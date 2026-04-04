@@ -125,7 +125,7 @@ static NovaApp app_registry[] = {
     { "finder",          "Finder",           "\xF0\x9F\x93\x81", "/app/finder",           TRUE,  TRUE  },
     { "terminal",        "Terminal",         "\xF0\x9F\x96\xA5",  "/app/terminal",         TRUE,  FALSE },
     { "notes",           "Notes",            "\xF0\x9F\x93\x9D", "/app/notes",            TRUE,  FALSE },
-    { "text-editor",     "Text Editor",      "\xF0\x9F\x93\x9D", "/app/text-editor",      TRUE,  FALSE },
+    { "text-editor",     "Text Editor",      "\xF0\x9F\x92\xBB", "/app/text-editor",      TRUE,  FALSE },
     { "calculator",      "Calculator",       "\xF0\x9F\xA7\xAE", "/app/calculator",       TRUE,  TRUE  },
     { "browser",         "Browser",          "\xF0\x9F\x8C\x90", "/app/browser",          TRUE,  FALSE },
     { "settings",        "Settings",         "\xE2\x9A\x99\xEF\xB8\x8F",  "/app/settings",         TRUE,  TRUE  },
