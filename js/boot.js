@@ -20,6 +20,11 @@ import { registerMusic } from './apps/music.js';
 import { registerCalendar } from './apps/calendar.js';
 import { registerAppStore } from './apps/appstore.js';
 import { showSetupWizard } from './shell/setup-wizard.js';
+import { notifications } from './kernel/notifications.js';
+import { initControlCenter } from './shell/control-center.js';
+import { initLaunchpad } from './shell/launchpad.js';
+import { registerPhotos } from './apps/photos.js';
+import { initShortcuts } from './shell/shortcuts.js';
 
 // Boot sequence
 (async function boot() {
@@ -47,6 +52,7 @@ import { showSetupWizard } from './shell/setup-wizard.js';
   registerMusic();
   registerCalendar();
   registerAppStore();
+  registerPhotos();
   await animate(progressBar, 85, 200);
 
   // Init kernel
@@ -67,6 +73,12 @@ import { showSetupWizard } from './shell/setup-wizard.js';
   requestAnimationFrame(() => { loginScreen.style.opacity = '1'; });
   updateLoginClock();
   setInterval(updateLoginClock, 1000);
+
+  // Show saved username
+  const savedName = localStorage.getItem('nova-username');
+  if (savedName) {
+    document.querySelector('.login-name').textContent = savedName;
+  }
 
   // Wait for login
   const passwordInput = document.getElementById('login-password');
@@ -106,6 +118,10 @@ import { showSetupWizard } from './shell/setup-wizard.js';
   initDock();
   initDesktop();
   initSpotlight();
+  initControlCenter();
+  initLaunchpad();
+  notifications.init();
+  initShortcuts();
 
   // Desktop ready
   await sleep(300);
@@ -114,6 +130,16 @@ import { showSetupWizard } from './shell/setup-wizard.js';
   await showSetupWizard();
 
   eventBus.emit('desktop:ready');
+
+  // Welcome notification
+  const userName = localStorage.getItem('nova-username') || 'User';
+  notifications.show({
+    title: `Welcome back, ${userName}!`,
+    body: 'NOVA OS is ready. Press Cmd+Space for Spotlight, F4 for Launchpad.',
+    icon: '\uD83D\uDC4B',
+    duration: 5000,
+  });
+
   console.log('NOVA OS booted successfully.');
 })();
 

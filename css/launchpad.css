@@ -1,0 +1,77 @@
+/* Launchpad */
+#launchpad {
+  position: fixed;
+  inset: 0;
+  z-index: 8500;
+  background: rgba(0, 0, 0, 0.6);
+  backdrop-filter: blur(30px);
+  -webkit-backdrop-filter: blur(30px);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 40px;
+  animation: fadeIn 0.25s ease;
+}
+
+.launchpad-search {
+  width: 280px;
+  padding: 8px 16px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 8px;
+  color: white;
+  font-size: 14px;
+  font-family: var(--font);
+  outline: none;
+  text-align: center;
+  margin-bottom: 30px;
+}
+
+.launchpad-search::placeholder {
+  color: rgba(255, 255, 255, 0.4);
+}
+
+.launchpad-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 100px);
+  gap: 24px 20px;
+  justify-content: center;
+  max-width: 700px;
+  width: 100%;
+  padding: 0 40px;
+}
+
+.launchpad-app {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  cursor: default;
+  transition: transform 0.15s;
+}
+
+.launchpad-app:hover {
+  transform: scale(1.1);
+}
+
+.launchpad-app:active {
+  transform: scale(0.95);
+}
+
+.launchpad-app-icon {
+  width: 64px;
+  height: 64px;
+  border-radius: 15px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 32px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.launchpad-app-name {
+  font-size: 11px;
+  color: white;
+  text-align: center;
+  text-shadow: 0 1px 4px rgba(0, 0, 0, 0.6);
+}

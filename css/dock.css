@@ -113,6 +113,7 @@
 .dock-icon-browser { background: linear-gradient(145deg, #42a5f5, #1565c0) !important; }
 .dock-icon-music { background: linear-gradient(145deg, #ec407a, #ad1457) !important; }
 .dock-icon-calendar { background: linear-gradient(145deg, #ef5350, #c62828) !important; }
+.dock-icon-photos { background: linear-gradient(145deg, #e040fb, #aa00ff) !important; }
 .dock-icon-draw { background: linear-gradient(145deg, #e53935, #c62828) !important; }
 .dock-icon-appstore { background: linear-gradient(145deg, #42a5f5, #1e88e5) !important; }
 .dock-icon-trash { background: linear-gradient(145deg, #555, #333) !important; }

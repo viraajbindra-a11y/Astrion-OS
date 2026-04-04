@@ -12,6 +12,7 @@ const dockApps = [
   { id: 'music', name: 'Music', icon: '\uD83C\uDFB5', iconClass: 'dock-icon-music' },
   { id: 'calendar', name: 'Calendar', icon: '\uD83D\uDCC5', iconClass: 'dock-icon-calendar' },
   { id: 'calculator', name: 'Calculator', icon: '\uD83D\uDDA9', iconClass: 'dock-icon-calculator' },
+  { id: 'photos', name: 'Photos', icon: '\uD83D\uDDBC\uFE0F', iconClass: 'dock-icon-photos' },
   { id: 'draw', name: 'Draw', icon: '\uD83C\uDFA8', iconClass: 'dock-icon-draw' },
   { id: 'appstore', name: 'App Store', icon: '\uD83D\uDECD\uFE0F', iconClass: 'dock-icon-appstore' },
   { id: 'settings', name: 'Settings', icon: '\u2699\uFE0F', iconClass: 'dock-icon-settings' },
