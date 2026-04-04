@@ -122,7 +122,11 @@ function open() {
       else if (key === 'bluetooth') { bluetoothOn = !bluetoothOn; }
       else if (key === 'airdrop') { airdropOn = !airdropOn; }
       else if (key === 'focus') { focusOn = !focusOn; }
-      else if (key === 'lock') { close(); return; }
+      else if (key === 'lock') {
+        close();
+        import('./lock-screen.js').then(m => m.lockScreen());
+        return;
+      }
 
       el.classList.toggle('active');
       const valueEl = el.querySelector('.cc-tile-value');

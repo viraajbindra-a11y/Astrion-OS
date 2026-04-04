@@ -87,6 +87,17 @@
   cursor: default;
 }
 
+/* Battery percentage */
+.menubar-battery-wrap {
+  gap: 4px;
+}
+
+.menubar-battery-pct {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+
 /* Notification badge */
 .menubar-icon {
   position: relative;

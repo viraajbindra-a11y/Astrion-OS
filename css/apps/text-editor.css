@@ -66,8 +66,37 @@
   padding: 0 10px 0 8px;
 }
 
-.texteditor-textarea {
+/* Editor container for highlight overlay */
+.texteditor-editor-wrap {
   flex: 1;
+  position: relative;
+  overflow: hidden;
+}
+
+.texteditor-highlight {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 12px 14px;
+  font-size: 13px;
+  font-family: var(--mono);
+  line-height: 1.6;
+  white-space: pre;
+  overflow: auto;
+  tab-size: 4;
+  pointer-events: none;
+  color: transparent;
+  word-wrap: normal;
+}
+
+.texteditor-textarea {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
   padding: 12px 14px;
   background: transparent;
   border: none;
@@ -80,12 +109,40 @@
   tab-size: 4;
   white-space: pre;
   overflow-wrap: normal;
-  overflow-x: auto;
+  overflow: auto;
+  z-index: 1;
+  caret-color: var(--accent);
+}
+
+/* When syntax highlighting is active, make textarea text invisible */
+.texteditor-textarea.highlighting {
+  color: transparent;
 }
 
 .texteditor-textarea::placeholder {
   color: var(--text-tertiary);
 }
+
+/* Syntax highlighting token colors */
+.hl-keyword { color: #ff79c6; }
+.hl-string { color: #f1fa8c; }
+.hl-number { color: #bd93f9; }
+.hl-comment { color: #6272a4; font-style: italic; }
+.hl-function { color: #50fa7b; }
+.hl-operator { color: #ff79c6; }
+.hl-punctuation { color: #f8f8f2; }
+.hl-type { color: #8be9fd; font-style: italic; }
+.hl-property { color: #66d9ef; }
+.hl-tag { color: #ff79c6; }
+.hl-attribute { color: #50fa7b; }
+.hl-attr-value { color: #f1fa8c; }
+.hl-selector { color: #50fa7b; }
+.hl-css-property { color: #66d9ef; }
+.hl-css-value { color: #f1fa8c; }
+.hl-variable { color: #f8f8f2; }
+.hl-regex { color: #f1fa8c; }
+.hl-decorator { color: #ff79c6; }
+.hl-builtin { color: #8be9fd; }
 
 .texteditor-statusbar {
   display: flex;

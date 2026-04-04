@@ -11,6 +11,9 @@ export function initMenubar() {
   updateClock();
   setInterval(updateClock, 1000);
 
+  // Simulated battery — starts at 100%, drains very slowly
+  initBattery();
+
   // Update app name when window focuses
   eventBus.on('window:focused', ({ title, app }) => {
     const appNames = {
@@ -259,6 +262,41 @@ function updateClock() {
       toggleClockDropdown();
     });
   }
+}
+
+function initBattery() {
+  let battery = parseInt(localStorage.getItem('nova-battery') || '100');
+  const pctEl = document.getElementById('menubar-battery-pct');
+  const fillEl = document.getElementById('battery-fill');
+
+  function updateBattery() {
+    if (pctEl) pctEl.textContent = battery + '%';
+    if (fillEl) {
+      const fillWidth = Math.round(14 * (battery / 100));
+      fillEl.setAttribute('width', String(Math.max(1, fillWidth)));
+    }
+  }
+
+  updateBattery();
+
+  // Drain 1% every 3 minutes (simulated)
+  setInterval(() => {
+    if (battery > 5) {
+      battery--;
+      localStorage.setItem('nova-battery', String(battery));
+      updateBattery();
+    }
+  }, 180000);
+
+  // If it's been a while, simulate charging back up
+  const lastTime = parseInt(localStorage.getItem('nova-battery-time') || '0');
+  const now = Date.now();
+  if (now - lastTime > 3600000) { // More than 1 hour since last session
+    battery = 100;
+    localStorage.setItem('nova-battery', '100');
+    updateBattery();
+  }
+  localStorage.setItem('nova-battery-time', String(now));
 }
 
 function showAboutDialog() {
