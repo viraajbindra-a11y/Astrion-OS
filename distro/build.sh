@@ -33,12 +33,18 @@ apt-get install -y -qq \
 # ============================================
 echo "[2/8] Configuring..."
 lb config \
+  --mode debian \
   --distribution bookworm \
   --parent-distribution bookworm \
   --parent-mirror-bootstrap "http://deb.debian.org/debian" \
+  --parent-mirror-chroot "http://deb.debian.org/debian" \
   --parent-mirror-chroot-security "http://security.debian.org/debian-security" \
   --mirror-bootstrap "http://deb.debian.org/debian" \
+  --mirror-chroot "http://deb.debian.org/debian" \
   --mirror-chroot-security "http://security.debian.org/debian-security" \
+  --mirror-binary "http://deb.debian.org/debian" \
+  --mirror-binary-security "http://security.debian.org/debian-security" \
+  --debootstrap-options "--keyring=/usr/share/keyrings/debian-archive-keyring.gpg" \
   --archive-areas "main contrib non-free non-free-firmware" \
   --architectures amd64 \
   --binary-images iso-hybrid \
