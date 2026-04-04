@@ -9,9 +9,25 @@
  * frameless window that looks like a real operating system.
  */
 
-const { app, BrowserWindow, screen, globalShortcut, Menu, ipcMain } = require('electron');
+const { app, BrowserWindow, screen, globalShortcut, Menu, ipcMain, autoUpdater } = require('electron');
 const path = require('path');
 const express = require('express');
+
+// --- Auto-Updater ---
+// Checks GitHub Releases for new versions on startup
+function setupAutoUpdater() {
+  try {
+    const { updateElectronApp } = require('update-electron-app');
+    updateElectronApp({
+      repo: 'viraajbindra-a11y/Nova-OS',
+      updateInterval: '1 hour',
+      notifyUser: true,
+    });
+  } catch (e) {
+    // update-electron-app not installed or not in production, skip
+    console.log('Auto-updater not available:', e.message);
+  }
+}
 
 let mainWindow;
 let server;
@@ -111,6 +127,7 @@ ipcMain.handle('get-fullscreen', () => {
 app.whenReady().then(async () => {
   await startServer();
   createWindow();
+  setupAutoUpdater();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

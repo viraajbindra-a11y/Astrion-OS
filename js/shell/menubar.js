@@ -229,5 +229,69 @@ function updateClock() {
     hour12: true
   });
   const day = now.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
-  document.getElementById('menubar-clock').textContent = `${day}  ${time}`;
+  const clockEl = document.getElementById('menubar-clock');
+  clockEl.textContent = `${day}  ${time}`;
+
+  // Setup click handler for calendar dropdown (once)
+  if (!clockEl.dataset.init) {
+    clockEl.dataset.init = 'true';
+    clockEl.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleClockDropdown();
+    });
+  }
+}
+
+function toggleClockDropdown() {
+  let dd = document.getElementById('clock-dropdown');
+  if (dd) { dd.remove(); return; }
+
+  const now = new Date();
+  const month = now.getMonth();
+  const year = now.getFullYear();
+  const today = now.getDate();
+  const dayNames = ['Su','Mo','Tu','We','Th','Fr','Sa'];
+  const monthNames = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  const firstDay = new Date(year, month, 1).getDay();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+  let calGrid = dayNames.map(d => `<div style="font-size:10px;color:rgba(255,255,255,0.4);text-align:center;padding:4px 0;">${d}</div>`).join('');
+  for (let i = 0; i < firstDay; i++) calGrid += `<div></div>`;
+  for (let d = 1; d <= daysInMonth; d++) {
+    const isToday = d === today;
+    calGrid += `<div style="text-align:center;padding:4px 0;font-size:12px;${isToday ? 'background:var(--accent);border-radius:50%;color:white;font-weight:600;' : 'color:rgba(255,255,255,0.8);'}">${d}</div>`;
+  }
+
+  dd = document.createElement('div');
+  dd.id = 'clock-dropdown';
+  dd.style.cssText = `position:fixed;top:28px;right:8px;width:260px;background:rgba(38,38,42,0.95);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:1px solid rgba(255,255,255,0.1);border-radius:12px;padding:16px;box-shadow:0 15px 50px rgba(0,0,0,0.5);z-index:95000;animation:scaleIn 0.15s ease-out;`;
+  dd.innerHTML = `
+    <div style="text-align:center;margin-bottom:12px;">
+      <div style="font-size:28px;font-weight:600;">${now.toLocaleTimeString('en-US', {hour:'numeric',minute:'2-digit',second:'2-digit',hour12:true})}</div>
+      <div style="font-size:13px;color:rgba(255,255,255,0.5);">${now.toLocaleDateString('en-US', {weekday:'long',month:'long',day:'numeric',year:'numeric'})}</div>
+    </div>
+    <div style="border-top:1px solid rgba(255,255,255,0.08);padding-top:12px;">
+      <div style="font-size:13px;font-weight:600;text-align:center;margin-bottom:8px;">${monthNames[month]} ${year}</div>
+      <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:1px;">${calGrid}</div>
+    </div>
+  `;
+
+  document.getElementById('desktop').appendChild(dd);
+
+  // Update time every second
+  const timer = setInterval(() => {
+    const el = document.getElementById('clock-dropdown');
+    if (!el) { clearInterval(timer); return; }
+    const n = new Date();
+    el.querySelector('div > div').textContent = n.toLocaleTimeString('en-US', {hour:'numeric',minute:'2-digit',second:'2-digit',hour12:true});
+  }, 1000);
+
+  // Close on click outside
+  const closeHandler = (e) => {
+    if (!dd.contains(e.target) && e.target.id !== 'menubar-clock') {
+      dd.remove();
+      document.removeEventListener('click', closeHandler);
+    }
+  };
+  setTimeout(() => document.addEventListener('click', closeHandler), 10);
 }

@@ -129,7 +129,23 @@ class WindowManager {
   minimize(id) {
     const state = this.windows.get(id);
     if (!state) return;
-    state.el.style.display = 'none';
+
+    // Animate to dock
+    const el = state.el;
+    const dockCenter = window.innerWidth / 2;
+    const dockY = window.innerHeight - 40;
+    el.style.transition = 'transform 0.35s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.35s ease';
+    el.style.transformOrigin = 'center bottom';
+    el.style.transform = `scale(0.1) translateY(${dockY - el.offsetTop}px)`;
+    el.style.opacity = '0';
+
+    setTimeout(() => {
+      el.style.display = 'none';
+      el.style.transition = '';
+      el.style.transform = '';
+      el.style.opacity = '';
+    }, 350);
+
     state.minimized = true;
     eventBus.emit('window:minimized', { id });
 
@@ -149,7 +165,18 @@ class WindowManager {
   unminimize(id) {
     const state = this.windows.get(id);
     if (!state) return;
-    state.el.style.display = '';
+    const el = state.el;
+    el.style.transform = 'scale(0.1)';
+    el.style.opacity = '0';
+    el.style.display = '';
+
+    requestAnimationFrame(() => {
+      el.style.transition = 'transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s ease';
+      el.style.transform = 'scale(1)';
+      el.style.opacity = '1';
+      setTimeout(() => { el.style.transition = ''; }, 300);
+    });
+
     state.minimized = false;
     this.focus(id);
     eventBus.emit('window:unminimized', { id });

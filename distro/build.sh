@@ -1,37 +1,47 @@
 #!/bin/bash
-# NOVA OS — ISO Build Script
-# Requires: Debian/Ubuntu with live-build installed
+# NOVA OS — Bootable ISO Builder
+#
+# Creates a bootable ISO that runs NOVA OS on real hardware.
+# Uses a minimal Debian base but NOVA OS is the ONLY interface.
+# No terminal, no login prompt, no desktop environment — just NOVA OS.
+#
+# Requirements: Debian/Ubuntu with live-build, debootstrap, xorriso
 # Run: sudo bash build.sh
 
 set -e
 
-echo "========================================="
+echo "==========================================="
 echo "  NOVA OS — Building Bootable ISO"
-echo "========================================="
+echo "==========================================="
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 BUILD_DIR="$SCRIPT_DIR/build"
 OUTPUT_DIR="$SCRIPT_DIR/output"
 
-# Clean previous build
 rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR" "$OUTPUT_DIR"
 cd "$BUILD_DIR"
 
-# Install build dependencies
-echo "[1/6] Installing build tools..."
+# ============================================
+# STEP 1: Install build tools
+# ============================================
+echo "[1/7] Installing build dependencies..."
 apt-get update -qq
-apt-get install -y -qq live-build debootstrap syslinux isolinux xorriso 2>/dev/null
+apt-get install -y -qq \
+  live-build debootstrap syslinux isolinux xorriso \
+  squashfs-tools grub-pc-bin grub-efi-amd64-bin mtools dosfstools 2>/dev/null
 
-# Configure live-build
-echo "[2/6] Configuring live system..."
+# ============================================
+# STEP 2: Configure live-build
+# ============================================
+echo "[2/7] Configuring live system..."
 lb config \
   --distribution bookworm \
   --archive-areas "main contrib non-free non-free-firmware" \
   --architectures amd64 \
   --binary-images iso-hybrid \
-  --bootappend-live "boot=live quiet splash" \
+  --bootappend-live "boot=live quiet splash noautologin" \
   --debian-installer false \
   --memtest none \
   --iso-application "NOVA OS" \
@@ -39,78 +49,101 @@ lb config \
   --iso-volume "NOVA-OS" \
   --image-name "nova-os"
 
-# Define packages to install
-echo "[3/6] Setting up packages..."
+# ============================================
+# STEP 3: Define packages
+# ============================================
+echo "[3/7] Configuring packages..."
 cat > config/package-lists/nova.list.chroot << 'PACKAGES'
-# Display
-xorg
+# Minimal X11
+xserver-xorg-core
+xserver-xorg-input-all
+xserver-xorg-video-all
 xinit
 openbox
 
-# Browser (kiosk mode)
+# Chromium browser (renders NOVA OS)
 chromium
 chromium-sandbox
 
 # Audio
 pulseaudio
 alsa-utils
+alsa-oss
 
-# Network
+# Networking
 network-manager
+wpasupplicant
 wireless-tools
 firmware-iwlwifi
+firmware-realtek
+firmware-atheros
 firmware-misc-nonfree
 
-# Node.js for local server
+# Node.js (runs the local NOVA OS server)
 nodejs
 npm
 
-# System utilities
+# System
 sudo
 dbus-x11
 policykit-1
 upower
+acpi
+unclutter
 PACKAGES
 
-# Copy NOVA OS files into the live filesystem
-echo "[4/6] Copying NOVA OS files..."
-CHROOT_DIR="config/includes.chroot"
-mkdir -p "$CHROOT_DIR/opt/nova-os"
-mkdir -p "$CHROOT_DIR/home/nova"
-mkdir -p "$CHROOT_DIR/etc/systemd/system"
-mkdir -p "$CHROOT_DIR/usr/local/bin"
+# ============================================
+# STEP 4: Copy NOVA OS into the live system
+# ============================================
+echo "[4/7] Embedding NOVA OS..."
+CHROOT="config/includes.chroot"
 
-# Copy the entire NOVA OS web app
-cp -r "$PROJECT_ROOT/index.html" "$CHROOT_DIR/opt/nova-os/"
-cp -r "$PROJECT_ROOT/css" "$CHROOT_DIR/opt/nova-os/"
-cp -r "$PROJECT_ROOT/js" "$CHROOT_DIR/opt/nova-os/"
-cp -r "$PROJECT_ROOT/server" "$CHROOT_DIR/opt/nova-os/"
-cp -r "$PROJECT_ROOT/package.json" "$CHROOT_DIR/opt/nova-os/"
-cp -r "$PROJECT_ROOT/package-lock.json" "$CHROOT_DIR/opt/nova-os/"
-[ -d "$PROJECT_ROOT/assets" ] && cp -r "$PROJECT_ROOT/assets" "$CHROOT_DIR/opt/nova-os/"
+# Copy NOVA OS web app
+mkdir -p "$CHROOT/opt/nova-os"
+cp "$PROJECT_ROOT/index.html" "$CHROOT/opt/nova-os/"
+cp -r "$PROJECT_ROOT/css" "$CHROOT/opt/nova-os/"
+cp -r "$PROJECT_ROOT/js" "$CHROOT/opt/nova-os/"
+cp "$PROJECT_ROOT/package.json" "$CHROOT/opt/nova-os/"
+cp "$PROJECT_ROOT/package-lock.json" "$CHROOT/opt/nova-os/" 2>/dev/null || true
+cp -r "$PROJECT_ROOT/server" "$CHROOT/opt/nova-os/"
+[ -d "$PROJECT_ROOT/assets" ] && cp -r "$PROJECT_ROOT/assets" "$CHROOT/opt/nova-os/"
 
-# Create the auto-login and auto-start scripts
-cat > "$CHROOT_DIR/usr/local/bin/nova-session" << 'SESSION'
+# ============================================
+# STEP 5: Create boot scripts
+# ============================================
+echo "[5/7] Creating boot configuration..."
+
+# The session script — this is what runs when the system boots
+mkdir -p "$CHROOT/usr/local/bin"
+cat > "$CHROOT/usr/local/bin/nova-session" << 'SCRIPT'
 #!/bin/bash
-# NOVA OS Session Script — starts the full desktop experience
+export HOME=/home/nova
+export DISPLAY=:0
 
-# Start PulseAudio
-pulseaudio --start 2>/dev/null
+# Start PulseAudio for sound
+pulseaudio --start --exit-idle-time=-1 2>/dev/null &
 
-# Install Node dependencies if needed
+# Install Node dependencies on first boot
 if [ ! -d /opt/nova-os/node_modules ]; then
-  cd /opt/nova-os && npm install --production 2>/dev/null
+  echo "First boot — installing dependencies..."
+  cd /opt/nova-os && npm install --production --no-optional 2>/dev/null
 fi
 
-# Start the NOVA OS local server
+# Start NOVA OS server
 cd /opt/nova-os
 node server/index.js &
-NOVA_PID=$!
+SERVER_PID=$!
 
-# Wait for server to start
-sleep 2
+# Wait for server to be ready
+for i in $(seq 1 30); do
+  curl -s http://localhost:3000 > /dev/null 2>&1 && break
+  sleep 0.5
+done
 
-# Launch Chromium in kiosk mode
+# Get screen resolution
+RESOLUTION=$(xdpyinfo 2>/dev/null | awk '/dimensions/{print $2}' || echo "1920x1080")
+
+# Launch Chromium in kiosk mode (fullscreen, no UI chrome)
 chromium \
   --no-first-run \
   --no-default-browser-check \
@@ -120,124 +153,157 @@ chromium \
   --disable-save-password-bubble \
   --disable-session-crashed-bubble \
   --disable-component-update \
+  --disable-background-networking \
+  --disable-sync \
   --noerrdialogs \
   --kiosk \
-  --window-size=$(xdpyinfo | awk '/dimensions/{print $2}' | tr 'x' ',') \
+  --window-size=${RESOLUTION/x/,} \
   --app=http://localhost:3000 \
+  --user-data-dir=/home/nova/.nova-chromium \
   2>/dev/null
 
-# If Chromium closes, kill the server and restart
-kill $NOVA_PID 2>/dev/null
-SESSION
-chmod +x "$CHROOT_DIR/usr/local/bin/nova-session"
+# If Chromium exits, restart it
+kill $SERVER_PID 2>/dev/null
+exec /usr/local/bin/nova-session
+SCRIPT
+chmod +x "$CHROOT/usr/local/bin/nova-session"
 
-# Openbox autostart
-mkdir -p "$CHROOT_DIR/etc/xdg/openbox"
-cat > "$CHROOT_DIR/etc/xdg/openbox/autostart" << 'AUTOSTART'
-# Disable screen saver
-xset s off
-xset -dpms
-xset s noblank
+# Openbox autostart — runs nova-session when X starts
+mkdir -p "$CHROOT/etc/xdg/openbox"
+cat > "$CHROOT/etc/xdg/openbox/autostart" << 'AUTOSTART'
+# Disable screensaver and power management
+xset s off &
+xset -dpms &
+xset s noblank &
 
-# Hide cursor after 3 seconds of inactivity
-unclutter -idle 3 &
+# Hide mouse cursor when idle
+unclutter -idle 3 -root &
 
-# Start NOVA OS
-/usr/local/bin/nova-session &
+# Set dark background (shown briefly before NOVA loads)
+xsetroot -solid "#0a0a1e" &
+
+# Launch NOVA OS
+exec /usr/local/bin/nova-session
 AUTOSTART
 
-# Create .xinitrc for startx
-cat > "$CHROOT_DIR/home/nova/.xinitrc" << 'XINITRC'
+# X startup
+mkdir -p "$CHROOT/home/nova"
+cat > "$CHROOT/home/nova/.xinitrc" << 'XINITRC'
 exec openbox-session
 XINITRC
 
-# Auto-login service
-cat > "$CHROOT_DIR/etc/systemd/system/nova-autologin.service" << 'AUTOLOGIN'
-[Unit]
-Description=NOVA OS Auto Login
-After=systemd-user-sessions.service plymouth-quit-wait.service
-After=getty@tty1.service
-
-[Service]
-Type=simple
-ExecStart=/usr/local/bin/nova-startx
-Restart=always
-RestartSec=3
-User=nova
-Environment=DISPLAY=:0
-
-[Install]
-WantedBy=graphical.target
-AUTOLOGIN
-
-# startx wrapper
-cat > "$CHROOT_DIR/usr/local/bin/nova-startx" << 'STARTX'
-#!/bin/bash
-export HOME=/home/nova
-export DISPLAY=:0
-cd /home/nova
-exec startx /home/nova/.xinitrc -- :0 vt1 -keeptty
-STARTX
-chmod +x "$CHROOT_DIR/usr/local/bin/nova-startx"
-
-# Getty autologin override
-mkdir -p "$CHROOT_DIR/etc/systemd/system/getty@tty1.service.d"
-cat > "$CHROOT_DIR/etc/systemd/system/getty@tty1.service.d/autologin.conf" << 'GETTY'
+# Auto-login and auto-start X on tty1
+mkdir -p "$CHROOT/etc/systemd/system/getty@tty1.service.d"
+cat > "$CHROOT/etc/systemd/system/getty@tty1.service.d/autologin.conf" << 'GETTY'
 [Service]
 ExecStart=
 ExecStart=-/sbin/agetty --autologin nova --noclear %I $TERM
+Type=simple
 GETTY
 
-# Create user setup hook
-mkdir -p "$CHROOT_DIR/../hooks/normal"
-cat > "$CHROOT_DIR/../hooks/normal/0100-setup-user.hook.chroot" << 'HOOK'
-#!/bin/bash
-# Create nova user
-useradd -m -s /bin/bash -G audio,video,sudo,netdev nova 2>/dev/null || true
-echo "nova:nova" | chpasswd
-echo "nova ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+# Auto-start X when nova logs in
+mkdir -p "$CHROOT/home/nova"
+cat > "$CHROOT/home/nova/.bash_profile" << 'PROFILE'
+# Auto-start X if not already running
+if [ -z "$DISPLAY" ] && [ "$(tty)" = "/dev/tty1" ]; then
+  exec startx -- -keeptty > /dev/null 2>&1
+fi
+PROFILE
 
-# Install node modules
-cd /opt/nova-os && npm install --production 2>/dev/null || true
-
-# Enable services
-systemctl enable nova-autologin.service 2>/dev/null || true
-systemctl enable NetworkManager 2>/dev/null || true
-
-# Set ownership
-chown -R nova:nova /home/nova
-chown -R nova:nova /opt/nova-os
-HOOK
-chmod +x "$CHROOT_DIR/../hooks/normal/0100-setup-user.hook.chroot"
-
-# Boot splash (optional - NOVA branding)
-mkdir -p "$CHROOT_DIR/etc/default"
-cat > "$CHROOT_DIR/etc/default/grub" << 'GRUB'
+# GRUB splash configuration
+mkdir -p "$CHROOT/etc/default"
+cat > "$CHROOT/etc/default/grub" << 'GRUB'
 GRUB_DEFAULT=0
-GRUB_TIMEOUT=0
+GRUB_TIMEOUT=2
 GRUB_DISTRIBUTOR="NOVA OS"
-GRUB_CMDLINE_LINUX_DEFAULT="quiet splash"
+GRUB_CMDLINE_LINUX_DEFAULT="quiet splash loglevel=0 vt.global_cursor_default=0"
 GRUB_CMDLINE_LINUX=""
-GRUB_BACKGROUND=""
 GRUB_TERMINAL_OUTPUT="gfxterm"
+GRUB_GFXMODE=auto
 GRUB
 
-# Build the ISO
-echo "[5/6] Building ISO (this takes 10-20 minutes)..."
-lb build 2>&1 | tail -5
+# Plymouth boot splash (NOVA branded)
+mkdir -p "$CHROOT/usr/share/plymouth/themes/nova"
+cat > "$CHROOT/usr/share/plymouth/themes/nova/nova.plymouth" << 'PLYMOUTH'
+[Plymouth Theme]
+Name=NOVA OS
+Description=NOVA OS Boot Screen
+ModuleName=script
+
+[script]
+ImageDir=/usr/share/plymouth/themes/nova
+ScriptFile=/usr/share/plymouth/themes/nova/nova.script
+PLYMOUTH
+
+cat > "$CHROOT/usr/share/plymouth/themes/nova/nova.script" << 'PLYSCRIPT'
+Window.SetBackgroundTopColor(0.04, 0.04, 0.12);
+Window.SetBackgroundBottomColor(0.04, 0.04, 0.12);
+PLYSCRIPT
+
+# ============================================
+# STEP 6: Setup hooks (run during build)
+# ============================================
+echo "[6/7] Setting up system hooks..."
+mkdir -p config/hooks/normal
+
+cat > config/hooks/normal/0100-nova-setup.hook.chroot << 'HOOK'
+#!/bin/bash
+set -e
+
+# Create nova user (no password — auto-login)
+useradd -m -s /bin/bash -G audio,video,sudo,netdev,plugdev nova 2>/dev/null || true
+echo "nova ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers.d/nova
+
+# Install node modules for NOVA OS
+cd /opt/nova-os
+npm install --production --no-optional 2>/dev/null || true
+
+# Set correct ownership
+chown -R nova:nova /home/nova
+chown -R nova:nova /opt/nova-os
+
+# Enable NetworkManager
+systemctl enable NetworkManager 2>/dev/null || true
+
+# Disable unnecessary services for faster boot
+systemctl disable ssh 2>/dev/null || true
+systemctl disable apache2 2>/dev/null || true
+systemctl disable cups 2>/dev/null || true
+
+# Set hostname
+echo "nova-os" > /etc/hostname
+
+# Set timezone
+ln -sf /usr/share/zoneinfo/UTC /etc/localtime 2>/dev/null || true
+HOOK
+chmod +x config/hooks/normal/0100-nova-setup.hook.chroot
+
+# ============================================
+# STEP 7: Build the ISO
+# ============================================
+echo "[7/7] Building ISO (this takes 10-20 minutes)..."
+lb build 2>&1 | tail -20
 
 # Move output
-echo "[6/6] Finalizing..."
-mv nova-os-amd64.hybrid.iso "$OUTPUT_DIR/nova-os.iso" 2>/dev/null || mv *.iso "$OUTPUT_DIR/nova-os.iso" 2>/dev/null
-
-ISO_SIZE=$(du -h "$OUTPUT_DIR/nova-os.iso" | cut -f1)
-echo ""
-echo "========================================="
-echo "  NOVA OS ISO built successfully!"
-echo "  Size: $ISO_SIZE"
-echo "  Location: $OUTPUT_DIR/nova-os.iso"
-echo "========================================="
-echo ""
-echo "Flash to USB with:"
-echo "  sudo dd if=$OUTPUT_DIR/nova-os.iso of=/dev/sdX bs=4M status=progress"
-echo "  (or use Balena Etcher)"
+if ls *.iso 1>/dev/null 2>&1; then
+  mv *.iso "$OUTPUT_DIR/nova-os.iso"
+  ISO_SIZE=$(du -h "$OUTPUT_DIR/nova-os.iso" | cut -f1)
+  echo ""
+  echo "==========================================="
+  echo "  NOVA OS ISO built successfully!"
+  echo "  Size: $ISO_SIZE"
+  echo "  File: $OUTPUT_DIR/nova-os.iso"
+  echo "==========================================="
+  echo ""
+  echo "To use:"
+  echo "  1. Flash to USB:  sudo dd if=$OUTPUT_DIR/nova-os.iso of=/dev/sdX bs=4M status=progress"
+  echo "     Or use Balena Etcher (https://etcher.balena.io)"
+  echo "  2. Boot from USB on any PC"
+  echo "  3. NOVA OS starts automatically — no login, no setup"
+  echo ""
+  echo "  Supports: UEFI and Legacy BIOS boot"
+  echo "  Requirements: 2GB RAM, x86_64 CPU"
+else
+  echo "ERROR: ISO build failed. Check logs above."
+  exit 1
+fi
