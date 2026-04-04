@@ -1,0 +1,44 @@
+name: Build NOVA OS Kernel
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'kernel/**'
+
+permissions:
+  contents: write
+
+jobs:
+  build-kernel:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            build-essential gcc gnu-efi \
+            xorriso mtools dosfstools \
+            qemu-system-x86 ovmf nasm
+
+      - name: Build NOVA OS kernel and ISO
+        run: |
+          cd kernel
+          make iso
+
+      - name: Upload kernel ISO
+        uses: actions/upload-artifact@v4
+        with:
+          name: nova-os-kernel-iso
+          path: kernel/build/nova-os.iso
+          retention-days: 30
+
+      - name: Show build info
+        run: |
+          ls -lh kernel/build/nova-os.iso
+          echo "NOVA OS kernel ISO built successfully!"
