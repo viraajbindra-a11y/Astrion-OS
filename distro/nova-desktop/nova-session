@@ -7,8 +7,10 @@ export XDG_CURRENT_DESKTOP=NOVA
 export XDG_SESSION_DESKTOP=NOVA
 export DESKTOP_SESSION=nova
 
-# Start compositor for smooth rendering
-picom --backend glx --vsync &
+# Start compositor for smooth rendering (use xrender as fallback for VMs)
+picom --backend glx --vsync 2>/dev/null || \
+picom --backend xrender 2>/dev/null || \
+picom 2>/dev/null &
 
 # Set wallpaper
 if [ -f /usr/share/nova-os/wallpapers/default.png ]; then
@@ -48,7 +50,25 @@ polybar nova-bar -c /etc/nova-os/polybar.ini &
 # Start the NOVA AI assistant server
 if [ -f /opt/nova-os/server/index.js ]; then
   cd /opt/nova-os && node server/index.js &
+  NOVA_SERVER_PID=$!
 fi
+
+# Auto-launch NOVA OS in Chromium after server starts
+(
+  sleep 5
+  # Wait for NOVA server to be ready
+  for i in $(seq 1 20); do
+    if curl -s http://localhost:3000 > /dev/null 2>&1; then
+      break
+    fi
+    sleep 1
+  done
+  # Launch Chromium in kiosk-like mode
+  chromium --no-first-run --disable-infobars --disable-session-crashed-bubble \
+    --start-maximized --app=http://localhost:3000 2>/dev/null || \
+  chromium-browser --no-first-run --start-maximized --app=http://localhost:3000 2>/dev/null || \
+  firefox-esr http://localhost:3000 2>/dev/null || true
+) &
 
 # Start the window manager (openbox with NOVA config)
 exec openbox --config-file /etc/nova-os/openbox/rc.xml

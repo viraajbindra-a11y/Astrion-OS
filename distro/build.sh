@@ -119,7 +119,7 @@ apt-get install -y -qq nodejs npm git curl wget python3 || true
 
 # System
 apt-get install -y -qq sudo dbus-x11 policykit-1 policykit-1-gnome upower acpi acpid \
-  lightdm lightdm-gtk-greeter plymouth || true
+  lightdm lightdm-gtk-greeter plymouth imagemagick || true
 
 # App installation
 apt-get install -y -qq flatpak gnome-software software-properties-common || true
@@ -182,9 +182,131 @@ cp -r "$PROJECT_ROOT/server" "$CHROOT/opt/nova-os/" 2>/dev/null || true
 cp "$PROJECT_ROOT/package.json" "$CHROOT/opt/nova-os/" 2>/dev/null || true
 cp -r "$PROJECT_ROOT/assets" "$CHROOT/opt/nova-os/" 2>/dev/null || true
 
-# Wallpaper (simple solid color fallback — no PIL needed)
+# ---- NOVA OS Branding ----
+
+# Generate NOVA wallpaper with ImageMagick (dark gradient with logo)
 mkdir -p "$CHROOT/usr/share/nova-os/wallpapers"
-# We'll use hsetroot for solid color if no wallpaper image exists
+
+cat > "$CHROOT/tmp/gen-wallpaper.sh" << 'WALLPAPER_SCRIPT'
+#!/bin/bash
+# Generate NOVA OS wallpaper using ImageMagick
+if command -v convert &>/dev/null; then
+  # Dark gradient wallpaper (1920x1080)
+  convert -size 1920x1080 \
+    gradient:'#0a0a1a'-'#1a1a3e' \
+    -blur 0x20 \
+    \( -size 1920x1080 \
+       -seed 42 plasma:transparent-'#0022aa10' \
+       -blur 0x40 \) \
+    -compose overlay -composite \
+    \( -size 300x300 xc:none \
+       -fill 'rgba(0,122,255,0.08)' \
+       -draw 'circle 150,150 150,0' \
+       -blur 0x60 \
+       -geometry +810+390 \) \
+    -compose over -composite \
+    /usr/share/nova-os/wallpapers/default.png 2>/dev/null || \
+  # Fallback: simple gradient
+  convert -size 1920x1080 gradient:'#0a0a1a'-'#1a1a3e' \
+    /usr/share/nova-os/wallpapers/default.png 2>/dev/null || true
+fi
+WALLPAPER_SCRIPT
+chmod +x "$CHROOT/tmp/gen-wallpaper.sh"
+chroot "$CHROOT" /tmp/gen-wallpaper.sh
+
+# Plymouth boot splash theme (NOVA OS branded)
+mkdir -p "$CHROOT/usr/share/plymouth/themes/nova-os"
+
+cat > "$CHROOT/usr/share/plymouth/themes/nova-os/nova-os.plymouth" << 'PLYMOUTH'
+[Plymouth Theme]
+Name=NOVA OS
+Description=NOVA OS Boot Splash
+ModuleName=script
+
+[script]
+ImageDir=/usr/share/plymouth/themes/nova-os
+ScriptFile=/usr/share/plymouth/themes/nova-os/nova-os.script
+PLYMOUTH
+
+cat > "$CHROOT/usr/share/plymouth/themes/nova-os/nova-os.script" << 'PLYSCRIPT'
+# NOVA OS Plymouth Script
+Window.SetBackgroundTopColor(0.04, 0.04, 0.10);
+Window.SetBackgroundBottomColor(0.06, 0.06, 0.18);
+
+# Load logo
+logo.image = Image("logo.png");
+logo.sprite = Sprite(logo.image);
+logo.sprite.SetX(Window.GetWidth() / 2 - logo.image.GetWidth() / 2);
+logo.sprite.SetY(Window.GetHeight() / 2 - logo.image.GetHeight() / 2 - 40);
+logo.sprite.SetOpacity(1);
+
+# NOVA OS text
+nova_text.image = Image.Text("N O V A  O S", 0.85, 0.85, 0.85, 1, "Inter 18");
+nova_text.sprite = Sprite(nova_text.image);
+nova_text.sprite.SetX(Window.GetWidth() / 2 - nova_text.image.GetWidth() / 2);
+nova_text.sprite.SetY(Window.GetHeight() / 2 + 50);
+
+# Progress bar
+bar_bg.image = Image("progress-bg.png");
+bar_bg.sprite = Sprite(bar_bg.image);
+bar_bg.sprite.SetX(Window.GetWidth() / 2 - bar_bg.image.GetWidth() / 2);
+bar_bg.sprite.SetY(Window.GetHeight() / 2 + 90);
+
+bar_fill.original = Image("progress-fill.png");
+bar_fill.sprite = Sprite();
+bar_fill.sprite.SetX(Window.GetWidth() / 2 - bar_bg.image.GetWidth() / 2);
+bar_fill.sprite.SetY(Window.GetHeight() / 2 + 90);
+
+fun boot_progress_cb(time, progress) {
+    bar_fill.image = bar_fill.original.Scale(bar_bg.image.GetWidth() * progress, bar_fill.original.GetHeight());
+    bar_fill.sprite.SetImage(bar_fill.image);
+}
+Plymouth.SetBootProgressFunction(boot_progress_cb);
+
+# Hide messages/password prompts gracefully
+fun message_cb(text) { }
+Plymouth.SetMessageFunction(message_cb);
+PLYSCRIPT
+
+# Generate Plymouth logo and progress bar images using ImageMagick in chroot
+cat > "$CHROOT/tmp/gen-plymouth-assets.sh" << 'PLYASSETS'
+#!/bin/bash
+cd /usr/share/plymouth/themes/nova-os
+
+if command -v convert &>/dev/null; then
+  # Logo: white diamond in circle (80x80)
+  convert -size 80 80 xc:none \
+    -fill none -stroke 'rgba(255,255,255,0.9)' -strokewidth 2 \
+    -draw 'circle 40,40 40,4' \
+    -fill 'rgba(255,255,255,0.9)' -stroke none \
+    -draw 'polygon 40,18 58,40 40,62 22,40' \
+    -fill white \
+    -draw 'circle 40,40 40,34' \
+    logo.png 2>/dev/null || \
+  # Fallback: simple white circle
+  convert -size 80x80 xc:none \
+    -fill 'rgba(255,255,255,0.8)' \
+    -draw 'circle 40,40 40,5' \
+    logo.png 2>/dev/null || true
+
+  # Progress bar background (200x3)
+  convert -size 200x3 xc:'rgba(255,255,255,0.15)' \
+    -fill 'rgba(255,255,255,0.15)' -draw 'roundrectangle 0,0 199,2 2,2' \
+    progress-bg.png 2>/dev/null || \
+  convert -size 200x3 xc:'rgba(255,255,255,0.15)' progress-bg.png 2>/dev/null || true
+
+  # Progress bar fill (200x3)
+  convert -size 200x3 xc:'rgba(255,255,255,0.7)' \
+    -fill 'rgba(255,255,255,0.7)' -draw 'roundrectangle 0,0 199,2 2,2' \
+    progress-fill.png 2>/dev/null || \
+  convert -size 200x3 xc:'rgba(255,255,255,0.7)' progress-fill.png 2>/dev/null || true
+else
+  # No ImageMagick — create minimal 1x1 PNGs
+  printf '\x89PNG\r\n\x1a\n' > logo.png || true
+fi
+PLYASSETS
+chmod +x "$CHROOT/tmp/gen-plymouth-assets.sh"
+chroot "$CHROOT" /tmp/gen-plymouth-assets.sh
 
 # Dunst notification config
 cat > "$CHROOT/etc/nova-os/dunstrc" << 'DUNST'
@@ -335,17 +457,23 @@ mkdir -p /etc/lightdm
 cat > /etc/lightdm/lightdm.conf << 'LDM'
 [Seat:*]
 autologin-user=nova
-autologin-session=NOVA OS
-user-session=NOVA OS
+autologin-session=nova-session
+user-session=nova-session
 greeter-session=lightdm-gtk-greeter
+greeter-hide-users=false
 LDM
+
+# Enable autologin group
+groupadd -f autologin
+usermod -a -G autologin nova 2>/dev/null || true
 
 cat > /etc/lightdm/lightdm-gtk-greeter.conf << 'GREETER'
 [greeter]
 theme-name = Arc-Dark
 icon-theme-name = Papirus-Dark
 font-name = Inter 11
-background = #1a1a2e
+background = /usr/share/nova-os/wallpapers/default.png
+default-user-image = /usr/share/nova-os/logo.png
 indicators = ~host;~spacer;~clock;~spacer;~session;~power
 GREETER
 
@@ -393,6 +521,35 @@ GRUB_CMDLINE_LINUX=""
 GRUB_TERMINAL_OUTPUT="gfxterm"
 GRUB_GFXMODE=auto
 GRUB
+
+# NOVA OS Plymouth theme
+plymouth-set-default-theme nova-os 2>/dev/null || \
+  update-alternatives --set default.plymouth /usr/share/plymouth/themes/nova-os/nova-os.plymouth 2>/dev/null || true
+
+# OS release branding
+cat > /etc/os-release << 'OSREL'
+PRETTY_NAME="NOVA OS 1.0"
+NAME="NOVA OS"
+VERSION_ID="1.0"
+VERSION="1.0 (Andromeda)"
+VERSION_CODENAME=andromeda
+ID=nova-os
+ID_LIKE=debian
+HOME_URL="https://github.com/viraajbindra-a11y/Nova-OS"
+BUG_REPORT_URL="https://github.com/viraajbindra-a11y/Nova-OS/issues"
+OSREL
+
+# LSB release
+cat > /etc/lsb-release << 'LSB'
+DISTRIB_ID=NOVA-OS
+DISTRIB_RELEASE=1.0
+DISTRIB_CODENAME=andromeda
+DISTRIB_DESCRIPTION="NOVA OS 1.0 (Andromeda)"
+LSB
+
+# Issue banner
+echo "NOVA OS 1.0 \\n \\l" > /etc/issue
+echo "NOVA OS 1.0" > /etc/issue.net
 
 # Disable unnecessary services
 systemctl disable ssh 2>/dev/null || true
@@ -457,25 +614,39 @@ set timeout=3
 
 insmod all_video
 insmod gfxterm
-set gfxmode=auto
+insmod png
+set gfxmode=1920x1080,1280x720,auto
 terminal_output gfxterm
 
-set menu_color_normal=white/black
-set menu_color_highlight=black/light-gray
+# NOVA OS dark theme
+set color_normal=light-gray/black
+set color_highlight=white/dark-gray
+set menu_color_normal=light-gray/black
+set menu_color_highlight=white/dark-gray
 
-menuentry "NOVA OS — Start" {
-    linux /live/vmlinuz boot=live quiet splash
+# Title
+echo ""
+echo "    N O V A   O S"
+echo "    ─────────────"
+echo ""
+
+menuentry "  NOVA OS" {
+    linux /live/vmlinuz boot=live quiet splash loglevel=3
     initrd /live/initrd.img
 }
 
-menuentry "NOVA OS — Safe Mode" {
+menuentry "  NOVA OS — Safe Mode (no GPU acceleration)" {
     linux /live/vmlinuz boot=live nomodeset
     initrd /live/initrd.img
 }
 
-menuentry "NOVA OS — To RAM (copy to memory)" {
+menuentry "  NOVA OS — Load to RAM (faster, needs 4GB+)" {
     linux /live/vmlinuz boot=live toram quiet splash
     initrd /live/initrd.img
+}
+
+menuentry "  Memory Test (memtest86+)" {
+    linux16 /live/vmlinuz memtest
 }
 GRUBCFG
 
