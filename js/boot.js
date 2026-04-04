@@ -28,6 +28,9 @@ import { initShortcuts } from './shell/shortcuts.js';
 import { registerWeather } from './apps/weather.js';
 import { registerClock } from './apps/clock.js';
 import { registerReminders } from './apps/reminders.js';
+import { initLockScreen } from './shell/lock-screen.js';
+import { initScreenshot } from './shell/screenshot.js';
+import { appInstaller } from './kernel/app-installer.js';
 
 // Boot sequence
 (async function boot() {
@@ -145,6 +148,9 @@ import { registerReminders } from './apps/reminders.js';
   initLaunchpad();
   notifications.init();
   initShortcuts();
+  initLockScreen();
+  initScreenshot();
+  appInstaller.loadInstalled();
 
   // Desktop ready
   await sleep(300);

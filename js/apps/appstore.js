@@ -1,6 +1,7 @@
 // NOVA OS — App Store
 
 import { processManager } from '../kernel/process-manager.js';
+import { appInstaller } from '../kernel/app-installer.js';
 
 export function registerAppStore() {
   processManager.register('appstore', {
@@ -16,7 +17,18 @@ export function registerAppStore() {
   });
 }
 
-const storeApps = [
+// Build store listing from real installable apps + demo apps
+function buildStoreApps() {
+  const registry = appInstaller.getRegistry();
+  const realApps = Object.entries(registry).map(([id, app]) => ({
+    id, name: app.name, icon: app.icon, category: app.category,
+    dev: app.dev, rating: app.rating, color: app.color,
+    desc: app.desc, installed: appInstaller.isInstalled(id), price: app.price || 'Free',
+  }));
+  return [...realApps, ...demoApps];
+}
+
+const demoApps = [
   {
     id: 'weather-widget', name: 'Weather Pro', icon: '\u26C5', category: 'Utilities',
     dev: 'CloudTech', rating: 4.8, color: 'linear-gradient(135deg, #1e88e5, #0d47a1)',
@@ -76,6 +88,7 @@ const storeApps = [
 function initAppStore(container) {
   let activeTab = 'discover';
   let detailApp = null;
+  const storeApps = buildStoreApps();
 
   container.innerHTML = `
     <div class="appstore-app">
@@ -302,29 +315,31 @@ function initAppStore(container) {
     return card;
   }
 
-  function installApp(app, btn) {
+  async function installApp(app, btn) {
     if (app.installed) return;
     btn.textContent = 'Installing...';
     btn.style.pointerEvents = 'none';
-    setTimeout(() => {
-      app.installed = true;
-      btn.textContent = 'Installed';
-      btn.classList.add('installed');
-      btn.style.pointerEvents = '';
-      showNotification(`${app.name} installed successfully!`);
-    }, 1500);
-  }
 
-  function showNotification(message) {
-    const notif = document.createElement('div');
-    notif.style.cssText = 'position:fixed;top:36px;right:16px;background:rgba(40,40,40,0.95);backdrop-filter:blur(20px);border:1px solid rgba(255,255,255,0.1);border-radius:10px;padding:12px 16px;color:white;font-size:13px;z-index:99999;animation:slideUp 0.3s ease;box-shadow:0 10px 30px rgba(0,0,0,0.3);display:flex;align-items:center;gap:8px;';
-    notif.innerHTML = `<span style="font-size:18px">\u2705</span> ${message}`;
-    document.body.appendChild(notif);
-    setTimeout(() => {
-      notif.style.transition = 'opacity 0.3s';
-      notif.style.opacity = '0';
-      setTimeout(() => notif.remove(), 300);
-    }, 3000);
+    // Check if this is a real installable app from the registry
+    const registry = appInstaller.getRegistry();
+    const realApp = registry[app.id];
+
+    await new Promise(r => setTimeout(r, 1200)); // install animation
+
+    if (realApp) {
+      await appInstaller.install(app.id);
+    }
+
+    app.installed = true;
+    btn.textContent = 'OPEN';
+    btn.classList.add('installed');
+    btn.style.pointerEvents = '';
+
+    // Click to open installed app
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (realApp) processManager.launch(app.id);
+    });
   }
 
   renderContent();

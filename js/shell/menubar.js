@@ -3,6 +3,7 @@
 import { eventBus } from '../kernel/event-bus.js';
 import { windowManager } from '../kernel/window-manager.js';
 import { processManager } from '../kernel/process-manager.js';
+import { lockScreen, showShutdownDialog } from './lock-screen.js';
 
 let activeDropdown = null;
 
@@ -36,11 +37,10 @@ export function initMenubar() {
       { label: 'System Settings...', shortcut: '\u2318,', action: () => processManager.launch('settings') },
       { label: 'App Store...', action: () => processManager.launch('appstore') },
       { separator: true },
-      { label: 'Sleep', disabled: true },
-      { label: 'Restart...', disabled: true },
-      { label: 'Shut Down...', disabled: true },
       { separator: true },
-      { label: 'Lock Screen', shortcut: '\u2318\u2303Q', action: () => location.reload() },
+      { label: 'Lock Screen', shortcut: '\u2318L', action: () => lockScreen() },
+      { separator: true },
+      { label: 'Shut Down...', action: () => showShutdownDialog() },
     ]);
   });
 

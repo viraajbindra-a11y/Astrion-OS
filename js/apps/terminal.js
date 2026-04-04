@@ -88,24 +88,51 @@ function initTerminal(container, instanceId) {
     switch (command) {
       case 'help':
         addLine(`Available commands:
+
+  FILES
   ls [path]       - List directory contents
   cd [path]       - Change directory
   cat [file]      - Show file contents
+  head [file]     - Show first 10 lines
+  tail [file]     - Show last 10 lines
   mkdir [name]    - Create directory
-  touch [name]    - Create file
+  touch [name]    - Create empty file
   rm [path]       - Delete file/folder
-  echo [text]     - Print text
+  mv [src] [dest] - Move/rename file
+  cp [src] [dest] - Copy file
+  find [query]    - Search for files
+  grep [pat] [f]  - Search in file
+  wc [file]       - Count lines/words/chars
+  tree [path]     - Show directory tree
+
+  SYSTEM
   pwd             - Print working directory
+  echo [text]     - Print text
   clear           - Clear terminal
   whoami          - Current user
+  hostname        - Show hostname
   date            - Current date/time
+  cal             - Show calendar
   uname           - System info
-  tree [path]     - Show directory tree
-  find [query]    - Search for files
-  ai [question]   - Ask NOVA AI
-  neofetch        - System information
+  neofetch        - System info (fancy)
+  uptime          - System uptime
+  df              - Disk usage
+  du              - File space usage
+  env             - Environment variables
+  which [cmd]     - Locate a command
+  man [cmd]       - Manual page
   history         - Command history
-  help            - Show this help`, 'system');
+  open [app]      - Open an app
+  exit            - Close terminal
+
+  FUN
+  ai [question]   - Ask NOVA AI
+  fortune         - Random quote
+  cowsay [text]   - ASCII cow says text
+
+  SHORTCUTS
+  Tab             - Auto-complete paths
+  Up/Down         - Command history`, 'system');
         break;
 
       case 'ls': {
@@ -254,6 +281,192 @@ function initTerminal(container, instanceId) {
         addLine(response);
         break;
       }
+
+      case 'mv': {
+        if (args.length < 2) { addLine('mv: missing operand', 'error'); break; }
+        const src = resolvePath(args[0]);
+        const dest = resolvePath(args[1]);
+        if (await fileSystem.exists(src)) {
+          await fileSystem.rename(src, dest);
+          addLine(`Moved: ${args[0]} -> ${args[1]}`, 'success');
+        } else {
+          addLine(`mv: ${args[0]}: No such file or directory`, 'error');
+        }
+        break;
+      }
+
+      case 'cp': {
+        if (args.length < 2) { addLine('cp: missing operand', 'error'); break; }
+        const src = resolvePath(args[0]);
+        const dest = resolvePath(args[1]);
+        const file = await fileSystem.readFile(src);
+        if (file) {
+          if (file.type === 'file') await fileSystem.writeFile(dest, file.content || '');
+          else await fileSystem.createFolder(dest);
+          addLine(`Copied: ${args[0]} -> ${args[1]}`, 'success');
+        } else {
+          addLine(`cp: ${args[0]}: No such file or directory`, 'error');
+        }
+        break;
+      }
+
+      case 'head': {
+        if (!args[0]) { addLine('head: missing operand', 'error'); break; }
+        const path = resolvePath(args[0]);
+        const file = await fileSystem.readFile(path);
+        if (file && file.type === 'file') {
+          const lines = (file.content || '').split('\n').slice(0, 10);
+          addLine(lines.join('\n'));
+        } else {
+          addLine(`head: ${args[0]}: No such file`, 'error');
+        }
+        break;
+      }
+
+      case 'tail': {
+        if (!args[0]) { addLine('tail: missing operand', 'error'); break; }
+        const path = resolvePath(args[0]);
+        const file = await fileSystem.readFile(path);
+        if (file && file.type === 'file') {
+          const lines = (file.content || '').split('\n').slice(-10);
+          addLine(lines.join('\n'));
+        } else {
+          addLine(`tail: ${args[0]}: No such file`, 'error');
+        }
+        break;
+      }
+
+      case 'wc': {
+        if (!args[0]) { addLine('wc: missing operand', 'error'); break; }
+        const path = resolvePath(args[0]);
+        const file = await fileSystem.readFile(path);
+        if (file && file.type === 'file') {
+          const content = file.content || '';
+          const lines = content.split('\n').length;
+          const words = content.split(/\s+/).filter(w => w).length;
+          const chars = content.length;
+          addLine(`  ${lines}  ${words}  ${chars} ${args[0]}`);
+        } else {
+          addLine(`wc: ${args[0]}: No such file`, 'error');
+        }
+        break;
+      }
+
+      case 'grep': {
+        if (args.length < 2) { addLine('Usage: grep [pattern] [file]', 'error'); break; }
+        const pattern = args[0];
+        const path = resolvePath(args[1]);
+        const file = await fileSystem.readFile(path);
+        if (file && file.type === 'file') {
+          const lines = (file.content || '').split('\n').filter(l => l.includes(pattern));
+          if (lines.length > 0) addLine(lines.join('\n'));
+          else addLine(`(no matches for "${pattern}")`, 'system');
+        } else {
+          addLine(`grep: ${args[1]}: No such file`, 'error');
+        }
+        break;
+      }
+
+      case 'du': {
+        const all = await fileSystem.search('');
+        let totalSize = 0;
+        all.forEach(f => { if (f.content) totalSize += f.content.length; });
+        addLine(`${totalSize} bytes total (${all.length} files/folders)`);
+        break;
+      }
+
+      case 'df':
+        addLine('Filesystem      Size   Used   Avail  Use%  Mounted on');
+        addLine('nova-fs         5.0G   ' + Math.round(Math.random() * 100) + 'K   5.0G   0%    /');
+        break;
+
+      case 'uptime': {
+        const uptimeMs = Date.now() - performance.timeOrigin;
+        const hours = Math.floor(uptimeMs / 3600000);
+        const mins = Math.floor((uptimeMs % 3600000) / 60000);
+        addLine(`up ${hours}:${mins.toString().padStart(2, '0')}, 1 user`);
+        break;
+      }
+
+      case 'hostname':
+        addLine('nova-os');
+        break;
+
+      case 'env':
+        addLine(`HOME=/home/nova\nUSER=nova\nSHELL=/bin/nova-sh\nPATH=/usr/local/bin:/usr/bin\nTERM=nova-terminal\nOS=NOVA OS 0.1.0\nLANG=en_US.UTF-8`);
+        break;
+
+      case 'export':
+        addLine('Environment variables (read-only in web shell)', 'system');
+        break;
+
+      case 'which':
+        if (!args[0]) { addLine('which: missing argument', 'error'); break; }
+        const builtins = ['ls','cd','cat','mkdir','touch','rm','mv','cp','echo','pwd','clear','whoami','date','uname','tree','find','history','neofetch','ai','help','head','tail','wc','grep','du','df','uptime','hostname','env','which','man','open','exit'];
+        if (builtins.includes(args[0])) addLine(`/usr/bin/${args[0]}`);
+        else addLine(`${args[0]} not found`, 'error');
+        break;
+
+      case 'man':
+        if (!args[0]) { addLine('Usage: man [command]', 'error'); break; }
+        addLine(`NOVA OS Manual: ${args[0]}\n\nThis is a built-in NOVA OS command.\nType 'help' for a list of all commands.`, 'system');
+        break;
+
+      case 'open': {
+        const appMap = {finder:'finder',notes:'notes',terminal:'terminal',calculator:'calculator',settings:'settings',browser:'browser',music:'music',calendar:'calendar',draw:'draw',photos:'photos',weather:'weather',clock:'clock',reminders:'reminders',appstore:'appstore','text-editor':'text-editor'};
+        const appId = appMap[args[0]?.toLowerCase()];
+        if (appId) {
+          const { processManager } = await import('../kernel/process-manager.js');
+          processManager.launch(appId);
+          addLine(`Opening ${args[0]}...`, 'success');
+        } else {
+          addLine(`open: unknown app '${args[0]}'\nAvailable: ${Object.keys(appMap).join(', ')}`, 'error');
+        }
+        break;
+      }
+
+      case 'exit':
+        addLine('Closing terminal...', 'system');
+        setTimeout(() => {
+          const { windowManager } = window.__nova || {};
+          // Find and close this terminal window
+          document.querySelector(`#term-input-${instanceId}`)?.closest('.window')?.querySelector('.win-btn.close')?.click();
+        }, 500);
+        break;
+
+      case 'cal': {
+        const now = new Date();
+        const month = now.toLocaleString('en', { month: 'long' });
+        const year = now.getFullYear();
+        const daysInMonth = new Date(year, now.getMonth() + 1, 0).getDate();
+        const firstDay = new Date(year, now.getMonth(), 1).getDay();
+        let cal = `     ${month} ${year}\nSu Mo Tu We Th Fr Sa\n`;
+        cal += '   '.repeat(firstDay);
+        for (let d = 1; d <= daysInMonth; d++) {
+          cal += (d < 10 ? ' ' : '') + d + ' ';
+          if ((d + firstDay) % 7 === 0) cal += '\n';
+        }
+        addLine(cal);
+        break;
+      }
+
+      case 'fortune':
+        const fortunes = [
+          'The best way to predict the future is to build it.',
+          'Code is poetry.',
+          'There are 10 types of people: those who understand binary and those who don\'t.',
+          'First, solve the problem. Then, write the code.',
+          'Talk is cheap. Show me the code. — Linus Torvalds',
+          'Any sufficiently advanced technology is indistinguishable from magic. — Arthur C. Clarke',
+          'NOVA OS believes in you!',
+        ];
+        addLine(fortunes[Math.floor(Math.random() * fortunes.length)]);
+        break;
+
+      case 'cowsay':
+        const msg = args.join(' ') || 'Moo! Welcome to NOVA OS!';
+        addLine(` ${'_'.repeat(msg.length + 2)}\n< ${msg} >\n ${'‾'.repeat(msg.length + 2)}\n        \\   ^__^\n         \\  (oo)\\_______\n            (__)\\       )\\/\\\n                ||----w |\n                ||     ||`);
+        break;
 
       default:
         addLine(`nova: command not found: ${command}`, 'error');

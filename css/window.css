@@ -77,12 +77,19 @@
   background: var(--green);
 }
 
+/* NOVA OS uses square buttons instead of macOS circles */
+.win-btn {
+  border-radius: 4px !important;
+  width: 14px !important;
+  height: 14px !important;
+}
+
 /* Show icons on hover */
 .window-buttons:hover .win-btn.close::after {
   content: '×';
   font-size: 11px;
   font-weight: bold;
-  color: rgba(0, 0, 0, 0.5);
+  color: rgba(0, 0, 0, 0.6);
   line-height: 1;
 }
 
@@ -90,15 +97,15 @@
   content: '−';
   font-size: 13px;
   font-weight: bold;
-  color: rgba(0, 0, 0, 0.5);
+  color: rgba(0, 0, 0, 0.6);
   line-height: 1;
 }
 
 .window-buttons:hover .win-btn.maximize::after {
-  content: '+';
-  font-size: 11px;
+  content: '↗';
+  font-size: 9px;
   font-weight: bold;
-  color: rgba(0, 0, 0, 0.5);
+  color: rgba(0, 0, 0, 0.6);
   line-height: 1;
 }
 
