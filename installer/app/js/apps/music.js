@@ -16,6 +16,126 @@ export function registerMusic() {
   });
 }
 
+// Audio synthesizer — generates music from Web Audio API
+class NovaAudio {
+  constructor() {
+    this.ctx = null;
+    this.gainNode = null;
+    this.playing = false;
+    this.scheduledNotes = [];
+    this.loopTimer = null;
+  }
+
+  init() {
+    if (this.ctx) return;
+    this.ctx = new (window.AudioContext || window.webkitAudioContext)();
+    this.gainNode = this.ctx.createGain();
+    this.gainNode.gain.value = 0.15;
+    this.gainNode.connect(this.ctx.destination);
+  }
+
+  setVolume(v) {
+    if (this.gainNode) this.gainNode.gain.value = v / 100 * 0.25;
+  }
+
+  playTrack(trackIndex) {
+    this.init();
+    this.stop();
+    this.playing = true;
+
+    // Each track gets a unique scale/pattern based on its index
+    const scales = [
+      [261, 293, 329, 349, 392, 440, 493],       // C major
+      [293, 329, 369, 392, 440, 493, 554],       // D major
+      [220, 261, 293, 329, 369, 440, 493],       // A minor
+      [246, 293, 329, 369, 415, 493, 554],       // B minor
+      [329, 369, 415, 440, 493, 554, 622],       // E major
+      [196, 220, 246, 261, 293, 329, 369],       // G major
+      [174, 207, 233, 261, 293, 329, 349],       // F major
+      [277, 311, 329, 369, 415, 466, 493],       // C# minor
+      [233, 277, 311, 329, 369, 415, 466],       // Bb major
+      [349, 392, 440, 466, 523, 587, 659],       // F major high
+    ];
+
+    const scale = scales[trackIndex % scales.length];
+    const tempos = [0.4, 0.35, 0.5, 0.6, 0.45, 0.3, 0.55, 0.4, 0.65, 0.5];
+    const noteLength = tempos[trackIndex % tempos.length];
+
+    // Generate a repeating melody pattern
+    const patterns = [
+      [0, 2, 4, 3, 2, 4, 5, 3],
+      [0, 4, 3, 2, 5, 4, 3, 1],
+      [0, 1, 2, 4, 6, 4, 2, 1],
+      [5, 4, 2, 0, 2, 4, 5, 6],
+      [0, 2, 3, 5, 3, 2, 0, 1],
+      [4, 3, 1, 0, 1, 3, 4, 6],
+      [0, 3, 5, 3, 0, 2, 4, 2],
+      [6, 5, 3, 1, 0, 1, 3, 5],
+      [0, 1, 3, 5, 6, 5, 3, 1],
+      [2, 0, 4, 2, 5, 3, 6, 4],
+    ];
+    const pattern = patterns[trackIndex % patterns.length];
+
+    let noteIndex = 0;
+    const playNote = () => {
+      if (!this.playing) return;
+
+      const freq = scale[pattern[noteIndex % pattern.length]];
+      const osc = this.ctx.createOscillator();
+      const noteGain = this.ctx.createGain();
+
+      // Alternate between wave types for variety
+      const waves = ['sine', 'triangle', 'sine', 'square'];
+      osc.type = waves[trackIndex % waves.length];
+      osc.frequency.value = freq;
+
+      noteGain.gain.setValueAtTime(0, this.ctx.currentTime);
+      noteGain.gain.linearRampToValueAtTime(0.3, this.ctx.currentTime + 0.05);
+      noteGain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + noteLength * 0.9);
+
+      osc.connect(noteGain);
+      noteGain.connect(this.gainNode);
+      osc.start(this.ctx.currentTime);
+      osc.stop(this.ctx.currentTime + noteLength);
+
+      // Add a bass note every 4 beats
+      if (noteIndex % 4 === 0) {
+        const bass = this.ctx.createOscillator();
+        const bassGain = this.ctx.createGain();
+        bass.type = 'sine';
+        bass.frequency.value = scale[0] / 2;
+        bassGain.gain.setValueAtTime(0.15, this.ctx.currentTime);
+        bassGain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + noteLength * 2);
+        bass.connect(bassGain);
+        bassGain.connect(this.gainNode);
+        bass.start(this.ctx.currentTime);
+        bass.stop(this.ctx.currentTime + noteLength * 2);
+      }
+
+      noteIndex++;
+      this.loopTimer = setTimeout(playNote, noteLength * 1000);
+    };
+
+    playNote();
+  }
+
+  stop() {
+    this.playing = false;
+    if (this.loopTimer) clearTimeout(this.loopTimer);
+  }
+
+  pause() {
+    this.playing = false;
+    if (this.loopTimer) clearTimeout(this.loopTimer);
+  }
+
+  resume(trackIndex) {
+    this.playTrack(trackIndex);
+  }
+}
+
+const audio = new NovaAudio();
+
 // Demo tracks
 const tracks = [
   { title: 'Midnight Drive', artist: 'Synthwave FM', duration: '3:42', art: '\uD83C\uDF03', color: '#1a237e' },
@@ -168,6 +288,7 @@ function initMusic(container) {
 
     startProgress(track.duration);
     startVisualizer();
+    audio.playTrack(index);
   }
 
   function togglePlay() {
@@ -176,8 +297,10 @@ function initMusic(container) {
     if (isPlaying) {
       startProgress(tracks[currentTrack].duration);
       startVisualizer();
+      audio.resume(currentTrack);
     } else {
       clearInterval(progressInterval);
+      audio.pause();
       stopVisualizer();
     }
   }
@@ -200,6 +323,7 @@ function initMusic(container) {
           playBtn.textContent = '\u25B6';
           clearInterval(progressInterval);
           stopVisualizer();
+          audio.stop();
         }
         return;
       }
@@ -235,4 +359,10 @@ function initMusic(container) {
       bar.style.height = '2px';
     });
   }
+
+  // Volume control
+  container.querySelector('.music-volume-slider').addEventListener('input', (e) => {
+    volume = parseInt(e.target.value);
+    audio.setVolume(volume);
+  });
 }

@@ -1,0 +1,16 @@
+<svg width="120" height="120" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="120" height="120" rx="26" fill="url(#ph1)"/>
+  <!-- Back photo -->
+  <rect x="24" y="34" width="48" height="38" rx="5" fill="white" opacity="0.5" transform="rotate(-8 48 53)"/>
+  <!-- Front photo -->
+  <rect x="38" y="32" width="50" height="40" rx="5" fill="white" opacity="0.9" transform="rotate(5 63 52)"/>
+  <!-- Mountain scene in front photo -->
+  <polygon points="44,68 58,50 68,62 76,48 88,68" fill="#c060c0" opacity="0.4"/>
+  <!-- Sun in photo -->
+  <circle cx="78" cy="42" r="5" fill="#ffeb3b" opacity="0.7"/>
+  <!-- Third photo peeking -->
+  <rect x="30" y="50" width="46" height="36" rx="4" fill="white" opacity="0.35" transform="rotate(15 53 68)"/>
+  <defs>
+    <linearGradient id="ph1" x1="0" y1="0" x2="120" y2="120"><stop stop-color="#ab47bc"/><stop offset="1" stop-color="#e91e63"/></linearGradient>
+  </defs>
+</svg>

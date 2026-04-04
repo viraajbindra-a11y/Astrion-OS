@@ -148,7 +148,7 @@ function initSettings(container) {
             <div class="settings-row-label">Dock Size</div>
             <div class="settings-row-desc">Adjust the dock icon size</div>
           </div>
-          <input type="range" min="36" max="64" value="48" style="width:120px;accent-color:var(--accent);">
+          <input type="range" min="36" max="64" value="${localStorage.getItem('nova-dock-size') || '48'}" style="width:120px;accent-color:var(--accent);" id="dock-size-slider">
         </div>
         <div class="settings-row">
           <div>
@@ -165,6 +165,15 @@ function initSettings(container) {
         </div>
       </div>
     `;
+
+    main.querySelector('#dock-size-slider').addEventListener('input', function() {
+      const size = this.value + 'px';
+      localStorage.setItem('nova-dock-size', this.value);
+      document.querySelectorAll('.dock-item-icon').forEach(icon => {
+        icon.style.width = size;
+        icon.style.height = size;
+      });
+    });
 
     main.querySelector('#toggle-magnify').addEventListener('click', function() {
       this.classList.toggle('on');

@@ -25,6 +25,9 @@ import { initControlCenter } from './shell/control-center.js';
 import { initLaunchpad } from './shell/launchpad.js';
 import { registerPhotos } from './apps/photos.js';
 import { initShortcuts } from './shell/shortcuts.js';
+import { registerWeather } from './apps/weather.js';
+import { registerClock } from './apps/clock.js';
+import { registerReminders } from './apps/reminders.js';
 
 // Boot sequence
 (async function boot() {
@@ -53,20 +56,40 @@ import { initShortcuts } from './shell/shortcuts.js';
   registerCalendar();
   registerAppStore();
   registerPhotos();
+  registerWeather();
+  registerClock();
+  registerReminders();
   await animate(progressBar, 85, 200);
 
   // Init kernel
   windowManager.init();
   await animate(progressBar, 100, 300);
 
-  // Phase 2: Transition to login screen
+  // Phase 2: Fade out boot screen
   await sleep(400);
   bootScreen.style.transition = 'opacity 0.5s ease';
   bootScreen.style.opacity = '0';
   await sleep(500);
   bootScreen.classList.add('hidden');
 
-  // Show login screen
+  // Phase 2.5: If first boot, show setup wizard BEFORE login
+  const isFirstBoot = !localStorage.getItem('nova-setup-done');
+  if (isFirstBoot) {
+    // Show desktop behind wizard (so wallpaper applies live)
+    desktop.classList.remove('hidden');
+    desktop.style.opacity = '1';
+    applyWallpaper();
+    applyAccentColor();
+
+    await showSetupWizard();
+
+    // After wizard, apply chosen preferences
+    applyWallpaper();
+    applyAccentColor();
+    desktop.classList.add('hidden');
+  }
+
+  // Phase 3: Login screen
   loginScreen.classList.remove('hidden');
   loginScreen.style.opacity = '0';
   loginScreen.style.transition = 'opacity 0.6s ease';
@@ -96,7 +119,7 @@ import { initShortcuts } from './shell/shortcuts.js';
     });
   });
 
-  // Phase 3: Transition to desktop
+  // Phase 4: Transition to desktop
   loginScreen.style.transition = 'opacity 0.5s ease, transform 0.5s ease';
   loginScreen.style.opacity = '0';
   loginScreen.style.transform = 'scale(1.05)';
@@ -125,18 +148,17 @@ import { initShortcuts } from './shell/shortcuts.js';
 
   // Desktop ready
   await sleep(300);
-
-  // Show setup wizard on first boot
-  await showSetupWizard();
-
   eventBus.emit('desktop:ready');
 
   // Welcome notification
   const userName = localStorage.getItem('nova-username') || 'User';
+  const welcomeMsg = isFirstBoot
+    ? 'Welcome to NOVA OS! Press Cmd+Space for Spotlight, F4 for Launchpad.'
+    : 'NOVA OS is ready. Press Cmd+Space for Spotlight, F4 for Launchpad.';
   notifications.show({
-    title: `Welcome back, ${userName}!`,
-    body: 'NOVA OS is ready. Press Cmd+Space for Spotlight, F4 for Launchpad.',
-    icon: '\uD83D\uDC4B',
+    title: isFirstBoot ? `Welcome, ${userName}!` : `Welcome back, ${userName}!`,
+    body: welcomeMsg,
+    icon: isFirstBoot ? '\uD83D\uDE80' : '\uD83D\uDC4B',
     duration: 5000,
   });
 

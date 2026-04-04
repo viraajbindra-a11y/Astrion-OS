@@ -51,12 +51,36 @@ function initPhotos(container) {
         <div class="photos-header-tab active" data-tab="all">All Photos</div>
         <div class="photos-header-tab" data-tab="favorites">Favorites</div>
         <div class="photos-header-tab" data-tab="albums">Albums</div>
+        <div style="margin-left:auto;padding-right:8px;">
+          <button id="photos-import-btn" style="background:var(--accent);border:none;color:white;padding:5px 14px;border-radius:6px;font-size:12px;font-family:var(--font);cursor:pointer;">+ Import</button>
+        </div>
       </div>
       <div class="photos-grid" id="photos-grid"></div>
+      <input type="file" id="photos-upload" accept="image/*" multiple style="display:none">
     </div>
   `;
 
   const grid = container.querySelector('#photos-grid');
+  const uploadInput = container.querySelector('#photos-upload');
+  const importBtn = container.querySelector('#photos-import-btn');
+
+  // Load saved user photos
+  let userPhotos = JSON.parse(localStorage.getItem('nova-user-photos') || '[]');
+
+  // Import button
+  importBtn.addEventListener('click', () => uploadInput.click());
+  uploadInput.addEventListener('change', (e) => {
+    const files = e.target.files;
+    for (const file of files) {
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        userPhotos.push({ dataUrl: ev.target.result, name: file.name });
+        localStorage.setItem('nova-user-photos', JSON.stringify(userPhotos));
+        renderGrid();
+      };
+      reader.readAsDataURL(file);
+    }
+  });
 
   // Tab switching
   container.querySelectorAll('.photos-header-tab').forEach(tab => {
@@ -75,6 +99,33 @@ function initPhotos(container) {
       grid.innerHTML = `<div class="photos-empty"><div class="photos-empty-icon">\uD83D\uDCC1</div><div>Create albums to organize your photos</div></div>`;
       return;
     }
+
+    // Show uploaded photos first
+    userPhotos.forEach((photo, i) => {
+      const el = document.createElement('div');
+      el.className = 'photos-item';
+      el.style.backgroundImage = `url(${photo.dataUrl})`;
+      el.style.backgroundSize = 'cover';
+      el.style.backgroundPosition = 'center';
+      el.innerHTML = `
+        <div class="photos-item-overlay"></div>
+        <div class="photos-item-name">${photo.name}</div>
+      `;
+      el.addEventListener('click', () => {
+        // Lightbox for uploaded photos
+        const lb = document.createElement('div');
+        lb.className = 'photos-lightbox';
+        lb.innerHTML = `
+          <button class="photos-lightbox-close">&times;</button>
+          <img src="${photo.dataUrl}" style="max-width:90%;max-height:90%;object-fit:contain;border-radius:8px;">
+          <div class="photos-lightbox-info">${photo.name}</div>
+        `;
+        lb.querySelector('.photos-lightbox-close').addEventListener('click', () => lb.remove());
+        lb.addEventListener('click', (e) => { if (e.target === lb) lb.remove(); });
+        container.querySelector('.photos-app').appendChild(lb);
+      });
+      grid.appendChild(el);
+    });
 
     const items = activeTab === 'favorites' ? photos.slice(0, 6) : photos;
 

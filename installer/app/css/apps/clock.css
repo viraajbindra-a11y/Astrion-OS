@@ -1,0 +1,169 @@
+/* Clock App */
+.clock-app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: #111;
+}
+
+.clock-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  background: rgba(30,30,30,0.8);
+}
+
+.clock-tab {
+  flex: 1;
+  padding: 10px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+
+.clock-tab.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+
+.clock-content {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+/* World Clock */
+.clock-world-list {
+  width: 100%;
+  max-width: 400px;
+}
+
+.clock-world-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+
+.clock-world-city {
+  font-size: 14px;
+}
+
+.clock-world-diff {
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.clock-world-time {
+  font-size: 28px;
+  font-weight: 300;
+}
+
+.clock-world-ampm {
+  font-size: 14px;
+  color: var(--text-tertiary);
+  margin-left: 4px;
+}
+
+/* Stopwatch */
+.clock-stopwatch-display {
+  font-size: 56px;
+  font-weight: 200;
+  font-variant-numeric: tabular-nums;
+  margin-bottom: 32px;
+  letter-spacing: 2px;
+}
+
+.clock-stopwatch-ms {
+  font-size: 36px;
+  color: var(--text-tertiary);
+}
+
+.clock-stopwatch-controls {
+  display: flex;
+  gap: 20px;
+}
+
+.clock-stopwatch-btn {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  border: 2px solid;
+  background: none;
+  color: white;
+  font-size: 14px;
+  font-family: var(--font);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.clock-stopwatch-btn.start {
+  border-color: var(--green);
+  color: var(--green);
+}
+
+.clock-stopwatch-btn.stop {
+  border-color: var(--red);
+  color: var(--red);
+}
+
+.clock-stopwatch-btn.reset {
+  border-color: var(--text-tertiary);
+  color: var(--text-tertiary);
+}
+
+.clock-stopwatch-laps {
+  width: 100%;
+  max-width: 300px;
+  margin-top: 24px;
+  max-height: 150px;
+  overflow-y: auto;
+}
+
+.clock-stopwatch-lap {
+  display: flex;
+  justify-content: space-between;
+  padding: 6px 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+}
+
+/* Timer */
+.clock-timer-display {
+  font-size: 56px;
+  font-weight: 200;
+  font-variant-numeric: tabular-nums;
+  margin-bottom: 24px;
+}
+
+.clock-timer-presets {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 24px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.clock-timer-preset {
+  background: rgba(255,255,255,0.08);
+  border: none;
+  color: var(--text-secondary);
+  padding: 8px 16px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-family: var(--font);
+  cursor: pointer;
+}
+
+.clock-timer-preset:hover {
+  background: rgba(255,255,255,0.12);
+}

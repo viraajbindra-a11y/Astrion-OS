@@ -30,10 +30,10 @@ function initTerminal(container, instanceId) {
       </div>
       <div class="terminal-output" id="term-output-${instanceId}">
         <div class="terminal-welcome">Welcome to <strong>NOVA Terminal</strong> v0.1\nType <strong>help</strong> for available commands, or ask AI with <strong>ai [question]</strong>\n</div>
-      </div>
-      <div class="terminal-input-line">
-        <span class="terminal-prompt" id="term-prompt-${instanceId}">nova:~$</span>
-        <input type="text" class="terminal-input" id="term-input-${instanceId}" autofocus spellcheck="false" autocomplete="off">
+        <div class="terminal-input-line">
+          <span class="terminal-prompt" id="term-prompt-${instanceId}">nova:~$</span>
+          <input type="text" class="terminal-input" id="term-input-${instanceId}" autofocus spellcheck="false" autocomplete="off">
+        </div>
       </div>
     </div>
   `;
