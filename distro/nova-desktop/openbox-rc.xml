@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<openbox_config xmlns="http://openbox.org/3.4/rc">
+  <resistance>
+    <strength>10</strength>
+    <screen_edge_strength>20</screen_edge_strength>
+  </resistance>
+
+  <focus>
+    <focusNew>yes</focusNew>
+    <followMouse>no</followMouse>
+    <focusLast>yes</focusLast>
+    <underMouse>no</underMouse>
+    <focusDelay>200</focusDelay>
+    <raiseOnFocus>no</raiseOnFocus>
+  </focus>
+
+  <theme>
+    <name>nova-dark</name>
+    <titleLayout>NLIMC</titleLayout>
+    <keepBorder>yes</keepBorder>
+    <animateIconify>yes</animateIconify>
+    <font place="ActiveWindow">
+      <name>Inter</name>
+      <size>10</size>
+      <weight>Bold</weight>
+    </font>
+    <font place="InactiveWindow">
+      <name>Inter</name>
+      <size>10</size>
+      <weight>Normal</weight>
+    </font>
+  </theme>
+
+  <desktops>
+    <number>4</number>
+    <names>
+      <name>Desktop 1</name>
+      <name>Desktop 2</name>
+      <name>Desktop 3</name>
+      <name>Desktop 4</name>
+    </names>
+  </desktops>
+
+  <!-- Keyboard shortcuts -->
+  <keyboard>
+    <!-- Launch AI Spotlight -->
+    <keybind key="Super_L">
+      <action name="Execute"><command>/usr/bin/nova-spotlight</command></action>
+    </keybind>
+
+    <!-- Launch terminal -->
+    <keybind key="C-A-t">
+      <action name="Execute"><command>x-terminal-emulator</command></action>
+    </keybind>
+
+    <!-- Launch file manager -->
+    <keybind key="C-A-f">
+      <action name="Execute"><command>thunar</command></action>
+    </keybind>
+
+    <!-- Launch browser -->
+    <keybind key="C-A-b">
+      <action name="Execute"><command>firefox</command></action>
+    </keybind>
+
+    <!-- Screenshot -->
+    <keybind key="Print">
+      <action name="Execute"><command>xfce4-screenshooter</command></action>
+    </keybind>
+
+    <!-- Window management -->
+    <keybind key="A-F4">
+      <action name="Close"/>
+    </keybind>
+    <keybind key="A-F9">
+      <action name="Iconify"/>
+    </keybind>
+    <keybind key="A-F10">
+      <action name="ToggleMaximize"/>
+    </keybind>
+
+    <!-- Snap windows -->
+    <keybind key="Super-Left">
+      <action name="UnmaximizeFull"/>
+      <action name="MoveResizeTo">
+        <x>0</x><y>0</y><width>50%</width><height>100%</height>
+      </action>
+    </keybind>
+    <keybind key="Super-Right">
+      <action name="UnmaximizeFull"/>
+      <action name="MoveResizeTo">
+        <x>50%</x><y>0</y><width>50%</width><height>100%</height>
+      </action>
+    </keybind>
+    <keybind key="Super-Up">
+      <action name="ToggleMaximize"/>
+    </keybind>
+
+    <!-- Switch desktops -->
+    <keybind key="C-Left">
+      <action name="GoToDesktop"><to>left</to><wrap>yes</wrap></action>
+    </keybind>
+    <keybind key="C-Right">
+      <action name="GoToDesktop"><to>right</to><wrap>yes</wrap></action>
+    </keybind>
+
+    <!-- Lock screen -->
+    <keybind key="Super-l">
+      <action name="Execute"><command>dm-tool lock</command></action>
+    </keybind>
+  </keyboard>
+
+  <mouse>
+    <dragThreshold>1</dragThreshold>
+    <doubleClickTime>500</doubleClickTime>
+    <screenEdgeWarpTime>400</screenEdgeWarpTime>
+    <screenEdgeWarpMouse>false</screenEdgeWarpMouse>
+  </mouse>
+
+  <applications>
+    <!-- Default window decorations -->
+    <application class="*">
+      <decor>yes</decor>
+    </application>
+    <!-- Plank dock — no decorations -->
+    <application class="Plank">
+      <decor>no</decor>
+      <skip_taskbar>yes</skip_taskbar>
+      <layer>above</layer>
+    </application>
+  </applications>
+</openbox_config>

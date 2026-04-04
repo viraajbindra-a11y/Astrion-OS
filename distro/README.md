@@ -1,41 +1,37 @@
-# NOVA OS — Custom Linux Distribution
+# NOVA OS — Linux Distribution
 
-This builds a bootable `.iso` file that boots directly into NOVA OS.
+A real operating system based on Debian, with NOVA OS as the desktop environment.
 
-## How it works
+## What this is
 
-- Based on **Debian 12 (Bookworm)** minimal
-- Boots to auto-login, no password
-- Starts X11 + Chromium in kiosk mode
-- Chromium loads NOVA OS from a local Node.js server
-- No traditional desktop environment — NOVA OS IS the desktop
+NOVA OS is a complete Linux distribution. It's not a web app in a browser — it's a real operating system that:
+- Boots on real hardware (UEFI + Legacy BIOS)
+- Runs real applications (Firefox, LibreOffice, GIMP, VS Code, etc.)
+- Has a real terminal with bash
+- Has a real file manager
+- Can install apps from apt, flatpak, or the NOVA App Store
+- Has the NOVA AI assistant built into the desktop
+- Has our custom dock, menubar, window manager, and desktop shell
 
-## Building the ISO
+## How to build
 
-### Option 1: GitHub Actions (Recommended)
-Push to the `main` branch. The GitHub Action builds the ISO automatically.
-Download it from the Actions tab → Artifacts.
+### Automatic (GitHub Actions)
+Push to main → Actions tab → "Build NOVA OS ISO" → download the ISO from artifacts.
 
-### Option 2: Build locally (requires Linux)
+### Manual (requires Ubuntu/Debian)
 ```bash
-cd distro
-sudo bash build.sh
+sudo bash distro/build.sh
 ```
-The ISO will be at `distro/output/nova-os.iso`.
 
-## Flashing to USB
-```bash
-# macOS
-sudo dd if=output/nova-os.iso of=/dev/diskN bs=4M status=progress
+## How to use
 
-# Linux
-sudo dd if=output/nova-os.iso of=/dev/sdX bs=4M status=progress
-
-# Or use Balena Etcher (GUI) — https://etcher.balena.io
-```
+1. Download the ISO
+2. Flash to USB with Balena Etcher (https://etcher.balena.io)
+3. Boot from USB on any PC
+4. NOVA OS runs — real OS, real apps, real AI
 
 ## System Requirements
-- 2GB RAM minimum (4GB recommended)
-- 8GB USB drive or disk space
+- 4GB RAM (2GB minimum)
+- 20GB disk space
 - x86_64 processor
-- Network connection (for AI features, optional)
+- USB drive (8GB+) for live boot

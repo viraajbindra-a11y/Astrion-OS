@@ -1,0 +1,45 @@
+#!/bin/bash
+# NOVA OS — Desktop Session Launcher
+# This is what runs when you log into NOVA OS.
+# It sets up the desktop environment and launches all components.
+
+export XDG_CURRENT_DESKTOP=NOVA
+export XDG_SESSION_DESKTOP=NOVA
+export DESKTOP_SESSION=nova
+
+# Start compositor for smooth rendering
+picom --backend glx --vsync &
+
+# Set wallpaper
+if [ -f /usr/share/nova-os/wallpapers/default.png ]; then
+  feh --bg-fill /usr/share/nova-os/wallpapers/default.png &
+else
+  hsetroot -solid "#1a1a2e" &
+fi
+
+# Disable screensaver
+xset s off &
+xset -dpms &
+
+# Start notification daemon
+dunst -config /etc/nova-os/dunstrc &
+
+# Start PulseAudio / PipeWire for audio
+pulseaudio --start 2>/dev/null || pipewire &
+
+# Start NetworkManager applet (for WiFi)
+nm-applet --indicator &
+
+# Start the NOVA dock (plank or our custom dock)
+plank &
+
+# Start the NOVA panel/menubar (polybar or our custom one)
+polybar nova-bar -c /etc/nova-os/polybar.ini &
+
+# Start the NOVA AI assistant server
+if [ -f /opt/nova-os/server/index.js ]; then
+  cd /opt/nova-os && node server/index.js &
+fi
+
+# Start the window manager (openbox with NOVA config)
+exec openbox --config-file /etc/nova-os/openbox/rc.xml

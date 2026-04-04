@@ -1,0 +1,7 @@
+[Desktop Entry]
+Name=NOVA OS
+Comment=NOVA OS Desktop Environment
+Exec=/usr/bin/nova-session
+TryExec=/usr/bin/nova-session
+Type=Application
+DesktopNames=NOVA

@@ -1,0 +1,14 @@
+#!/bin/bash
+# NOVA OS — Spotlight AI Launcher
+# Opens a Rofi-based app launcher with custom NOVA theme.
+# Press Super key to trigger.
+
+rofi -show drun \
+  -theme /etc/nova-os/rofi-theme.rasi \
+  -display-drun "Ask NOVA..." \
+  -drun-display-format "{name}" \
+  -show-icons \
+  -icon-theme "Papirus-Dark" \
+  -font "Inter 13" \
+  -no-lazy-grab \
+  -matching fuzzy

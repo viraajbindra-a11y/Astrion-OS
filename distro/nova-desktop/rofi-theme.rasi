@@ -1,0 +1,74 @@
+/* NOVA OS — Rofi Theme (Spotlight/App Launcher) */
+
+* {
+    bg: #1e1e2eee;
+    bg-alt: #2a2a3a;
+    fg: #ffffff;
+    fg-alt: #888888;
+    accent: #007aff;
+    border: #007aff44;
+
+    background-color: transparent;
+    text-color: @fg;
+}
+
+window {
+    width: 500px;
+    background-color: @bg;
+    border: 1px solid;
+    border-color: @border;
+    border-radius: 14px;
+    padding: 0;
+    location: center;
+    anchor: center;
+}
+
+inputbar {
+    padding: 14px 18px;
+    spacing: 10px;
+    children: [icon-search, entry];
+    background-color: transparent;
+    border: 0 0 1px 0;
+    border-color: #ffffff10;
+}
+
+icon-search {
+    expand: false;
+    filename: "search";
+    size: 20px;
+    vertical-align: 0.5;
+}
+
+entry {
+    placeholder: "Search apps or ask AI...";
+    placeholder-color: @fg-alt;
+    font: "Inter 15";
+}
+
+listview {
+    lines: 7;
+    columns: 1;
+    fixed-height: true;
+    padding: 6px;
+    spacing: 2px;
+}
+
+element {
+    padding: 8px 14px;
+    spacing: 12px;
+    border-radius: 8px;
+}
+
+element selected {
+    background-color: @accent;
+}
+
+element-icon {
+    size: 28px;
+    vertical-align: 0.5;
+}
+
+element-text {
+    font: "Inter 13";
+    vertical-align: 0.5;
+}
