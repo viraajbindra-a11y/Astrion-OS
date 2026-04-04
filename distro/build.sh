@@ -65,7 +65,7 @@ feh
 lxappearance
 
 # === REAL BROWSER ===
-firefox-esr
+chromium
 
 # === REAL TERMINAL ===
 xfce4-terminal
@@ -238,7 +238,7 @@ DUNST
 mkdir -p "$CHROOT/etc/skel/.config/plank/dock1/launchers"
 cat > "$CHROOT/etc/skel/.config/plank/dock1/launchers/firefox-esr.dockitem" << 'DOCK'
 [PlankDockItemPreferences]
-Launcher=file:///usr/share/applications/firefox-esr.desktop
+Launcher=file:///usr/share/applications/chromium.desktop
 DOCK
 cat > "$CHROOT/etc/skel/.config/plank/dock1/launchers/thunar.dockitem" << 'DOCK'
 [PlankDockItemPreferences]
@@ -370,7 +370,7 @@ if ls *.iso 1>/dev/null 2>&1; then
   echo "  Flash to USB → Boot → Use."
   echo ""
   echo "  Included apps:"
-  echo "    - Firefox (real browser)"
+  echo "    - Chromium (real browser)"
   echo "    - Thunar (file manager)"
   echo "    - Terminal (bash)"
   echo "    - Mousepad + Geany (text editors)"
