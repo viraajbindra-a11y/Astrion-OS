@@ -1,0 +1,24 @@
+<svg width="120" height="120" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="120" height="120" rx="26" fill="url(#calc1)"/>
+  <!-- Display -->
+  <rect x="28" y="26" width="64" height="20" rx="4" fill="white" opacity="0.2"/>
+  <text x="84" y="41" fill="white" font-family="SF Pro Display, Helvetica" font-size="14" font-weight="600" text-anchor="end">386</text>
+  <!-- Button grid row 1 -->
+  <rect x="28" y="52" width="13" height="13" rx="3" fill="white" opacity="0.5"/>
+  <rect x="45" y="52" width="13" height="13" rx="3" fill="white" opacity="0.5"/>
+  <rect x="62" y="52" width="13" height="13" rx="3" fill="white" opacity="0.5"/>
+  <rect x="79" y="52" width="13" height="13" rx="3" fill="#f5a623"/>
+  <!-- Button grid row 2 -->
+  <rect x="28" y="69" width="13" height="13" rx="3" fill="white" opacity="0.9"/>
+  <rect x="45" y="69" width="13" height="13" rx="3" fill="white" opacity="0.9"/>
+  <rect x="62" y="69" width="13" height="13" rx="3" fill="white" opacity="0.9"/>
+  <rect x="79" y="69" width="13" height="13" rx="3" fill="#f5a623"/>
+  <!-- Button grid row 3 -->
+  <rect x="28" y="86" width="13" height="13" rx="3" fill="white" opacity="0.9"/>
+  <rect x="45" y="86" width="13" height="13" rx="3" fill="white" opacity="0.9"/>
+  <rect x="62" y="86" width="13" height="13" rx="3" fill="white" opacity="0.9"/>
+  <rect x="79" y="86" width="13" height="13" rx="3" fill="#f5a623"/>
+  <defs>
+    <linearGradient id="calc1" x1="0" y1="0" x2="120" y2="120"><stop stop-color="#4a4a4a"/><stop offset="1" stop-color="#2d2d2d"/></linearGradient>
+  </defs>
+</svg>

@@ -1,0 +1,22 @@
+<svg width="120" height="120" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="120" height="120" rx="26" fill="url(#dr1)"/>
+  <!-- Paint palette -->
+  <ellipse cx="56" cy="68" rx="26" ry="22" fill="white" opacity="0.9" transform="rotate(-10 56 68)"/>
+  <!-- Palette hole -->
+  <ellipse cx="48" cy="62" rx="5" ry="4" fill="url(#dr1)"/>
+  <!-- Paint dots -->
+  <circle cx="42" cy="72" r="4" fill="#fdd835"/>
+  <circle cx="54" cy="78" r="4" fill="#42a5f5"/>
+  <circle cx="66" cy="74" r="4" fill="#66bb6a"/>
+  <circle cx="72" cy="64" r="3.5" fill="#ab47bc"/>
+  <circle cx="62" cy="56" r="3.5" fill="#ff7043"/>
+  <!-- Paint brush -->
+  <rect x="68" y="24" width="8" height="36" rx="2" fill="white" opacity="0.9" transform="rotate(20 72 42)"/>
+  <!-- Brush tip -->
+  <rect x="66" y="56" width="8" height="10" rx="1" fill="#fdd835" transform="rotate(20 70 61)"/>
+  <!-- Brush ferrule -->
+  <rect x="67" y="52" width="8" height="5" rx="0.5" fill="white" opacity="0.5" transform="rotate(20 71 54)"/>
+  <defs>
+    <linearGradient id="dr1" x1="0" y1="0" x2="120" y2="120"><stop stop-color="#ef5350"/><stop offset="1" stop-color="#b71c1c"/></linearGradient>
+  </defs>
+</svg>
