@@ -48,7 +48,6 @@ lb config \
   --mirror-binary "http://deb.debian.org/debian" \
   --mirror-binary-security "false" \
   --security "false" \
-  --updates "false" \
   --archive-areas "main contrib non-free non-free-firmware" \
   --architectures amd64 \
   --binary-images iso-hybrid \
