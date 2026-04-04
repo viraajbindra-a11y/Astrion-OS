@@ -41,12 +41,12 @@ lb config \
   --parent-distribution bookworm \
   --parent-mirror-bootstrap "http://deb.debian.org/debian" \
   --parent-mirror-chroot "http://deb.debian.org/debian" \
-  --parent-mirror-chroot-security "http://security.debian.org/debian-security" \
+  --parent-mirror-chroot-security "http://deb.debian.org/debian-security" \
   --mirror-bootstrap "http://deb.debian.org/debian" \
   --mirror-chroot "http://deb.debian.org/debian" \
-  --mirror-chroot-security "http://security.debian.org/debian-security" \
+  --mirror-chroot-security "http://deb.debian.org/debian-security" \
   --mirror-binary "http://deb.debian.org/debian" \
-  --mirror-binary-security "http://security.debian.org/debian-security" \
+  --mirror-binary-security "http://deb.debian.org/debian-security" \
   --archive-areas "main contrib non-free non-free-firmware" \
   --architectures amd64 \
   --binary-images iso-hybrid \
