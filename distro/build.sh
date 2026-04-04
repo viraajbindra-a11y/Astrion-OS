@@ -41,8 +41,7 @@ lb config \
   --memtest none \
   --iso-application "NOVA OS" \
   --iso-publisher "NOVA OS Project" \
-  --iso-volume "NOVA-OS-1.0" \
-  --image-name "nova-os"
+  --iso-volume "NOVA-OS-1.0"
 
 # ============================================
 # 3. Package list — REAL applications
@@ -507,8 +506,8 @@ echo "[8/8] Building ISO (this takes 15-30 minutes)..."
 lb build 2>&1 | tail -20
 
 # Move output
-if ls *.iso 1>/dev/null 2>&1; then
-  mv *.iso "$OUTPUT_DIR/nova-os.iso"
+if ls *.hybrid.iso 1>/dev/null 2>&1 || ls *.iso 1>/dev/null 2>&1; then
+  mv *.iso "$OUTPUT_DIR/nova-os.iso" 2>/dev/null || mv *.hybrid.iso "$OUTPUT_DIR/nova-os.iso" 2>/dev/null
   ISO_SIZE=$(du -h "$OUTPUT_DIR/nova-os.iso" | cut -f1)
   echo ""
   echo "============================================"
