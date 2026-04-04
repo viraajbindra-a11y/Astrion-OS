@@ -61,7 +61,9 @@ function open() {
       const appEl = document.createElement('div');
       appEl.className = 'launchpad-app';
       appEl.innerHTML = `
-        <div class="launchpad-app-icon" style="background:${appColors[app.id] || 'linear-gradient(145deg,#555,#333)'}">${app.icon}</div>
+        <div class="launchpad-app-icon">
+          <img src="assets/icons/${app.id}.svg" alt="${app.name}" draggable="false" style="width:100%;height:100%;border-radius:15px;object-fit:cover;">
+        </div>
         <div class="launchpad-app-name">${app.name}</div>
       `;
       appEl.addEventListener('click', () => {

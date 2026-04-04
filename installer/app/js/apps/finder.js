@@ -170,9 +170,153 @@ async function initFinder(container, instanceId, startPath) {
         }
       });
 
+      // Drag support — drag files to Desktop or other Finder windows
+      el.draggable = true;
+      el.addEventListener('dragstart', (e) => {
+        e.dataTransfer.setData('nova/filepath', file.path);
+        e.dataTransfer.setData('text/plain', name);
+        e.dataTransfer.effectAllowed = 'move';
+        el.classList.add('dragging');
+      });
+      el.addEventListener('dragend', () => el.classList.remove('dragging'));
+
+      // Drop onto folders — move file into folder
+      if (file.type === 'folder') {
+        el.addEventListener('dragover', (e) => {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          el.classList.add('drop-target');
+        });
+        el.addEventListener('dragleave', () => el.classList.remove('drop-target'));
+        el.addEventListener('drop', async (e) => {
+          e.preventDefault();
+          el.classList.remove('drop-target');
+          const srcPath = e.dataTransfer.getData('nova/filepath');
+          if (srcPath && srcPath !== file.path) {
+            const srcName = fileSystem.getFileName(srcPath);
+            const destPath = `${file.path}/${srcName}`;
+            await fileSystem.rename(srcPath, destPath);
+            loadFiles();
+          }
+        });
+      }
+
+      // Right-click context menu
+      el.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        showFileContextMenu(e.clientX, e.clientY, file, name);
+      });
+
       filesContainer.appendChild(el);
     });
   }
+
+  function showFileContextMenu(x, y, file, name) {
+    // Remove existing menu
+    document.querySelectorAll('.finder-context-menu').forEach(m => m.remove());
+
+    const menu = document.createElement('div');
+    menu.className = 'finder-context-menu';
+    menu.style.cssText = `position:fixed;left:${Math.min(x, window.innerWidth - 200)}px;top:${Math.min(y, window.innerHeight - 200)}px;background:rgba(38,38,42,0.95);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:1px solid rgba(255,255,255,0.1);border-radius:8px;padding:4px;min-width:180px;z-index:99999;box-shadow:0 10px 40px rgba(0,0,0,0.4);font-size:13px;`;
+
+    const items = [
+      { label: 'Open', action: () => {
+        if (file.type === 'folder') navigateTo(file.path);
+        else processManager.launch('text-editor', { filePath: file.path, title: name });
+      }},
+      { label: 'Open With...', disabled: true },
+      { separator: true },
+      { label: 'Rename', action: async () => {
+        const newName = prompt('Rename to:', name);
+        if (newName && newName !== name) {
+          const newPath = file.path.replace(name, newName);
+          await fileSystem.rename(file.path, newPath);
+          loadFiles();
+        }
+      }},
+      { label: 'Duplicate', action: async () => {
+        if (file.type === 'file') {
+          const content = (await fileSystem.readFile(file.path))?.content || '';
+          await fileSystem.writeFile(file.path.replace(name, name.replace(/(\.\w+)?$/, ' copy$1')), content);
+          loadFiles();
+        }
+      }},
+      { separator: true },
+      { label: 'Move to Trash', action: async () => {
+        if (confirm(`Delete "${name}"?`)) {
+          await fileSystem.delete(file.path);
+          loadFiles();
+        }
+      }},
+      { separator: true },
+      { label: 'Get Info', action: () => {
+        const info = `Name: ${name}\nPath: ${file.path}\nType: ${file.type}\nCreated: ${new Date(file.created).toLocaleString()}\nModified: ${new Date(file.modified).toLocaleString()}`;
+        alert(info);
+      }},
+    ];
+
+    items.forEach(item => {
+      if (item.separator) {
+        const sep = document.createElement('div');
+        sep.style.cssText = 'height:1px;background:rgba(255,255,255,0.08);margin:4px 8px;';
+        menu.appendChild(sep);
+        return;
+      }
+      const el = document.createElement('div');
+      el.style.cssText = `padding:6px 12px;border-radius:4px;cursor:${item.disabled ? 'default' : 'pointer'};color:${item.disabled ? 'rgba(255,255,255,0.3)' : 'white'};`;
+      el.textContent = item.label;
+      if (!item.disabled) {
+        el.addEventListener('mouseenter', () => el.style.background = 'var(--accent)');
+        el.addEventListener('mouseleave', () => el.style.background = 'transparent');
+        el.addEventListener('click', () => { menu.remove(); item.action(); });
+      }
+      menu.appendChild(el);
+    });
+
+    document.body.appendChild(menu);
+    const closeMenu = () => { menu.remove(); document.removeEventListener('click', closeMenu); };
+    setTimeout(() => document.addEventListener('click', closeMenu), 10);
+  }
+
+  // Drop files into the current directory (from Desktop or external)
+  filesContainer.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  });
+  filesContainer.addEventListener('drop', async (e) => {
+    if (e.target.closest('.finder-file')) return; // handled by folder drop
+    e.preventDefault();
+
+    // Internal file move
+    const srcPath = e.dataTransfer.getData('nova/filepath');
+    if (srcPath) {
+      const srcName = fileSystem.getFileName(srcPath);
+      const destPath = currentPath === '/' ? `/${srcName}` : `${currentPath}/${srcName}`;
+      if (srcPath !== destPath) {
+        await fileSystem.rename(srcPath, destPath);
+        loadFiles();
+      }
+      return;
+    }
+
+    // External file drop (from OS)
+    if (e.dataTransfer.files.length > 0) {
+      for (const file of e.dataTransfer.files) {
+        const reader = new FileReader();
+        reader.onload = async () => {
+          const destPath = currentPath === '/' ? `/${file.name}` : `${currentPath}/${file.name}`;
+          await fileSystem.writeFile(destPath, reader.result);
+          loadFiles();
+        };
+        if (file.type.startsWith('text/') || file.name.match(/\.(txt|md|js|html|css|json|py|ts|xml|csv|sh|yaml|yml)$/i)) {
+          reader.readAsText(file);
+        } else {
+          reader.readAsDataURL(file);
+        }
+      }
+    }
+  });
 
   // Initial load
   loadFiles();

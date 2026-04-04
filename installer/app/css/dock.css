@@ -18,6 +18,26 @@
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 16px;
   box-shadow: var(--shadow-dock);
+  max-width: calc(100vw - 20px);
+  overflow: visible;
+}
+
+/* Scale dock icons on smaller screens */
+@media (max-width: 900px) {
+  .dock-item-icon {
+    width: 40px !important;
+    height: 40px !important;
+  }
+  .dock-separator { height: 28px; }
+}
+@media (max-width: 700px) {
+  .dock-item-icon {
+    width: 34px !important;
+    height: 34px !important;
+    border-radius: 8px !important;
+  }
+  .dock-container { gap: 2px; padding: 3px 6px; border-radius: 12px; }
+  .dock-separator { height: 22px; }
 }
 
 .dock-item {

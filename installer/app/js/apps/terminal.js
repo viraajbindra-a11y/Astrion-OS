@@ -103,7 +103,16 @@ function initTerminal(container, instanceId) {
   find [query]    - Search for files
   grep [pat] [f]  - Search in file
   wc [file]       - Count lines/words/chars
+  sort [file]     - Sort file lines
+  uniq [file]     - Remove duplicate lines
   tree [path]     - Show directory tree
+  write [f] [txt] - Write text to file
+  append [f] [txt]- Append text to file
+
+  CODE
+  js [code]       - Run JavaScript code
+  node [code]     - Run JavaScript code
+  run [file.js]   - Execute a JS script file
 
   SYSTEM
   pwd             - Print working directory
@@ -115,6 +124,7 @@ function initTerminal(container, instanceId) {
   cal             - Show calendar
   uname           - System info
   neofetch        - System info (fancy)
+  sysinfo         - Detailed system info
   uptime          - System uptime
   df              - Disk usage
   du              - File space usage
@@ -125,8 +135,16 @@ function initTerminal(container, instanceId) {
   open [app]      - Open an app
   exit            - Close terminal
 
-  FUN
+  NETWORK
+  curl [url]      - Fetch a URL
+  fetch [url]     - Fetch a URL
+
+  TOOLS
+  base64 [enc|dec] [text] - Base64 encode/decode
+  hash [text]     - SHA-256 hash
   ai [question]   - Ask NOVA AI
+
+  FUN
   fortune         - Random quote
   cowsay [text]   - ASCII cow says text
 
@@ -467,6 +485,174 @@ function initTerminal(container, instanceId) {
         const msg = args.join(' ') || 'Moo! Welcome to NOVA OS!';
         addLine(` ${'_'.repeat(msg.length + 2)}\n< ${msg} >\n ${'‾'.repeat(msg.length + 2)}\n        \\   ^__^\n         \\  (oo)\\_______\n            (__)\\       )\\/\\\n                ||----w |\n                ||     ||`);
         break;
+
+      // ========================================
+      // JavaScript code execution
+      // ========================================
+      case 'js':
+      case 'node': {
+        const code = args.join(' ');
+        if (!code) {
+          addLine('Usage: js <code>  — Run JavaScript code\nExamples:\n  js 2 + 2\n  js Math.PI * 10\n  js Array.from({length:5}, (_,i) => i*i)\n  js fetch("/api").then(r => r.json())', 'system');
+          break;
+        }
+        try {
+          // Create a sandboxed-ish execution context
+          const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
+          const sandboxGlobals = {
+            console: {
+              log: (...a) => addLine(a.map(v => typeof v === 'object' ? JSON.stringify(v, null, 2) : String(v)).join(' ')),
+              error: (...a) => addLine(a.join(' '), 'error'),
+              warn: (...a) => addLine(a.join(' '), 'system'),
+            },
+            Math, Date, JSON, parseInt, parseFloat, isNaN, isFinite,
+            Array, Object, String, Number, Boolean, Map, Set, RegExp,
+            Promise, setTimeout, setInterval, clearTimeout, clearInterval,
+            fetch: window.fetch.bind(window),
+          };
+          const fn = new AsyncFunction(...Object.keys(sandboxGlobals), `
+            try {
+              const __result = await eval(${JSON.stringify(code)});
+              if (__result !== undefined) console.log(__result);
+            } catch(e) { console.error(e.message); }
+          `);
+          await fn(...Object.values(sandboxGlobals));
+        } catch (e) {
+          addLine(`Error: ${e.message}`, 'error');
+        }
+        break;
+      }
+
+      // Run a script file
+      case 'run': {
+        if (!args[0]) { addLine('Usage: run <file.js>  — Execute a JavaScript file', 'error'); break; }
+        const scriptPath = resolvePath(args[0]);
+        const scriptFile = await fileSystem.readFile(scriptPath);
+        if (scriptFile && scriptFile.type === 'file') {
+          addLine(`Running ${args[0]}...`, 'system');
+          try {
+            const AsyncFunction = Object.getPrototypeOf(async function(){}).constructor;
+            const sandboxGlobals = {
+              console: {
+                log: (...a) => addLine(a.map(v => typeof v === 'object' ? JSON.stringify(v, null, 2) : String(v)).join(' ')),
+                error: (...a) => addLine(a.join(' '), 'error'),
+                warn: (...a) => addLine(a.join(' '), 'system'),
+              },
+              Math, Date, JSON, parseInt, parseFloat, Array, Object, String, Number,
+              Promise, setTimeout, fetch: window.fetch.bind(window),
+              require: (mod) => { throw new Error(`require('${mod}') is not available in NOVA Terminal`); },
+            };
+            const fn = new AsyncFunction(...Object.keys(sandboxGlobals), scriptFile.content);
+            await fn(...Object.values(sandboxGlobals));
+            addLine('Script finished.', 'success');
+          } catch (e) {
+            addLine(`Runtime error: ${e.message}`, 'error');
+          }
+        } else {
+          addLine(`run: ${args[0]}: No such file`, 'error');
+        }
+        break;
+      }
+
+      // Write to file
+      case 'write': {
+        if (args.length < 2) { addLine('Usage: write <file> <content>', 'error'); break; }
+        const writePath = resolvePath(args[0]);
+        const writeContent = args.slice(1).join(' ');
+        await fileSystem.writeFile(writePath, writeContent);
+        addLine(`Written to ${args[0]}`, 'success');
+        break;
+      }
+
+      // Append to file
+      case 'append': {
+        if (args.length < 2) { addLine('Usage: append <file> <content>', 'error'); break; }
+        const appendPath = resolvePath(args[0]);
+        const existing = await fileSystem.readFile(appendPath);
+        const newContent = (existing?.content || '') + '\n' + args.slice(1).join(' ');
+        await fileSystem.writeFile(appendPath, newContent);
+        addLine(`Appended to ${args[0]}`, 'success');
+        break;
+      }
+
+      // Sort a file
+      case 'sort': {
+        if (!args[0]) { addLine('sort: missing operand', 'error'); break; }
+        const sortPath = resolvePath(args[0]);
+        const sortFile = await fileSystem.readFile(sortPath);
+        if (sortFile && sortFile.type === 'file') {
+          const lines = (sortFile.content || '').split('\n').sort();
+          addLine(lines.join('\n'));
+        } else {
+          addLine(`sort: ${args[0]}: No such file`, 'error');
+        }
+        break;
+      }
+
+      // Unique lines
+      case 'uniq': {
+        if (!args[0]) { addLine('uniq: missing operand', 'error'); break; }
+        const uniqPath = resolvePath(args[0]);
+        const uniqFile = await fileSystem.readFile(uniqPath);
+        if (uniqFile && uniqFile.type === 'file') {
+          const lines = [...new Set((uniqFile.content || '').split('\n'))];
+          addLine(lines.join('\n'));
+        } else {
+          addLine(`uniq: ${args[0]}: No such file`, 'error');
+        }
+        break;
+      }
+
+      // Quick system info
+      case 'sysinfo':
+        addLine(`NOVA OS v0.1.0
+Platform: ${navigator.platform}
+Cores: ${navigator.hardwareConcurrency || 'unknown'}
+Memory: ${navigator.deviceMemory ? navigator.deviceMemory + ' GB' : 'unknown'}
+Language: ${navigator.language}
+Online: ${navigator.onLine ? 'Yes' : 'No'}
+Screen: ${screen.width}x${screen.height} (${window.devicePixelRatio}x DPI)
+ColorDepth: ${screen.colorDepth}-bit
+Storage: IndexedDB (virtual filesystem)`);
+        break;
+
+      // Curl-like HTTP fetch
+      case 'curl':
+      case 'fetch': {
+        if (!args[0]) { addLine(`Usage: ${command} <url>`, 'error'); break; }
+        addLine(`Fetching ${args[0]}...`, 'system');
+        try {
+          const resp = await fetch(args[0]);
+          const text = await resp.text();
+          addLine(`HTTP ${resp.status} ${resp.statusText}\n${text.substring(0, 2000)}${text.length > 2000 ? '\n...(truncated)' : ''}`);
+        } catch (e) {
+          addLine(`fetch error: ${e.message}`, 'error');
+        }
+        break;
+      }
+
+      // Base64 encode/decode
+      case 'base64': {
+        if (!args[0]) { addLine('Usage: base64 encode|decode <text>', 'error'); break; }
+        if (args[0] === 'encode') addLine(btoa(args.slice(1).join(' ')));
+        else if (args[0] === 'decode') {
+          try { addLine(atob(args.slice(1).join(' '))); }
+          catch { addLine('Invalid base64 input', 'error'); }
+        }
+        else addLine(btoa(args.join(' ')));
+        break;
+      }
+
+      // SHA-256 hash
+      case 'sha256':
+      case 'hash': {
+        if (!args[0]) { addLine('Usage: hash <text>', 'error'); break; }
+        const data = new TextEncoder().encode(args.join(' '));
+        const hashBuf = await crypto.subtle.digest('SHA-256', data);
+        const hashHex = Array.from(new Uint8Array(hashBuf)).map(b => b.toString(16).padStart(2, '0')).join('');
+        addLine(hashHex);
+        break;
+      }
 
       default:
         addLine(`nova: command not found: ${command}`, 'error');

@@ -170,6 +170,37 @@ async function initFinder(container, instanceId, startPath) {
         }
       });
 
+      // Drag support — drag files to Desktop or other Finder windows
+      el.draggable = true;
+      el.addEventListener('dragstart', (e) => {
+        e.dataTransfer.setData('nova/filepath', file.path);
+        e.dataTransfer.setData('text/plain', name);
+        e.dataTransfer.effectAllowed = 'move';
+        el.classList.add('dragging');
+      });
+      el.addEventListener('dragend', () => el.classList.remove('dragging'));
+
+      // Drop onto folders — move file into folder
+      if (file.type === 'folder') {
+        el.addEventListener('dragover', (e) => {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          el.classList.add('drop-target');
+        });
+        el.addEventListener('dragleave', () => el.classList.remove('drop-target'));
+        el.addEventListener('drop', async (e) => {
+          e.preventDefault();
+          el.classList.remove('drop-target');
+          const srcPath = e.dataTransfer.getData('nova/filepath');
+          if (srcPath && srcPath !== file.path) {
+            const srcName = fileSystem.getFileName(srcPath);
+            const destPath = `${file.path}/${srcName}`;
+            await fileSystem.rename(srcPath, destPath);
+            loadFiles();
+          }
+        });
+      }
+
       // Right-click context menu
       el.addEventListener('contextmenu', (e) => {
         e.preventDefault();
@@ -247,6 +278,45 @@ async function initFinder(container, instanceId, startPath) {
     const closeMenu = () => { menu.remove(); document.removeEventListener('click', closeMenu); };
     setTimeout(() => document.addEventListener('click', closeMenu), 10);
   }
+
+  // Drop files into the current directory (from Desktop or external)
+  filesContainer.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  });
+  filesContainer.addEventListener('drop', async (e) => {
+    if (e.target.closest('.finder-file')) return; // handled by folder drop
+    e.preventDefault();
+
+    // Internal file move
+    const srcPath = e.dataTransfer.getData('nova/filepath');
+    if (srcPath) {
+      const srcName = fileSystem.getFileName(srcPath);
+      const destPath = currentPath === '/' ? `/${srcName}` : `${currentPath}/${srcName}`;
+      if (srcPath !== destPath) {
+        await fileSystem.rename(srcPath, destPath);
+        loadFiles();
+      }
+      return;
+    }
+
+    // External file drop (from OS)
+    if (e.dataTransfer.files.length > 0) {
+      for (const file of e.dataTransfer.files) {
+        const reader = new FileReader();
+        reader.onload = async () => {
+          const destPath = currentPath === '/' ? `/${file.name}` : `${currentPath}/${file.name}`;
+          await fileSystem.writeFile(destPath, reader.result);
+          loadFiles();
+        };
+        if (file.type.startsWith('text/') || file.name.match(/\.(txt|md|js|html|css|json|py|ts|xml|csv|sh|yaml|yml)$/i)) {
+          reader.readAsText(file);
+        } else {
+          reader.readAsDataURL(file);
+        }
+      }
+    }
+  });
 
   // Initial load
   loadFiles();

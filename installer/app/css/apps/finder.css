@@ -193,3 +193,40 @@
   border-top: 1px solid var(--border);
   background: rgba(40, 40, 40, 0.4);
 }
+
+/* Drag and drop */
+.finder-file.dragging {
+  opacity: 0.4;
+}
+
+.finder-file.drop-target {
+  background: rgba(0, 122, 255, 0.3);
+  outline: 2px dashed var(--accent);
+  outline-offset: -2px;
+  border-radius: var(--radius-sm);
+}
+
+.finder-files.drop-zone-active {
+  background: rgba(0, 122, 255, 0.05);
+}
+
+/* Desktop drag-over state */
+#desktop.drag-over::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 122, 255, 0.05);
+  border: 2px dashed rgba(0, 122, 255, 0.3);
+  pointer-events: none;
+  z-index: 100;
+}
+
+/* Desktop icon improvements */
+.desktop-icon {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.desktop-icon.dragging {
+  opacity: 0.4;
+}

@@ -1,11 +1,13 @@
-// NOVA OS — Desktop (icons, wallpaper, right-click menu)
+// NOVA OS — Desktop (icons, wallpaper, right-click menu, drag & drop)
 
 import { processManager } from '../kernel/process-manager.js';
 import { fileSystem } from '../kernel/file-system.js';
+import { eventBus } from '../kernel/event-bus.js';
 
 export function initDesktop() {
   loadDesktopIcons();
   setupContextMenu();
+  setupDesktopDragDrop();
 }
 
 async function loadDesktopIcons() {
@@ -88,6 +90,61 @@ function setupContextMenu() {
       processManager.launch('settings');
     } else if (action === 'refresh') {
       loadDesktopIcons();
+    }
+  });
+}
+
+function setupDesktopDragDrop() {
+  const desktop = document.getElementById('desktop');
+
+  // Allow dropping files from OS (external drag) onto the desktop
+  desktop.addEventListener('dragover', (e) => {
+    if (e.target.closest('.window') || e.target.closest('#dock') || e.target.closest('#menubar')) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    desktop.classList.add('drag-over');
+  });
+
+  desktop.addEventListener('dragleave', (e) => {
+    if (!desktop.contains(e.relatedTarget) || e.relatedTarget === null) {
+      desktop.classList.remove('drag-over');
+    }
+  });
+
+  desktop.addEventListener('drop', async (e) => {
+    if (e.target.closest('.window') || e.target.closest('#dock')) return;
+    e.preventDefault();
+    desktop.classList.remove('drag-over');
+
+    // Handle internal file drags (from Finder)
+    const novaFilePath = e.dataTransfer.getData('nova/filepath');
+    if (novaFilePath) {
+      const fileName = fileSystem.getFileName(novaFilePath);
+      const destPath = `/Desktop/${fileName}`;
+      if (novaFilePath !== destPath) {
+        await fileSystem.rename(novaFilePath, destPath);
+        loadDesktopIcons();
+        eventBus.emit('fs:changed', '/Desktop');
+      }
+      return;
+    }
+
+    // Handle external files (dragged from OS)
+    if (e.dataTransfer.files.length > 0) {
+      for (const file of e.dataTransfer.files) {
+        const reader = new FileReader();
+        reader.onload = async () => {
+          const content = reader.result;
+          await fileSystem.writeFile(`/Desktop/${file.name}`, content);
+          loadDesktopIcons();
+        };
+        if (file.type.startsWith('text/') || file.name.match(/\.(txt|md|js|html|css|json|py|ts|xml|csv|sh|yaml|yml)$/i)) {
+          reader.readAsText(file);
+        } else {
+          // Store binary files as base64 data URLs
+          reader.readAsDataURL(file);
+        }
+      }
     }
   });
 }
