@@ -48,8 +48,7 @@ lb config \
   --mirror-binary "http://deb.debian.org/debian" \
   --mirror-binary-security "false" \
   --security "false" \
-  --linux-packages "linux-image linux-headers" \
-  --linux-flavours "amd64" \
+  --linux-packages "none" \
   --archive-areas "main contrib non-free non-free-firmware" \
   --architectures amd64 \
   --binary-images iso-hybrid \
@@ -72,6 +71,10 @@ cp /usr/share/keyrings/debian-archive-keyring.gpg config/archives/security.key.b
 # ============================================
 echo "[3/8] Setting up packages..."
 cat > config/package-lists/nova.list.chroot << 'PACKAGES'
+# === KERNEL ===
+linux-image-amd64
+live-boot
+
 # === DISPLAY SERVER & WINDOW MANAGER ===
 xorg
 xinit
