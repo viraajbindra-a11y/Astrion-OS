@@ -72,14 +72,17 @@ apt-get update -qq
 # Install kernel + live boot
 apt-get install -y -qq linux-image-amd64 live-boot systemd-sysv
 
-# Display server (NO window manager — Chromium IS the shell, like ChromeOS)
+# Display server (NO window manager — NOVA Shell IS the desktop)
 apt-get install -y -qq xorg xinit xdotool hsetroot
 
-# Utilities only (no polybar, no plank, no rofi — NOVA OS has its own)
+# NOVA native renderer dependencies (WebKitGTK + GTK3 + build tools)
+apt-get install -y -qq libwebkit2gtk-4.0-dev libgtk-3-dev gcc pkg-config make
+
+# Utilities only (no polybar, no plank, no rofi — NOVA OS has its own native shell)
 apt-get install -y -qq dunst feh
 
-# Real browser
-apt-get install -y -qq chromium || apt-get install -y -qq firefox-esr || true
+# Keep a lightweight browser for external web browsing (not the shell)
+apt-get install -y -qq firefox-esr || true
 
 # Terminal + file manager + text editor
 apt-get install -y -qq xfce4-terminal thunar thunar-archive-plugin tumbler mousepad geany
@@ -173,7 +176,7 @@ cp "$SCRIPT_DIR/nova-desktop/polybar.ini" "$CHROOT/etc/nova-os/polybar.ini"
 # Rofi theme (spotlight)
 cp "$SCRIPT_DIR/nova-desktop/rofi-theme.rasi" "$CHROOT/etc/nova-os/rofi-theme.rasi"
 
-# NOVA AI server
+# NOVA AI server + web assets
 mkdir -p "$CHROOT/opt/nova-os"
 cp "$PROJECT_ROOT/index.html" "$CHROOT/opt/nova-os/" 2>/dev/null || true
 cp -r "$PROJECT_ROOT/css" "$CHROOT/opt/nova-os/" 2>/dev/null || true
@@ -181,6 +184,29 @@ cp -r "$PROJECT_ROOT/js" "$CHROOT/opt/nova-os/" 2>/dev/null || true
 cp -r "$PROJECT_ROOT/server" "$CHROOT/opt/nova-os/" 2>/dev/null || true
 cp "$PROJECT_ROOT/package.json" "$CHROOT/opt/nova-os/" 2>/dev/null || true
 cp -r "$PROJECT_ROOT/assets" "$CHROOT/opt/nova-os/" 2>/dev/null || true
+
+# ── NOVA Native Renderer (our own rendering engine, NOT Chromium) ──
+echo "  Compiling NOVA native renderer..."
+mkdir -p "$CHROOT/opt/nova-os/renderer"
+cp "$SCRIPT_DIR/nova-renderer/nova-shell.c" "$CHROOT/opt/nova-os/renderer/"
+cp "$SCRIPT_DIR/nova-renderer/nova-renderer.c" "$CHROOT/opt/nova-os/renderer/"
+cp "$SCRIPT_DIR/nova-renderer/Makefile" "$CHROOT/opt/nova-os/renderer/"
+cp "$SCRIPT_DIR/nova-renderer/nova-start.sh" "$CHROOT/opt/nova-os/renderer/"
+
+# Compile inside chroot (has access to GTK/WebKitGTK headers)
+cat > "$CHROOT/tmp/build-renderer.sh" << 'BUILD_RENDERER'
+#!/bin/bash
+set -e
+cd /opt/nova-os/renderer
+make clean
+make all
+make install
+echo "NOVA native renderer compiled successfully!"
+which nova-shell && echo "  nova-shell: $(which nova-shell)"
+which nova-renderer && echo "  nova-renderer: $(which nova-renderer)"
+BUILD_RENDERER
+chmod +x "$CHROOT/tmp/build-renderer.sh"
+chroot "$CHROOT" /tmp/build-renderer.sh
 
 # ---- NOVA OS Branding ----
 
@@ -437,11 +463,11 @@ fi
 BASHPROFILE
 chown nova:nova /home/nova/.bash_profile
 
-# .xinitrc — the ENTIRE desktop is NOVA OS in kiosk Chromium
+# .xinitrc — NOVA OS boots directly into its own native renderer
 cat > /home/nova/.xinitrc << 'XINITRC'
 #!/bin/bash
 # NOVA OS — Desktop Init
-# This IS the operating system. No other desktop involved.
+# This IS the operating system. Our own native renderer, not Chromium.
 
 # Audio
 pulseaudio --start 2>/dev/null &
@@ -452,7 +478,7 @@ nm-applet --indicator 2>/dev/null &
 # Power management
 xfce4-power-manager 2>/dev/null &
 
-# Set black background while loading
+# Set NOVA dark background while loading
 xsetroot -solid "#0a0a1a"
 
 # Disable screen blanking
@@ -460,7 +486,7 @@ xset s off
 xset -dpms
 xset s noblank
 
-# Start the NOVA OS server
+# Start the NOVA OS server (serves the web app content)
 cd /opt/nova-os
 node server/index.js &
 NOVA_PID=$!
@@ -473,17 +499,11 @@ for i in $(seq 1 30); do
   sleep 1
 done
 
-# Launch NOVA OS fullscreen in Chromium — THIS IS THE OS
-exec chromium \
-  --no-first-run \
-  --disable-infobars \
-  --disable-session-crashed-bubble \
-  --disable-translate \
-  --noerrdialogs \
-  --kiosk \
-  --start-fullscreen \
-  --app=http://localhost:3000 \
-  2>/dev/null
+# Launch the NOVA OS native shell — this IS the desktop
+# nova-shell = our own C/GTK3 renderer with native panel, dock, window manager
+# It uses WebKitGTK to render app content but is NOT a browser
+# Shows as "nova-shell" in process lists, not "chromium"
+exec nova-shell 2>/dev/null
 XINITRC
 chown nova:nova /home/nova/.xinitrc
 chmod +x /home/nova/.xinitrc
@@ -721,11 +741,18 @@ if [ -f "$OUTPUT_DIR/nova-os.iso" ]; then
   echo "  File: $OUTPUT_DIR/nova-os.iso"
   echo "============================================"
   echo ""
-  echo "  This is a REAL operating system."
+  echo "  This is a REAL operating system with its OWN renderer."
+  echo "  No Chromium. No browser UI. 100% native NOVA OS."
   echo "  Flash to USB -> Boot -> Use."
   echo ""
+  echo "  NOVA Native Shell:"
+  echo "    - nova-shell (C/GTK3 native desktop environment)"
+  echo "    - Native menubar, dock, window manager"
+  echo "    - WebKitGTK app renderer (NOT a browser)"
+  echo "    - Shows as 'nova-shell' in process lists"
+  echo ""
   echo "  Included apps:"
-  echo "    - Chromium (full browser)"
+  echo "    - Firefox ESR (for external web browsing)"
   echo "    - Thunar (file manager with trash)"
   echo "    - Terminal (bash shell)"
   echo "    - Mousepad + Geany (text editors)"
@@ -736,9 +763,6 @@ if [ -f "$OUTPUT_DIR/nova-os.iso" ]; then
   echo "    - Calculator"
   echo "    - Image viewer + PDF reader"
   echo "    - Software Center (install more apps)"
-  echo "    - Bluetooth manager"
-  echo "    - Printer setup"
-  echo "    - NOVA dock + menubar"
   echo "    - NOVA AI assistant"
   echo ""
   echo "  Flash: sudo dd if=$OUTPUT_DIR/nova-os.iso of=/dev/sdX bs=4M status=progress"

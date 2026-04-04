@@ -35,6 +35,30 @@ import { appInstaller } from './kernel/app-installer.js';
 
 // Boot sequence
 (async function boot() {
+  // ─── Native App Mode ───
+  // When running inside nova-shell (our C renderer), each app opens in its own
+  // native GTK window. The server sends a page with __NOVA_LAUNCH_APP__ set.
+  // We skip the full desktop boot and just launch that one app.
+  if (window.__NOVA_NATIVE__ && window.__NOVA_LAUNCH_APP__) {
+    console.log(`[NOVA Native] Launching app: ${window.__NOVA_LAUNCH_APP__}`);
+    await fileSystem.init();
+
+    // Register all apps
+    registerFinder(); registerNotes(); registerTerminal();
+    registerCalculator(); registerSettings(); registerTextEditor();
+    registerDraw(); registerBrowser(); registerMusic();
+    registerCalendar(); registerAppStore(); registerPhotos();
+    registerWeather(); registerClock(); registerReminders();
+    registerActivityMonitor();
+
+    windowManager.init();
+
+    // Launch the requested app directly (no boot screen, no login)
+    processManager.launch(window.__NOVA_LAUNCH_APP__);
+    console.log(`[NOVA Native] App ${window.__NOVA_LAUNCH_APP__} launched.`);
+    return;
+  }
+
   const bootScreen = document.getElementById('boot-screen');
   const loginScreen = document.getElementById('login-screen');
   const desktop = document.getElementById('desktop');
