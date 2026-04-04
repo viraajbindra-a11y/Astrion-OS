@@ -25,7 +25,8 @@ echo "[1/8] Installing build tools..."
 apt-get update -qq
 apt-get install -y -qq \
   live-build debootstrap syslinux isolinux xorriso \
-  squashfs-tools grub-pc-bin grub-efi-amd64-bin mtools dosfstools 2>/dev/null
+  squashfs-tools grub-pc-bin grub-efi-amd64-bin mtools dosfstools \
+  debian-archive-keyring 2>/dev/null
 
 # ============================================
 # 2. Configure live-build
@@ -33,6 +34,11 @@ apt-get install -y -qq \
 echo "[2/8] Configuring..."
 lb config \
   --distribution bookworm \
+  --parent-distribution bookworm \
+  --parent-mirror-bootstrap "http://deb.debian.org/debian" \
+  --parent-mirror-chroot-security "http://security.debian.org/debian-security" \
+  --mirror-bootstrap "http://deb.debian.org/debian" \
+  --mirror-chroot-security "http://security.debian.org/debian-security" \
   --archive-areas "main contrib non-free non-free-firmware" \
   --architectures amd64 \
   --binary-images iso-hybrid \
