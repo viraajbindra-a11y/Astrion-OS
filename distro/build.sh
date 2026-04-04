@@ -32,6 +32,9 @@ apt-get install -y -qq \
 # 2. Configure live-build
 # ============================================
 echo "[2/8] Configuring..."
+# Symlink Debian keyring so debootstrap finds it
+ln -sf /usr/share/keyrings/debian-archive-keyring.gpg /etc/apt/trusted.gpg.d/debian-archive-keyring.gpg 2>/dev/null || true
+
 lb config \
   --mode debian \
   --distribution bookworm \
@@ -44,7 +47,6 @@ lb config \
   --mirror-chroot-security "http://security.debian.org/debian-security" \
   --mirror-binary "http://deb.debian.org/debian" \
   --mirror-binary-security "http://security.debian.org/debian-security" \
-  --debootstrap-options "--keyring=/usr/share/keyrings/debian-archive-keyring.gpg" \
   --archive-areas "main contrib non-free non-free-firmware" \
   --architectures amd64 \
   --binary-images iso-hybrid \
