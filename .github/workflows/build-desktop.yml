@@ -1,0 +1,67 @@
+name: Build NOVA OS Desktop App
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'installer/**'
+      - 'css/**'
+      - 'js/**'
+      - 'index.html'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            platform: mac
+          - os: ubuntu-latest
+            platform: linux
+          - os: windows-latest
+            platform: win
+
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Copy web app files
+        shell: bash
+        run: |
+          mkdir -p installer/app
+          cp index.html installer/app/
+          cp -r css installer/app/
+          cp -r js installer/app/
+          [ -d assets ] && cp -r assets installer/app/ || true
+
+      - name: Install dependencies
+        working-directory: installer
+        run: npm install
+
+      - name: Build desktop app
+        working-directory: installer
+        run: npm run build:${{ matrix.platform }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: nova-os-${{ matrix.platform }}
+          path: |
+            installer/dist/*.dmg
+            installer/dist/*.zip
+            installer/dist/*.exe
+            installer/dist/*.AppImage
+            installer/dist/*.deb
+          retention-days: 30

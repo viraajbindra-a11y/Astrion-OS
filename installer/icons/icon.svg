@@ -1,0 +1,16 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1024" y2="1024">
+      <stop offset="0%" stop-color="#1a1a3e"/>
+      <stop offset="100%" stop-color="#0a0a2e"/>
+    </linearGradient>
+  </defs>
+  <!-- Background -->
+  <rect width="1024" height="1024" rx="220" fill="url(#bg)"/>
+  <!-- Outer circle -->
+  <circle cx="512" cy="512" r="300" stroke="#007AFF" stroke-width="24" fill="none"/>
+  <!-- Diamond -->
+  <path d="M512 312 L662 512 L512 712 L362 512 Z" fill="#007AFF"/>
+  <!-- Inner circle -->
+  <circle cx="512" cy="512" r="60" fill="white"/>
+</svg>
