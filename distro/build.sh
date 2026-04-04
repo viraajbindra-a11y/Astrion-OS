@@ -41,13 +41,13 @@ lb config \
   --parent-distribution bookworm \
   --parent-mirror-bootstrap "http://deb.debian.org/debian" \
   --parent-mirror-chroot "http://deb.debian.org/debian" \
-  --parent-mirror-chroot-security "http://deb.debian.org/debian-security" \
+  --parent-mirror-chroot-security "false" \
   --mirror-bootstrap "http://deb.debian.org/debian" \
   --mirror-chroot "http://deb.debian.org/debian" \
-  --mirror-chroot-security "http://deb.debian.org/debian-security" \
+  --mirror-chroot-security "false" \
   --mirror-binary "http://deb.debian.org/debian" \
-  --mirror-binary-security "http://deb.debian.org/debian-security" \
-  --security "true" \
+  --mirror-binary-security "false" \
+  --security "false" \
   --linux-packages "linux-image linux-headers" \
   --linux-flavours "amd64" \
   --archive-areas "main contrib non-free non-free-firmware" \
@@ -59,6 +59,13 @@ lb config \
   --iso-application "NOVA OS" \
   --iso-publisher "NOVA OS Project" \
   --iso-volume "NOVA-OS-1.0"
+
+# Manually add security repo with correct suite name (bookworm-security, not bookworm/updates)
+mkdir -p config/archives
+echo "deb http://deb.debian.org/debian-security bookworm-security main contrib non-free non-free-firmware" > config/archives/security.list.chroot
+echo "deb http://deb.debian.org/debian-security bookworm-security main contrib non-free non-free-firmware" > config/archives/security.list.binary
+cp /usr/share/keyrings/debian-archive-keyring.gpg config/archives/security.key.chroot 2>/dev/null || true
+cp /usr/share/keyrings/debian-archive-keyring.gpg config/archives/security.key.binary 2>/dev/null || true
 
 # ============================================
 # 3. Package list — REAL applications
