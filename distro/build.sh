@@ -86,6 +86,13 @@ eog
 vlc
 evince
 xarchiver
+libreoffice-writer
+libreoffice-calc
+libreoffice-impress
+shotwell
+transmission-gtk
+simple-scan
+cheese
 
 # === SYSTEM TOOLS ===
 xfce4-power-manager
@@ -93,29 +100,66 @@ xfce4-settings
 xfce4-taskmanager
 gvfs
 gvfs-backends
+gvfs-fuse
 udisks2
+gparted
+baobab
+gnome-disk-utility
+gnome-system-monitor
+xfce4-notifyd
+xdg-utils
+xdg-user-dirs
+dconf-cli
+at-spi2-core
+
+# === PRINTING ===
+cups
+cups-client
+system-config-printer
+printer-driver-all
+
+# === BLUETOOTH ===
+bluez
+bluez-tools
+blueman
 
 # === AUDIO ===
 pulseaudio
+pulseaudio-module-bluetooth
 pavucontrol
 alsa-utils
 
 # === NETWORKING ===
 network-manager
 network-manager-gnome
+network-manager-openvpn
 wpasupplicant
 wireless-tools
 firmware-iwlwifi
 firmware-realtek
 firmware-atheros
 firmware-misc-nonfree
+firmware-brcm80211
+
+# === DRAG AND DROP / CLIPBOARD ===
+xclip
+xsel
+xdotool
+
+# === TRASH / FILE OPERATIONS ===
+trash-cli
+gvfs-backends
 
 # === APPEARANCE ===
 papirus-icon-theme
 fonts-inter
 fonts-noto
 fonts-noto-color-emoji
+fonts-noto-cjk
 arc-theme
+adwaita-icon-theme
+gtk2-engines-murrine
+qt5-style-plugins
 
 # === DEVELOPMENT (for NOVA AI and apps) ===
 nodejs
@@ -123,20 +167,44 @@ npm
 git
 curl
 wget
+python3
+python3-pip
 
 # === SYSTEM ===
 sudo
 dbus-x11
 policykit-1
+policykit-1-gnome
 upower
 acpi
+acpid
 unclutter
 lightdm
 lightdm-gtk-greeter
+lightdm-gtk-greeter-settings
+plymouth
+plymouth-themes
 
 # === APP INSTALLATION ===
 flatpak
 gnome-software
+gnome-software-plugin-flatpak
+software-properties-common
+apt-transport-https
+
+# === MULTIMEDIA CODECS ===
+ffmpeg
+gstreamer1.0-plugins-base
+gstreamer1.0-plugins-good
+gstreamer1.0-plugins-bad
+gstreamer1.0-plugins-ugly
+gstreamer1.0-libav
+
+# === DISPLAY DRIVERS ===
+xserver-xorg-video-intel
+xserver-xorg-video-amdgpu
+xserver-xorg-video-nouveau
+mesa-utils
 PACKAGES
 
 # ============================================
@@ -234,28 +302,73 @@ cat > "$CHROOT/etc/nova-os/dunstrc" << 'DUNST'
     foreground = "#ffffff"
 DUNST
 
-# Plank dock config
+# Plank dock config — all real apps
 mkdir -p "$CHROOT/etc/skel/.config/plank/dock1/launchers"
-cat > "$CHROOT/etc/skel/.config/plank/dock1/launchers/firefox-esr.dockitem" << 'DOCK'
+for app in chromium thunar xfce4-terminal mousepad vlc shotwell galculator gnome-software; do
+  cat > "$CHROOT/etc/skel/.config/plank/dock1/launchers/${app}.dockitem" << DOCKITEM
 [PlankDockItemPreferences]
-Launcher=file:///usr/share/applications/chromium.desktop
-DOCK
-cat > "$CHROOT/etc/skel/.config/plank/dock1/launchers/thunar.dockitem" << 'DOCK'
-[PlankDockItemPreferences]
-Launcher=file:///usr/share/applications/thunar.desktop
-DOCK
-cat > "$CHROOT/etc/skel/.config/plank/dock1/launchers/xfce4-terminal.dockitem" << 'DOCK'
-[PlankDockItemPreferences]
-Launcher=file:///usr/share/applications/xfce4-terminal.desktop
-DOCK
-cat > "$CHROOT/etc/skel/.config/plank/dock1/launchers/mousepad.dockitem" << 'DOCK'
-[PlankDockItemPreferences]
-Launcher=file:///usr/share/applications/mousepad.desktop
-DOCK
-cat > "$CHROOT/etc/skel/.config/plank/dock1/launchers/geany.dockitem" << 'DOCK'
-[PlankDockItemPreferences]
-Launcher=file:///usr/share/applications/geany.desktop
-DOCK
+Launcher=file:///usr/share/applications/${app}.desktop
+DOCKITEM
+done
+
+# Plank dock settings
+cat > "$CHROOT/etc/skel/.config/plank/dock1/settings" << 'PLANKCFG'
+[PlankDockPreferences]
+Alignment=3
+IconSize=48
+HideMode=3
+Position=3
+Theme=Transparent
+ZoomEnabled=true
+ZoomPercent=130
+PLANKCFG
+
+# Desktop shortcuts for quick access
+mkdir -p "$CHROOT/etc/skel/Desktop"
+
+# Create XDG user dirs
+mkdir -p "$CHROOT/etc/skel/Documents"
+mkdir -p "$CHROOT/etc/skel/Downloads"
+mkdir -p "$CHROOT/etc/skel/Pictures"
+mkdir -p "$CHROOT/etc/skel/Music"
+mkdir -p "$CHROOT/etc/skel/Videos"
+mkdir -p "$CHROOT/etc/skel/.local/share/Trash/files"
+mkdir -p "$CHROOT/etc/skel/.local/share/Trash/info"
+
+# Welcome file on desktop
+cat > "$CHROOT/etc/skel/Desktop/Welcome.txt" << 'WELCOME'
+Welcome to NOVA OS!
+
+This is a real operating system. Here's what you can do:
+
+APPS:
+- Chromium: Browse the web (full browser)
+- Thunar: Manage your files
+- Terminal: Run commands with bash
+- Mousepad/Geany: Edit text and code
+- VLC: Play videos and music
+- Shotwell: View and manage photos
+- Calculator: Do math
+- LibreOffice: Documents, spreadsheets, presentations
+- Software Center: Install more apps
+
+SHORTCUTS:
+- Super key: Open app launcher (Spotlight)
+- Ctrl+Alt+T: Open terminal
+- Ctrl+Alt+F: Open file manager
+- Ctrl+Alt+B: Open browser
+- Print Screen: Take screenshot
+- Super+L: Lock screen
+- Super+Left/Right: Snap windows to half screen
+- Alt+F4: Close window
+- Ctrl+Left/Right: Switch desktops
+
+AI:
+- NOVA AI assistant is built into the system
+- Open the NOVA web app for AI features
+
+Enjoy NOVA OS!
+WELCOME
 
 # ============================================
 # 5. LightDM config (login screen)
@@ -307,6 +420,9 @@ fi
 # Enable services
 systemctl enable lightdm 2>/dev/null || true
 systemctl enable NetworkManager 2>/dev/null || true
+systemctl enable bluetooth 2>/dev/null || true
+systemctl enable cups 2>/dev/null || true
+systemctl enable acpid 2>/dev/null || true
 
 # Add Flathub for flatpak apps
 flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo 2>/dev/null || true
@@ -318,8 +434,43 @@ echo "127.0.0.1 nova-os" >> /etc/hosts
 # Set timezone
 ln -sf /usr/share/zoneinfo/UTC /etc/localtime
 
-# Set default terminal
+# Set default apps
 update-alternatives --set x-terminal-emulator /usr/bin/xfce4-terminal.wrapper 2>/dev/null || true
+update-alternatives --set x-www-browser /usr/bin/chromium 2>/dev/null || true
+
+# Set Chromium as default browser
+mkdir -p /etc/skel/.config
+echo "[Default Applications]
+text/html=chromium.desktop
+x-scheme-handler/http=chromium.desktop
+x-scheme-handler/https=chromium.desktop
+application/xhtml+xml=chromium.desktop
+" > /etc/skel/.config/mimeapps.list
+
+# GTK theme settings
+mkdir -p /etc/skel/.config/gtk-3.0
+echo "[Settings]
+gtk-theme-name=Arc-Dark
+gtk-icon-theme-name=Papirus-Dark
+gtk-font-name=Inter 11
+gtk-cursor-theme-name=Adwaita
+gtk-application-prefer-dark-theme=1
+" > /etc/skel/.config/gtk-3.0/settings.ini
+
+# GTK2
+echo 'gtk-theme-name="Arc-Dark"
+gtk-icon-theme-name="Papirus-Dark"
+gtk-font-name="Inter 11"
+' > /etc/skel/.gtkrc-2.0
+
+# XDG user dirs
+echo 'XDG_DESKTOP_DIR="$HOME/Desktop"
+XDG_DOCUMENTS_DIR="$HOME/Documents"
+XDG_DOWNLOAD_DIR="$HOME/Downloads"
+XDG_MUSIC_DIR="$HOME/Music"
+XDG_PICTURES_DIR="$HOME/Pictures"
+XDG_VIDEOS_DIR="$HOME/Videos"
+' > /etc/skel/.config/user-dirs.dirs
 
 # Disable unnecessary services
 systemctl disable ssh 2>/dev/null || true
@@ -370,14 +521,20 @@ if ls *.iso 1>/dev/null 2>&1; then
   echo "  Flash to USB → Boot → Use."
   echo ""
   echo "  Included apps:"
-  echo "    - Chromium (real browser)"
-  echo "    - Thunar (file manager)"
-  echo "    - Terminal (bash)"
+  echo "    - Chromium (full browser)"
+  echo "    - Thunar (file manager with trash)"
+  echo "    - Terminal (bash shell)"
   echo "    - Mousepad + Geany (text editors)"
   echo "    - VLC (media player)"
+  echo "    - LibreOffice (docs, sheets, slides)"
+  echo "    - Shotwell (photo manager)"
   echo "    - Screenshot tool"
   echo "    - Calculator"
-  echo "    - Image viewer"
+  echo "    - Image viewer + PDF reader"
+  echo "    - Software Center (install more apps)"
+  echo "    - Bluetooth manager"
+  echo "    - Printer setup"
+  echo "    - System monitor"
   echo "    - NOVA AI assistant"
   echo "    - NOVA dock + menubar"
   echo ""

@@ -30,7 +30,16 @@ pulseaudio --start 2>/dev/null || pipewire &
 # Start NetworkManager applet (for WiFi)
 nm-applet --indicator &
 
-# Start the NOVA dock (plank or our custom dock)
+# Start Bluetooth applet
+blueman-applet &
+
+# Start power manager
+xfce4-power-manager &
+
+# PolicyKit agent (for admin prompts)
+/usr/lib/policykit-1-gnome/polkit-gnome-authentication-agent-1 &
+
+# Start the NOVA dock
 plank &
 
 # Start the NOVA panel/menubar (polybar or our custom one)
