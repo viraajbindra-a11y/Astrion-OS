@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="ocSky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#081b3e"/>
+      <stop offset="55%" stop-color="#0a2a5e"/>
+      <stop offset="100%" stop-color="#0a4178"/>
+    </linearGradient>
+    <linearGradient id="ocWater" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#103a66"/>
+      <stop offset="100%" stop-color="#061427"/>
+    </linearGradient>
+    <radialGradient id="sun" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#ffb74d" stop-opacity="0.9"/>
+      <stop offset="60%" stop-color="#ff8a3d" stop-opacity="0.2"/>
+      <stop offset="100%" stop-color="#ff6b2b" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1920" height="1080" fill="url(#ocSky)"/>
+  <!-- sun glow -->
+  <circle cx="960" cy="540" r="380" fill="url(#sun)"/>
+  <circle cx="960" cy="540" r="70" fill="#ffd48a" opacity="0.95"/>
+  <!-- water -->
+  <rect x="0" y="540" width="1920" height="540" fill="url(#ocWater)"/>
+  <!-- sun reflection on water -->
+  <g fill="#ffd48a" opacity="0.35">
+    <rect x="600" y="560" width="720" height="6" rx="3"/>
+    <rect x="640" y="590" width="640" height="5" rx="2.5"/>
+    <rect x="680" y="620" width="560" height="4" rx="2"/>
+    <rect x="700" y="660" width="520" height="5" rx="2.5"/>
+    <rect x="620" y="700" width="680" height="6" rx="3"/>
+    <rect x="580" y="750" width="760" height="4" rx="2"/>
+    <rect x="660" y="800" width="600" height="5" rx="2.5"/>
+    <rect x="550" y="860" width="820" height="6" rx="3"/>
+    <rect x="620" y="920" width="680" height="4" rx="2"/>
+  </g>
+  <!-- horizon line -->
+  <line x1="0" y1="540" x2="1920" y2="540" stroke="#000" stroke-width="1" opacity="0.3"/>
+</svg>

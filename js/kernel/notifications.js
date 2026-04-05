@@ -114,13 +114,24 @@ class NotificationManager {
     return `${Math.floor(hours / 24)}d ago`;
   }
 
-  show({ title, body, icon, duration = 4000, actions = [] }) {
+  show({ title, body, icon, duration = 4000, actions = [], urgent = false }) {
     const id = this.nextId++;
 
-    // Add to history
+    // Always add to history
     this.history.push({ id, title, body, icon, time: Date.now() });
-    // Keep max 50 items
     if (this.history.length > 50) this.history.shift();
+
+    // Suppress visible banner if Focus mode is on (unless marked urgent)
+    if (!urgent) {
+      try {
+        const focusEnabled = localStorage.getItem('nova-focus-enabled') === 'true';
+        const mode = localStorage.getItem('nova-focus-mode') || 'none';
+        if (focusEnabled && mode !== 'none') {
+          eventBus.emit('notification:shown', { id, title, count: this.history.length });
+          return id;
+        }
+      } catch {}
+    }
 
     const el = document.createElement('div');
     el.style.cssText = `

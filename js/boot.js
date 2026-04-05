@@ -38,6 +38,13 @@ import { initEmojiPicker } from './shell/emoji-picker.js';
 import { initWidgets } from './shell/widgets.js';
 import { initHotCorners } from './shell/hot-corners.js';
 import { initQuickLook } from './shell/quick-look.js';
+import { initClipboardManager } from './shell/clipboard-manager.js';
+import { initSpaces } from './shell/spaces.js';
+import { initNightShift } from './shell/night-shift.js';
+import { initFocusMode } from './shell/focus-mode.js';
+import { initIdleLock } from './shell/idle-lock.js';
+import { registerVault } from './apps/vault.js';
+import { verifyPassword } from './kernel/crypto.js';
 
 // Boot sequence
 (async function boot() {
@@ -94,6 +101,7 @@ import { initQuickLook } from './shell/quick-look.js';
   registerClock();
   registerReminders();
   registerActivityMonitor();
+  registerVault();
   await animate(progressBar, 85, 200);
 
   // Init kernel
@@ -138,19 +146,66 @@ import { initQuickLook } from './shell/quick-look.js';
     document.querySelector('.login-name').textContent = savedName;
   }
 
-  // Wait for login
+  // Wait for login — verify password against stored PBKDF2 hash
   const passwordInput = document.getElementById('login-password');
   passwordInput.focus();
 
+  const storedHash = localStorage.getItem('nova-password-hash');
+
   await new Promise(resolve => {
-    const login = () => {
-      resolve();
+    let failedAttempts = 0;
+
+    const login = async () => {
+      // No password set — any click/enter lets you in
+      if (!storedHash) { resolve(); return; }
+
+      const pw = passwordInput.value;
+      if (!pw) {
+        passwordInput.focus();
+        passwordInput.animate(
+          [{ transform: 'translateX(-8px)' }, { transform: 'translateX(8px)' }, { transform: 'translateX(0)' }],
+          { duration: 200, iterations: 1 }
+        );
+        return;
+      }
+
+      const ok = await verifyPassword(pw, storedHash);
+      if (ok) {
+        resolve();
+      } else {
+        failedAttempts++;
+        passwordInput.value = '';
+        passwordInput.animate(
+          [{ transform: 'translateX(0)' }, { transform: 'translateX(-10px)' }, { transform: 'translateX(10px)' }, { transform: 'translateX(-6px)' }, { transform: 'translateX(6px)' }, { transform: 'translateX(0)' }],
+          { duration: 400, iterations: 1 }
+        );
+
+        // Lock out after 5 failed attempts — 10s delay
+        if (failedAttempts >= 5) {
+          passwordInput.disabled = true;
+          let secs = 10;
+          const timer = setInterval(() => {
+            passwordInput.placeholder = `Locked — try again in ${secs}s`;
+            secs--;
+            if (secs < 0) {
+              clearInterval(timer);
+              passwordInput.disabled = false;
+              passwordInput.placeholder = 'Password';
+              failedAttempts = 0;
+              passwordInput.focus();
+            }
+          }, 1000);
+        }
+      }
     };
+
     passwordInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') login();
     });
     loginScreen.addEventListener('click', (e) => {
-      if (!e.target.closest('.login-input-wrap')) login();
+      if (e.target.closest('.login-input-wrap')) return;
+      // Click outside the input only logs in if no password is set
+      if (!storedHash) resolve();
     });
   });
 
@@ -191,6 +246,11 @@ import { initQuickLook } from './shell/quick-look.js';
   initHotCorners();
   initQuickLook();
   initWidgets();
+  initClipboardManager();
+  initSpaces();
+  initNightShift();
+  initFocusMode();
+  initIdleLock();
 
   // Desktop ready
   await sleep(300);

@@ -1,0 +1,68 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1920 1080" preserveAspectRatio="xMidYMid slice">
+  <defs>
+    <linearGradient id="fSky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0a1f14"/>
+      <stop offset="60%" stop-color="#0e2a1b"/>
+      <stop offset="100%" stop-color="#143820"/>
+    </linearGradient>
+    <radialGradient id="fGlow" cx="50%" cy="40%" r="50%">
+      <stop offset="0%" stop-color="#6dff9a" stop-opacity="0.2"/>
+      <stop offset="100%" stop-color="#6dff9a" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="fTreeBack" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0e2a1b"/>
+      <stop offset="100%" stop-color="#061810"/>
+    </linearGradient>
+    <linearGradient id="fTreeFore" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#030a06"/>
+      <stop offset="100%" stop-color="#010402"/>
+    </linearGradient>
+  </defs>
+  <rect width="1920" height="1080" fill="url(#fSky)"/>
+  <rect width="1920" height="1080" fill="url(#fGlow)"/>
+
+  <!-- mist -->
+  <ellipse cx="960" cy="680" rx="1000" ry="120" fill="#6dff9a" opacity="0.06"/>
+
+  <!-- background trees -->
+  <g fill="url(#fTreeBack)">
+    <polygon points="80,1080 180,540 280,1080"/>
+    <polygon points="260,1080 360,580 460,1080"/>
+    <polygon points="440,1080 520,560 600,1080"/>
+    <polygon points="600,1080 690,600 780,1080"/>
+    <polygon points="780,1080 870,540 960,1080"/>
+    <polygon points="960,1080 1050,580 1140,1080"/>
+    <polygon points="1140,1080 1230,560 1320,1080"/>
+    <polygon points="1320,1080 1410,600 1500,1080"/>
+    <polygon points="1500,1080 1590,540 1680,1080"/>
+    <polygon points="1680,1080 1770,580 1860,1080"/>
+  </g>
+
+  <!-- foreground trees -->
+  <g fill="url(#fTreeFore)">
+    <polygon points="40,1080 180,620 320,1080"/>
+    <polygon points="240,1080 380,640 520,1080"/>
+    <polygon points="440,1080 580,620 720,1080"/>
+    <polygon points="640,1080 780,680 920,1080"/>
+    <polygon points="840,1080 980,640 1120,1080"/>
+    <polygon points="1040,1080 1180,680 1320,1080"/>
+    <polygon points="1240,1080 1380,620 1520,1080"/>
+    <polygon points="1440,1080 1580,640 1720,1080"/>
+    <polygon points="1640,1080 1780,680 1920,1080"/>
+  </g>
+
+  <!-- fireflies -->
+  <g fill="#9fff6d">
+    <circle cx="240" cy="420" r="2" opacity="0.9"/>
+    <circle cx="540" cy="380" r="2.5" opacity="0.7"/>
+    <circle cx="820" cy="460" r="1.8" opacity="0.85"/>
+    <circle cx="1100" cy="400" r="2.3" opacity="0.75"/>
+    <circle cx="1360" cy="440" r="2" opacity="0.9"/>
+    <circle cx="1640" cy="380" r="2.4" opacity="0.65"/>
+    <circle cx="420" cy="580" r="1.9" opacity="0.8"/>
+    <circle cx="720" cy="620" r="2.1" opacity="0.9"/>
+    <circle cx="1020" cy="560" r="2.3" opacity="0.7"/>
+    <circle cx="1280" cy="620" r="1.8" opacity="0.85"/>
+    <circle cx="1560" cy="560" r="2" opacity="0.75"/>
+  </g>
+</svg>

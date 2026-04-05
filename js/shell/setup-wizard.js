@@ -1,13 +1,15 @@
 // NOVA OS — Setup Wizard (First Run Experience)
 // Fullscreen, animated, multi-step onboarding
 
+import { hashPassword } from '../kernel/crypto.js';
+
 const wallpapers = [
-  { id: 'gradient-purple', name: 'Aurora', colors: 'linear-gradient(135deg, #1a1a2e, #16213e, #0f3460, #533483)' },
-  { id: 'gradient-blue', name: 'Ocean', colors: 'linear-gradient(135deg, #0c1445, #1a237e, #283593, #1565c0)' },
-  { id: 'gradient-dark', name: 'Midnight', colors: 'linear-gradient(135deg, #0a0a0a, #1a1a1a, #2d2d2d, #1a1a1a)' },
-  { id: 'gradient-sunset', name: 'Sunset', colors: 'linear-gradient(135deg, #1a0a2e, #4a1942, #7b2d5f, #b0413e)' },
-  { id: 'gradient-forest', name: 'Forest', colors: 'linear-gradient(135deg, #0a1a0a, #1b3a1b, #2d5a2d, #1a3a2a)' },
-  { id: 'gradient-space', name: 'Deep Space', colors: 'radial-gradient(ellipse at 30% 50%, #1a0533 0%, #0a0a1a 50%, #000000 100%)' },
+  { id: 'aurora',    name: 'Aurora',    colors: 'url("assets/wallpapers/aurora.svg")' },
+  { id: 'ocean',     name: 'Sunset',    colors: 'url("assets/wallpapers/ocean.svg")' },
+  { id: 'nebula',    name: 'Nebula',    colors: 'url("assets/wallpapers/nebula.svg")' },
+  { id: 'mountains', name: 'Mountains', colors: 'url("assets/wallpapers/mountains.svg")' },
+  { id: 'geometry',  name: 'Geometry',  colors: 'url("assets/wallpapers/geometry.svg")' },
+  { id: 'forest',    name: 'Forest',    colors: 'url("assets/wallpapers/forest.svg")' },
 ];
 
 const accents = [
@@ -115,22 +117,40 @@ export function showSetupWizard() {
           `;
           break;
 
-        case 1: // Name
+        case 1: // Name + password
           el.innerHTML = `
             <div style="text-align:center;">
               <div style="font-size:56px;margin-bottom:16px;">&#x1F44B;</div>
-              <h1 style="font-size:30px;font-weight:700;margin-bottom:8px;">What's your name?</h1>
-              <p style="font-size:15px;color:rgba(255,255,255,0.45);margin-bottom:32px;">NOVA will use this to personalize your experience</p>
-              <input type="text" id="setup-name" placeholder="Enter your name" value="${userName}"
-                style="width:300px;padding:14px 20px;background:rgba(255,255,255,0.08);border:2px solid rgba(255,255,255,0.12);border-radius:14px;color:white;font-size:18px;font-family:var(--font);outline:none;text-align:center;"
-                autofocus>
-              <div style="margin-top:12px;font-size:12px;color:rgba(255,255,255,0.3);">This shows on your lock screen and in the menubar</div>
+              <h1 style="font-size:30px;font-weight:700;margin-bottom:8px;">Create your account</h1>
+              <p style="font-size:15px;color:rgba(255,255,255,0.45);margin-bottom:28px;">NOVA uses this to personalize your experience and lock your screen</p>
+              <div style="display:flex;flex-direction:column;gap:10px;width:300px;margin:0 auto;">
+                <input type="text" id="setup-name" placeholder="Name" value="${userName}"
+                  style="padding:13px 18px;background:rgba(255,255,255,0.08);border:2px solid rgba(255,255,255,0.12);border-radius:12px;color:white;font-size:15px;font-family:var(--font);outline:none;text-align:center;">
+                <input type="password" id="setup-password" placeholder="Password (optional)" autocomplete="new-password"
+                  style="padding:13px 18px;background:rgba(255,255,255,0.08);border:2px solid rgba(255,255,255,0.12);border-radius:12px;color:white;font-size:15px;font-family:var(--font);outline:none;text-align:center;">
+                <div id="setup-pw-strength" style="height:4px;border-radius:2px;background:rgba(255,255,255,0.06);"></div>
+              </div>
+              <div style="margin-top:14px;font-size:11px;color:rgba(255,255,255,0.3);max-width:320px;margin-left:auto;margin-right:auto;line-height:1.5;">Leave the password blank to use NOVA without a lock screen. You can change this later in Settings.</div>
             </div>
           `;
           const nameInput = el.querySelector('#setup-name');
-          nameInput.addEventListener('focus', () => { nameInput.style.borderColor = 'var(--accent)'; });
-          nameInput.addEventListener('blur', () => { nameInput.style.borderColor = 'rgba(255,255,255,0.12)'; });
-          nameInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') next(); });
+          const pwInput = el.querySelector('#setup-password');
+          const strengthBar = el.querySelector('#setup-pw-strength');
+          [nameInput, pwInput].forEach(input => {
+            input.addEventListener('focus', () => { input.style.borderColor = 'var(--accent)'; });
+            input.addEventListener('blur', () => { input.style.borderColor = 'rgba(255,255,255,0.12)'; });
+            input.addEventListener('keydown', (e) => { if (e.key === 'Enter') next(); });
+          });
+          pwInput.addEventListener('input', () => {
+            let score = 0;
+            if (pwInput.value.length >= 8) score++;
+            if (pwInput.value.length >= 12) score++;
+            if (/[A-Z]/.test(pwInput.value) && /[a-z]/.test(pwInput.value)) score++;
+            if (/\d/.test(pwInput.value) && /[^\w]/.test(pwInput.value)) score++;
+            const colors = ['#555', '#ff3b30', '#ff9500', '#ffcc00', '#34c759'];
+            const widths = ['0', '25', '50', '75', '100'];
+            strengthBar.style.background = `linear-gradient(90deg, ${colors[score]} ${widths[score]}%, rgba(255,255,255,0.06) ${widths[score]}%)`;
+          });
           setTimeout(() => nameInput.focus(), 100);
           break;
 
@@ -140,12 +160,18 @@ export function showSetupWizard() {
               <h1 style="font-size:30px;font-weight:700;margin-bottom:8px;">Choose your look</h1>
               <p style="font-size:15px;color:rgba(255,255,255,0.45);margin-bottom:28px;">Pick a wallpaper for your desktop</p>
               <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;">
-                ${wallpapers.map(w => `
-                  <div data-wp="${w.id}" style="aspect-ratio:16/10;border-radius:12px;background:${w.colors};cursor:pointer;border:3px solid ${w.id === selectedWallpaper ? 'var(--accent)' : 'transparent'};transition:border-color 0.2s,transform 0.15s;position:relative;overflow:hidden;"
+                ${wallpapers.map(w => {
+                  const isSvg = w.colors.startsWith('url(');
+                  const bgStyle = isSvg
+                    ? `background-image:${w.colors};background-size:cover;background-position:center;`
+                    : `background:${w.colors};`;
+                  return `
+                  <div data-wp="${w.id}" style="aspect-ratio:16/10;border-radius:12px;${bgStyle}cursor:pointer;border:3px solid ${w.id === selectedWallpaper ? 'var(--accent)' : 'transparent'};transition:border-color 0.2s,transform 0.15s;position:relative;overflow:hidden;"
                     onmouseenter="this.style.transform='scale(1.03)'" onmouseleave="this.style.transform='scale(1)'">
                     <div style="position:absolute;bottom:0;left:0;right:0;padding:6px 10px;background:linear-gradient(transparent,rgba(0,0,0,0.5));font-size:11px;color:rgba(255,255,255,0.8);text-align:left;">${w.name}</div>
                   </div>
-                `).join('')}
+                `;
+                }).join('')}
               </div>
             </div>
           `;
@@ -259,11 +285,15 @@ export function showSetupWizard() {
       }
     }
 
+    let userPassword = '';
+
     function next() {
       // Save data from current step
       if (step === 1) {
         const nameInput = wizard.querySelector('#setup-name');
+        const pwInput = wizard.querySelector('#setup-password');
         if (nameInput) userName = nameInput.value.trim() || '';
+        if (pwInput) userPassword = pwInput.value;
       }
 
       if (step >= totalSteps - 1) {
@@ -274,16 +304,32 @@ export function showSetupWizard() {
       }
     }
 
-    function finish() {
+    async function finish() {
       localStorage.setItem('nova-setup-done', 'true');
       localStorage.setItem('nova-username', userName || 'User');
       localStorage.setItem('nova-wallpaper', selectedWallpaper);
       localStorage.setItem('nova-accent', selectedAccent);
 
+      // Hash password with PBKDF2-SHA256 if the user chose one
+      if (userPassword) {
+        try {
+          const hash = await hashPassword(userPassword);
+          localStorage.setItem('nova-password-hash', hash);
+        } catch (e) {
+          console.error('Password hash failed:', e);
+        }
+      } else {
+        localStorage.removeItem('nova-password-hash');
+      }
+
       const wp = wallpapers.find(w => w.id === selectedWallpaper);
       if (wp) {
         const desktop = document.getElementById('desktop');
-        if (desktop) desktop.style.backgroundImage = wp.colors;
+        if (desktop) {
+          desktop.style.backgroundImage = wp.colors;
+          desktop.style.backgroundSize = 'cover';
+          desktop.style.backgroundPosition = 'center';
+        }
       }
       document.documentElement.style.setProperty('--accent', selectedAccent);
 

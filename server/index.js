@@ -11,9 +11,70 @@ const __dirname = dirname(__filename);
 const app = express();
 const PORT = 3000;
 
+// ─── Security: rate limiter ───
+// Simple in-memory token bucket per IP. Hard cap on /api/* endpoints
+// so a rogue app can't spam the AI proxy or update endpoint.
+const rateLimitBuckets = new Map();
+const RATE_LIMITS = {
+  '/api/ai':           { tokens: 30,  refillPerSec: 0.5 }, // 30 requests, refill 1 every 2s
+  '/api/update/check': { tokens: 5,   refillPerSec: 0.05 }, // 5/hour-ish
+  default:             { tokens: 60,  refillPerSec: 1 },
+};
+
+function rateLimit(req, res, next) {
+  if (!req.path.startsWith('/api/')) return next();
+
+  const ip = req.ip || req.socket.remoteAddress || 'local';
+  const limitKey = RATE_LIMITS[req.path] ? req.path : 'default';
+  const limit = RATE_LIMITS[limitKey];
+  const bucketKey = `${ip}:${limitKey}`;
+
+  let bucket = rateLimitBuckets.get(bucketKey);
+  const now = Date.now() / 1000;
+
+  if (!bucket) {
+    bucket = { tokens: limit.tokens, last: now };
+    rateLimitBuckets.set(bucketKey, bucket);
+  } else {
+    const elapsed = now - bucket.last;
+    bucket.tokens = Math.min(limit.tokens, bucket.tokens + elapsed * limit.refillPerSec);
+    bucket.last = now;
+  }
+
+  if (bucket.tokens < 1) {
+    res.setHeader('Retry-After', '5');
+    return res.status(429).json({
+      error: 'Rate limit exceeded',
+      retryAfter: Math.ceil((1 - bucket.tokens) / limit.refillPerSec),
+    });
+  }
+
+  bucket.tokens -= 1;
+  next();
+}
+
+// Cleanup old buckets every 5 minutes
+setInterval(() => {
+  const cutoff = Date.now() / 1000 - 600;
+  for (const [key, bucket] of rateLimitBuckets.entries()) {
+    if (bucket.last < cutoff) rateLimitBuckets.delete(key);
+  }
+}, 300000);
+
+// Security headers
+app.use((req, res, next) => {
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'SAMEORIGIN');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('Permissions-Policy', 'interest-cohort=()');
+  next();
+});
+
+app.use(rateLimit);
+
 // Serve static files from project root
 app.use(express.static(join(__dirname, '..')));
-app.use(express.json());
+app.use(express.json({ limit: '1mb' }));
 
 // API key — set via environment variable: ANTHROPIC_API_KEY
 // Run with: ANTHROPIC_API_KEY=sk-ant-... npm start
@@ -128,6 +189,7 @@ app.get('/app/:appId', (req, res) => {
   <link rel="stylesheet" href="/css/apps/activity-monitor.css">
   <link rel="stylesheet" href="/css/apps/appstore.css">
   <link rel="stylesheet" href="/css/apps/browser.css">
+  <link rel="stylesheet" href="/css/apps/vault.css">
   <style>
     /* Native mode: no shell chrome, just the app content filling the window */
     body.nova-native-app { background: #1e1e2e; margin: 0; padding: 0; overflow: hidden; }

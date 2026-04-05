@@ -1,0 +1,15 @@
+/* NOVA OS — Vault App */
+/* Most styles are inlined in js/apps/vault.js for isolation.
+   This file exists so the server doesn't 404 and for future overrides. */
+
+.vault-app {
+  font-feature-settings: 'cv11', 'ss01';
+}
+
+.vault-item {
+  transition: background 0.12s ease;
+}
+
+.vault-lock input:focus {
+  border-color: var(--accent);
+}

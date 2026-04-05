@@ -18,18 +18,20 @@ export function registerSettings() {
 }
 
 const wallpapers = [
-  { id: 'gradient-purple', name: 'Aurora', colors: 'linear-gradient(135deg, #1a1a2e, #16213e, #0f3460, #533483)' },
-  { id: 'gradient-blue', name: 'Ocean', colors: 'linear-gradient(135deg, #0c1445, #1a237e, #283593, #1565c0)' },
+  // Real SVG wallpapers
+  { id: 'aurora',    name: 'Aurora',    colors: 'url("assets/wallpapers/aurora.svg")' },
+  { id: 'ocean',     name: 'Sunset Bay', colors: 'url("assets/wallpapers/ocean.svg")' },
+  { id: 'nebula',    name: 'Nebula',    colors: 'url("assets/wallpapers/nebula.svg")' },
+  { id: 'mountains', name: 'Mountains', colors: 'url("assets/wallpapers/mountains.svg")' },
+  { id: 'geometry',  name: 'Geometry',  colors: 'url("assets/wallpapers/geometry.svg")' },
+  { id: 'forest',    name: 'Forest',    colors: 'url("assets/wallpapers/forest.svg")' },
+  // Legacy gradient wallpapers (still available)
+  { id: 'gradient-purple', name: 'Purple Gradient', colors: 'linear-gradient(135deg, #1a1a2e, #16213e, #0f3460, #533483)' },
+  { id: 'gradient-blue', name: 'Blue Gradient', colors: 'linear-gradient(135deg, #0c1445, #1a237e, #283593, #1565c0)' },
   { id: 'gradient-dark', name: 'Midnight', colors: 'linear-gradient(135deg, #0a0a0a, #1a1a1a, #2d2d2d, #1a1a1a)' },
   { id: 'gradient-sunset', name: 'Sunset', colors: 'linear-gradient(135deg, #1a0a2e, #4a1942, #7b2d5f, #b0413e)' },
-  { id: 'gradient-forest', name: 'Forest', colors: 'linear-gradient(135deg, #0a1a0a, #1b3a1b, #2d5a2d, #1a3a2a)' },
   { id: 'gradient-space', name: 'Deep Space', colors: 'radial-gradient(ellipse at 30% 50%, #1a0533 0%, #0a0a1a 50%, #000000 100%)' },
-  { id: 'gradient-ember', name: 'Ember', colors: 'linear-gradient(135deg, #1a0a0a, #4a1515, #8b2500, #cc5500)' },
-  { id: 'gradient-arctic', name: 'Arctic', colors: 'linear-gradient(135deg, #0a1628, #1a3a5c, #3a7abd, #87ceeb)' },
   { id: 'gradient-neon', name: 'Neon City', colors: 'linear-gradient(135deg, #0a0020, #1a0050, #3a00a0, #ff00ff33)' },
-  { id: 'gradient-dusk', name: 'Dusk', colors: 'linear-gradient(135deg, #2c1654, #553380, #7c5baa, #ffb347)' },
-  { id: 'gradient-mono', name: 'Monochrome', colors: 'linear-gradient(135deg, #111, #222, #333, #222)' },
-  { id: 'gradient-rose', name: 'Rose Gold', colors: 'linear-gradient(135deg, #2a1a1a, #4a2a2a, #8b5a5a, #daa)' },
 ];
 
 function initSettings(container) {
@@ -375,7 +377,11 @@ export function applyWallpaper() {
   const wp = wallpapers.find(w => w.id === id);
   if (wp) {
     const desktop = document.getElementById('desktop');
+    if (!desktop) return;
     desktop.style.backgroundImage = wp.colors;
+    desktop.style.backgroundSize = 'cover';
+    desktop.style.backgroundPosition = 'center';
+    desktop.style.backgroundRepeat = 'no-repeat';
     desktop.style.backgroundColor = '';
   }
 }

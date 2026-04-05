@@ -157,6 +157,9 @@ export function initSpotlight() {
       'open reminders': 'reminders',
       'open activity monitor': 'activity-monitor',
       'open monitor': 'activity-monitor',
+      'open vault': 'vault',
+      'open passwords': 'vault',
+      'open password manager': 'vault',
     };
 
     for (const [cmd, appId] of Object.entries(appCommands)) {

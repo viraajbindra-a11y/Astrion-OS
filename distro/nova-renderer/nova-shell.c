@@ -137,6 +137,7 @@ static NovaApp app_registry[] = {
     { "draw",            "Draw",             "\xF0\x9F\x8E\xA8", "/app/draw",             FALSE, FALSE },
     { "reminders",       "Reminders",        "\xE2\x9C\x85",     "/app/reminders",        FALSE, TRUE  },
     { "activity-monitor","Activity Monitor", "\xF0\x9F\x93\x8A", "/app/activity-monitor", FALSE, TRUE  },
+    { "vault",           "Vault",            "\xF0\x9F\x94\x90", "/app/vault",            TRUE,  TRUE  },
     { "appstore",        "App Store",        "\xF0\x9F\x9B\x8D",  "/app/appstore",         FALSE, TRUE  },
     { NULL, NULL, NULL, NULL, FALSE, FALSE } /* Sentinel */
 };
