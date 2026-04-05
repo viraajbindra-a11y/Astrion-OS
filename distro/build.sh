@@ -458,7 +458,7 @@ AUTOLOGIN
 cat > /home/nova/.bash_profile << 'BASHPROFILE'
 # NOVA OS — Auto-start the desktop on tty1
 if [ -z "$DISPLAY" ] && [ "$(tty)" = "/dev/tty1" ]; then
-  exec startx -- -nocursor 2>/dev/null
+  exec startx 2>/dev/null
 fi
 BASHPROFILE
 chown nova:nova /home/nova/.bash_profile
