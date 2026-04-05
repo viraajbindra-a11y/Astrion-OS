@@ -220,6 +220,234 @@ app.get('/app/:appId', (req, res) => {
 </html>`);
 });
 
+// ═══════════════════════════════════════════════════════════
+// Browser Proxy — fetches external pages and rewrites them so
+// they can be rendered inside the NOVA browser iframe without
+// X-Frame-Options / CSP blocking.
+// ═══════════════════════════════════════════════════════════
+app.get('/api/browser/proxy', async (req, res) => {
+  const targetUrl = req.query.url;
+  if (!targetUrl) return res.status(400).send('Missing url');
+
+  try {
+    const upstream = await fetch(targetUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) NOVA/1.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+      },
+      redirect: 'follow',
+    });
+
+    const contentType = upstream.headers.get('content-type') || 'text/html';
+
+    // Strip headers that block iframes
+    res.removeHeader('X-Frame-Options');
+    res.removeHeader('Content-Security-Policy');
+    res.setHeader('Content-Type', contentType);
+
+    // HTML: rewrite links so they go back through the proxy
+    if (contentType.includes('text/html')) {
+      let html = await upstream.text();
+      const baseUrl = new URL(targetUrl);
+      const proxyBase = `/api/browser/proxy?url=`;
+
+      // Inject <base> so relative URLs resolve
+      const baseTag = `<base href="${baseUrl.origin}${baseUrl.pathname}">`;
+      html = html.replace(/<head([^>]*)>/i, `<head$1>${baseTag}`);
+
+      // Rewrite absolute links through the proxy
+      html = html.replace(
+        /(href|src|action)=["'](https?:\/\/[^"']+)["']/gi,
+        (m, attr, url) => `${attr}="${proxyBase}${encodeURIComponent(url)}"`
+      );
+
+      // Intercept clicks + forms with JS
+      const shim = `<script>
+        document.addEventListener('click', function(e) {
+          const a = e.target.closest('a');
+          if (a && a.href && !a.href.startsWith('javascript:') && !a.href.includes('/api/browser/proxy')) {
+            e.preventDefault();
+            window.parent.postMessage({ type: 'nova-browser-nav', url: a.href }, '*');
+          }
+        }, true);
+      </script>`;
+      html = html.replace(/<\/body>/i, shim + '</body>');
+
+      res.send(html);
+    } else {
+      // Non-HTML: stream through
+      const buffer = await upstream.arrayBuffer();
+      res.send(Buffer.from(buffer));
+    }
+  } catch (err) {
+    console.error('Browser proxy error:', err.message);
+    res.status(502).send(`<html><body style="font-family:sans-serif;padding:40px;background:#1e1e2e;color:white;"><h2>Proxy error</h2><p>Could not fetch: ${targetUrl}</p><p style="color:#888">${err.message}</p></body></html>`);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
+// System Control — Bluetooth / Wi-Fi / Volume / Brightness
+// These shell out to bluetoothctl / nmcli / amixer on the ISO.
+// On dev machines they return simulated data.
+// ═══════════════════════════════════════════════════════════
+function runShell(cmd, args = []) {
+  return new Promise(async (resolve) => {
+    const { spawn } = await import('child_process');
+    const proc = spawn(cmd, args, { timeout: 5000 });
+    let stdout = '', stderr = '';
+    proc.stdout.on('data', d => stdout += d);
+    proc.stderr.on('data', d => stderr += d);
+    proc.on('close', code => resolve({ code, stdout, stderr }));
+    proc.on('error', err => resolve({ code: -1, stdout: '', stderr: err.message }));
+  });
+}
+
+// ─── Bluetooth ───
+app.get('/api/bluetooth/status', async (req, res) => {
+  const r = await runShell('bluetoothctl', ['show']);
+  const powered = /Powered: yes/i.test(r.stdout);
+  res.json({ available: r.code === 0, powered });
+});
+
+app.post('/api/bluetooth/power', async (req, res) => {
+  const { on } = req.body;
+  await runShell('bluetoothctl', ['power', on ? 'on' : 'off']);
+  res.json({ ok: true });
+});
+
+app.get('/api/bluetooth/devices', async (req, res) => {
+  // Start scan, wait 3s, then list
+  await runShell('bluetoothctl', ['--timeout', '3', 'scan', 'on']).catch(() => {});
+  const r = await runShell('bluetoothctl', ['devices']);
+  const devices = r.stdout.split('\n')
+    .map(line => line.match(/^Device ([0-9A-F:]{17}) (.+)$/i))
+    .filter(Boolean)
+    .map(m => ({ mac: m[1], name: m[2] }));
+  res.json({ devices });
+});
+
+app.post('/api/bluetooth/pair', async (req, res) => {
+  const { mac } = req.body;
+  if (!mac) return res.status(400).json({ error: 'mac required' });
+  const r = await runShell('bluetoothctl', ['pair', mac]);
+  res.json({ ok: r.code === 0, output: r.stdout });
+});
+
+app.post('/api/bluetooth/connect', async (req, res) => {
+  const { mac } = req.body;
+  const r = await runShell('bluetoothctl', ['connect', mac]);
+  res.json({ ok: r.code === 0 });
+});
+
+// ─── Wi-Fi ───
+app.get('/api/wifi/networks', async (req, res) => {
+  // nmcli returns SSID, signal, security
+  const r = await runShell('nmcli', ['-t', '-f', 'SSID,SIGNAL,SECURITY', 'device', 'wifi', 'list']);
+  if (r.code !== 0) {
+    return res.json({ networks: [], error: r.stderr || 'nmcli not available' });
+  }
+  const networks = r.stdout.split('\n')
+    .filter(Boolean)
+    .map(line => {
+      const [ssid, signal, security] = line.split(':');
+      return { ssid, signal: parseInt(signal) || 0, security: security || 'Open' };
+    })
+    .filter(n => n.ssid);
+  res.json({ networks });
+});
+
+app.post('/api/wifi/connect', async (req, res) => {
+  const { ssid, password } = req.body;
+  if (!ssid) return res.status(400).json({ error: 'ssid required' });
+  const args = password
+    ? ['device', 'wifi', 'connect', ssid, 'password', password]
+    : ['device', 'wifi', 'connect', ssid];
+  const r = await runShell('nmcli', args);
+  res.json({ ok: r.code === 0, output: r.stdout || r.stderr });
+});
+
+app.get('/api/wifi/status', async (req, res) => {
+  const r = await runShell('nmcli', ['-t', '-f', 'DEVICE,STATE,CONNECTION', 'device']);
+  const wifi = r.stdout.split('\n')
+    .map(line => line.split(':'))
+    .find(parts => parts[0] && parts[0].startsWith('wl'));
+  res.json({
+    connected: wifi && wifi[1] === 'connected',
+    connection: wifi?.[2] || null,
+  });
+});
+
+// ─── Volume ───
+app.get('/api/volume', async (req, res) => {
+  const r = await runShell('pactl', ['get-sink-volume', '@DEFAULT_SINK@']);
+  const m = r.stdout.match(/(\d+)%/);
+  res.json({ level: m ? parseInt(m[1]) : 50 });
+});
+
+app.post('/api/volume', async (req, res) => {
+  const { level } = req.body;
+  if (typeof level !== 'number') return res.status(400).json({ error: 'level required' });
+  await runShell('pactl', ['set-sink-volume', '@DEFAULT_SINK@', `${Math.max(0, Math.min(150, level))}%`]);
+  res.json({ ok: true });
+});
+
+app.post('/api/volume/mute', async (req, res) => {
+  await runShell('pactl', ['set-sink-mute', '@DEFAULT_SINK@', 'toggle']);
+  res.json({ ok: true });
+});
+
+// ─── Brightness ───
+app.get('/api/brightness', async (req, res) => {
+  try {
+    const fs = await import('fs/promises');
+    const backlights = await fs.readdir('/sys/class/backlight').catch(() => []);
+    if (backlights.length === 0) return res.json({ level: 100 });
+    const dir = `/sys/class/backlight/${backlights[0]}`;
+    const [cur, max] = await Promise.all([
+      fs.readFile(`${dir}/brightness`, 'utf-8'),
+      fs.readFile(`${dir}/max_brightness`, 'utf-8'),
+    ]);
+    res.json({ level: Math.round((parseInt(cur) / parseInt(max)) * 100) });
+  } catch {
+    res.json({ level: 100 });
+  }
+});
+
+app.post('/api/brightness', async (req, res) => {
+  try {
+    const fs = await import('fs/promises');
+    const { level } = req.body;
+    const backlights = await fs.readdir('/sys/class/backlight').catch(() => []);
+    if (backlights.length === 0) return res.json({ ok: false });
+    const dir = `/sys/class/backlight/${backlights[0]}`;
+    const max = parseInt(await fs.readFile(`${dir}/max_brightness`, 'utf-8'));
+    const target = Math.round((Math.max(0, Math.min(100, level)) / 100) * max);
+    // Requires brightness file to be writable — usually needs sudo or udev rule
+    await runShell('sudo', ['-n', 'tee', `${dir}/brightness`]).catch(() => {});
+    await fs.writeFile(`${dir}/brightness`, String(target)).catch(() => {});
+    res.json({ ok: true });
+  } catch (e) {
+    res.json({ ok: false, error: e.message });
+  }
+});
+
+// ─── System Actions ───
+app.post('/api/system/shutdown', async (req, res) => {
+  res.json({ ok: true });
+  setTimeout(() => runShell('sudo', ['-n', 'shutdown', '-h', 'now']), 500);
+});
+
+app.post('/api/system/restart', async (req, res) => {
+  res.json({ ok: true });
+  setTimeout(() => runShell('sudo', ['-n', 'shutdown', '-r', 'now']), 500);
+});
+
+app.post('/api/system/sleep', async (req, res) => {
+  res.json({ ok: true });
+  setTimeout(() => runShell('sudo', ['-n', 'systemctl', 'suspend']), 500);
+});
+
 app.listen(PORT, () => {
   console.log(`NOVA OS server running at http://localhost:${PORT}`);
 });

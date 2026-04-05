@@ -135,12 +135,46 @@ apt-get install -y -qq flatpak gnome-software software-properties-common || true
 # Multimedia codecs
 apt-get install -y -qq ffmpeg gstreamer1.0-plugins-base gstreamer1.0-plugins-good || true
 
-# Display drivers
+# Display drivers + Vulkan + hardware video
 apt-get install -y -qq xserver-xorg-video-intel xserver-xorg-video-amdgpu \
-  xserver-xorg-video-nouveau mesa-utils || true
+  xserver-xorg-video-nouveau mesa-utils mesa-vulkan-drivers vulkan-tools \
+  intel-media-va-driver-non-free i965-va-driver-shaders libvdpau-va-gl1 || true
+
+# CPU microcode (critical security/stability fixes for Intel + AMD)
+apt-get install -y -qq intel-microcode amd64-microcode || true
+
+# All Linux firmware blobs (Wi-Fi, Bluetooth, audio codecs, GPU, etc.)
+apt-get install -y -qq firmware-linux firmware-linux-nonfree firmware-misc-nonfree \
+  firmware-iwlwifi firmware-realtek firmware-atheros firmware-libertas \
+  firmware-bnx2 firmware-bnx2x firmware-brcm80211 firmware-ipw2x00 \
+  firmware-ralink firmware-zd1211 firmware-ti-connectivity \
+  firmware-intel-sound firmware-sof-signed firmware-amd-graphics || true
 
 # Bootloader (GRUB for both EFI and BIOS)
 apt-get install -y -qq grub-efi-amd64-bin grub-pc-bin grub-common || true
+
+# ═══════════════════════════════════════════════════
+# Linux-Surface kernel — adds full support for Microsoft Surface devices
+# (multi-touch, pen pressure, accurate battery, sensors, Surface Dock)
+# https://github.com/linux-surface/linux-surface
+# ═══════════════════════════════════════════════════
+echo "Installing linux-surface kernel for Surface Pro support..."
+apt-get install -y -qq gpg ca-certificates || true
+
+# Add the linux-surface APT repository
+curl -fsSL https://raw.githubusercontent.com/linux-surface/linux-surface/master/pkg/keys/surface.asc \
+  | gpg --dearmor -o /usr/share/keyrings/linux-surface.gpg 2>/dev/null || true
+
+echo "deb [arch=amd64 signed-by=/usr/share/keyrings/linux-surface.gpg] https://pkg.surfacelinux.com/debian release main" \
+  > /etc/apt/sources.list.d/linux-surface.list
+
+apt-get update -qq 2>/dev/null || true
+
+# Install Surface kernel + userspace tools
+# (keep the stock Debian kernel too so non-Surface hardware still boots)
+apt-get install -y -qq linux-image-surface linux-headers-surface \
+  iptsd libwacom-surface surface-control 2>/dev/null || \
+  echo "  linux-surface packages unavailable — continuing with stock kernel"
 
 # Clean up
 apt-get clean
