@@ -38,7 +38,7 @@ export function showSetupWizard() {
 
     const wizard = document.createElement('div');
     wizard.id = 'setup-wizard';
-    wizard.style.cssText = 'position:fixed;inset:0;z-index:99999;background:#000;overflow:hidden;';
+    wizard.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;width:100vw;height:100vh;z-index:99999;background:#000;overflow:hidden;';
 
     document.body.appendChild(wizard);
 
@@ -57,12 +57,17 @@ export function showSetupWizard() {
 
       let bg = step === 2 ? (wallpapers.find(w => w.id === selectedWallpaper)?.colors || stepBgs[0]) : stepBgs[step];
 
+      const bgIsUrl = typeof bg === 'string' && bg.startsWith('url(');
+      const bgStyle = bgIsUrl
+        ? `background-image:${bg};background-size:cover;background-position:center;`
+        : `background:${bg};`;
+
       wizard.innerHTML = `
-        <div style="position:absolute;inset:0;background:${bg};transition:background 0.6s ease;"></div>
+        <div style="position:absolute;top:0;left:0;right:0;bottom:0;width:100%;height:100%;${bgStyle}transition:background 0.6s ease;"></div>
         <div style="position:absolute;top:0;left:0;right:0;height:3px;background:rgba(255,255,255,0.1);z-index:2;">
           <div style="height:100%;width:${progress}%;background:var(--accent);transition:width 0.4s ease;border-radius:0 2px 2px 0;"></div>
         </div>
-        <div style="position:relative;z-index:1;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px;">
+        <div style="position:absolute;top:0;left:0;width:100%;height:100%;z-index:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px;box-sizing:border-box;">
           <div id="setup-content" style="max-width:560px;width:100%;animation:scaleIn 0.35s cubic-bezier(0.16,1,0.3,1);"></div>
           <div style="position:absolute;bottom:32px;left:0;right:0;display:flex;justify-content:center;align-items:center;gap:16px;">
             ${step > 0 ? `<button id="setup-back" style="background:rgba(255,255,255,0.08);border:none;color:rgba(255,255,255,0.6);padding:10px 24px;border-radius:10px;font-size:14px;font-family:var(--font);cursor:pointer;">Back</button>` : ''}

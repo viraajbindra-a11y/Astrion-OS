@@ -75,6 +75,11 @@ apt-get install -y -qq linux-image-amd64 live-boot systemd-sysv
 # Display server (NO window manager — NOVA Shell IS the desktop)
 apt-get install -y -qq xorg xinit xdotool hsetroot
 
+# Cursor theme + input drivers + VM guest tools (UTM / QEMU / VMware / VirtualBox)
+apt-get install -y -qq dmz-cursor-theme adwaita-icon-theme \
+  xserver-xorg-input-libinput xserver-xorg-input-evdev xserver-xorg-input-mouse \
+  spice-vdagent qemu-guest-agent open-vm-tools virtualbox-guest-x11 2>/dev/null || true
+
 # NOVA native renderer dependencies (WebKitGTK + GTK3 + build tools)
 apt-get install -y -qq libwebkit2gtk-4.0-dev libgtk-3-dev gcc pkg-config make
 
@@ -454,6 +459,8 @@ systemctl enable NetworkManager 2>/dev/null || true
 systemctl enable bluetooth 2>/dev/null || true
 systemctl enable cups 2>/dev/null || true
 systemctl enable acpid 2>/dev/null || true
+systemctl enable spice-vdagentd 2>/dev/null || true
+systemctl enable qemu-guest-agent 2>/dev/null || true
 
 # Set hostname
 echo "nova-os" > /etc/hostname
@@ -486,6 +493,18 @@ cat > /home/nova/.xinitrc << 'XINITRC'
 # NOVA OS — Desktop Init
 # This IS the operating system. Our own native renderer, not Chromium.
 
+# ── Cursor ──
+# Force a visible cursor (VMs sometimes hide the X11 default)
+xsetroot -cursor_name left_ptr
+export XCURSOR_THEME=DMZ-White
+export XCURSOR_SIZE=24
+
+# ── VM guest agents (for mouse integration in UTM/QEMU/VMware/VirtualBox) ──
+spice-vdagent -x 2>/dev/null &
+vmware-user 2>/dev/null &
+VBoxClient --clipboard 2>/dev/null &
+VBoxClient --draganddrop 2>/dev/null &
+
 # Audio
 pulseaudio --start 2>/dev/null &
 
@@ -506,28 +525,67 @@ xset s noblank
 # Log everything to a file so we can debug if things go wrong
 exec > /tmp/nova-startup.log 2>&1
 set -x
+date
 
-# The NOVA server is managed by systemd (nova-server.service).
-# Just wait for it to be ready.
-echo "Waiting for NOVA server..."
+# ── Start NOVA server ──
+# systemd should already be running nova-server.service. If not, start it here.
+echo "Checking NOVA server..."
+if ! curl -s --max-time 2 http://localhost:3000 > /dev/null 2>&1; then
+  echo "Server not running — trying to start via systemctl..."
+  sudo systemctl start nova-server.service 2>&1 || true
+  sleep 2
+
+  # Still not up? Launch it directly as this user
+  if ! curl -s --max-time 2 http://localhost:3000 > /dev/null 2>&1; then
+    echo "systemctl failed — starting node directly..."
+    cd /opt/nova-os
+    nohup node server/index.js > /tmp/nova-server.log 2>&1 &
+    NOVA_PID=$!
+    echo "Started node as PID $NOVA_PID"
+  fi
+fi
+
+# Wait for server to be ready (up to 30 seconds)
+echo "Waiting for server to respond..."
 for i in $(seq 1 30); do
-  if curl -s http://localhost:3000 > /dev/null 2>&1; then
+  if curl -s --max-time 1 http://localhost:3000 > /dev/null 2>&1; then
     echo "Server ready after ${i}s"
     break
   fi
   sleep 1
+  if [ $i -eq 30 ]; then
+    echo "WARNING: server never came up — showing error screen"
+    # Write an error HTML to /tmp and point renderer at it
+    cat > /tmp/nova-error.html << 'ERRHTML'
+<!DOCTYPE html><html><head><title>NOVA OS Error</title>
+<style>
+body { margin:0; background:#0a0a1a; color:white; font-family:system-ui,sans-serif;
+       display:flex; align-items:center; justify-content:center; height:100vh; }
+.box { text-align:center; max-width:500px; padding:40px; }
+h1 { font-size:32px; margin-bottom:10px; }
+p { color:rgba(255,255,255,0.6); line-height:1.5; }
+code { display:block; background:rgba(255,255,255,0.08); padding:12px; border-radius:8px;
+       font-family:monospace; font-size:12px; margin-top:20px; text-align:left; }
+</style></head><body>
+<div class="box">
+  <h1>NOVA OS could not start</h1>
+  <p>The NOVA server did not respond. Try rebooting, or open a terminal
+     (Ctrl+Alt+F2) and run:</p>
+  <code>sudo systemctl status nova-server<br>journalctl -u nova-server -n 50</code>
+</div></body></html>
+ERRHTML
+  fi
 done
 
 # Launch NOVA OS fullscreen via nova-renderer
-# nova-renderer = fullscreen WebKitGTK view loading the full web OS
-# The web OS already has its own menubar, dock, and window manager
-# Shows as "nova-renderer" in process lists, not "chromium"
-#
-# We use nova-renderer (simple, reliable) instead of nova-shell (experimental)
-# because nova-shell needs a compositor for its transparent panels/dock.
 if command -v nova-renderer >/dev/null 2>&1; then
   echo "Launching nova-renderer..."
-  exec nova-renderer
+  # If the error screen exists (server never came up), point the renderer at it
+  if [ -f /tmp/nova-error.html ]; then
+    exec nova-renderer --url file:///tmp/nova-error.html
+  else
+    exec nova-renderer
+  fi
 elif command -v nova-shell >/dev/null 2>&1; then
   echo "nova-renderer missing, falling back to nova-shell..."
   exec nova-shell
