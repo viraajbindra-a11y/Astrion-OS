@@ -1,4 +1,4 @@
-name: Build NOVA OS Desktop App
+name: Build & Release NOVA OS Desktop App
 
 on:
   workflow_dispatch:
@@ -9,12 +9,36 @@ on:
       - 'css/**'
       - 'js/**'
       - 'index.html'
+      - 'assets/**'
 
 permissions:
   contents: write
 
 jobs:
+  # ───────────────────────────────────────────────
+  # 1. Compute a new auto-incrementing version tag
+  # ───────────────────────────────────────────────
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.compute.outputs.version }}
+      tag: ${{ steps.compute.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compute version
+        id: compute
+        run: |
+          BASE=$(node -p "require('./installer/package.json').version.split('.').slice(0,2).join('.')")
+          VERSION="${BASE}.${{ github.run_number }}"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag=v$VERSION" >> $GITHUB_OUTPUT
+          echo "Building NOVA OS $VERSION"
+
+  # ───────────────────────────────────────────────
+  # 2. Build Mac / Linux / Windows in parallel
+  # ───────────────────────────────────────────────
   build:
+    needs: version
     strategy:
       fail-fast: false
       matrix:
@@ -36,6 +60,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+
+      - name: Set version in package.json
+        shell: bash
+        working-directory: installer
+        run: |
+          node -e "const fs=require('fs');const pkg=require('./package.json');pkg.version='${{ needs.version.outputs.version }}';fs.writeFileSync('./package.json',JSON.stringify(pkg,null,2));"
+          echo "package.json version:"
+          node -p "require('./package.json').version"
 
       - name: Copy web app files
         shell: bash
@@ -64,6 +96,56 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: nova-os-${{ matrix.platform }}
-          path: installer/dist/*
-          if-no-files-found: error
+          path: |
+            installer/dist/*.dmg
+            installer/dist/*.exe
+            installer/dist/*.AppImage
+            installer/dist/*.yml
+            installer/dist/*.blockmap
+          if-no-files-found: warn
           retention-days: 30
+
+  # ───────────────────────────────────────────────
+  # 3. Create a GitHub Release with all platform builds
+  # ───────────────────────────────────────────────
+  release:
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Flatten artifacts into release folder
+        run: |
+          mkdir -p release
+          find artifacts -type f \
+            \( -name "*.dmg" -o -name "*.exe" -o -name "*.AppImage" \
+               -o -name "*.yml" -o -name "*.blockmap" \) \
+            -exec cp {} release/ \;
+          echo "Files in release:"
+          ls -la release/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ needs.version.outputs.tag }}
+          name: NOVA OS ${{ needs.version.outputs.version }}
+          body: |
+            **NOVA OS ${{ needs.version.outputs.version }}** — auto-built from commit ${{ github.sha }}
+
+            Commit message: ${{ github.event.head_commit.message }}
+
+            ### Downloads
+            - **macOS:** `.dmg`
+            - **Windows:** `.exe`
+            - **Linux:** `.AppImage`
+
+            The desktop app will auto-update to this version on next launch.
+          files: release/*
+          draft: false
+          prerelease: false
+          fail_on_unmatched_files: false
+          token: ${{ secrets.GITHUB_TOKEN }}
