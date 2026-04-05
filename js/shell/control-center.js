@@ -116,12 +116,37 @@ function open() {
 
   // Toggle handlers
   ccEl.querySelectorAll('[data-toggle]').forEach(el => {
-    el.addEventListener('click', () => {
+    el.addEventListener('click', async () => {
       const key = el.dataset.toggle;
-      if (key === 'wifi') { wifiOn = !wifiOn; }
-      else if (key === 'bluetooth') { bluetoothOn = !bluetoothOn; }
-      else if (key === 'airdrop') { airdropOn = !airdropOn; }
-      else if (key === 'focus') { focusOn = !focusOn; }
+      // Clicking Wi-Fi tile: open the real Wi-Fi picker
+      if (key === 'wifi') {
+        close();
+        const { openWifiPicker } = await import('./wifi-picker.js');
+        openWifiPicker();
+        return;
+      }
+      // Clicking Bluetooth tile: open the real Bluetooth picker
+      if (key === 'bluetooth') {
+        close();
+        const { openBluetoothPicker } = await import('./bluetooth-picker.js');
+        openBluetoothPicker();
+        return;
+      }
+      if (key === 'airdrop') { airdropOn = !airdropOn; }
+      else if (key === 'focus') {
+        close();
+        const { setFocusMode, getFocusState } = await import('./focus-mode.js');
+        const st = getFocusState();
+        setFocusMode(st.enabled ? 'none' : 'dnd');
+        return;
+      }
+      else if (key === 'dnd') {
+        const { setFocusMode, getFocusState } = await import('./focus-mode.js');
+        const st = getFocusState();
+        setFocusMode(st.enabled ? 'none' : 'dnd');
+        el.classList.toggle('active');
+        return;
+      }
       else if (key === 'lock') {
         close();
         import('./lock-screen.js').then(m => m.lockScreen());
@@ -139,18 +164,48 @@ function open() {
     });
   });
 
-  // Slider handlers
+  // Slider handlers — wire to real server endpoints
   ccEl.querySelectorAll('[data-slider]').forEach(slider => {
-    slider.addEventListener('input', () => {
+    let debounce = null;
+    slider.addEventListener('input', async () => {
       const key = slider.dataset.slider;
+      const level = parseInt(slider.value);
       if (key === 'brightness') {
-        brightness = parseInt(slider.value);
-        document.getElementById('desktop').style.filter = `brightness(${brightness / 100})`;
+        brightness = level;
+        // Live preview — apply CSS filter as fallback
+        const desktop = document.getElementById('desktop');
+        if (desktop) desktop.style.filter = `brightness(${Math.max(0.3, level / 100)})`;
       } else if (key === 'volume') {
-        volume = parseInt(slider.value);
+        volume = level;
       }
+
+      // Debounce server call — don't spam pactl
+      if (debounce) clearTimeout(debounce);
+      debounce = setTimeout(async () => {
+        try {
+          await fetch(`/api/${key}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ level }),
+          });
+        } catch {}
+      }, 120);
     });
   });
+
+  // Load current values from server
+  fetch('/api/volume').then(r => r.json()).then(d => {
+    if (d.level != null) {
+      const s = ccEl.querySelector('[data-slider="volume"]');
+      if (s) { s.value = d.level; volume = d.level; }
+    }
+  }).catch(() => {});
+  fetch('/api/brightness').then(r => r.json()).then(d => {
+    if (d.level != null) {
+      const s = ccEl.querySelector('[data-slider="brightness"]');
+      if (s) { s.value = d.level; brightness = d.level; }
+    }
+  }).catch(() => {});
 }
 
 function close() {

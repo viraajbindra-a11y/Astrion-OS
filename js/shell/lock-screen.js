@@ -125,6 +125,13 @@ function doShutdown(message) {
   `;
   document.body.appendChild(screen);
 
+  // Play shutdown chime
+  import('../kernel/sound.js').then(m => m.sounds.shutdown()).catch(() => {});
+
+  // Hit the real server endpoint — on the ISO this actually shuts down
+  const endpoint = message.includes('Restart') ? '/api/system/restart' : '/api/system/shutdown';
+  fetch(endpoint, { method: 'POST' }).catch(() => {});
+
   setTimeout(() => {
     if (message.includes('Restart')) {
       location.reload();
