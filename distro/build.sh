@@ -486,24 +486,43 @@ xset s off
 xset -dpms
 xset s noblank
 
+# Log everything to a file so we can debug if things go wrong
+exec > /tmp/nova-startup.log 2>&1
+set -x
+
 # Start the NOVA OS server (serves the web app content)
 cd /opt/nova-os
 node server/index.js &
 NOVA_PID=$!
+echo "Started server PID $NOVA_PID"
 
 # Wait for server to be ready
 for i in $(seq 1 30); do
   if curl -s http://localhost:3000 > /dev/null 2>&1; then
+    echo "Server ready after ${i}s"
     break
   fi
   sleep 1
 done
 
-# Launch the NOVA OS native shell — this IS the desktop
-# nova-shell = our own C/GTK3 renderer with native panel, dock, window manager
-# It uses WebKitGTK to render app content but is NOT a browser
-# Shows as "nova-shell" in process lists, not "chromium"
-exec nova-shell 2>/dev/null
+# Launch NOVA OS fullscreen via nova-renderer
+# nova-renderer = fullscreen WebKitGTK view loading the full web OS
+# The web OS already has its own menubar, dock, and window manager
+# Shows as "nova-renderer" in process lists, not "chromium"
+#
+# We use nova-renderer (simple, reliable) instead of nova-shell (experimental)
+# because nova-shell needs a compositor for its transparent panels/dock.
+if command -v nova-renderer >/dev/null 2>&1; then
+  echo "Launching nova-renderer..."
+  exec nova-renderer
+elif command -v nova-shell >/dev/null 2>&1; then
+  echo "nova-renderer missing, falling back to nova-shell..."
+  exec nova-shell
+else
+  echo "ERROR: no NOVA renderer found!"
+  sleep 5
+  exit 1
+fi
 XINITRC
 chown nova:nova /home/nova/.xinitrc
 chmod +x /home/nova/.xinitrc
