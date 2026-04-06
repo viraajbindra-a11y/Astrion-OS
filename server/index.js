@@ -478,6 +478,138 @@ app.get('/api/battery', async (req, res) => {
   }
 });
 
+// ─── System Info (Task Manager / Activity Monitor) ───
+app.get('/api/system/processes', async (req, res) => {
+  const r = await runShell('ps', ['aux', '--sort=-pcpu']);
+  if (r.code !== 0) return res.json({ processes: [] });
+  const lines = r.stdout.split('\n').filter(Boolean);
+  const header = lines[0];
+  const processes = lines.slice(1).map(line => {
+    const parts = line.trim().split(/\s+/);
+    return {
+      user: parts[0],
+      pid: parseInt(parts[1]),
+      cpu: parseFloat(parts[2]),
+      mem: parseFloat(parts[3]),
+      vsz: parseInt(parts[4]),
+      rss: parseInt(parts[5]),
+      tty: parts[6],
+      stat: parts[7],
+      start: parts[8],
+      time: parts[9],
+      command: parts.slice(10).join(' '),
+    };
+  });
+  res.json({ processes });
+});
+
+app.get('/api/system/cpu', async (req, res) => {
+  try {
+    const fs = await import('fs/promises');
+    const stat1 = await fs.readFile('/proc/stat', 'utf-8');
+    await new Promise(r => setTimeout(r, 200));
+    const stat2 = await fs.readFile('/proc/stat', 'utf-8');
+
+    const parse = (s) => {
+      const line = s.split('\n')[0]; // cpu line
+      const parts = line.split(/\s+/).slice(1).map(Number);
+      const idle = parts[3] + (parts[4] || 0);
+      const total = parts.reduce((a, b) => a + b, 0);
+      return { idle, total };
+    };
+    const a = parse(stat1), b = parse(stat2);
+    const idle = b.idle - a.idle;
+    const total = b.total - a.total;
+    const usage = total > 0 ? Math.round(((total - idle) / total) * 100) : 0;
+
+    // Count cores
+    const cpuInfo = await fs.readFile('/proc/cpuinfo', 'utf-8');
+    const cores = (cpuInfo.match(/^processor/gm) || []).length;
+    const model = (cpuInfo.match(/model name\s*:\s*(.+)/i) || [])[1] || 'Unknown';
+
+    // Uptime
+    const uptimeRaw = await fs.readFile('/proc/uptime', 'utf-8');
+    const uptimeSec = Math.floor(parseFloat(uptimeRaw.split(' ')[0]));
+
+    res.json({ usage, cores, model: model.trim(), uptime: uptimeSec });
+  } catch (e) {
+    res.json({ usage: 0, cores: 1, model: 'Unknown', uptime: 0 });
+  }
+});
+
+app.get('/api/system/memory', async (req, res) => {
+  try {
+    const fs = await import('fs/promises');
+    const meminfo = await fs.readFile('/proc/meminfo', 'utf-8');
+    const get = (key) => {
+      const m = meminfo.match(new RegExp(`${key}:\\s+(\\d+)`));
+      return m ? parseInt(m[1]) : 0;
+    };
+    const total = get('MemTotal');
+    const free = get('MemFree');
+    const buffers = get('Buffers');
+    const cached = get('Cached');
+    const available = get('MemAvailable');
+    const swapTotal = get('SwapTotal');
+    const swapFree = get('SwapFree');
+
+    res.json({
+      total: Math.round(total / 1024), // MB
+      used: Math.round((total - available) / 1024),
+      available: Math.round(available / 1024),
+      cached: Math.round((buffers + cached) / 1024),
+      swapTotal: Math.round(swapTotal / 1024),
+      swapUsed: Math.round((swapTotal - swapFree) / 1024),
+    });
+  } catch {
+    res.json({ total: 8192, used: 4096, available: 4096, cached: 0, swapTotal: 0, swapUsed: 0 });
+  }
+});
+
+app.get('/api/system/disk', async (req, res) => {
+  const r = await runShell('df', ['-h', '--output=source,fstype,size,used,avail,pcent,target']);
+  const lines = r.stdout.split('\n').filter(Boolean).slice(1);
+  const disks = lines
+    .filter(l => !l.includes('tmpfs') && !l.includes('devtmpfs') && !l.includes('squashfs'))
+    .map(l => {
+      const parts = l.trim().split(/\s+/);
+      return { device: parts[0], fstype: parts[1], size: parts[2], used: parts[3], avail: parts[4], percent: parts[5], mount: parts[6] };
+    });
+  res.json({ disks });
+});
+
+app.get('/api/system/network-stats', async (req, res) => {
+  try {
+    const fs = await import('fs/promises');
+    const net = await fs.readFile('/proc/net/dev', 'utf-8');
+    const lines = net.split('\n').filter(l => l.includes(':'));
+    const interfaces = lines.map(l => {
+      const [name, rest] = l.split(':');
+      const nums = rest.trim().split(/\s+/).map(Number);
+      return { name: name.trim(), rxBytes: nums[0], txBytes: nums[8], rxPackets: nums[1], txPackets: nums[9] };
+    }).filter(i => i.name !== 'lo');
+    res.json({ interfaces });
+  } catch {
+    res.json({ interfaces: [] });
+  }
+});
+
+app.post('/api/system/kill', async (req, res) => {
+  const { pid, signal } = req.body;
+  if (!pid) return res.status(400).json({ error: 'pid required' });
+  const r = await runShell('kill', [signal || '-15', String(pid)]);
+  res.json({ ok: r.code === 0 });
+});
+
+app.get('/api/system/services', async (req, res) => {
+  const r = await runShell('systemctl', ['list-units', '--type=service', '--all', '--no-pager', '--plain', '--no-legend']);
+  const services = r.stdout.split('\n').filter(Boolean).map(line => {
+    const parts = line.trim().split(/\s+/);
+    return { name: parts[0], load: parts[1], active: parts[2], sub: parts[3], description: parts.slice(4).join(' ') };
+  });
+  res.json({ services });
+});
+
 // ─── System Actions ───
 app.post('/api/system/shutdown', async (req, res) => {
   res.json({ ok: true });
