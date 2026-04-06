@@ -241,6 +241,24 @@ app.get('/app/:appId', (req, res) => {
 </html>`);
 });
 
+// ─── Launch real browser (Firefox/Chromium) for fast browsing ───
+app.post('/api/browser/open', async (req, res) => {
+  const { url } = req.body;
+  if (!url) return res.status(400).json({ error: 'url required' });
+  // Try browsers in order of preference
+  const browsers = ['firefox-esr', 'firefox', 'chromium', 'chromium-browser', 'google-chrome'];
+  for (const browser of browsers) {
+    const check = await runShell('which', [browser]);
+    if (check.code === 0) {
+      runShell(browser, ['--new-window', url]); // Don't await — it stays open
+      return res.json({ ok: true, browser });
+    }
+  }
+  // Fallback: xdg-open
+  runShell('xdg-open', [url]);
+  res.json({ ok: true, browser: 'xdg-open' });
+});
+
 // ═══════════════════════════════════════════════════════════
 // Browser Proxy — fetches external pages and rewrites them so
 // they can be rendered inside the NOVA browser iframe without
