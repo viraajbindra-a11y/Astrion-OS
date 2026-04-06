@@ -34,10 +34,10 @@
 #define NOVA_VERSION       "1.0"
 #define NOVA_SERVER_URL    "http://localhost:3000"
 
-#define PANEL_HEIGHT       28
-#define DOCK_HEIGHT        64
-#define DOCK_ICON_SIZE     48
-#define DOCK_PADDING       8
+#define PANEL_HEIGHT       32
+#define DOCK_HEIGHT        78
+#define DOCK_ICON_SIZE     64
+#define DOCK_PADDING       10
 
 #define COLOR_BG_R         0.04
 #define COLOR_BG_G         0.04
@@ -143,9 +143,13 @@ static NovaApp app_registry[] = {
     { "clock",           "Clock",            "\xE2\x8F\xB0",     "/app/clock",            FALSE, TRUE  },
     { "draw",            "Draw",             "\xF0\x9F\x8E\xA8", "/app/draw",             FALSE, FALSE },
     { "reminders",       "Reminders",        "\xE2\x9C\x85",     "/app/reminders",        FALSE, TRUE  },
-    { "activity-monitor","Activity Monitor", "\xF0\x9F\x93\x8A", "/app/activity-monitor", FALSE, TRUE  },
+    { "activity-monitor","Task Manager",     "\xF0\x9F\x93\x8A", "/app/activity-monitor", FALSE, TRUE  },
+    { "messages",        "Messages",         "\xF0\x9F\x92\xAC", "/app/messages",         TRUE,  TRUE  },
     { "vault",           "Vault",            "\xF0\x9F\x94\x90", "/app/vault",            TRUE,  TRUE  },
-    { "appstore",        "App Store",        "\xF0\x9F\x9B\x8D",  "/app/appstore",         FALSE, TRUE  },
+    { "screen-recorder", "Screen Recorder",  "\xE2\x8F\xBA\xEF\xB8\x8F", "/app/screen-recorder",  FALSE, TRUE  },
+    { "trash",           "Trash",            "\xF0\x9F\x97\x91\xEF\xB8\x8F", "/app/trash",      TRUE,  TRUE  },
+    { "installer",       "Install Astrion",  "\xF0\x9F\x92\xBF", "/app/installer",        FALSE, TRUE  },
+    { "appstore",        "App Store",        "\xF0\x9F\x9B\x8D",  "/app/appstore",         TRUE,  TRUE  },
     { NULL, NULL, NULL, NULL, FALSE, FALSE } /* Sentinel */
 };
 
@@ -313,21 +317,21 @@ static void apply_css_theme(void)
         "}\n"
         "\n"
         ".nova-panel label {\n"
-        "  font-size: 13px;\n"
+        "  font-size: 18px;\n"
         "  font-weight: 500;\n"
         "  color: #e0e0e0;\n"
-        "  padding: 0 8px;\n"
+        "  padding: 0 10px;\n"
         "}\n"
         "\n"
         ".nova-panel-apple {\n"
         "  font-weight: 700;\n"
-        "  font-size: 14px;\n"
+        "  font-size: 20px;\n"
         "  color: #ffffff;\n"
-        "  padding: 0 12px;\n"
+        "  padding: 0 14px;\n"
         "}\n"
         "\n"
         ".nova-panel-right label {\n"
-        "  font-size: 12px;\n"
+        "  font-size: 16px;\n"
         "  color: #c0c0c0;\n"
         "}\n"
         "\n"
@@ -339,9 +343,9 @@ static void apply_css_theme(void)
         "}\n"
         "\n"
         ".nova-dock-icon {\n"
-        "  font-size: 32px;\n"
-        "  padding: 4px 6px;\n"
-        "  border-radius: 12px;\n"
+        "  font-size: 42px;\n"
+        "  padding: 6px 8px;\n"
+        "  border-radius: 14px;\n"
         "  transition: 200ms ease;\n"
         "}\n"
         "\n"
@@ -358,6 +362,10 @@ static void apply_css_theme(void)
         "  background: #1e1e2e;\n"
         "  border: 1px solid #3a3a4a;\n"
         "  border-radius: 12px;\n"
+        "}\n"
+        "\n"
+        ".nova-launcher {\n"
+        "  min-width: 500px;\n"
         "}\n"
         "\n"
         ".nova-launcher entry {\n"
@@ -851,7 +859,7 @@ static void create_dock(void)
         GtkWidget *btn = gtk_button_new();
         GtkWidget *icon_label = gtk_label_new(app_registry[i].icon);
         PangoAttrList *attrs = pango_attr_list_new();
-        pango_attr_list_insert(attrs, pango_attr_size_new(28 * PANGO_SCALE));
+        pango_attr_list_insert(attrs, pango_attr_size_new(42 * PANGO_SCALE));
         gtk_label_set_attributes(GTK_LABEL(icon_label), attrs);
         pango_attr_list_unref(attrs);
         gtk_container_add(GTK_CONTAINER(btn), icon_label);
