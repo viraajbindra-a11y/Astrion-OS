@@ -453,6 +453,31 @@ app.post('/api/brightness', async (req, res) => {
   }
 });
 
+// ─── Battery ───
+app.get('/api/battery', async (req, res) => {
+  try {
+    const fs = await import('fs/promises');
+    // Find battery in /sys/class/power_supply/
+    const supplies = await fs.readdir('/sys/class/power_supply').catch(() => []);
+    const bat = supplies.find(s => s.startsWith('BAT'));
+    if (!bat) return res.json({ level: 100, charging: true, available: false });
+
+    const dir = `/sys/class/power_supply/${bat}`;
+    const [capacityRaw, statusRaw] = await Promise.all([
+      fs.readFile(`${dir}/capacity`, 'utf-8').catch(() => '100'),
+      fs.readFile(`${dir}/status`, 'utf-8').catch(() => 'Unknown'),
+    ]);
+    res.json({
+      level: parseInt(capacityRaw.trim()),
+      charging: statusRaw.trim() === 'Charging' || statusRaw.trim() === 'Full',
+      status: statusRaw.trim(),
+      available: true,
+    });
+  } catch {
+    res.json({ level: 100, charging: true, available: false });
+  }
+});
+
 // ─── System Actions ───
 app.post('/api/system/shutdown', async (req, res) => {
   res.json({ ok: true });

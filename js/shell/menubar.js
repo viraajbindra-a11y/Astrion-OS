@@ -349,11 +349,11 @@ function showForceQuitDialog() {
 }
 
 function initBattery() {
-  let battery = parseInt(localStorage.getItem('nova-battery') || '100');
   const pctEl = document.getElementById('menubar-battery-pct');
   const fillEl = document.getElementById('battery-fill');
+  let battery = 100;
 
-  function updateBattery() {
+  function updateDisplay() {
     if (pctEl) pctEl.textContent = battery + '%';
     if (fillEl) {
       const fillWidth = Math.round(14 * (battery / 100));
@@ -361,26 +361,35 @@ function initBattery() {
     }
   }
 
-  updateBattery();
+  async function fetchBattery() {
+    try {
+      const res = await fetch('/api/battery');
+      const data = await res.json();
+      if (data.available) {
+        battery = data.level;
+        updateDisplay();
+        // Store for offline use
+        localStorage.setItem('nova-battery', String(battery));
+        return;
+      }
+    } catch {}
+    // Fallback to simulated battery if /api/battery not available
+    battery = parseInt(localStorage.getItem('nova-battery') || '100');
+    updateDisplay();
+  }
 
-  // Drain 1% every 3 minutes (simulated)
+  // Initial read + poll every 30 seconds
+  fetchBattery();
+  setInterval(fetchBattery, 30000);
+
+  // Fallback drain for web-only mode (no server battery endpoint)
   setInterval(() => {
     if (battery > 5) {
       battery--;
       localStorage.setItem('nova-battery', String(battery));
-      updateBattery();
+      updateDisplay();
     }
   }, 180000);
-
-  // If it's been a while, simulate charging back up
-  const lastTime = parseInt(localStorage.getItem('nova-battery-time') || '0');
-  const now = Date.now();
-  if (now - lastTime > 3600000) { // More than 1 hour since last session
-    battery = 100;
-    localStorage.setItem('nova-battery', '100');
-    updateBattery();
-  }
-  localStorage.setItem('nova-battery-time', String(now));
 }
 
 function showAboutDialog() {
