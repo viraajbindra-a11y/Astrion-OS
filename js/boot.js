@@ -265,8 +265,8 @@ import { initVolumeHud } from './shell/volume-hud.js';
   initIdleLock();
   initVolumeHud();
 
-  // Boot chime
-  setTimeout(() => sounds.boot(), 100);
+  // Boot chime (disabled — users found it annoying)
+  // setTimeout(() => sounds.boot(), 100);
 
   // Desktop ready
   await sleep(300);

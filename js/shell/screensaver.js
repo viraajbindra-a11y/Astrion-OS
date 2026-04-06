@@ -12,17 +12,20 @@ let checkInterval = null;
 let active = false;
 
 export function initScreensaver() {
-  // Track activity
+  // Track REAL user activity (only events with isTrusted = true)
   const events = ['mousemove', 'mousedown', 'keydown', 'wheel', 'touchstart'];
   events.forEach(evt => {
-    document.addEventListener(evt, () => {
-      lastActivity = Date.now();
-      if (active) dismiss();
+    document.addEventListener(evt, (e) => {
+      if (e.isTrusted) {
+        lastActivity = Date.now();
+        if (active) dismiss();
+      }
     }, { passive: true });
   });
 
   // Check every 10s
   checkInterval = setInterval(checkIdle, 10000);
+  console.log('[Screensaver] Initialized, timeout:', localStorage.getItem(SCREENSAVER_KEY) || DEFAULT_TIMEOUT, 'min');
 }
 
 function checkIdle() {

@@ -288,14 +288,15 @@ async function syncTime() {
     } catch {}
   }
 
-  // Set system timezone based on browser's detected timezone
+  // Set system timezone from IP geolocation (worldtimeapi returns timezone)
   try {
-    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
-    if (tz) {
+    const tzRes = await fetch('https://worldtimeapi.org/api/ip', { signal: AbortSignal.timeout(5000) });
+    const tzData = await tzRes.json();
+    if (tzData.timezone) {
       fetch('/api/system/set-timezone', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ timezone: tz }),
+        body: JSON.stringify({ timezone: tzData.timezone }),
       }).catch(() => {});
     }
   } catch {}
