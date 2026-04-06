@@ -157,6 +157,26 @@ apt-get install -y -qq firmware-linux firmware-linux-nonfree firmware-misc-nonfr
 apt-get install -y -qq grub-efi-amd64-bin grub-pc-bin grub-common || true
 
 # ═══════════════════════════════════════════════════
+# Waydroid — Android runtime for Linux
+# Lets users run Android apps (including Google Play Store)
+# inside Zenith OS. Needs first-run init to download Android image.
+# https://waydro.id
+# ═══════════════════════════════════════════════════
+echo "Installing Waydroid (Android runtime)..."
+curl -fsSL https://repo.waydro.id/waydroid.gpg \
+  | gpg --dearmor -o /usr/share/keyrings/waydroid.gpg 2>/dev/null || true
+
+echo "deb [signed-by=/usr/share/keyrings/waydroid.gpg] https://repo.waydro.id/ bookworm main" \
+  > /etc/apt/sources.list.d/waydroid.list 2>/dev/null || true
+
+apt-get update -qq 2>/dev/null || true
+apt-get install -y -qq waydroid 2>/dev/null || \
+  echo "  Waydroid package not available — skipping"
+
+# Cage: minimal Wayland compositor for running Waydroid under X11
+apt-get install -y -qq cage weston 2>/dev/null || true
+
+# ═══════════════════════════════════════════════════
 # Linux-Surface kernel — adds full support for Microsoft Surface devices
 # (multi-touch, pen pressure, accurate battery, sensors, Surface Dock)
 # https://github.com/linux-surface/linux-surface

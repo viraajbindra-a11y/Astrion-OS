@@ -658,6 +658,69 @@ app.post('/api/apps/launch', async (req, res) => {
   res.json({ ok: true });
 });
 
+// ═══════════════════════════════════════════════════════════
+// Waydroid — Android Runtime
+// ═══════════════════════════════════════════════════════════
+app.get('/api/android/status', async (req, res) => {
+  const installed = await runShell('which', ['waydroid']);
+  if (installed.code !== 0) return res.json({ available: false, reason: 'Waydroid not installed' });
+
+  const status = await runShell('waydroid', ['status']);
+  const running = /Session:\s+RUNNING/i.test(status.stdout);
+  const initialized = !/not initialized/i.test(status.stdout);
+  res.json({ available: true, initialized, running });
+});
+
+app.post('/api/android/init', async (req, res) => {
+  // Downloads ~800MB Android system image on first run
+  res.json({ status: 'initializing', message: 'Downloading Android image (~800MB). This takes a few minutes...' });
+  // Run in background — it's slow
+  const { gapps } = req.body || {};
+  const args = ['init', '-s', 'GAPPS'];
+  if (!gapps) args.splice(2); // just 'init' without GApps
+  runShell('sudo', ['waydroid', ...args]).then(r => {
+    console.log('Waydroid init:', r.code === 0 ? 'OK' : 'FAILED', r.stderr?.slice(0, 200));
+  });
+});
+
+app.post('/api/android/start', async (req, res) => {
+  // Start Waydroid session (needs Wayland — use cage as nested compositor)
+  res.json({ status: 'starting' });
+  // Launch in cage (minimal Wayland compositor) so it works under X11
+  runShell('cage', ['waydroid', 'show-full-ui']).catch(() => {
+    // Fallback: try direct launch
+    runShell('waydroid', ['show-full-ui']);
+  });
+});
+
+app.post('/api/android/stop', async (req, res) => {
+  await runShell('waydroid', ['session', 'stop']);
+  res.json({ ok: true });
+});
+
+app.post('/api/android/install-apk', async (req, res) => {
+  const { path } = req.body;
+  if (!path) return res.status(400).json({ error: 'path required' });
+  const r = await runShell('waydroid', ['app', 'install', path]);
+  res.json({ ok: r.code === 0, output: r.stdout || r.stderr });
+});
+
+app.get('/api/android/apps', async (req, res) => {
+  const r = await runShell('waydroid', ['app', 'list']);
+  const apps = r.stdout.split('\n').filter(Boolean).map(line => {
+    const parts = line.trim().split(/\s+/);
+    return { packageName: parts[0], name: parts.slice(1).join(' ') || parts[0] };
+  });
+  res.json({ apps });
+});
+
+app.post('/api/android/launch-app', async (req, res) => {
+  const { packageName } = req.body;
+  if (!packageName) return res.status(400).json({ error: 'packageName required' });
+  runShell('waydroid', ['app', 'launch', packageName]);
+  res.json({ ok: true });
+});
+
 // ─── System Actions ───
 app.post('/api/system/shutdown', async (req, res) => {
   res.json({ ok: true });

@@ -98,6 +98,7 @@ function initAppStore(container) {
           <button class="appstore-tab" data-tab="top">Top Charts</button>
           <button class="appstore-tab" data-tab="categories">Categories</button>
           <button class="appstore-tab" data-tab="linux">Linux Apps</button>
+          <button class="appstore-tab" data-tab="android">Android</button>
           <button class="appstore-tab" data-tab="skills">AI Skills</button>
         </div>
         <input type="text" class="appstore-search" placeholder="Search apps...">
@@ -134,6 +135,7 @@ function initAppStore(container) {
       case 'top': renderTopCharts(); break;
       case 'categories': renderCategories(); break;
       case 'linux': renderLinuxApps(); break;
+      case 'android': renderAndroidApps(); break;
       case 'skills': renderSkills(); break;
     }
   }
@@ -342,6 +344,139 @@ function initAppStore(container) {
       e.stopPropagation();
       if (realApp) processManager.launch(app.id);
     });
+  }
+
+  // ─── Android Apps tab (Waydroid integration) ───
+  async function renderAndroidApps() {
+    content.innerHTML = `<div style="padding:30px; text-align:center; color:rgba(255,255,255,0.4);">Checking Android runtime...</div>`;
+
+    try {
+      const res = await fetch('/api/android/status');
+      const status = await res.json();
+
+      if (!status.available) {
+        content.innerHTML = `
+          <div style="padding:40px; text-align:center;">
+            <div style="font-size:64px; margin-bottom:16px;">\uD83E\uDD16</div>
+            <div style="font-size:18px; font-weight:600; margin-bottom:8px;">Android Apps</div>
+            <div style="font-size:13px; color:rgba(255,255,255,0.5); max-width:400px; margin:0 auto 20px; line-height:1.6;">
+              Run Android apps on Zenith OS using Waydroid. This feature requires the Waydroid package which isn't installed yet.
+            </div>
+            <div style="font-size:11px; color:rgba(255,255,255,0.3);">Install Waydroid from the Terminal:<br><code style="background:rgba(255,255,255,0.08); padding:2px 8px; border-radius:4px;">sudo apt install waydroid</code></div>
+          </div>
+        `;
+        return;
+      }
+
+      if (!status.initialized) {
+        content.innerHTML = `
+          <div style="padding:40px; text-align:center;">
+            <div style="font-size:64px; margin-bottom:16px;">\uD83E\uDD16</div>
+            <div style="font-size:18px; font-weight:600; margin-bottom:8px;">Set Up Android Apps</div>
+            <div style="font-size:13px; color:rgba(255,255,255,0.5); max-width:440px; margin:0 auto 20px; line-height:1.6;">
+              Waydroid is installed but needs to download the Android system image (~800 MB). This only happens once. You can choose to include Google Play Store.
+            </div>
+            <div style="display:flex; gap:10px; justify-content:center;">
+              <button id="android-init" style="padding:11px 24px; border-radius:10px; border:none; background:var(--accent); color:white; font-size:13px; font-weight:600; cursor:pointer; font-family:var(--font);">Set Up (without Play Store)</button>
+              <button id="android-init-gapps" style="padding:11px 24px; border-radius:10px; border:none; background:linear-gradient(135deg, #34a853, #1e8e3e); color:white; font-size:13px; font-weight:600; cursor:pointer; font-family:var(--font);">Set Up with Google Play</button>
+            </div>
+            <div style="margin-top:16px; font-size:10px; color:rgba(255,255,255,0.3);">Google Play requires ~1.2 GB download and GApps agreement</div>
+          </div>
+        `;
+
+        content.querySelector('#android-init')?.addEventListener('click', async () => {
+          content.innerHTML = `<div style="padding:60px; text-align:center;"><div style="font-size:48px; margin-bottom:12px;">\u23F3</div><div style="font-size:14px;">Downloading Android image...</div><div style="font-size:11px; color:rgba(255,255,255,0.4); margin-top:8px;">This takes 3-5 minutes. Don't close this window.</div></div>`;
+          await fetch('/api/android/init', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+          setTimeout(() => renderAndroidApps(), 5000);
+        });
+
+        content.querySelector('#android-init-gapps')?.addEventListener('click', async () => {
+          content.innerHTML = `<div style="padding:60px; text-align:center;"><div style="font-size:48px; margin-bottom:12px;">\u23F3</div><div style="font-size:14px;">Downloading Android + Google Play...</div><div style="font-size:11px; color:rgba(255,255,255,0.4); margin-top:8px;">This takes 5-10 minutes. Don't close this window.</div></div>`;
+          await fetch('/api/android/init', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ gapps: true }) });
+          setTimeout(() => renderAndroidApps(), 5000);
+        });
+        return;
+      }
+
+      // Waydroid is initialized — show Android apps
+      content.innerHTML = `
+        <div style="padding:20px;">
+          <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:20px;">
+            <div>
+              <div style="font-size:16px; font-weight:600;">\uD83E\uDD16 Android Apps</div>
+              <div style="font-size:11px; color:rgba(255,255,255,0.5);">Powered by Waydroid \u00B7 ${status.running ? '\uD83D\uDFE2 Running' : '\u26AA Stopped'}</div>
+            </div>
+            <div style="display:flex; gap:8px;">
+              ${status.running
+                ? `<button id="android-stop" style="padding:8px 16px; border-radius:8px; border:1px solid rgba(255,59,48,0.3); background:transparent; color:#ff6b6b; font-size:12px; cursor:pointer; font-family:var(--font);">Stop Android</button>`
+                : `<button id="android-start" style="padding:8px 16px; border-radius:8px; border:none; background:var(--accent); color:white; font-size:12px; font-weight:500; cursor:pointer; font-family:var(--font);">Launch Android</button>`
+              }
+            </div>
+          </div>
+
+          <div style="display:grid; grid-template-columns:repeat(auto-fill, minmax(200px, 1fr)); gap:12px; margin-bottom:20px;">
+            <div style="padding:20px; border-radius:12px; background:rgba(52,168,83,0.12); border:1px solid rgba(52,168,83,0.2); text-align:center; cursor:pointer;" id="android-play">
+              <div style="font-size:36px; margin-bottom:8px;">\u25B6\uFE0F</div>
+              <div style="font-size:13px; font-weight:600;">Open Play Store</div>
+              <div style="font-size:10px; color:rgba(255,255,255,0.5);">Browse & install apps</div>
+            </div>
+            <div style="padding:20px; border-radius:12px; background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.08); text-align:center; cursor:pointer;" id="android-full">
+              <div style="font-size:36px; margin-bottom:8px;">\uD83D\uDCF1</div>
+              <div style="font-size:13px; font-weight:600;">Android Home</div>
+              <div style="font-size:10px; color:rgba(255,255,255,0.5);">Full Android launcher</div>
+            </div>
+          </div>
+
+          <div style="font-size:12px; font-weight:600; color:rgba(255,255,255,0.6); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:10px;">Installed Android Apps</div>
+          <div id="android-app-list"></div>
+        </div>
+      `;
+
+      // Bind buttons
+      content.querySelector('#android-start')?.addEventListener('click', async () => {
+        await fetch('/api/android/start', { method: 'POST' });
+        setTimeout(() => renderAndroidApps(), 2000);
+      });
+      content.querySelector('#android-stop')?.addEventListener('click', async () => {
+        await fetch('/api/android/stop', { method: 'POST' });
+        setTimeout(() => renderAndroidApps(), 1000);
+      });
+      content.querySelector('#android-play')?.addEventListener('click', async () => {
+        if (!status.running) await fetch('/api/android/start', { method: 'POST' });
+        await fetch('/api/android/launch-app', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ packageName: 'com.android.vending' }) });
+      });
+      content.querySelector('#android-full')?.addEventListener('click', async () => {
+        await fetch('/api/android/start', { method: 'POST' });
+      });
+
+      // Load installed Android apps
+      const appList = content.querySelector('#android-app-list');
+      try {
+        const appsRes = await fetch('/api/android/apps');
+        const { apps } = await appsRes.json();
+        if (apps.length === 0) {
+          appList.innerHTML = '<div style="color:rgba(255,255,255,0.3); font-size:12px;">No Android apps installed. Open the Play Store to get started.</div>';
+        } else {
+          appList.innerHTML = apps.map(a => `
+            <div style="display:flex; align-items:center; gap:10px; padding:8px 10px; border-radius:8px; margin-bottom:4px; cursor:pointer; transition:background 0.1s;"
+              onmouseenter="this.style.background='rgba(255,255,255,0.05)'" onmouseleave="this.style.background=''">
+              <div style="font-size:18px;">\uD83D\uDCE6</div>
+              <div style="flex:1; font-size:12px;">${escHtml(a.name || a.packageName)}</div>
+              <button class="android-launch" data-pkg="${escHtml(a.packageName)}" style="padding:4px 10px; border-radius:5px; border:none; background:rgba(255,255,255,0.08); color:white; font-size:10px; cursor:pointer; font-family:var(--font);">Open</button>
+            </div>
+          `).join('');
+          appList.querySelectorAll('.android-launch').forEach(btn => {
+            btn.addEventListener('click', () => {
+              fetch('/api/android/launch-app', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ packageName: btn.dataset.pkg }) });
+            });
+          });
+        }
+      } catch {
+        appList.innerHTML = '<div style="color:rgba(255,255,255,0.3); font-size:12px;">Could not load apps</div>';
+      }
+    } catch (err) {
+      content.innerHTML = `<div style="padding:40px; text-align:center; color:rgba(255,255,255,0.4);">Android runtime unavailable<br><span style="font-size:11px;">${err.message}</span></div>`;
+    }
   }
 
   // ─── Linux Apps tab (Flatpak integration) ───
