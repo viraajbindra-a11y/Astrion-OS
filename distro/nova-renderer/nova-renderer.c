@@ -307,11 +307,11 @@ int main(int argc, char *argv[])
 
         /* 2) Auto-detect from screen size if no config */
         if (zoom <= 0) {
-            if (screen_w >= 3600)       zoom = 1.5;
-            else if (screen_w >= 2700)  zoom = 1.5;
-            else if (screen_w >= 2400)  zoom = 1.4;
-            else if (screen_w >= 2000)  zoom = 1.3;
-            else if (screen_w >= 1800)  zoom = 1.15;
+            if (screen_w >= 3600)       zoom = 1.6;
+            else if (screen_w >= 2700)  zoom = 1.75;
+            else if (screen_w >= 2400)  zoom = 1.5;
+            else if (screen_w >= 2000)  zoom = 1.35;
+            else if (screen_w >= 1800)  zoom = 1.2;
             else                        zoom = 1.0;
         }
 
