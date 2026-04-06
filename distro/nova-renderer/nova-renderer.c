@@ -164,10 +164,23 @@ int main(int argc, char *argv[])
     signal(SIGINT, signal_handler);
     signal(SIGTERM, signal_handler);
 
+    /* ─── Get actual screen dimensions ─── */
+    GdkScreen *screen = gdk_screen_get_default();
+    int screen_w = gdk_screen_get_width(screen);
+    int screen_h = gdk_screen_get_height(screen);
+    g_print("[Zenith Renderer] Screen size: %dx%d\n", screen_w, screen_h);
+
     /* ─── Create the window ─── */
     window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
     gtk_window_set_title(GTK_WINDOW(window), NOVA_TITLE);
-    gtk_window_set_default_size(GTK_WINDOW(window), 1920, 1080);
+
+    /* Set size to ACTUAL screen dimensions — not hardcoded 1920x1080.
+     * gtk_window_fullscreen() requires a window manager to process the
+     * _NET_WM_STATE_FULLSCREEN hint. We don't run a WM, so we manually
+     * size + position the window to fill the screen. */
+    gtk_window_set_default_size(GTK_WINDOW(window), screen_w, screen_h);
+    gtk_window_move(GTK_WINDOW(window), 0, 0);
+    gtk_window_resize(GTK_WINDOW(window), screen_w, screen_h);
 
     /* Remove ALL window decorations — no title bar, no borders */
     gtk_window_set_decorated(GTK_WINDOW(window), FALSE);
@@ -176,7 +189,7 @@ int main(int argc, char *argv[])
     gtk_window_set_skip_taskbar_hint(GTK_WINDOW(window), TRUE);
     gtk_window_set_skip_pager_hint(GTK_WINDOW(window), TRUE);
 
-    /* Use NORMAL type hint — DESKTOP type prevents proper fullscreen */
+    /* Use NORMAL type hint */
     gtk_window_set_type_hint(GTK_WINDOW(window), GDK_WINDOW_TYPE_HINT_NORMAL);
 
     /* Make it black while loading */
