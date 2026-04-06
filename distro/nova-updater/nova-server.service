@@ -1,12 +1,12 @@
 [Unit]
-Description=NOVA OS Web Server
+Description=Astrion OS Web Server
 After=network.target
 Wants=network.target
 
 [Service]
 Type=simple
-User=nova
-Group=nova
+User=astrion
+Group=astrion
 WorkingDirectory=/opt/nova-os
 ExecStart=/usr/bin/node /opt/nova-os/server/index.js
 Restart=on-failure

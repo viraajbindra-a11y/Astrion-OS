@@ -208,7 +208,7 @@ done
 chroot "$MOUNT" /bin/bash << CHROOTSH
 set -e
 # Remove live user if it exists
-userdel -r nova 2>/dev/null || true
+userdel -r astrion 2>/dev/null || true
 # Create user
 useradd -m -s /bin/bash -G audio,video,sudo,netdev,plugdev,cdrom "$USERNAME"
 echo "$USERNAME:$PASSWORD" | chpasswd

@@ -26,8 +26,8 @@ log() {
 
 notify() {
   # Send a desktop notification to the nova user (if X is running)
-  if pgrep -u nova Xorg >/dev/null 2>&1 || pgrep -u nova xinit >/dev/null 2>&1; then
-    sudo -u nova DISPLAY=:0 notify-send "Astrion OS" "$1" 2>/dev/null || true
+  if pgrep -u astrion Xorg >/dev/null 2>&1 || pgrep -u astrion xinit >/dev/null 2>&1; then
+    sudo -u astrion DISPLAY=:0 notify-send "Astrion OS" "$1" 2>/dev/null || true
   fi
 }
 
@@ -129,14 +129,14 @@ if [ -f "$NOVA_DIR/package.json" ]; then
   npm install --omit=dev --no-audit --no-fund 2>&1 | tail -5 || log "npm install had warnings"
 fi
 
-chown -R nova:nova "$NOVA_DIR"
+chown -R astrion:astrion "$NOVA_DIR"
 
 # Save the new SHA
 echo "$LATEST_SHA" > "$STATE"
 
 # Restart the Astrion server
 systemctl start nova-server.service 2>/dev/null || \
-  sudo -u nova bash -c "cd $NOVA_DIR && nohup node server/index.js > /tmp/nova-server.log 2>&1 &"
+  sudo -u astrion bash -c "cd $NOVA_DIR && nohup node server/index.js > /tmp/nova-server.log 2>&1 &"
 
 log "Update complete: now at $LATEST_SHA"
 notify "Astrion OS updated! Refresh your browser to see changes."

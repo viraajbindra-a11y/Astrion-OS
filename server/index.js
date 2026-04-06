@@ -799,7 +799,7 @@ app.post('/api/display/set-zoom', async (req, res) => {
   if (!zoom || zoom < 0.5 || zoom > 4) return res.status(400).json({ error: 'zoom must be 0.5-4.0' });
   try {
     const fs = await import('fs/promises');
-    const homedir = process.env.HOME || '/home/nova';
+    const homedir = process.env.HOME || '/home/astrion';
     const configDir = `${homedir}/.config/nova-renderer`;
     await fs.mkdir(configDir, { recursive: true });
     await fs.writeFile(`${configDir}/zoom`, String(zoom));

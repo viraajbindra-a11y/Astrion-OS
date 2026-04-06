@@ -519,13 +519,13 @@ cat > "$CHROOT/tmp/setup-system.sh" << 'SETUP_SCRIPT'
 #!/bin/bash
 set -e
 
-# Create nova user
-useradd -m -s /bin/bash -G audio,video,sudo,netdev,plugdev,cdrom nova 2>/dev/null || true
-echo "nova:nova" | chpasswd
-echo "nova ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/nova
+# Create astrion user
+useradd -m -s /bin/bash -G audio,video,sudo,netdev,plugdev,cdrom astrion 2>/dev/null || true
+echo "astrion:astrion" | chpasswd
+echo "astrion ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/astrion
 # Specifically allow passwordless nova-update + nova-install (for API endpoint)
-echo "nova ALL=(ALL) NOPASSWD: /usr/bin/nova-update, /usr/bin/nova-install" >> /etc/sudoers.d/nova
-chmod 0440 /etc/sudoers.d/nova
+echo "nova ALL=(ALL) NOPASSWD: /usr/bin/nova-update, /usr/bin/nova-install" >> /etc/sudoers.d/astrion
+chmod 0440 /etc/sudoers.d/astrion
 
 # Install NOVA OS node modules
 if [ -f /opt/nova-os/package.json ]; then
@@ -554,20 +554,20 @@ mkdir -p /etc/systemd/system/getty@tty1.service.d
 cat > /etc/systemd/system/getty@tty1.service.d/autologin.conf << 'AUTOLOGIN'
 [Service]
 ExecStart=
-ExecStart=-/sbin/agetty --autologin nova --noclear %I $TERM
+ExecStart=-/sbin/agetty --autologin astrion --noclear %I $TERM
 AUTOLOGIN
 
 # .bash_profile auto-starts X (which runs .xinitrc)
-cat > /home/nova/.bash_profile << 'BASHPROFILE'
+cat > /home/astrion/.bash_profile << 'BASHPROFILE'
 # Astrion OS — Auto-start the desktop on tty1
 if [ -z "$DISPLAY" ] && [ "$(tty)" = "/dev/tty1" ]; then
   exec startx 2>/dev/null
 fi
 BASHPROFILE
-chown nova:nova /home/nova/.bash_profile
+chown astrion:astrion /home/astrion/.bash_profile
 
 # .xinitrc — Astrion OS boots directly into its own native renderer
-cat > /home/nova/.xinitrc << 'XINITRC'
+cat > /home/astrion/.xinitrc << 'XINITRC'
 #!/bin/bash
 # Astrion OS — Desktop Init
 # This IS the operating system. Our own native renderer, not Chromium.
@@ -690,8 +690,8 @@ else
   exit 1
 fi
 XINITRC
-chown nova:nova /home/nova/.xinitrc
-chmod +x /home/nova/.xinitrc
+chown astrion:astrion /home/astrion/.xinitrc
+chmod +x /home/astrion/.xinitrc
 
 # GTK theme
 mkdir -p /etc/skel/.config/gtk-3.0
@@ -763,8 +763,8 @@ systemctl disable ssh 2>/dev/null || true
 systemctl disable apache2 2>/dev/null || true
 
 # Set ownership
-chown -R nova:nova /home/nova
-chown -R nova:nova /opt/nova-os 2>/dev/null || true
+chown -R astrion:astrion /home/nova
+chown -R astrion:astrion /opt/nova-os 2>/dev/null || true
 
 echo "System setup complete."
 SETUP_SCRIPT
