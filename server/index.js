@@ -245,8 +245,8 @@ app.get('/app/:appId', (req, res) => {
 app.post('/api/browser/open', async (req, res) => {
   const { url } = req.body;
   if (!url) return res.status(400).json({ error: 'url required' });
-  // Try browsers in order of preference
-  const browsers = ['firefox-esr', 'firefox', 'chromium', 'chromium-browser', 'google-chrome'];
+  // Try browsers in order: our own first, then system browsers
+  const browsers = ['astrion-browser', 'firefox-esr', 'firefox', 'chromium', 'chromium-browser'];
   for (const browser of browsers) {
     const check = await runShell('which', [browser]);
     if (check.code === 0) {

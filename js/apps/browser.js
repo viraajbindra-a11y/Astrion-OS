@@ -137,8 +137,25 @@ function initBrowser(container, instanceId, options = {}) {
 
       // Update BrowserView bounds when window moves/resizes
       setupBrowserViewTracking(viewport);
+    } else if (window.__NOVA_NATIVE__) {
+      // On ISO: launch our custom Astrion Browser (WebKitGTK, fast, native)
+      const old = viewport.querySelector('.browser-home, .browser-error, iframe');
+      if (old) old.remove();
+
+      fetch('/api/browser/open', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url }),
+      });
+
+      loadingBar.style.width = '100%';
+      setTimeout(() => { loadingBar.style.width = '0%'; }, 300);
+      windowManager.setTitle(instanceId, url.replace(/^https?:\/\//, '').split('/')[0]);
+
+      // Show quick-access home in this window while browser opens natively
+      showHome();
     } else {
-      // Web fallback: use our server-side proxy (strips X-Frame-Options)
+      // Web version: use server-side proxy (strips X-Frame-Options)
       const old = viewport.querySelector('.browser-home, .browser-error, iframe');
       if (old) old.remove();
 
