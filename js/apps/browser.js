@@ -43,6 +43,7 @@ function initBrowser(container, instanceId, options = {}) {
           <input type="text" class="browser-url-input" id="brw-url-${instanceId}" placeholder="Search or enter URL..." value="${currentUrl}" spellcheck="false">
         </div>
         <button class="browser-nav-btn" id="brw-home-${instanceId}" title="Home">\uD83C\uDFE0</button>
+        <button class="browser-nav-btn" id="brw-external-${instanceId}" title="Open in Firefox" style="font-size:11px; opacity:0.6;">\uD83E\uDD8A</button>
       </div>
       <div class="browser-viewport" id="brw-viewport-${instanceId}">
         <div class="browser-loading" id="brw-loading-${instanceId}">
@@ -89,6 +90,15 @@ function initBrowser(container, instanceId, options = {}) {
     if (isElectron) window.novaElectron.browser.close();
     showHome();
   });
+  container.querySelector(`#brw-external-${instanceId}`).addEventListener('click', () => {
+    if (currentUrl) {
+      fetch('/api/browser/open', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: currentUrl }),
+      });
+    }
+  });
 
   // Listen for title/url updates from Electron
   if (isElectron) {
@@ -127,33 +137,6 @@ function initBrowser(container, instanceId, options = {}) {
 
       // Update BrowserView bounds when window moves/resizes
       setupBrowserViewTracking(viewport);
-    } else if (window.__NOVA_NATIVE__) {
-      // On ISO: launch real Firefox/Chromium (fast, full browser engine)
-      const old = viewport.querySelector('.browser-home, .browser-error, iframe');
-      if (old) old.remove();
-
-      fetch('/api/browser/open', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url }),
-      }).then(r => r.json()).then(data => {
-        loadingBar.style.width = '100%';
-        setTimeout(() => { loadingBar.style.width = '0%'; }, 300);
-
-        const msg = document.createElement('div');
-        msg.className = 'browser-home';
-        msg.innerHTML = `
-          <div style="text-align:center; padding:60px 20px;">
-            <div style="font-size:48px; margin-bottom:16px;">\uD83C\uDF10</div>
-            <div style="font-size:16px; font-weight:600; margin-bottom:8px;">Opened in ${data.browser || 'browser'}</div>
-            <div style="font-size:13px; color:rgba(255,255,255,0.5); max-width:400px; margin:0 auto;">${url}</div>
-            <div style="margin-top:20px; font-size:12px; color:rgba(255,255,255,0.4);">The page opened in a native browser window for best performance.</div>
-          </div>
-        `;
-        viewport.appendChild(msg);
-      });
-
-      windowManager.setTitle(instanceId, url.replace(/^https?:\/\//, '').split('/')[0]);
     } else {
       // Web fallback: use our server-side proxy (strips X-Frame-Options)
       const old = viewport.querySelector('.browser-home, .browser-error, iframe');
