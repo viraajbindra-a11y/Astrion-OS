@@ -7,9 +7,12 @@ import { lockScreen, showShutdownDialog } from './lock-screen.js';
 
 let activeDropdown = null;
 
+let timeOffset = 0; // ms offset from system clock to real time
+
 export function initMenubar() {
   updateClock();
   setInterval(updateClock, 1000);
+  syncTime();
 
   // Simulated battery — starts at 100%, drains very slowly
   initBattery();
@@ -249,8 +252,48 @@ function closeDropdown() {
   }
 }
 
+function getRealTime() {
+  return new Date(Date.now() + timeOffset);
+}
+
+async function syncTime() {
+  // Try to get accurate time from web API (works even if system clock is wrong)
+  try {
+    const before = Date.now();
+    const res = await fetch('https://worldtimeapi.org/api/ip', { signal: AbortSignal.timeout(5000) });
+    const after = Date.now();
+    const data = await res.json();
+    const serverTime = new Date(data.datetime).getTime();
+    const latency = (after - before) / 2;
+    timeOffset = serverTime - before - latency;
+
+    if (Math.abs(timeOffset) > 5000) {
+      console.log(`[Clock] Synced: offset ${Math.round(timeOffset / 1000)}s`);
+      // Also try to fix system clock via server
+      fetch('/api/system/set-time', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ timestamp: serverTime }),
+      }).catch(() => {});
+    }
+  } catch {
+    // Try fallback: use HTTP Date header from any server
+    try {
+      const res = await fetch('/api/battery', { signal: AbortSignal.timeout(3000) });
+      const serverDate = res.headers.get('date');
+      if (serverDate) {
+        const serverTime = new Date(serverDate).getTime();
+        timeOffset = serverTime - Date.now();
+      }
+    } catch {}
+  }
+
+  // Re-sync every 10 minutes
+  setTimeout(syncTime, 600000);
+}
+
 function updateClock() {
-  const now = new Date();
+  const now = getRealTime();
   const time = now.toLocaleTimeString('en-US', {
     hour: 'numeric',
     minute: '2-digit',

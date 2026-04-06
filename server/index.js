@@ -794,6 +794,15 @@ app.post('/api/display/set-resolution', async (req, res) => {
 });
 
 // ─── System Actions ───
+app.post('/api/system/set-time', async (req, res) => {
+  const { timestamp } = req.body;
+  if (!timestamp) return res.status(400).json({ error: 'timestamp required' });
+  const d = new Date(timestamp);
+  const dateStr = d.toISOString().replace('T', ' ').split('.')[0];
+  const r = await runShell('sudo', ['-n', 'date', '-s', dateStr]);
+  res.json({ ok: r.code === 0 });
+});
+
 app.post('/api/system/shutdown', async (req, res) => {
   res.json({ ok: true });
   setTimeout(() => runShell('sudo', ['-n', 'shutdown', '-h', 'now']), 500);
