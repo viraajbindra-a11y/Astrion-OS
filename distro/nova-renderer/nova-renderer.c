@@ -272,6 +272,22 @@ int main(int argc, char *argv[])
 
     webkit_web_view_load_uri(webview, url);
 
+    /* ─── HiDPI scaling ─── */
+    /* CSS zoom doesn't work in WebKitGTK, so we use the proper WebKit
+     * zoom API. This is equivalent to Ctrl+Plus in a browser. */
+    {
+        GdkScreen *scr = gdk_screen_get_default();
+        int sw = gdk_screen_get_width(scr);
+        int sh = gdk_screen_get_height(scr);
+        g_print("[NOVA Renderer] Screen: %dx%d\n", sw, sh);
+        if (sw >= 3600)       webkit_web_view_set_zoom_level(webview, 1.6);
+        else if (sw >= 2700)  webkit_web_view_set_zoom_level(webview, 2.0);
+        else if (sw >= 2400)  webkit_web_view_set_zoom_level(webview, 1.75);
+        else if (sw >= 2000)  webkit_web_view_set_zoom_level(webview, 1.5);
+        else if (sw >= 1800)  webkit_web_view_set_zoom_level(webview, 1.25);
+        g_print("[NOVA Renderer] Zoom: %.1f\n", webkit_web_view_get_zoom_level(webview));
+    }
+
     /* ─── Run the main loop ─── */
     gtk_main();
 
