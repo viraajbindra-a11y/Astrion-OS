@@ -288,45 +288,119 @@ function initSettings(container) {
   }
 
   function renderAI() {
+    const currentProvider = localStorage.getItem('nova-ai-provider') || 'auto';
+    const ollamaUrl = localStorage.getItem('nova-ai-ollama-url') || 'http://localhost:11434';
+    const ollamaModel = localStorage.getItem('nova-ai-ollama-model') || 'llama3.2';
+
     main.innerHTML = `
       <div class="settings-section-title">AI Assistant</div>
+
       <div class="settings-group">
         <div class="settings-row">
           <div>
-            <div class="settings-row-label">AI Model</div>
-            <div class="settings-row-desc">Choose the AI model for responses</div>
+            <div class="settings-row-label">AI Provider</div>
+            <div class="settings-row-desc">Choose where AI responses come from</div>
           </div>
-          <select class="settings-select">
-            <option value="mock">Local (Demo Mode)</option>
-            <option value="haiku" disabled>Claude Haiku (Requires API)</option>
-            <option value="sonnet" disabled>Claude Sonnet (Requires API)</option>
+          <select class="settings-select" id="ai-provider">
+            <option value="auto" ${currentProvider === 'auto' ? 'selected' : ''}>Auto (try Ollama → Anthropic → offline)</option>
+            <option value="ollama" ${currentProvider === 'ollama' ? 'selected' : ''}>Ollama (local/remote LLM)</option>
+            <option value="anthropic" ${currentProvider === 'anthropic' ? 'selected' : ''}>Anthropic (Claude API key)</option>
+            <option value="mock" ${currentProvider === 'mock' ? 'selected' : ''}>Offline (demo mode)</option>
           </select>
+        </div>
+      </div>
+
+      <div class="settings-group">
+        <div style="padding:8px 14px 4px; font-size:11px; font-weight:600; color:rgba(255,255,255,0.5); text-transform:uppercase; letter-spacing:0.5px;">Ollama Settings</div>
+        <div class="settings-row">
+          <div>
+            <div class="settings-row-label">Ollama URL</div>
+            <div class="settings-row-desc">Local: http://localhost:11434 — Remote: http://192.168.x.x:11434</div>
+          </div>
+          <input type="text" id="ai-ollama-url" class="settings-select" value="${ollamaUrl}" style="width:260px; font-family:var(--mono,monospace); font-size:12px;">
         </div>
         <div class="settings-row">
           <div>
+            <div class="settings-row-label">Model</div>
+            <div class="settings-row-desc">e.g. llama3.2, mistral, phi3, gemma2</div>
+          </div>
+          <input type="text" id="ai-ollama-model" class="settings-select" value="${ollamaModel}" style="width:180px; font-family:var(--mono,monospace); font-size:12px;">
+        </div>
+        <div class="settings-row">
+          <div>
+            <div class="settings-row-label">Test Connection</div>
+            <div class="settings-row-desc" id="ai-test-status">Click to verify Ollama is reachable</div>
+          </div>
+          <button class="settings-toggle" id="ai-test-btn" style="padding:6px 14px; border-radius:6px; border:none; background:var(--accent); color:white; font-size:12px; cursor:pointer; font-family:var(--font);">Test</button>
+        </div>
+      </div>
+
+      <div class="settings-group">
+        <div class="settings-row">
+          <div>
             <div class="settings-row-label">AI in Apps</div>
-            <div class="settings-row-desc">Enable AI features in Notes, Terminal, etc.</div>
+            <div class="settings-row-desc">Enable AI features in Notes, Terminal, Messages</div>
           </div>
           <button class="settings-toggle on"></button>
         </div>
         <div class="settings-row">
           <div>
             <div class="settings-row-label">Spotlight AI</div>
-            <div class="settings-row-desc">Press Cmd+Space to ask NOVA anything</div>
+            <div class="settings-row-desc">Press Cmd+Space to ask Astrion anything</div>
           </div>
           <button class="settings-toggle on"></button>
         </div>
       </div>
-      <div class="settings-group">
-        <div class="settings-row">
-          <div>
-            <div class="settings-row-label">API Endpoint</div>
-            <div class="settings-row-desc">For connecting to a real AI backend</div>
-          </div>
-          <input type="text" class="settings-select" value="/api/ai" style="width:200px;font-family:var(--mono);font-size:12px;">
-        </div>
-      </div>
     `;
+
+    // Save provider on change
+    main.querySelector('#ai-provider').addEventListener('change', (e) => {
+      localStorage.setItem('nova-ai-provider', e.target.value);
+    });
+
+    // Save Ollama URL on change
+    main.querySelector('#ai-ollama-url').addEventListener('change', (e) => {
+      localStorage.setItem('nova-ai-ollama-url', e.target.value.trim());
+    });
+
+    // Save model on change
+    main.querySelector('#ai-ollama-model').addEventListener('change', (e) => {
+      localStorage.setItem('nova-ai-ollama-model', e.target.value.trim());
+    });
+
+    // Test connection
+    main.querySelector('#ai-test-btn').addEventListener('click', async () => {
+      const status = main.querySelector('#ai-test-status');
+      const url = main.querySelector('#ai-ollama-url').value.trim();
+      const model = main.querySelector('#ai-ollama-model').value.trim();
+      status.textContent = 'Testing...';
+      status.style.color = 'rgba(255,255,255,0.5)';
+
+      try {
+        const res = await fetch('/api/ai/ollama', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            url,
+            model,
+            system: 'Reply with just "OK" and nothing else.',
+            messages: [{ role: 'user', content: 'Test' }],
+          }),
+          signal: AbortSignal.timeout(10000),
+        });
+        const data = await res.json();
+        if (data.reply) {
+          status.textContent = '\u2705 Connected! Model: ' + (data.model || model);
+          status.style.color = '#34c759';
+        } else {
+          status.textContent = '\u274C Failed: ' + (data.error || 'No response');
+          status.style.color = '#ff3b30';
+        }
+      } catch (err) {
+        status.textContent = '\u274C ' + err.message;
+        status.style.color = '#ff3b30';
+      }
+    });
   }
 
   function renderKeyboard() {
