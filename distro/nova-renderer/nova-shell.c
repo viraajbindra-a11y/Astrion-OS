@@ -378,7 +378,7 @@ static gboolean on_desktop_draw(GtkWidget *widget, cairo_t *cr, gpointer data)
 static void create_desktop(void)
 {
     desktop_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-    gtk_window_set_title(GTK_WINDOW(desktop_window), "Zenith OS Desktop");
+    gtk_window_set_title(GTK_WINDOW(desktop_window), "Astrion OS Desktop");
     gtk_window_set_decorated(GTK_WINDOW(desktop_window), FALSE);
     gtk_window_set_skip_taskbar_hint(GTK_WINDOW(desktop_window), TRUE);
     gtk_window_set_skip_pager_hint(GTK_WINDOW(desktop_window), TRUE);
@@ -401,9 +401,9 @@ static void create_desktop(void)
 
 static void on_apple_menu_about(GtkMenuItem *item, gpointer data)
 {
-    /* Show About Zenith OS dialog */
+    /* Show About Astrion OS dialog */
     GtkWidget *dialog = gtk_dialog_new();
-    gtk_window_set_title(GTK_WINDOW(dialog), "About Zenith OS");
+    gtk_window_set_title(GTK_WINDOW(dialog), "About Astrion OS");
     gtk_window_set_modal(GTK_WINDOW(dialog), TRUE);
     gtk_window_set_default_size(GTK_WINDOW(dialog), 320, 280);
     gtk_window_set_resizable(GTK_WINDOW(dialog), FALSE);
@@ -427,7 +427,7 @@ static void on_apple_menu_about(GtkMenuItem *item, gpointer data)
 
     GtkWidget *name = gtk_label_new(NULL);
     gtk_label_set_markup(name,
-        "<span size='18000' weight='bold' foreground='#ffffff'>Zenith OS</span>");
+        "<span size='18000' weight='bold' foreground='#ffffff'>Astrion OS</span>");
     gtk_box_pack_start(GTK_BOX(content), name, FALSE, FALSE, 4);
 
     GtkWidget *ver = gtk_label_new(NULL);
@@ -517,7 +517,7 @@ static void on_apple_button_clicked(GtkWidget *widget, gpointer data)
     GtkStyleContext *ctx = gtk_widget_get_style_context(menu);
     gtk_style_context_add_class(ctx, "nova-menu");
 
-    GtkWidget *about = gtk_menu_item_new_with_label("About Zenith OS");
+    GtkWidget *about = gtk_menu_item_new_with_label("About Astrion OS");
     g_signal_connect(about, "activate", G_CALLBACK(on_apple_menu_about), NULL);
     gtk_menu_shell_append(GTK_MENU_SHELL(menu), about);
 
@@ -600,7 +600,7 @@ static void create_panel(void)
     gtk_box_pack_start(GTK_BOX(left_box), apple_btn, FALSE, FALSE, 0);
 
     /* Active app name */
-    GtkWidget *app_name = gtk_label_new("Zenith OS");
+    GtkWidget *app_name = gtk_label_new("Astrion OS");
     PangoAttrList *attrs = pango_attr_list_new();
     pango_attr_list_insert(attrs, pango_attr_weight_new(PANGO_WEIGHT_BOLD));
     gtk_label_set_attributes(GTK_LABEL(app_name), attrs);
@@ -1338,7 +1338,7 @@ int main(int argc, char *argv[])
         if (strcmp(argv[i], "--dev") == 0) dev_mode = TRUE;
         if (strcmp(argv[i], "--url") == 0 && i + 1 < argc) server_url = argv[++i];
         if (strcmp(argv[i], "--help") == 0) {
-            g_print("Zenith OS Shell v" NOVA_VERSION "\n");
+            g_print("Astrion OS Shell v" NOVA_VERSION "\n");
             g_print("Usage: nova-shell [OPTIONS]\n\n");
             g_print("Options:\n");
             g_print("  --dev        Enable developer tools\n");
@@ -1363,38 +1363,38 @@ int main(int argc, char *argv[])
     GdkScreen *screen = gdk_screen_get_default();
     screen_width = gdk_screen_get_width(screen);
     screen_height = gdk_screen_get_height(screen);
-    g_print("[Zenith Shell] Screen: %dx%d\n", screen_width, screen_height);
+    g_print("[Astrion Shell] Screen: %dx%d\n", screen_width, screen_height);
 
     /* Count apps */
     for (app_count = 0; app_registry[app_count].id != NULL; app_count++);
-    g_print("[Zenith Shell] Registered %d apps\n", app_count);
+    g_print("[Astrion Shell] Registered %d apps\n", app_count);
 
     /* Apply CSS theme */
     apply_css_theme();
 
     /* Create desktop layers */
-    g_print("[Zenith Shell] Creating desktop...\n");
+    g_print("[Astrion Shell] Creating desktop...\n");
     create_desktop();
 
-    g_print("[Zenith Shell] Creating panel...\n");
+    g_print("[Astrion Shell] Creating panel...\n");
     create_panel();
 
-    g_print("[Zenith Shell] Creating dock...\n");
+    g_print("[Astrion Shell] Creating dock...\n");
     create_dock();
 
-    g_print("[Zenith Shell] Creating launcher...\n");
+    g_print("[Astrion Shell] Creating launcher...\n");
     create_launcher();
 
     /* Show welcome notification */
-    nova_show_notification("Welcome to Zenith OS",
+    nova_show_notification("Welcome to Astrion OS",
         "Your AI-native operating system is ready.");
 
-    g_print("[Zenith Shell] Desktop ready!\n");
-    g_print("[Zenith Shell] Press Ctrl+Space or click the search icon for Spotlight\n");
+    g_print("[Astrion Shell] Desktop ready!\n");
+    g_print("[Astrion Shell] Press Ctrl+Space or click the search icon for Spotlight\n");
 
     /* Run GTK main loop */
     gtk_main();
 
-    g_print("[Zenith Shell] Shutting down...\n");
+    g_print("[Astrion Shell] Shutting down...\n");
     return 0;
 }

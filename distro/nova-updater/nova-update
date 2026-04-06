@@ -1,13 +1,13 @@
 #!/bin/bash
-# Zenith OS — System Updater
+# Astrion OS — System Updater
 #
-# Checks GitHub for a newer version of the Zenith OS web app and
+# Checks GitHub for a newer version of the Astrion OS web app and
 # installs it in-place. Safe to run as root via systemd timer,
 # or manually from the Terminal app.
 #
-# The Zenith OS web app (html/css/js/assets) IS the operating system
+# The Astrion OS web app (html/css/js/assets) IS the operating system
 # — everything from the desktop shell to the apps is in there. So
-# updating the web app IS updating Zenith OS.
+# updating the web app IS updating Astrion OS.
 
 set -e
 
@@ -27,7 +27,7 @@ log() {
 notify() {
   # Send a desktop notification to the nova user (if X is running)
   if pgrep -u nova Xorg >/dev/null 2>&1 || pgrep -u nova xinit >/dev/null 2>&1; then
-    sudo -u nova DISPLAY=:0 notify-send "Zenith OS" "$1" 2>/dev/null || true
+    sudo -u nova DISPLAY=:0 notify-send "Astrion OS" "$1" 2>/dev/null || true
   fi
 }
 
@@ -88,7 +88,7 @@ fi
 
 log "Installing update…"
 
-# Stop the Zenith server if it's running
+# Stop the Astrion server if it's running
 systemctl stop nova-server.service 2>/dev/null || true
 pkill -f "node.*server/index.js" 2>/dev/null || true
 sleep 1
@@ -134,11 +134,11 @@ chown -R nova:nova "$NOVA_DIR"
 # Save the new SHA
 echo "$LATEST_SHA" > "$STATE"
 
-# Restart the Zenith server
+# Restart the Astrion server
 systemctl start nova-server.service 2>/dev/null || \
   sudo -u nova bash -c "cd $NOVA_DIR && nohup node server/index.js > /tmp/nova-server.log 2>&1 &"
 
 log "Update complete: now at $LATEST_SHA"
-notify "Zenith OS updated! Refresh your browser to see changes."
+notify "Astrion OS updated! Refresh your browser to see changes."
 
 exit 0

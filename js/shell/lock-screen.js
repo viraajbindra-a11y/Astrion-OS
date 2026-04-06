@@ -136,7 +136,7 @@ function doShutdown(message) {
     if (message.includes('Restart')) {
       location.reload();
     } else {
-      screen.innerHTML = `<div style="font-size:14px;color:rgba(255,255,255,0.3);">Zenith OS has shut down.<br><br>Close this tab or click to restart.</div>`;
+      screen.innerHTML = `<div style="font-size:14px;color:rgba(255,255,255,0.3);">Astrion OS has shut down.<br><br>Close this tab or click to restart.</div>`;
       screen.addEventListener('click', () => location.reload());
     }
   }, 2000);

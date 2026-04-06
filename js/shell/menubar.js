@@ -57,7 +57,7 @@ export function initMenubar() {
   document.getElementById('menubar-apple').addEventListener('click', (e) => {
     e.stopPropagation();
     showDropdown(e.target.closest('.menubar-apple'), [
-      { label: 'About Zenith OS', action: () => showAboutDialog() },
+      { label: 'About Astrion OS', action: () => showAboutDialog() },
       { separator: true },
       { label: 'Check for Updates...', action: () => checkForUpdates() },
       { label: 'System Settings...', shortcut: '\u2318,', action: () => processManager.launch('settings') },
@@ -132,14 +132,14 @@ function getMenuItems(menu) {
       ];
     case 'Help':
       return [
-        { label: 'Zenith OS Help', action: () => {
+        { label: 'Astrion OS Help', action: () => {
           eventBus.emit('spotlight:toggle');
         }},
         { separator: true },
         { label: 'Keyboard Shortcuts', action: () => {
           eventBus.emit('spotlight:toggle');
         }},
-        { label: 'About Zenith OS', action: () => showAboutDialog() },
+        { label: 'About Astrion OS', action: () => showAboutDialog() },
       ];
     default:
       return [{ label: 'No items', disabled: true }];
@@ -431,18 +431,18 @@ function showAboutDialog() {
         <circle cx="40" cy="40" r="6" fill="white"/>
       </svg>
     </div>
-    <div style="font-size:22px;font-weight:700;color:white;margin-bottom:4px;">Zenith OS</div>
+    <div style="font-size:22px;font-weight:700;color:white;margin-bottom:4px;">Astrion OS</div>
     <div style="font-size:12px;color:rgba(255,255,255,0.4);margin-bottom:16px;">Version 1.0.0 (Build 2026.04)</div>
     <div style="font-size:12px;color:rgba(255,255,255,0.5);line-height:1.6;">
       An AI-native operating system built from scratch.<br>
       Designed and developed by <strong style="color:rgba(255,255,255,0.8);">${userName}</strong>.
     </div>
     <div style="margin-top:6px;font-size:11px;color:rgba(255,255,255,0.3);">
-      Kernel: Zenith Kernel 1.0 &bull; Memory: 8 GB &bull; Arch: x86_64
+      Kernel: Astrion Kernel 1.0 &bull; Memory: 8 GB &bull; Arch: x86_64
     </div>
     <div style="margin-top:20px;padding-top:16px;border-top:1px solid rgba(255,255,255,0.06);">
       <div style="font-size:10px;color:rgba(255,255,255,0.25);">
-        &copy; 2026 Zenith OS Project. All rights reserved.<br>
+        &copy; 2026 Astrion OS Project. All rights reserved.<br>
         Built with vanilla JavaScript, CSS, and love.
       </div>
     </div>
@@ -469,7 +469,7 @@ async function checkForUpdates() {
 
   notifications.show({
     title: 'Checking for updates…',
-    body: 'Contacting Zenith update server',
+    body: 'Contacting Astrion update server',
     icon: '\uD83D\uDD04',
     duration: 3000,
   });
@@ -480,13 +480,13 @@ async function checkForUpdates() {
 
     if (data.status === 'up-to-date') {
       notifications.show({
-        title: 'Zenith OS is up to date',
+        title: 'Astrion OS is up to date',
         body: `Running commit ${data.current?.slice(0, 7) || 'latest'}`,
         icon: '\u2705',
       });
     } else if (data.status === 'updated') {
       notifications.show({
-        title: 'Zenith OS updated!',
+        title: 'Astrion OS updated!',
         body: `Updated to ${data.latest?.slice(0, 7)}. Refresh to see changes.`,
         icon: '\uD83C\uDF89',
         duration: 10000,

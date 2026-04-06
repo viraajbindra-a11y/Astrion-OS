@@ -52,7 +52,7 @@ function renderUnlock(container) {
       background:linear-gradient(180deg, rgba(20,20,30,0.6), rgba(10,10,20,0.8));
     ">
       <div style="font-size:72px; margin-bottom:12px;">${hasVault ? '\uD83D\uDD10' : '\uD83D\uDD11'}</div>
-      <div style="font-size:22px; font-weight:600; margin-bottom:6px;">${hasVault ? 'Zenith Vault' : 'Set Up Zenith Vault'}</div>
+      <div style="font-size:22px; font-weight:600; margin-bottom:6px;">${hasVault ? 'Astrion Vault' : 'Set Up Astrion Vault'}</div>
       <div style="font-size:12px; color:rgba(255,255,255,0.5); margin-bottom:24px; text-align:center; max-width:400px; padding:0 20px;">
         ${hasVault
           ? 'Enter your master password to unlock'

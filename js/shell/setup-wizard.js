@@ -99,7 +99,7 @@ export function showSetupWizard() {
                   <circle cx="40" cy="40" r="6" fill="white"/>
                 </svg>
               </div>
-              <h1 style="font-size:36px;font-weight:700;margin-bottom:8px;letter-spacing:-0.5px;">Welcome to Zenith OS</h1>
+              <h1 style="font-size:36px;font-weight:700;margin-bottom:8px;letter-spacing:-0.5px;">Welcome to Astrion OS</h1>
               <p style="font-size:17px;color:rgba(255,255,255,0.5);margin-bottom:48px;">The AI-native operating system</p>
               <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;text-align:center;">
                 <div style="background:rgba(255,255,255,0.05);border-radius:16px;padding:24px 12px;">
@@ -127,7 +127,7 @@ export function showSetupWizard() {
             <div style="text-align:center;">
               <div style="font-size:56px;margin-bottom:16px;">&#x1F44B;</div>
               <h1 style="font-size:30px;font-weight:700;margin-bottom:8px;">Create your account</h1>
-              <p style="font-size:15px;color:rgba(255,255,255,0.45);margin-bottom:28px;">Zenith uses this to personalize your experience and lock your screen</p>
+              <p style="font-size:15px;color:rgba(255,255,255,0.45);margin-bottom:28px;">Astrion uses this to personalize your experience and lock your screen</p>
               <div style="display:flex;flex-direction:column;gap:10px;width:300px;margin:0 auto;">
                 <input type="text" id="setup-name" placeholder="Name" value="${userName}"
                   style="padding:13px 18px;background:rgba(255,255,255,0.08);border:2px solid rgba(255,255,255,0.12);border-radius:12px;color:white;font-size:15px;font-family:var(--font);outline:none;text-align:center;">
@@ -135,7 +135,7 @@ export function showSetupWizard() {
                   style="padding:13px 18px;background:rgba(255,255,255,0.08);border:2px solid rgba(255,255,255,0.12);border-radius:12px;color:white;font-size:15px;font-family:var(--font);outline:none;text-align:center;">
                 <div id="setup-pw-strength" style="height:4px;border-radius:2px;background:rgba(255,255,255,0.06);"></div>
               </div>
-              <div style="margin-top:14px;font-size:11px;color:rgba(255,255,255,0.3);max-width:320px;margin-left:auto;margin-right:auto;line-height:1.5;">Leave the password blank to use Zenith without a lock screen. You can change this later in Settings.</div>
+              <div style="margin-top:14px;font-size:11px;color:rgba(255,255,255,0.3);max-width:320px;margin-left:auto;margin-right:auto;line-height:1.5;">Leave the password blank to use Astrion without a lock screen. You can change this later in Settings.</div>
             </div>
           `;
           const nameInput = el.querySelector('#setup-name');
@@ -196,7 +196,7 @@ export function showSetupWizard() {
           el.innerHTML = `
             <div style="text-align:center;">
               <h1 style="font-size:30px;font-weight:700;margin-bottom:8px;">Pick your color</h1>
-              <p style="font-size:15px;color:rgba(255,255,255,0.45);margin-bottom:32px;">This accent color is used throughout Zenith OS</p>
+              <p style="font-size:15px;color:rgba(255,255,255,0.45);margin-bottom:32px;">This accent color is used throughout Astrion OS</p>
               <div style="display:flex;justify-content:center;gap:16px;margin-bottom:36px;">
                 ${accents.map(a => `
                   <div data-color="${a.color}" style="width:48px;height:48px;border-radius:50%;background:${a.color};cursor:pointer;border:4px solid ${a.color === selectedAccent ? 'white' : 'transparent'};transition:all 0.2s;box-shadow:0 4px 12px rgba(0,0,0,0.3);"
@@ -226,7 +226,7 @@ export function showSetupWizard() {
           el.innerHTML = `
             <div style="text-align:center;">
               <h1 style="font-size:30px;font-weight:700;margin-bottom:8px;">Quick tips</h1>
-              <p style="font-size:15px;color:rgba(255,255,255,0.45);margin-bottom:28px;">Here's how to get the most out of Zenith OS</p>
+              <p style="font-size:15px;color:rgba(255,255,255,0.45);margin-bottom:28px;">Here's how to get the most out of Astrion OS</p>
               <div style="display:flex;flex-direction:column;gap:12px;text-align:left;">
                 <div style="display:flex;align-items:center;gap:16px;background:rgba(255,255,255,0.05);border-radius:14px;padding:16px 20px;">
                   <div style="font-size:28px;width:44px;text-align:center;">&#x1F50D;</div>
@@ -266,7 +266,7 @@ export function showSetupWizard() {
             <div style="text-align:center;">
               <div style="font-size:72px;margin-bottom:20px;animation:dockBounce 0.8s ease;">&#x1F680;</div>
               <h1 style="font-size:34px;font-weight:700;margin-bottom:8px;">You're all set${userName ? ', ' + userName : ''}!</h1>
-              <p style="font-size:17px;color:rgba(255,255,255,0.5);margin-bottom:36px;">Zenith OS is ready for you</p>
+              <p style="font-size:17px;color:rgba(255,255,255,0.5);margin-bottom:36px;">Astrion OS is ready for you</p>
               <div style="display:inline-flex;flex-direction:column;gap:8px;text-align:left;">
                 <div style="display:flex;align-items:center;gap:10px;font-size:14px;color:rgba(255,255,255,0.6);">
                   <span style="color:var(--accent);">&#x2713;</span> Desktop customized

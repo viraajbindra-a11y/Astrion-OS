@@ -271,8 +271,8 @@ import { initVolumeHud } from './shell/volume-hud.js';
   // Welcome notification
   const userName = localStorage.getItem('nova-username') || 'User';
   const welcomeMsg = isFirstBoot
-    ? 'Welcome to Zenith OS! Press Cmd+Space for Spotlight, F4 for Launchpad.'
-    : 'Zenith OS is ready. Press Cmd+Space for Spotlight, F4 for Launchpad.';
+    ? 'Welcome to Astrion OS! Press Cmd+Space for Spotlight, F4 for Launchpad.'
+    : 'Astrion OS is ready. Press Cmd+Space for Spotlight, F4 for Launchpad.';
   notifications.show({
     title: isFirstBoot ? `Welcome, ${userName}!` : `Welcome back, ${userName}!`,
     body: welcomeMsg,
@@ -280,7 +280,7 @@ import { initVolumeHud } from './shell/volume-hud.js';
     duration: 5000,
   });
 
-  console.log('Zenith OS booted successfully.');
+  console.log('Astrion OS booted successfully.');
 })();
 
 function animate(bar, targetWidth, duration) {
