@@ -202,6 +202,13 @@ static void hide_app_switcher(void);
 /* Desktop right-click menu */
 static void on_apple_menu_about(GtkMenuItem *item, gpointer data);
 
+/* Popup overlay forward declarations */
+static void hide_screensaver_cb(GtkWidget *w, gpointer data);
+static void toggle_popup(GtkWidget **win_ptr, const char *title,
+    const char *url, int w, int h);
+static gboolean popup_key_handler(GtkWidget *w, GdkEventKey *e, gpointer data);
+static void show_screensaver(void);
+
 /* ═══════════════════════════════════════════════
  * Utility: Draw rounded rectangle
  * ═══════════════════════════════════════════════ */
