@@ -80,8 +80,8 @@ apt-get install -y -qq dmz-cursor-theme adwaita-icon-theme \
   xserver-xorg-input-libinput xserver-xorg-input-evdev xserver-xorg-input-mouse \
   spice-vdagent qemu-guest-agent open-vm-tools virtualbox-guest-x11 2>/dev/null || true
 
-# NOVA native renderer dependencies (WebKitGTK + GTK3 + build tools)
-apt-get install -y -qq libwebkit2gtk-4.0-dev libgtk-3-dev gcc pkg-config make
+# NOVA native renderer dependencies (WebKitGTK + GTK3 + SVG icons + build tools)
+apt-get install -y -qq libwebkit2gtk-4.0-dev libgtk-3-dev librsvg2-dev librsvg2-common gcc pkg-config make
 
 # Utilities only (no polybar, no plank, no rofi — Astrion OS has its own native shell)
 apt-get install -y -qq dunst feh

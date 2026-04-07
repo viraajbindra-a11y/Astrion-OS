@@ -812,6 +812,12 @@ static void on_dock_icon_clicked(GtkWidget *widget, gpointer data)
 {
     NovaApp *app = (NovaApp *)data;
 
+    /* Browser: launch native astrion-browser instead of web app */
+    if (strcmp(app->id, "browser") == 0) {
+        g_spawn_command_line_async("astrion-browser", NULL);
+        return;
+    }
+
     /* Check if already open → focus it */
     if (app->single) {
         for (int i = 0; i < window_count; i++) {
@@ -857,13 +863,25 @@ static void create_dock(void)
         GtkWidget *icon_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
 
         GtkWidget *btn = gtk_button_new();
-        GtkWidget *icon_label = gtk_label_new(app_registry[i].icon);
-        PangoAttrList *attrs = pango_attr_list_new();
-        pango_attr_list_insert(attrs, pango_attr_size_new(42 * PANGO_SCALE));
-        gtk_label_set_attributes(GTK_LABEL(icon_label), attrs);
-        pango_attr_list_unref(attrs);
-        gtk_container_add(GTK_CONTAINER(btn), icon_label);
         gtk_button_set_relief(GTK_BUTTON(btn), GTK_RELIEF_NONE);
+
+        /* Try to load SVG icon from /opt/nova-os/assets/icons/<id>.svg */
+        char icon_path[512];
+        snprintf(icon_path, sizeof(icon_path), "/opt/nova-os/assets/icons/%s.svg", app_registry[i].id);
+        GdkPixbuf *pixbuf = gdk_pixbuf_new_from_file_at_size(icon_path, DOCK_ICON_SIZE, DOCK_ICON_SIZE, NULL);
+        if (pixbuf) {
+            GtkWidget *icon_img = gtk_image_new_from_pixbuf(pixbuf);
+            g_object_unref(pixbuf);
+            gtk_container_add(GTK_CONTAINER(btn), icon_img);
+        } else {
+            /* Fallback to emoji if SVG not found */
+            GtkWidget *icon_label = gtk_label_new(app_registry[i].icon);
+            PangoAttrList *attrs = pango_attr_list_new();
+            pango_attr_list_insert(attrs, pango_attr_size_new(42 * PANGO_SCALE));
+            gtk_label_set_attributes(GTK_LABEL(icon_label), attrs);
+            pango_attr_list_unref(attrs);
+            gtk_container_add(GTK_CONTAINER(btn), icon_label);
+        }
 
         GtkStyleContext *btn_ctx = gtk_widget_get_style_context(btn);
         gtk_style_context_add_class(btn_ctx, "nova-dock-icon");
