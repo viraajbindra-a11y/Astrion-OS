@@ -1127,6 +1127,10 @@ static void nova_toggle_launcher(void)
  * Window Manager — Native GTK Windows for Apps
  * ═══════════════════════════════════════════════ */
 
+/* Manual window dragging (no WM needed) */
+static int drag_start_x, drag_start_y, drag_win_x, drag_win_y;
+static gboolean dragging = FALSE;
+
 static gboolean on_window_titlebar_press(GtkWidget *widget, GdkEventButton *event, gpointer data)
 {
     NovaWindow *nwin = (NovaWindow *)data;
@@ -1135,10 +1139,29 @@ static gboolean on_window_titlebar_press(GtkWidget *widget, GdkEventButton *even
         return TRUE;
     }
     if (event->button == 1) {
-        gtk_window_begin_move_drag(GTK_WINDOW(nwin->window),
-            event->button, event->x_root, event->y_root, event->time);
+        dragging = TRUE;
+        drag_start_x = (int)event->x_root;
+        drag_start_y = (int)event->y_root;
+        gtk_window_get_position(GTK_WINDOW(nwin->window), &drag_win_x, &drag_win_y);
         return TRUE;
     }
+    return FALSE;
+}
+
+static gboolean on_window_titlebar_motion(GtkWidget *widget, GdkEventMotion *event, gpointer data)
+{
+    NovaWindow *nwin = (NovaWindow *)data;
+    if (dragging && nwin->window) {
+        int dx = (int)event->x_root - drag_start_x;
+        int dy = (int)event->y_root - drag_start_y;
+        gtk_window_move(GTK_WINDOW(nwin->window), drag_win_x + dx, drag_win_y + dy);
+    }
+    return FALSE;
+}
+
+static gboolean on_window_titlebar_release(GtkWidget *widget, GdkEventButton *event, gpointer data)
+{
+    dragging = FALSE;
     return FALSE;
 }
 
@@ -1243,8 +1266,13 @@ static void nova_launch_app(NovaApp *app)
     GtkWidget *titlebar = gtk_event_box_new();
     GtkStyleContext *tb_ctx = gtk_widget_get_style_context(titlebar);
     gtk_style_context_add_class(tb_ctx, "nova-window-titlebar");
+    gtk_widget_set_events(titlebar, GDK_BUTTON_PRESS_MASK | GDK_BUTTON_RELEASE_MASK | GDK_POINTER_MOTION_MASK);
     g_signal_connect(titlebar, "button-press-event",
         G_CALLBACK(on_window_titlebar_press), nwin);
+    g_signal_connect(titlebar, "motion-notify-event",
+        G_CALLBACK(on_window_titlebar_motion), nwin);
+    g_signal_connect(titlebar, "button-release-event",
+        G_CALLBACK(on_window_titlebar_release), nwin);
 
     GtkWidget *tb_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     gtk_widget_set_margin_start(tb_box, 8);
@@ -1257,7 +1285,7 @@ static void nova_launch_app(NovaApp *app)
     gtk_box_pack_start(GTK_BOX(tb_box), btn_box, FALSE, FALSE, 0);
 
     GtkWidget *close_btn = gtk_button_new();
-    gtk_widget_set_size_request(close_btn, 12, 12);
+    gtk_widget_set_size_request(close_btn, 16, 16);
     GtkStyleContext *close_ctx = gtk_widget_get_style_context(close_btn);
     gtk_style_context_add_class(close_ctx, "nova-window-btn");
     gtk_style_context_add_class(close_ctx, "nova-window-close");
@@ -1266,7 +1294,7 @@ static void nova_launch_app(NovaApp *app)
     gtk_box_pack_start(GTK_BOX(btn_box), close_btn, FALSE, FALSE, 0);
 
     GtkWidget *min_btn = gtk_button_new();
-    gtk_widget_set_size_request(min_btn, 12, 12);
+    gtk_widget_set_size_request(min_btn, 16, 16);
     GtkStyleContext *min_ctx = gtk_widget_get_style_context(min_btn);
     gtk_style_context_add_class(min_ctx, "nova-window-btn");
     gtk_style_context_add_class(min_ctx, "nova-window-minimize");
@@ -1275,7 +1303,7 @@ static void nova_launch_app(NovaApp *app)
     gtk_box_pack_start(GTK_BOX(btn_box), min_btn, FALSE, FALSE, 0);
 
     GtkWidget *max_btn = gtk_button_new();
-    gtk_widget_set_size_request(max_btn, 12, 12);
+    gtk_widget_set_size_request(max_btn, 16, 16);
     GtkStyleContext *max_ctx = gtk_widget_get_style_context(max_btn);
     gtk_style_context_add_class(max_ctx, "nova-window-btn");
     gtk_style_context_add_class(max_ctx, "nova-window-maximize");
@@ -1469,17 +1497,26 @@ static void nova_show_notification(const char *title, const char *body)
  * Global Keyboard Shortcuts
  * ═══════════════════════════════════════════════ */
 
-static GdkFilterReturn global_key_filter(GdkXEvent *xevent, GdkEvent *event, gpointer data)
+/* Global key snooper — catches Ctrl+Space from ANY window */
+static gint global_key_snooper(GtkWidget *widget, GdkEventKey *event, gpointer data)
 {
-    /* This is a placeholder — global keybinds would need X11 grabbing */
-    return GDK_FILTER_CONTINUE;
-}
+    if (event->type != GDK_KEY_PRESS) return FALSE;
 
-/* Watch for Ctrl+Space globally (via timeout polling) */
-static gboolean check_keys(gpointer data)
-{
-    /* Global shortcuts are handled by each window's key-press handler */
-    return TRUE;
+    gboolean ctrl = (event->state & GDK_CONTROL_MASK);
+
+    /* Ctrl+Space — toggle Spotlight launcher */
+    if (ctrl && event->keyval == GDK_KEY_space) {
+        nova_toggle_launcher();
+        return TRUE; /* consumed */
+    }
+
+    /* Super/Meta key — also toggle Spotlight */
+    if (event->keyval == GDK_KEY_Super_L || event->keyval == GDK_KEY_Super_R) {
+        nova_toggle_launcher();
+        return TRUE;
+    }
+
+    return FALSE; /* pass through */
 }
 
 /* ═══════════════════════════════════════════════
@@ -1518,6 +1555,9 @@ int main(int argc, char *argv[])
 
     /* Init GTK */
     gtk_init(&argc, &argv);
+
+    /* Register global keyboard shortcut handler */
+    gtk_key_snooper_install(global_key_snooper, NULL);
 
     signal(SIGINT, signal_handler);
     signal(SIGTERM, signal_handler);

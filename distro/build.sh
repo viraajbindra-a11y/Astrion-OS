@@ -583,7 +583,6 @@ export XCURSOR_SIZE=48
 # This is needed because the Surface Pro has 267 DPI (2736x1824)
 # WebKit content inside app windows has its own zoom from config file
 export GDK_SCALE=2
-export GDK_DPI_SCALE=0.5
 
 # ── Auto-fix system clock via NTP (uses UDP, not HTTPS — no SSL cert needed) ──
 sudo ntpdate -u pool.ntp.org 2>/dev/null &
