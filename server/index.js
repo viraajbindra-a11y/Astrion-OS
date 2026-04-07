@@ -195,6 +195,81 @@ app.post('/api/ai', async (req, res) => {
   }
 });
 
+// ─── System Overlay (brings JS features to native shell) ───
+// This page runs in a hidden WebKitGTK window and provides:
+// screensaver, widgets, emoji picker, clipboard, night shift, etc.
+app.get('/system-overlay', (req, res) => {
+  res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Astrion System Services</title>
+  <link rel="stylesheet" href="/css/system.css">
+  <style>
+    html, body {
+      margin: 0; padding: 0; overflow: hidden;
+      background: transparent;
+      width: 100vw; height: 100vh;
+      font-family: var(--font, -apple-system, 'Inter', sans-serif);
+      color: white;
+      pointer-events: none;
+    }
+    /* Only show pointer-events on active overlays */
+    .overlay-active { pointer-events: auto; }
+    #overlay-container {
+      position: fixed; top: 0; left: 0; width: 100vw; height: 100vh;
+      z-index: 1;
+    }
+  </style>
+</head>
+<body>
+  <div id="overlay-container"></div>
+  <div id="desktop" style="display:none"></div>
+  <div id="windows-container" style="display:none"></div>
+  <script>
+    window.__ASTRION_OVERLAY__ = true;
+    window.__NOVA_NATIVE__ = true;
+  </script>
+  <script type="module">
+    // Import all overlay features
+    import { initScreensaver, triggerScreensaver } from '/js/shell/screensaver.js';
+    import { initWidgets } from '/js/shell/widgets.js';
+    import { initNightShift } from '/js/shell/night-shift.js';
+    import { initClipboardManager } from '/js/shell/clipboard-manager.js';
+    import { initEmojiPicker } from '/js/shell/emoji-picker.js';
+    import { initFocusMode } from '/js/shell/focus-mode.js';
+    import { initIdleLock } from '/js/shell/idle-lock.js';
+    import { initVolumeHud } from '/js/shell/volume-hud.js';
+    import { initHotCorners } from '/js/shell/hot-corners.js';
+
+    // Initialize all overlay services
+    try { initScreensaver(); } catch(e) { console.log('screensaver:', e.message); }
+    try { initNightShift(); } catch(e) { console.log('nightshift:', e.message); }
+    try { initFocusMode(); } catch(e) { console.log('focus:', e.message); }
+    try { initIdleLock(); } catch(e) { console.log('idle:', e.message); }
+    try { initHotCorners(); } catch(e) { console.log('hotcorners:', e.message); }
+    try { initVolumeHud(); } catch(e) { console.log('volume:', e.message); }
+    try { initClipboardManager(); } catch(e) { console.log('clipboard:', e.message); }
+    try { initEmojiPicker(); } catch(e) { console.log('emoji:', e.message); }
+    try { initWidgets(); } catch(e) { console.log('widgets:', e.message); }
+
+    // Expose functions for C shell to call via run_javascript
+    window.triggerScreensaver = triggerScreensaver;
+    window.showOverlay = (name) => {
+      document.body.classList.add('overlay-active');
+      if (name === 'screensaver') triggerScreensaver();
+    };
+    window.hideOverlay = () => {
+      document.body.classList.remove('overlay-active');
+    };
+
+    console.log('[Astrion Overlay] All system services loaded');
+  </script>
+</body>
+</html>`);
+});
+
 // ─── Native Shell App Routes ───
 // When nova-shell (the native C renderer) opens an app,
 // it loads /app/terminal, /app/notes, etc.
