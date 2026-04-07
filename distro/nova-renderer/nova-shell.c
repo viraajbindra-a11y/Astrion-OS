@@ -1914,69 +1914,9 @@ int main(int argc, char *argv[])
     g_print("[Astrion Shell] Creating launcher...\n");
     create_launcher();
 
-    /* ─── System Overlay ─── */
-    /* Hidden WebKitGTK window that runs all JS overlay features:
-     * screensaver, widgets, night shift, clipboard, emoji, etc. */
-    g_print("[Astrion Shell] Loading system overlay...\n");
-    {
-        GtkWidget *overlay_win = gtk_window_new(GTK_WINDOW_TOPLEVEL);
-        gtk_window_set_title(GTK_WINDOW(overlay_win), "Astrion System Services");
-        gtk_window_set_default_size(GTK_WINDOW(overlay_win), screen_width, screen_height);
-        gtk_window_move(GTK_WINDOW(overlay_win), 0, 0);
-        gtk_window_set_decorated(GTK_WINDOW(overlay_win), FALSE);
-        gtk_window_set_skip_taskbar_hint(GTK_WINDOW(overlay_win), TRUE);
-        gtk_window_set_keep_above(GTK_WINDOW(overlay_win), TRUE);
-
-        /* Make window click-through by default */
-        gtk_widget_set_events(overlay_win, 0);
-
-        WebKitSettings *ov_settings = webkit_settings_new();
-        webkit_settings_set_enable_javascript(ov_settings, TRUE);
-        webkit_settings_set_enable_html5_local_storage(ov_settings, TRUE);
-        webkit_settings_set_enable_webaudio(ov_settings, TRUE);
-
-        /* Use persistent context (same as main renderer) */
-        const gchar *home = g_get_home_dir();
-        gchar *ov_data = g_build_filename(home, ".local", "share", "nova-renderer", NULL);
-        gchar *ov_cache = g_build_filename(home, ".cache", "nova-renderer", NULL);
-        WebKitWebsiteDataManager *ov_dm = webkit_website_data_manager_new(
-            "base-data-directory", ov_data,
-            "base-cache-directory", ov_cache, NULL);
-        WebKitWebContext *ov_ctx = webkit_web_context_new_with_website_data_manager(ov_dm);
-        g_free(ov_data);
-        g_free(ov_cache);
-
-        WebKitWebView *ov_webview = WEBKIT_WEB_VIEW(g_object_new(WEBKIT_TYPE_WEB_VIEW,
-            "settings", ov_settings, "web-context", ov_ctx, NULL));
-
-        /* Transparent background for overlay */
-        GdkRGBA ov_bg = {0, 0, 0, 0};
-        webkit_web_view_set_background_color(ov_webview, &ov_bg);
-
-        /* Apply HiDPI zoom */
-        double zoom = get_hidpi_zoom();
-        if (zoom > 0) webkit_web_view_set_zoom_level(ov_webview, zoom);
-
-        gtk_container_add(GTK_CONTAINER(overlay_win), GTK_WIDGET(ov_webview));
-
-        /* Load the system overlay page */
-        char overlay_url[256];
-        snprintf(overlay_url, sizeof(overlay_url), "%s/system-overlay", NOVA_SERVER_URL);
-        webkit_web_view_load_uri(ov_webview, overlay_url);
-
-        /* Show but make input pass-through */
-        gtk_widget_show_all(overlay_win);
-
-        /* Set input region to empty (click-through) */
-        GdkWindow *gdk_win = gtk_widget_get_window(overlay_win);
-        if (gdk_win) {
-            cairo_region_t *empty = cairo_region_create();
-            gdk_window_input_shape_combine_region(gdk_win, empty, 0, 0);
-            cairo_region_destroy(empty);
-        }
-
-        g_print("[Astrion Shell] System overlay loaded\n");
-    }
+    /* System overlay disabled — transparent windows need a compositor.
+     * JS overlay features (screensaver, widgets, etc.) will be added
+     * as on-demand native windows in a future update. */
 
     /* Show welcome notification */
     nova_show_notification("Welcome to Astrion OS",
