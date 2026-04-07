@@ -576,7 +576,14 @@ cat > /home/astrion/.xinitrc << 'XINITRC'
 # Force a visible cursor (VMs sometimes hide the X11 default)
 xsetroot -cursor_name left_ptr
 export XCURSOR_THEME=DMZ-White
-export XCURSOR_SIZE=24
+export XCURSOR_SIZE=48
+
+# ── HiDPI scaling for native shell ──
+# GDK_SCALE doubles all GTK widgets (panel, dock, menus, window chrome)
+# This is needed because the Surface Pro has 267 DPI (2736x1824)
+# WebKit content inside app windows has its own zoom from config file
+export GDK_SCALE=2
+export GDK_DPI_SCALE=0.5
 
 # ── Auto-fix system clock via NTP (uses UDP, not HTTPS — no SSL cert needed) ──
 sudo ntpdate -u pool.ntp.org 2>/dev/null &
