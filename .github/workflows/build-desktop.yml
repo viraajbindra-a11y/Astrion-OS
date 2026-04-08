@@ -1,4 +1,4 @@
-name: Build & Release NOVA OS Desktop App
+name: Build & Release Astrion OS Desktop App
 
 on:
   workflow_dispatch:
@@ -32,7 +32,7 @@ jobs:
           VERSION="${BASE}.${{ github.run_number }}"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "tag=v$VERSION" >> $GITHUB_OUTPUT
-          echo "Building NOVA OS $VERSION"
+          echo "Building Astrion OS $VERSION"
 
   # ───────────────────────────────────────────────
   # 2. Build Mac / Linux / Windows in parallel
@@ -132,9 +132,9 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ needs.version.outputs.tag }}
-          name: NOVA OS ${{ needs.version.outputs.version }}
+          name: Astrion OS ${{ needs.version.outputs.version }}
           body: |
-            **NOVA OS ${{ needs.version.outputs.version }}** — auto-built from commit ${{ github.sha }}
+            **Astrion OS ${{ needs.version.outputs.version }}** — auto-built from commit ${{ github.sha }}
 
             Commit message: ${{ github.event.head_commit.message }}
 

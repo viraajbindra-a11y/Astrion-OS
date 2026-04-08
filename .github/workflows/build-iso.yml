@@ -1,4 +1,4 @@
-name: Build NOVA OS Bootable ISO
+name: Build Astrion OS Bootable ISO
 
 on:
   workflow_dispatch:
@@ -26,7 +26,7 @@ jobs:
             grub-pc-bin grub-efi-amd64-bin grub-common grub2-common \
             mtools dosfstools debian-archive-keyring
 
-      - name: Build NOVA OS ISO
+      - name: Build Astrion OS ISO
         run: |
           cd distro
           sudo bash build.sh
@@ -42,4 +42,4 @@ jobs:
       - name: Show ISO info
         run: |
           ls -lh distro/output/nova-os.iso
-          echo "NOVA OS bootable ISO ready for download!"
+          echo "Astrion OS bootable ISO ready for download!"
