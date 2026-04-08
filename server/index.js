@@ -5,6 +5,8 @@ import express from 'express';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import dns from 'dns';
+import { WebSocketServer } from 'ws';
+import { spawn } from 'child_process';
 
 // Force IPv4 DNS resolution first — many networks (including some home
 // Wi-Fi) have broken IPv6. Node's default undici fetch prefers IPv6 and
@@ -1007,8 +1009,6 @@ app.post('/api/system/sleep', async (req, res) => {
 // ─── Real Terminal via WebSocket ───
 // Spawns a real bash shell and pipes stdin/stdout over WebSocket.
 // The Terminal app connects via ws://localhost:3001
-import { WebSocketServer } from 'ws';
-import { spawn } from 'child_process';
 
 const WS_PORT = 3001;
 
