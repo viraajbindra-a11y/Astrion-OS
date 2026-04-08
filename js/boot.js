@@ -76,6 +76,8 @@ import { registerSnake } from './apps/snake.js';
 import { register2048 } from './apps/2048.js';
 import { registerBudget } from './apps/budget.js';
 import { registerQuotes } from './apps/quotes.js';
+import { registerTypingTest } from './apps/typing-test.js';
+import { registerTodo } from './apps/todo.js';
 import { verifyPassword } from './kernel/crypto.js';
 import { sounds } from './kernel/sound.js';
 import { initVolumeHud } from './shell/volume-hud.js';
@@ -167,6 +169,8 @@ import { initVolumeHud } from './shell/volume-hud.js';
   register2048();
   registerBudget();
   registerQuotes();
+  registerTypingTest();
+  registerTodo();
   await animate(progressBar, 85, 200);
 
   // Init kernel
