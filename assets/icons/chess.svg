@@ -1,0 +1,7 @@
+<svg width="120" height="120" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+<rect width="120" height="120" rx="26" fill="url(#g_chess)"/>
+<text x="60" y="76" text-anchor="middle" fill="white" font-family="serif" font-size="56" opacity="0.9">♚</text>
+<defs><linearGradient id="g_chess" x1="0" y1="0" x2="120" y2="120">
+<stop stop-color="#4a4a54"/><stop offset="1" stop-color="#2a2a34"/>
+</linearGradient></defs>
+</svg>

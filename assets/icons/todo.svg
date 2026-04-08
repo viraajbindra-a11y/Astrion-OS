@@ -1,0 +1,7 @@
+<svg width="120" height="120" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+<rect width="120" height="120" rx="26" fill="url(#g_todo)"/>
+<rect x="36" y="36" width="16" height="16" rx="3" fill="#34c759"/><path d="M40 44 L43 47 L48 40" stroke="white" stroke-width="2.5" fill="none" stroke-linecap="round"/><rect x="58" y="40" width="28" height="3" rx="1.5" fill="white" opacity="0.6"/><rect x="36" y="58" width="16" height="16" rx="3" fill="none" stroke="white" stroke-width="2" opacity="0.4"/><rect x="58" y="62" width="24" height="3" rx="1.5" fill="white" opacity="0.4"/><rect x="36" y="80" width="16" height="16" rx="3" fill="none" stroke="white" stroke-width="2" opacity="0.4"/><rect x="58" y="84" width="20" height="3" rx="1.5" fill="white" opacity="0.4"/>
+<defs><linearGradient id="g_todo" x1="0" y1="0" x2="120" y2="120">
+<stop stop-color="#5856d6"/><stop offset="1" stop-color="#3a38a0"/>
+</linearGradient></defs>
+</svg>

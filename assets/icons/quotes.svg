@@ -1,0 +1,7 @@
+<svg width="120" height="120" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+<rect width="120" height="120" rx="26" fill="url(#g_quotes)"/>
+<text x="30" y="60" fill="white" font-family="serif" font-size="60" opacity="0.3">"</text><text x="90" y="90" fill="white" font-family="serif" font-size="60" opacity="0.3">"</text>
+<defs><linearGradient id="g_quotes" x1="0" y1="0" x2="120" y2="120">
+<stop stop-color="#5856d6"/><stop offset="1" stop-color="#3a38a0"/>
+</linearGradient></defs>
+</svg>

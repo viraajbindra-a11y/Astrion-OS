@@ -1,0 +1,7 @@
+<svg width="120" height="120" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+<rect width="120" height="120" rx="26" fill="url(#g_journal)"/>
+<rect x="32" y="24" width="56" height="72" rx="6" fill="white" opacity="0.9"/><line x1="42" y1="44" x2="78" y2="44" stroke="#ccc" stroke-width="1.5"/><line x1="42" y1="54" x2="72" y2="54" stroke="#ccc" stroke-width="1.5"/><line x1="42" y1="64" x2="68" y2="64" stroke="#ccc" stroke-width="1.5"/>
+<defs><linearGradient id="g_journal" x1="0" y1="0" x2="120" y2="120">
+<stop stop-color="#ff9500"/><stop offset="1" stop-color="#cc7700"/>
+</linearGradient></defs>
+</svg>

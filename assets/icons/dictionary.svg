@@ -1,0 +1,7 @@
+<svg width="120" height="120" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+<rect width="120" height="120" rx="26" fill="url(#g_dictionary)"/>
+<rect x="32" y="28" width="56" height="64" rx="4" fill="white" opacity="0.9"/><text x="60" y="68" text-anchor="middle" fill="#333" font-family="serif" font-size="28" font-weight="bold">Aa</text>
+<defs><linearGradient id="g_dictionary" x1="0" y1="0" x2="120" y2="120">
+<stop stop-color="#8b5cf6"/><stop offset="1" stop-color="#6d28d9"/>
+</linearGradient></defs>
+</svg>

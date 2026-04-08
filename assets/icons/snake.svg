@@ -1,0 +1,7 @@
+<svg width="120" height="120" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+<rect width="120" height="120" rx="26" fill="url(#g_snake)"/>
+<path d="M40 80 Q40 40 60 40 Q80 40 80 60 Q80 80 60 80" stroke="white" stroke-width="8" fill="none" stroke-linecap="round" opacity="0.9"/><circle cx="72" cy="48" r="4" fill="white"/>
+<defs><linearGradient id="g_snake" x1="0" y1="0" x2="120" y2="120">
+<stop stop-color="#34c759"/><stop offset="1" stop-color="#1a8a36"/>
+</linearGradient></defs>
+</svg>

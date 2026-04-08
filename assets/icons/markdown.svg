@@ -1,0 +1,7 @@
+<svg width="120" height="120" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+<rect width="120" height="120" rx="26" fill="url(#g_markdown)"/>
+<text x="60" y="74" text-anchor="middle" fill="white" font-family="monospace" font-size="42" font-weight="bold" opacity="0.9">M↓</text>
+<defs><linearGradient id="g_markdown" x1="0" y1="0" x2="120" y2="120">
+<stop stop-color="#3a3a44"/><stop offset="1" stop-color="#1a1a22"/>
+</linearGradient></defs>
+</svg>

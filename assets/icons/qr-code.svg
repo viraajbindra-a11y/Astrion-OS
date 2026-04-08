@@ -1,0 +1,7 @@
+<svg width="120" height="120" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+<rect width="120" height="120" rx="26" fill="url(#g_qr-code)"/>
+<rect x="34" y="34" width="52" height="52" rx="4" fill="white" opacity="0.9"/><rect x="40" y="40" width="16" height="16" fill="#333"/><rect x="64" y="40" width="16" height="16" fill="#333"/><rect x="40" y="64" width="16" height="16" fill="#333"/><rect x="52" y="52" width="8" height="8" fill="#333"/>
+<defs><linearGradient id="g_qr-code" x1="0" y1="0" x2="120" y2="120">
+<stop stop-color="#1a1a22"/><stop offset="1" stop-color="#0a0a14"/>
+</linearGradient></defs>
+</svg>
