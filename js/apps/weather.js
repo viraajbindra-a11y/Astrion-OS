@@ -54,7 +54,7 @@ function initWeather(container) {
   container.innerHTML = `
     <div class="weather-app">
       <div class="weather-current">
-        <div class="weather-location">Cupertino</div>
+        <div class="weather-location" id="weather-city">Loading location...</div>
         <div class="weather-temp-big">${hourly[0].temp}\u00B0</div>
         <div class="weather-condition">Mostly Sunny</div>
         <div class="weather-hl">H:${daily[0].high}\u00B0  L:${daily[0].low}\u00B0</div>
@@ -119,4 +119,29 @@ function initWeather(container) {
       </div>
     </div>
   `;
+
+  // Detect real location and update city name
+  const cityEl = container.querySelector('#weather-city');
+  if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(async (pos) => {
+      try {
+        const { latitude, longitude } = pos.coords;
+        const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`, {
+          headers: { 'User-Agent': 'AstrionOS/1.0' }
+        });
+        const data = await res.json();
+        const city = data.address?.city || data.address?.town || data.address?.village || data.address?.county || 'Your Location';
+        if (cityEl) cityEl.textContent = city;
+        localStorage.setItem('nova-location-city', city);
+        localStorage.setItem('nova-location-lat', String(latitude));
+        localStorage.setItem('nova-location-lon', String(longitude));
+      } catch {
+        if (cityEl) cityEl.textContent = localStorage.getItem('nova-location-city') || 'Weather';
+      }
+    }, () => {
+      if (cityEl) cityEl.textContent = localStorage.getItem('nova-location-city') || 'Weather';
+    });
+  } else {
+    if (cityEl) cityEl.textContent = localStorage.getItem('nova-location-city') || 'Weather';
+  }
 }

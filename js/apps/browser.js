@@ -157,26 +157,10 @@ function initBrowser(container, instanceId, options = {}) {
           }
         }).catch(() => {});
       } else {
-        // Web (GitHub Pages): direct iframe (some sites block this)
-        const iframe = document.createElement('iframe');
-        iframe.className = 'browser-iframe';
-        iframe.setAttribute('sandbox', 'allow-same-origin allow-scripts allow-forms allow-popups allow-popups-to-escape-sandbox');
-        iframe.src = url;
-        iframe.onload = () => {
-          loadingBar.style.width = '100%';
-          setTimeout(() => { loadingBar.style.width = '0%'; }, 300);
-        };
-        iframe.onerror = () => {
-          showBlockedPage(url);
-        };
-        // Most sites block iframes — detect it after a timeout
-        setTimeout(() => {
-          try {
-            // If we can't access iframe content, it was likely blocked
-            if (iframe.contentDocument === null) showBlockedPage(url);
-          } catch { showBlockedPage(url); }
-        }, 3000);
-        viewport.appendChild(iframe);
+        // Web (GitHub Pages): open in new tab (iframes blocked by most sites)
+        window.open(url, '_blank');
+        loadingBar.style.width = '100%';
+        setTimeout(() => { loadingBar.style.width = '0%'; }, 300);
       }
 
       windowManager.setTitle(instanceId, url.replace(/^https?:\/\//, '').split('/')[0]);
