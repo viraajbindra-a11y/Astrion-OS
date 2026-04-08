@@ -174,6 +174,11 @@ export function initSpotlight() {
       'open maps': 'maps',
       'open map': 'maps',
       'directions': 'maps',
+      'open voice memos': 'voice-memos',
+      'record voice': 'voice-memos',
+      'open pomodoro': 'pomodoro',
+      'pomodoro timer': 'pomodoro',
+      'focus timer': 'pomodoro',
     };
 
     for (const [cmd, appId] of Object.entries(appCommands)) {

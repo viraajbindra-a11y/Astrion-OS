@@ -24,6 +24,8 @@ const dockApps = [
   { id: 'sticky-notes', name: 'Sticky Notes' },
   { id: 'contacts', name: 'Contacts' },
   { id: 'maps', name: 'Maps' },
+  { id: 'voice-memos', name: 'Voice Memos' },
+  { id: 'pomodoro', name: 'Pomodoro' },
   { id: 'appstore', name: 'App Store' },
   { id: 'settings', name: 'Settings' },
 ];

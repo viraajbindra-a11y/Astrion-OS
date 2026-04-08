@@ -1,0 +1,8 @@
+<svg width="120" height="120" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="120" height="120" rx="26" fill="url(#vmg)"/>
+  <rect x="50" y="28" width="20" height="40" rx="10" fill="white" opacity="0.95"/>
+  <path d="M40 58 Q40 78 60 78 Q80 78 80 58" stroke="white" stroke-width="3" fill="none" opacity="0.8"/>
+  <line x1="60" y1="78" x2="60" y2="92" stroke="white" stroke-width="3" opacity="0.8"/>
+  <line x1="48" y1="92" x2="72" y2="92" stroke="white" stroke-width="3" stroke-linecap="round" opacity="0.8"/>
+  <defs><linearGradient id="vmg" x1="0" y1="0" x2="120" y2="120"><stop stop-color="#ff3b30"/><stop offset="1" stop-color="#c41e16"/></linearGradient></defs>
+</svg>

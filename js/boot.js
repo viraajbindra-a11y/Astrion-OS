@@ -52,6 +52,8 @@ import { registerInstaller } from './apps/installer.js';
 import { registerStickyNotes } from './apps/sticky-notes.js';
 import { registerContacts } from './apps/contacts.js';
 import { registerMaps } from './apps/maps.js';
+import { registerVoiceMemos } from './apps/voice-memos.js';
+import { registerPomodoro } from './apps/pomodoro.js';
 import { verifyPassword } from './kernel/crypto.js';
 import { sounds } from './kernel/sound.js';
 import { initVolumeHud } from './shell/volume-hud.js';
@@ -119,6 +121,8 @@ import { initVolumeHud } from './shell/volume-hud.js';
   registerStickyNotes();
   registerContacts();
   registerMaps();
+  registerVoiceMemos();
+  registerPomodoro();
   await animate(progressBar, 85, 200);
 
   // Init kernel
