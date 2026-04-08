@@ -170,6 +170,9 @@ static NovaApp app_registry[] = {
     { "vault",           "Vault",            "\xF0\x9F\x94\x90", "/app/vault",            TRUE,  TRUE  },
     { "screen-recorder", "Screen Recorder",  "\xE2\x8F\xBA\xEF\xB8\x8F", "/app/screen-recorder",  FALSE, TRUE  },
     { "trash",           "Trash",            "\xF0\x9F\x97\x91\xEF\xB8\x8F", "/app/trash",      TRUE,  TRUE  },
+    { "sticky-notes",   "Sticky Notes",     "\xF0\x9F\x97\x82\xEF\xB8\x8F", "/app/sticky-notes", TRUE, TRUE  },
+    { "contacts",        "Contacts",         "\xF0\x9F\x91\xA5", "/app/contacts",         TRUE,  TRUE  },
+    { "maps",            "Maps",             "\xF0\x9F\x97\xBA\xEF\xB8\x8F", "/app/maps",   TRUE,  TRUE  },
     { "installer",       "Install Astrion",  "\xF0\x9F\x92\xBF", "/app/installer",        FALSE, TRUE  },
     { "appstore",        "App Store",        "\xF0\x9F\x9B\x8D",  "/app/appstore",         TRUE,  TRUE  },
     { NULL, NULL, NULL, NULL, FALSE, FALSE } /* Sentinel */

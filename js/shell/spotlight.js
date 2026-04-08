@@ -168,6 +168,12 @@ export function initSpotlight() {
       'install nova': 'installer',
       'install nova os': 'installer',
       'installer': 'installer',
+      'open sticky notes': 'sticky-notes',
+      'open stickies': 'sticky-notes',
+      'open contacts': 'contacts',
+      'open maps': 'maps',
+      'open map': 'maps',
+      'directions': 'maps',
     };
 
     for (const [cmd, appId] of Object.entries(appCommands)) {

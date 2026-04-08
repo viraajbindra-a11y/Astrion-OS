@@ -1,0 +1,8 @@
+<svg width="120" height="120" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="120" height="120" rx="26" fill="url(#cg)"/>
+  <circle cx="60" cy="48" r="16" fill="white" opacity="0.9"/>
+  <ellipse cx="60" cy="82" rx="24" ry="14" fill="white" opacity="0.9"/>
+  <circle cx="42" cy="54" r="10" fill="white" opacity="0.4"/>
+  <ellipse cx="42" cy="78" rx="14" ry="8" fill="white" opacity="0.4"/>
+  <defs><linearGradient id="cg" x1="0" y1="0" x2="120" y2="120"><stop stop-color="#5856d6"/><stop offset="1" stop-color="#3a38a0"/></linearGradient></defs>
+</svg>

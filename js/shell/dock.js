@@ -21,6 +21,9 @@ const dockApps = [
   { id: 'vault', name: 'Vault' },
   { id: 'screen-recorder', name: 'Screen Recorder' },
   { id: 'trash', name: 'Trash' },
+  { id: 'sticky-notes', name: 'Sticky Notes' },
+  { id: 'contacts', name: 'Contacts' },
+  { id: 'maps', name: 'Maps' },
   { id: 'appstore', name: 'App Store' },
   { id: 'settings', name: 'Settings' },
 ];

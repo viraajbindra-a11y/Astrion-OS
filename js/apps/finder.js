@@ -233,6 +233,38 @@ async function initFinder(container, instanceId, startPath) {
         });
       }
 
+      // Inline rename — click the filename text
+      const nameEl = el.querySelector('.finder-file-name');
+      if (nameEl) {
+        nameEl.addEventListener('dblclick', (e) => {
+          e.stopPropagation();
+          const input = document.createElement('input');
+          input.type = 'text';
+          input.value = name;
+          input.style.cssText = 'width:100%;padding:2px 4px;background:rgba(255,255,255,0.1);border:1px solid var(--accent);border-radius:4px;color:white;font-size:12px;font-family:var(--font);outline:none;text-align:center;';
+          nameEl.replaceWith(input);
+          input.focus();
+          input.select();
+
+          const doRename = async () => {
+            const newName = input.value.trim();
+            if (newName && newName !== name) {
+              const parentPath = file.path.split('/').slice(0, -1).join('/');
+              const newPath = parentPath + '/' + newName;
+              await fileSystem.rename(file.path, newPath);
+              loadFiles();
+            } else {
+              const span = document.createElement('div');
+              span.className = 'finder-file-name';
+              span.textContent = name;
+              input.replaceWith(span);
+            }
+          };
+          input.addEventListener('keydown', (ke) => { if (ke.key === 'Enter') doRename(); if (ke.key === 'Escape') { input.replaceWith(nameEl); } });
+          input.addEventListener('blur', doRename);
+        });
+      }
+
       // Right-click context menu
       el.addEventListener('contextmenu', (e) => {
         e.preventDefault();

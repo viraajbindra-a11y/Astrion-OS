@@ -49,6 +49,9 @@ import { initScreensaver } from './shell/screensaver.js';
 import { registerScreenRecorder } from './apps/screen-recorder.js';
 import { registerTrash } from './apps/trash.js';
 import { registerInstaller } from './apps/installer.js';
+import { registerStickyNotes } from './apps/sticky-notes.js';
+import { registerContacts } from './apps/contacts.js';
+import { registerMaps } from './apps/maps.js';
 import { verifyPassword } from './kernel/crypto.js';
 import { sounds } from './kernel/sound.js';
 import { initVolumeHud } from './shell/volume-hud.js';
@@ -113,6 +116,9 @@ import { initVolumeHud } from './shell/volume-hud.js';
   registerScreenRecorder();
   registerTrash();
   registerInstaller();
+  registerStickyNotes();
+  registerContacts();
+  registerMaps();
   await animate(progressBar, 85, 200);
 
   // Init kernel
