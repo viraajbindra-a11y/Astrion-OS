@@ -68,6 +68,8 @@ import { registerWhiteboard } from './apps/whiteboard.js';
 import { registerPasswordGen } from './apps/password-gen.js';
 import { registerMarkdown } from './apps/markdown.js';
 import { registerQrCode } from './apps/qr-code.js';
+import { registerDictionary } from './apps/dictionary.js';
+import { registerJournal } from './apps/journal.js';
 import { verifyPassword } from './kernel/crypto.js';
 import { sounds } from './kernel/sound.js';
 import { initVolumeHud } from './shell/volume-hud.js';
@@ -151,6 +153,8 @@ import { initVolumeHud } from './shell/volume-hud.js';
   registerPasswordGen();
   registerMarkdown();
   registerQrCode();
+  registerDictionary();
+  registerJournal();
   await animate(progressBar, 85, 200);
 
   // Init kernel
