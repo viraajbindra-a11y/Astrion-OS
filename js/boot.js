@@ -299,7 +299,7 @@ import { initVolumeHud } from './shell/volume-hud.js';
 
   // ── Easter egg for John ──
   const trollName = localStorage.getItem('nova-username') || '';
-  if (trollName.toLowerCase() === 'john') {
+  if (['john', 'koa'].includes(trollName.toLowerCase())) {
     // Phase 1: Everything looks normal for 5 seconds...
     setTimeout(() => {
       // Flip the entire screen upside down
@@ -321,9 +321,9 @@ import { initVolumeHud } from './shell/volume-hud.js';
       err.innerHTML = `
         <div style="font-size:24px;margin-bottom:20px;">:( Your PC ran into a problem</div>
         <div style="font-size:14px;color:rgba(255,255,255,0.7);max-width:500px;text-align:center;line-height:1.8;">
-          JOHN_DETECTED_ERROR<br><br>
-          Error Code: 0xJ0HN_L0L<br><br>
-          Just kidding John. You got trolled.<br>
+          USER_TROLLED_EXCEPTION<br><br>
+          Error Code: 0xG0T_Y0U<br><br>
+          Just kidding ${trollName}. You got trolled.<br>
           Refresh the page to use Astrion OS normally.<br><br>
           - Your friend :)
         </div>
