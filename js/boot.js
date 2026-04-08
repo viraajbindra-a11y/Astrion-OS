@@ -65,6 +65,9 @@ import { registerColorPicker } from './apps/color-picker.js';
 import { registerStopwatch } from './apps/stopwatch.js';
 import { registerTimer } from './apps/timer.js';
 import { registerWhiteboard } from './apps/whiteboard.js';
+import { registerPasswordGen } from './apps/password-gen.js';
+import { registerMarkdown } from './apps/markdown.js';
+import { registerQrCode } from './apps/qr-code.js';
 import { verifyPassword } from './kernel/crypto.js';
 import { sounds } from './kernel/sound.js';
 import { initVolumeHud } from './shell/volume-hud.js';
@@ -145,6 +148,9 @@ import { initVolumeHud } from './shell/volume-hud.js';
   registerStopwatch();
   registerTimer();
   registerWhiteboard();
+  registerPasswordGen();
+  registerMarkdown();
+  registerQrCode();
   await animate(progressBar, 85, 200);
 
   // Init kernel
