@@ -170,7 +170,9 @@ function initBrowser(container, instanceId, options = {}) {
           viewport.innerHTML = `<div class="browser-error" style="padding:40px;text-align:center;color:rgba(255,255,255,0.5);"><div style="font-size:48px;margin-bottom:12px;">\u26A0\uFE0F</div><div>This site can't be loaded in an iframe.</div><div style="margin-top:8px;"><a href="${url}" target="_blank" style="color:var(--accent);">Open in new tab</a></div></div>`;
         };
         viewport.appendChild(iframe);
-      });
+      }
+
+      windowManager.setTitle(instanceId, url.replace(/^https?:\/\//, '').split('/')[0]);
     }
   }
 
