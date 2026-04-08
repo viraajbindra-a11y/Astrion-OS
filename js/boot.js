@@ -62,6 +62,9 @@ import { registerSystemInfo } from './apps/system-info.js';
 import { registerTranslator } from './apps/translator.js';
 import { registerUnitConverter } from './apps/unit-converter.js';
 import { registerColorPicker } from './apps/color-picker.js';
+import { registerStopwatch } from './apps/stopwatch.js';
+import { registerTimer } from './apps/timer.js';
+import { registerWhiteboard } from './apps/whiteboard.js';
 import { verifyPassword } from './kernel/crypto.js';
 import { sounds } from './kernel/sound.js';
 import { initVolumeHud } from './shell/volume-hud.js';
@@ -139,6 +142,9 @@ import { initVolumeHud } from './shell/volume-hud.js';
   registerTranslator();
   registerUnitConverter();
   registerColorPicker();
+  registerStopwatch();
+  registerTimer();
+  registerWhiteboard();
   await animate(progressBar, 85, 200);
 
   // Init kernel
