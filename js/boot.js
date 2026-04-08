@@ -57,6 +57,8 @@ import { registerPomodoro } from './apps/pomodoro.js';
 import { registerPdfViewer } from './apps/pdf-viewer.js';
 import { registerKanban } from './apps/kanban.js';
 import { registerHabitTracker } from './apps/habit-tracker.js';
+import { registerVideoPlayer } from './apps/video-player.js';
+import { registerSystemInfo } from './apps/system-info.js';
 import { verifyPassword } from './kernel/crypto.js';
 import { sounds } from './kernel/sound.js';
 import { initVolumeHud } from './shell/volume-hud.js';
@@ -129,6 +131,8 @@ import { initVolumeHud } from './shell/volume-hud.js';
   registerPdfViewer();
   registerKanban();
   registerHabitTracker();
+  registerVideoPlayer();
+  registerSystemInfo();
   await animate(progressBar, 85, 200);
 
   // Init kernel

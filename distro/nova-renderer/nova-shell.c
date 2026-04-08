@@ -178,6 +178,8 @@ static NovaApp app_registry[] = {
     { "pdf-viewer",      "PDF Viewer",       "\xF0\x9F\x93\x84", "/app/pdf-viewer",       FALSE, FALSE },
     { "kanban",          "Kanban",           "\xF0\x9F\x93\x8B", "/app/kanban",           TRUE,  TRUE  },
     { "habit-tracker",   "Habits",           "\xE2\x9C\x85",     "/app/habit-tracker",    FALSE, TRUE  },
+    { "video-player",   "Video Player",     "\xE2\x96\xB6\xEF\xB8\x8F", "/app/video-player", FALSE, FALSE },
+    { "system-info",    "System Info",      "\xE2\x84\xB9\xEF\xB8\x8F", "/app/system-info",  FALSE, TRUE  },
     { "installer",       "Install Astrion",  "\xF0\x9F\x92\xBF", "/app/installer",        FALSE, TRUE  },
     { "appstore",        "App Store",        "\xF0\x9F\x9B\x8D",  "/app/appstore",         TRUE,  TRUE  },
     { NULL, NULL, NULL, NULL, FALSE, FALSE } /* Sentinel */

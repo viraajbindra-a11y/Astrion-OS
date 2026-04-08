@@ -1,0 +1,8 @@
+<svg width="120" height="120" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="120" height="120" rx="26" fill="url(#vpg)"/>
+  <rect x="24" y="32" width="72" height="48" rx="6" fill="#0a0a0a" opacity="0.5"/>
+  <polygon points="52,46 52,70 72,58" fill="white" opacity="0.9"/>
+  <rect x="24" y="84" width="72" height="4" rx="2" fill="rgba(255,255,255,0.15)"/>
+  <rect x="24" y="84" width="36" height="4" rx="2" fill="white" opacity="0.8"/>
+  <defs><linearGradient id="vpg" x1="0" y1="0" x2="120" y2="120"><stop stop-color="#5856d6"/><stop offset="1" stop-color="#3a38a0"/></linearGradient></defs>
+</svg>

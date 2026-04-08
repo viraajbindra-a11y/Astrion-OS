@@ -185,6 +185,12 @@ export function initSpotlight() {
       'project board': 'kanban',
       'open habits': 'habit-tracker',
       'habit tracker': 'habit-tracker',
+      'open video': 'video-player',
+      'video player': 'video-player',
+      'play video': 'video-player',
+      'system info': 'system-info',
+      'neofetch': 'system-info',
+      'about this computer': 'system-info',
     };
 
     for (const [cmd, appId] of Object.entries(appCommands)) {
