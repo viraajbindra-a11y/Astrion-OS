@@ -3,8 +3,8 @@
 // Configurable in Settings. Defaults:
 //   top-right    → Notification Center
 //   bottom-right → Show Desktop
-//   top-left     → Mission Control
-//   bottom-left  → Launchpad
+//   top-left     → Overview
+//   bottom-left  → App Grid
 
 import { eventBus } from '../kernel/event-bus.js';
 import { windowManager } from '../kernel/window-manager.js';

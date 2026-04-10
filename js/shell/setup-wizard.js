@@ -231,21 +231,21 @@ export function showSetupWizard() {
                 <div style="display:flex;align-items:center;gap:16px;background:rgba(255,255,255,0.05);border-radius:14px;padding:16px 20px;">
                   <div style="font-size:28px;width:44px;text-align:center;">&#x1F50D;</div>
                   <div>
-                    <div style="font-size:14px;font-weight:600;">Spotlight AI</div>
+                    <div style="font-size:14px;font-weight:600;">Search</div>
                     <div style="font-size:12px;color:rgba(255,255,255,0.45);margin-top:2px;">Press <kbd style="background:rgba(255,255,255,0.1);padding:2px 6px;border-radius:4px;font-size:11px;">Cmd+Space</kbd> to search, launch apps, or ask AI anything</div>
                   </div>
                 </div>
                 <div style="display:flex;align-items:center;gap:16px;background:rgba(255,255,255,0.05);border-radius:14px;padding:16px 20px;">
                   <div style="font-size:28px;width:44px;text-align:center;">&#x1F3AF;</div>
                   <div>
-                    <div style="font-size:14px;font-weight:600;">Launchpad</div>
+                    <div style="font-size:14px;font-weight:600;">App Grid</div>
                     <div style="font-size:12px;color:rgba(255,255,255,0.45);margin-top:2px;">Press <kbd style="background:rgba(255,255,255,0.1);padding:2px 6px;border-radius:4px;font-size:11px;">F4</kbd> to see all your apps in a grid</div>
                   </div>
                 </div>
                 <div style="display:flex;align-items:center;gap:16px;background:rgba(255,255,255,0.05);border-radius:14px;padding:16px 20px;">
                   <div style="font-size:28px;width:44px;text-align:center;">&#x1F4F6;</div>
                   <div>
-                    <div style="font-size:14px;font-weight:600;">Control Center</div>
+                    <div style="font-size:14px;font-weight:600;">Quick Settings</div>
                     <div style="font-size:12px;color:rgba(255,255,255,0.45);margin-top:2px;">Click the Wi-Fi or battery icon for quick settings</div>
                   </div>
                 </div>

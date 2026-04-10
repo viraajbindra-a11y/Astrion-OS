@@ -1,4 +1,4 @@
-// NOVA OS — Control Center
+// NOVA OS — Quick Settings
 
 import { eventBus } from '../kernel/event-bus.js';
 

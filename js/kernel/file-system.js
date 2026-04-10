@@ -33,7 +33,7 @@ class NovaFileSystem {
       { path: '/Downloads', type: 'folder', created: Date.now(), modified: Date.now() },
       { path: '/Pictures', type: 'folder', created: Date.now(), modified: Date.now() },
       { path: '/Music', type: 'folder', created: Date.now(), modified: Date.now() },
-      { path: '/Desktop/Welcome.txt', type: 'file', content: 'Welcome to NOVA OS!\n\nThis is your new AI-native operating system.\nPress Cmd+Space to open Spotlight and ask NOVA anything.\n\nHave fun exploring!', created: Date.now(), modified: Date.now() },
+      { path: '/Desktop/Welcome.txt', type: 'file', content: 'Welcome to NOVA OS!\n\nThis is your new AI-native operating system.\nPress Cmd+Space to open Search and ask NOVA anything.\n\nHave fun exploring!', created: Date.now(), modified: Date.now() },
       { path: '/Documents/Notes.txt', type: 'file', content: 'My first note in NOVA OS.\n\nTODO:\n- Explore the file system\n- Try the AI assistant\n- Customize settings', created: Date.now(), modified: Date.now() },
       { path: '/Documents/Ideas.txt', type: 'file', content: 'Project ideas:\n\n1. Build a website\n2. Make a game\n3. Learn a new language', created: Date.now(), modified: Date.now() },
       { path: '/Pictures/readme.txt', type: 'file', content: 'Drop your images here!', created: Date.now(), modified: Date.now() },

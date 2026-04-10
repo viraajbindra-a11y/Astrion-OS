@@ -229,7 +229,7 @@ class AppInstaller {
 
       notifications.show({
         title: `${app.name} Installed`,
-        body: 'Open it from Spotlight or Launchpad.',
+        body: 'Open it from Search or App Grid.',
         icon: app.icon,
         duration: 3000,
       });

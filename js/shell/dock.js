@@ -3,7 +3,7 @@
 import { processManager } from '../kernel/process-manager.js';
 import { eventBus } from '../kernel/event-bus.js';
 
-// Core apps in dock — rest accessible via Launchpad (F4) or Spotlight (Cmd+Space)
+// Core apps in dock — rest accessible via App Grid (F4) or Search (Cmd+Space)
 const dockApps = [
   { id: 'finder', name: 'Finder' },
   { id: 'browser', name: 'Browser' },

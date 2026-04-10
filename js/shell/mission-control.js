@@ -1,4 +1,4 @@
-// NOVA OS — Mission Control
+// NOVA OS — Overview
 // Press F3 or swipe up with 3 fingers (or click menu item) to see all open
 // windows tiled in a grid. Click one to focus it. Press Esc / F3 again to exit.
 

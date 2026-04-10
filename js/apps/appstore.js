@@ -207,7 +207,7 @@ function initAppStore(container) {
           <div class="appstore-featured-card" style="background:linear-gradient(135deg, #4a148c, #7b1fa2, #ce93d8)">
             <div class="appstore-featured-label">\u2728 AI Skills</div>
             <div class="appstore-featured-title">Extend NOVA with AI Superpowers</div>
-            <div class="appstore-featured-desc">Skills are AI capabilities that plug directly into NOVA OS. They can summarize documents, generate code, translate languages, and more — all from Spotlight or any app.</div>
+            <div class="appstore-featured-desc">Skills are AI capabilities that plug directly into NOVA OS. They can summarize documents, generate code, translate languages, and more — all from Search or any app.</div>
           </div>
         </div>
         <div class="appstore-section-title" style="margin-top:20px">Available Skills</div>

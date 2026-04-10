@@ -356,7 +356,7 @@ function initSettings(container) {
         </div>
         <div class="settings-row">
           <div>
-            <div class="settings-row-label">Spotlight AI</div>
+            <div class="settings-row-label">Search AI</div>
             <div class="settings-row-desc">Press Cmd+Space to ask Astrion anything</div>
           </div>
           <button class="settings-toggle on"></button>
@@ -416,7 +416,7 @@ function initSettings(container) {
 
   function renderKeyboard() {
     const shortcuts = [
-      ['Cmd+Space', 'Open Spotlight'],
+      ['Cmd+Space', 'Open Search'],
       ['Cmd+N', 'New Finder window'],
       ['Cmd+T', 'New Terminal'],
       ['Cmd+W', 'Close window'],
@@ -432,7 +432,7 @@ function initSettings(container) {
       ['Ctrl+Alt+T', 'Open Terminal'],
       ['Ctrl+Alt+F', 'Open File Manager'],
       ['Ctrl+Alt+B', 'Open Browser'],
-      ['F4', 'Open Launchpad'],
+      ['F4', 'Open App Grid'],
       ['F11', 'Toggle fullscreen'],
       ['Cmd+Shift+3', 'Screenshot'],
     ];

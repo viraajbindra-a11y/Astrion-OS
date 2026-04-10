@@ -1,0 +1,10 @@
+<svg width="120" height="120" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="120" height="120" rx="26" fill="url(#lcg)"/>
+  <circle cx="45" cy="50" r="18" fill="white" opacity="0.2"/>
+  <circle cx="75" cy="50" r="18" fill="white" opacity="0.2"/>
+  <path d="M35 55 Q35 40 50 40 L70 40 Q85 40 85 55 L85 60 Q85 70 75 70 L55 70 L42 80 L42 70 Q35 70 35 60 Z" fill="white" opacity="0.9"/>
+  <circle cx="50" cy="55" r="3" fill="#007aff"/>
+  <circle cx="60" cy="55" r="3" fill="#007aff"/>
+  <circle cx="70" cy="55" r="3" fill="#007aff"/>
+  <defs><linearGradient id="lcg" x1="0" y1="0" x2="120" y2="120"><stop stop-color="#007aff"/><stop offset="1" stop-color="#0055cc"/></linearGradient></defs>
+</svg>

@@ -79,6 +79,7 @@ import { registerQuotes } from './apps/quotes.js';
 import { registerTypingTest } from './apps/typing-test.js';
 import { registerTodo } from './apps/todo.js';
 import { registerBeatStudio } from './apps/beat-studio.js';
+import { registerLiveChat } from './apps/live-chat.js';
 import { verifyPassword } from './kernel/crypto.js';
 import { sounds } from './kernel/sound.js';
 import { initVolumeHud } from './shell/volume-hud.js';
@@ -173,6 +174,7 @@ import { initVolumeHud } from './shell/volume-hud.js';
   registerTypingTest();
   registerTodo();
   registerBeatStudio();
+  registerLiveChat();
   await animate(progressBar, 85, 200);
 
   // Init kernel
@@ -311,7 +313,7 @@ import { initVolumeHud } from './shell/volume-hud.js';
   initScreenshot();
   appInstaller.loadInstalled();
 
-  // ─── Phase 1+ features (Mission Control, App Switcher, etc.) ───
+  // ─── Phase 1+ features (Overview, App Switcher, etc.) ───
   initMissionControl();
   initAppSwitcher();
   initEmojiPicker();
@@ -337,7 +339,7 @@ import { initVolumeHud } from './shell/volume-hud.js';
   const userName = localStorage.getItem('nova-username') || 'User';
   const appCount = processManager.getAllApps().length;
   const welcomeMsg = isFirstBoot
-    ? `Welcome to Astrion OS! ${appCount} apps ready. Press Cmd+Space for Spotlight.`
+    ? `Welcome to Astrion OS! ${appCount} apps ready. Press Cmd+Space for Search.`
     : `Astrion OS is ready. ${appCount} apps loaded.`;
   notifications.show({
     title: isFirstBoot ? `Welcome, ${userName}!` : `Welcome back, ${userName}!`,

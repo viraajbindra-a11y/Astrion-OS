@@ -1,4 +1,4 @@
-// NOVA OS — Launchpad (App Grid Overlay)
+// NOVA OS — App Grid (App Grid Overlay)
 
 import { processManager } from '../kernel/process-manager.js';
 import { eventBus } from '../kernel/event-bus.js';

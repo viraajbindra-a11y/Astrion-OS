@@ -51,7 +51,7 @@
 .win-btn {
   width: 12px;
   height: 12px;
-  border-radius: 50%;
+  border-radius: 3px;
   border: none;
   cursor: pointer;
   padding: 0;

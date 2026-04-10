@@ -1,4 +1,4 @@
-// NOVA OS — Spotlight (AI Command Palette)
+// NOVA OS — Search (AI Command Palette)
 
 import { eventBus } from '../kernel/event-bus.js';
 import { processManager } from '../kernel/process-manager.js';
@@ -91,6 +91,27 @@ export function initSpotlight() {
   async function handleQuery(query) {
     const lower = query.toLowerCase();
     let html = '';
+
+    // Inline calculator — detect math expressions
+    const mathClean = query.replace(/[^0-9+\-*/.() %^]/g, '');
+    if (mathClean.length > 2 && /[\d].*[+\-*/^%].*[\d]/.test(mathClean)) {
+      try {
+        const expr = mathClean.replace(/\^/g, '**');
+        const result = Function('"use strict"; return (' + expr + ')')();
+        if (typeof result === 'number' && isFinite(result)) {
+          html += `<div class="spotlight-result-group">
+            <div class="spotlight-result-label">Calculator</div>
+            <div class="spotlight-result-item" data-action="none" style="cursor:default;">
+              <div class="spotlight-result-icon" style="font-size:20px;">\uD83D\uDCF1</div>
+              <div class="spotlight-result-text">
+                <div class="spotlight-result-title" style="font-size:24px;font-weight:300;">${result}</div>
+                <div class="spotlight-result-subtitle">${query} =</div>
+              </div>
+            </div>
+          </div>`;
+        }
+      } catch {}
+    }
 
     // Search apps
     const apps = processManager.getAllApps();

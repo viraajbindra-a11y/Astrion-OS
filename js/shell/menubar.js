@@ -46,7 +46,7 @@ export function initMenubar() {
     document.getElementById('menubar-app-name').textContent = appNames[app] || title || 'Finder';
   });
 
-  // Spotlight shortcut in menubar
+  // Search shortcut in menubar
   document.getElementById('menubar-spotlight').addEventListener('click', () => {
     eventBus.emit('spotlight:toggle');
   });
