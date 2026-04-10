@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Astrion Search</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { background:#1a1a22; color:#e0e0e0; font-family:-apple-system,'Inter',system-ui,sans-serif; padding:20px; }
+.logo { text-align:center; margin:40px 0 24px; }
+.logo span { font-size:28px; font-weight:300; letter-spacing:2px; }
+.logo span b { color:#007aff; font-weight:600; }
+.search-box { max-width:600px; margin:0 auto 32px; display:flex; gap:8px; }
+.search-box input { flex:1; padding:12px 18px; border-radius:24px; border:1px solid rgba(255,255,255,0.12); background:rgba(255,255,255,0.06); color:white; font-size:15px; outline:none; }
+.search-box input:focus { border-color:#007aff; }
+.search-box button { padding:12px 24px; border-radius:24px; border:none; background:#007aff; color:white; font-size:14px; cursor:pointer; font-weight:500; }
+.results { max-width:600px; margin:0 auto; }
+.result { padding:16px 0; border-bottom:1px solid rgba(255,255,255,0.06); }
+.result-url { font-size:12px; color:#007aff; margin-bottom:4px; }
+.result-title { font-size:16px; font-weight:500; color:white; margin-bottom:4px; cursor:pointer; }
+.result-title:hover { text-decoration:underline; }
+.result-desc { font-size:13px; color:rgba(255,255,255,0.5); line-height:1.5; }
+.loading { text-align:center; padding:40px; color:rgba(255,255,255,0.4); }
+.powered { text-align:center; margin-top:24px; font-size:11px; color:rgba(255,255,255,0.25); }
+</style>
+</head>
+<body>
+<div class="logo"><span><b>Astrion</b> Search</span></div>
+<div class="search-box">
+  <input type="text" id="q" placeholder="Search the web..." autofocus>
+  <button id="go">Search</button>
+</div>
+<div class="results" id="results"></div>
+<div class="powered">Search results via DuckDuckGo Instant Answer API</div>
+
+<script>
+const params = new URLSearchParams(window.location.search);
+const q = params.get('q');
+const input = document.getElementById('q');
+const results = document.getElementById('results');
+
+if (q) { input.value = q; doSearch(q); }
+
+document.getElementById('go').onclick = () => doSearch(input.value);
+input.onkeydown = (e) => { if (e.key === 'Enter') doSearch(input.value); };
+
+async function doSearch(query) {
+  if (!query.trim()) return;
+  results.innerHTML = '<div class="loading">Searching...</div>';
+
+  try {
+    // Use DuckDuckGo Instant Answer API (no iframe needed — just JSON)
+    const res = await fetch(`https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`);
+    const data = await res.json();
+
+    let html = '';
+
+    // Abstract (main answer)
+    if (data.AbstractText) {
+      html += `<div class="result">
+        <div class="result-url">${data.AbstractSource || 'Source'}</div>
+        <div class="result-title" onclick="window.open('${data.AbstractURL}','_blank')">${data.Heading || query}</div>
+        <div class="result-desc">${data.AbstractText}</div>
+      </div>`;
+    }
+
+    // Related topics
+    if (data.RelatedTopics) {
+      data.RelatedTopics.slice(0, 8).forEach(topic => {
+        if (topic.Text && topic.FirstURL) {
+          const title = topic.Text.split(' - ')[0] || topic.Text.slice(0, 60);
+          html += `<div class="result">
+            <div class="result-url">${topic.FirstURL.replace('https://','').split('/')[0]}</div>
+            <div class="result-title" onclick="window.open('${topic.FirstURL}','_blank')">${title}</div>
+            <div class="result-desc">${topic.Text.slice(0, 200)}</div>
+          </div>`;
+        }
+      });
+    }
+
+    // Instant answer
+    if (data.Answer) {
+      html = `<div class="result">
+        <div class="result-title">${query}</div>
+        <div class="result-desc" style="font-size:20px;color:white;font-weight:300;">${data.Answer}</div>
+      </div>` + html;
+    }
+
+    if (!html) {
+      // No instant answers — show web search links
+      html = `<div class="result">
+        <div class="result-desc">No instant results. Try these:</div>
+      </div>`;
+      const engines = [
+        { name: 'Google', url: `https://www.google.com/search?q=${encodeURIComponent(query)}` },
+        { name: 'Bing', url: `https://www.bing.com/search?q=${encodeURIComponent(query)}` },
+        { name: 'DuckDuckGo', url: `https://duckduckgo.com/?q=${encodeURIComponent(query)}` },
+        { name: 'Wikipedia', url: `https://en.wikipedia.org/wiki/Special:Search?search=${encodeURIComponent(query)}` },
+      ];
+      engines.forEach(e => {
+        html += `<div class="result">
+          <div class="result-url">${e.name}</div>
+          <div class="result-title" onclick="window.open('${e.url}','_blank')">Search "${query}" on ${e.name}</div>
+        </div>`;
+      });
+    }
+
+    results.innerHTML = html;
+  } catch (err) {
+    results.innerHTML = `<div class="loading">Search failed. <a href="https://www.google.com/search?q=${encodeURIComponent(query)}" target="_blank" style="color:#007aff;">Try Google</a></div>`;
+  }
+}
+</script>
+</body>
+</html>

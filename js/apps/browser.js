@@ -63,7 +63,7 @@ function initBrowser(container, instanceId, options = {}) {
       let url = urlInput.value.trim();
       if (!url) return;
       if (!url.match(/^https?:\/\//) && !url.includes('.')) {
-        url = `https://search.brave.com/search?q=${encodeURIComponent(url)}`;
+        url = `/search.html?q=${encodeURIComponent(url)}`;
       } else if (!url.match(/^https?:\/\//)) {
         url = 'https://' + url;
       }
@@ -258,7 +258,7 @@ function initBrowser(container, instanceId, options = {}) {
     home.querySelector('.browser-home-search').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
         const q = e.target.value.trim();
-        if (q) navigate(q.includes('.') ? (q.startsWith('http') ? q : 'https://' + q) : `https://search.brave.com/search?q=${encodeURIComponent(q)}`);
+        if (q) navigate(q.includes('.') ? (q.startsWith('http') ? q : 'https://' + q) : `/search.html?q=${encodeURIComponent(q)}`);
       }
     });
 
