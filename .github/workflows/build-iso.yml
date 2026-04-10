@@ -49,11 +49,29 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -e
+
+          # build.sh runs with sudo, so distro/output/* is root-owned.
+          # This non-sudo step can't mv/rm those files without reclaiming ownership.
+          # (Lesson #34 in tasks/lessons.md)
+          sudo chown -R "$(whoami):$(whoami)" distro/output
+
           cd distro/output
 
-          # Read version from package.json
-          VERSION=$(jq -r .version "$GITHUB_WORKSPACE/package.json")
-          echo "Version from package.json: $VERSION"
+          # Find the latest release FIRST so we can name the ISO to match it.
+          # Reading version from the release tag instead of package.json avoids
+          # a mismatch when the Electron build pipeline bumps package.json
+          # independently of the git tag. (Lesson #35)
+          LATEST_TAG=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 10 --json tagName,isDraft,isPrerelease \
+            --jq 'map(select(.isDraft == false and .isPrerelease == false)) | .[0].tagName')
+
+          if [ -z "$LATEST_TAG" ] || [ "$LATEST_TAG" = "null" ]; then
+            echo "::warning::No published release found — skipping release upload. Artifact is still available for 30 days."
+            exit 0
+          fi
+
+          # Strip leading 'v' from tag: v0.1.95 -> 0.1.95
+          VERSION="${LATEST_TAG#v}"
+          echo "Latest release: $LATEST_TAG (version: $VERSION)"
 
           # Rename ISO with version + arch
           ASSET_NAME="astrion-os-${VERSION}-amd64.iso"
@@ -71,15 +89,6 @@ jobs:
           # Generate SHA256 checksum
           sha256sum "$ASSET_NAME" > "${ASSET_NAME}.sha256"
           cat "${ASSET_NAME}.sha256"
-
-          # Find the latest release (non-draft, non-prerelease)
-          LATEST_TAG=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 10 --json tagName,isDraft,isPrerelease \
-            --jq 'map(select(.isDraft == false and .isPrerelease == false)) | .[0].tagName')
-
-          if [ -z "$LATEST_TAG" ] || [ "$LATEST_TAG" = "null" ]; then
-            echo "::warning::No published release found — skipping release upload. Artifact is still available for 30 days."
-            exit 0
-          fi
 
           echo "Uploading to release $LATEST_TAG"
           gh release upload "$LATEST_TAG" "$ASSET_NAME" "${ASSET_NAME}.sha256" --clobber --repo "$GITHUB_REPOSITORY"
