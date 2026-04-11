@@ -71,18 +71,19 @@ Role tier: friend
 ---
 
 ### Naren — Hype Person + Designer
-First contribution: 2026-04-11 (Astrion Brain hero wallpaper — pending Viraaj confirmation of which friend)
-Role tier: friend
+First contribution: 2026-04-11 — **Astrion Brain hero wallpaper** (confirmed by Viraaj in chat)
+Role tier: friend (strong candidate to level up to `contributor` if this pace keeps up — a marketing-grade hero asset on day 1 is significant)
 
 #### Contributions
 - Picked 2 jobs on 2026-04-11
 - **Asked the "how does pay work" question before the presentation, which prompted Viraaj to add the "The Deal" slide to the deck.** Meaningful contribution to transparency. Credit in lessons for that one.
-- **[2026-04-11] Hero wallpaper — "Astrion Brain"** — a full-bleed cyberpunk illustration of dual neural networks (brains) connected across a galaxy background with circuit-pattern edges and the ASTRION lockup. Shipped as `assets/wallpapers/astrion-brain.png` and promoted to the **default wallpaper** across both the web OS and the installer. This is a marketing-grade asset — it visually represents the dual-brain architecture (S1/S2) from the old PLAN.md and will be the first thing every user sees. **Viraaj to confirm which friend contributed this so the credit lands on the right person** — assumed Naren as designer, but could be Koa/Lauren/Jian. Shipped in the 2026-04-11 Polish Sprint Day 1 commit.
+- **[2026-04-11] Hero wallpaper — "Astrion Brain"** — a full-bleed cyberpunk illustration of dual neural networks (brains) connected across a galaxy background, with circuit-pattern edges and the ASTRION lockup. Shipped as `assets/wallpapers/astrion-brain.png` and promoted to the **default wallpaper** across the web OS, the installer, and (Day 9) the bootable ISO. This is a marketing-grade asset — it visually represents the dual-brain architecture (S1/S2) from the old PLAN.md and will be the first thing every Astrion user sees. Shipped in commit `a16a21b` on 2026-04-11 as part of Polish Sprint Day 1.
 
 #### What he's received
-- Default wallpaper slot in the web OS, the installer, AND (Day 9) the bootable ISO — every Astrion user starting from v0.2.0 sees this wallpaper on first boot unless they pick another.
-- Row in `assets/wallpapers/CREDITS.md` crediting the contributor (placeholder until Viraaj confirms name).
-- Line in the v0.2.0 release notes under "Contributors".
+- **Default wallpaper slot** across every Astrion install starting from v0.2.0 — web OS, Electron desktop app, bootable ISO. First thing users see.
+- Row in `assets/wallpapers/CREDITS.md` under his name (Naren).
+- Named line in the v0.2.0 release notes under "Contributors" (Day 9 deliverable).
+- This contribution counts toward the "early contributor" tier when revenue starts flowing at M3 (~month 4). Per Viraaj's promise at the top of this file, early = bigger multiplier.
 
 ---
 
