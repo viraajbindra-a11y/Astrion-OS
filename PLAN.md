@@ -161,7 +161,7 @@ Each milestone has: a 1-sentence success definition, **explicit phases** (the su
 
 ---
 
-### M1 — Intent Kernel Foundations *(~3 weeks after M0)*
+### M1 — Intent Kernel Foundations *(~3 weeks after M0)* ✅ **COMPLETE — shipped in a one-day sprint on 2026-04-11 (commit `2016dba`)**
 
 **Kid version:** Build the "goal scheduler." You tell it what you *want*, it figures out the steps, runs them, reports back. No AI yet — just the machinery.
 
