@@ -348,6 +348,12 @@ import { initVolumeHud } from './shell/volume-hud.js';
   initSpotlight();
   initIntentExecutor();
   initContextBundle();
+  // Agent Core Sprint follow-up: the original sprint commit only wired
+  // initConversationMemory() into the native branch. The init itself is a
+  // no-op today, but the retrospective claimed "both branches" and that
+  // was false. Kept symmetric so the web preview + native shell behave
+  // identically.
+  initConversationMemory();
   initControlCenter();
   initLaunchpad();
   notifications.init();

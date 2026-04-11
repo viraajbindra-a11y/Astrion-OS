@@ -172,7 +172,13 @@ export function getContextBundle() {
 export function summarizeContext(bundle) {
   if (!bundle) return '';
   const lines = [];
-  lines.push(`date: ${new Date(bundle.timestamp).toISOString().replace(/T/, ' ').replace(/\..+/, '')}`);
+  // Agent Core Sprint follow-up: the sprint retrospective claimed this
+  // function "returns null, never throws". It did not — an empty bundle or
+  // one without a numeric timestamp would hit `new Date(undefined)` and
+  // throw RangeError inside the planner, silently killing every `intent:plan`
+  // call. Fall back to Date.now() on bad input.
+  const ts = Number.isFinite(bundle.timestamp) ? bundle.timestamp : Date.now();
+  lines.push(`date: ${new Date(ts).toISOString().replace(/T/, ' ').replace(/\..+/, '')}`);
   if (bundle.openApps?.length) {
     lines.push(`open apps: ${bundle.openApps.map(a => a.name).slice(0, 10).join(', ')}`);
   } else {

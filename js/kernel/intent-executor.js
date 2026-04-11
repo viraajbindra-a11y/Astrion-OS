@@ -173,6 +173,30 @@ function resolveBindings(args, bindings) {
 }
 
 /**
+ * Walk a resolved-args tree and collect any binding references that survived
+ * substitution (i.e., `${binds.NAME}` the executor couldn't resolve). Returns
+ * the list of unresolved binding names. Used by `executePlan` to fail with a
+ * clean error instead of letting the downstream capability complain about a
+ * nonsense path or string.
+ */
+function findUnresolvedBindings(value) {
+  const out = new Set();
+  const walk = (v) => {
+    if (v == null) return;
+    if (typeof v === 'string') {
+      const re = /\$\{binds\.([a-zA-Z0-9_]+)\}/g;
+      let m;
+      while ((m = re.exec(v))) out.add(m[1]);
+      return;
+    }
+    if (Array.isArray(v)) { v.forEach(walk); return; }
+    if (typeof v === 'object') { Object.values(v).forEach(walk); }
+  };
+  walk(value);
+  return Array.from(out);
+}
+
+/**
  * Given a step output, pick the value to bind (if the step declared a
  * `binds` field). For files.createFolder we want the `path` field; for a
  * generic capability we take `path` if present, otherwise the whole output.
@@ -284,8 +308,21 @@ export async function executePlan(plan, opts = {}) {
 
   for (let i = 0; i < resolved.length; i++) {
     const { cap, step } = resolved[i];
+    const subbed = resolveBindings(step.args || {}, bindings);
+    // Agent Core Sprint follow-up: if any `${binds.X}` survived substitution
+    // (typo in the planner output, missing upstream binds field, etc.), fail
+    // fast with a clean error. Without this the downstream capability would
+    // get a garbled string like "/${binds.nope}/foo" and complain about a
+    // "path outside allowed roots" — confusing and hard to debug.
+    const unresolved = findUnresolvedBindings(subbed);
+    if (unresolved.length > 0) {
+      const error = `unresolved binding${unresolved.length > 1 ? 's' : ''}: ${unresolved.map(n => '${binds.' + n + '}').join(', ')}`;
+      eventBus.emit('plan:step:fail', { planId, index: i, step, error });
+      eventBus.emit('plan:failed', { planId, error, atStep: i });
+      return { ok: false, planId, bindings, results, error, atStep: i };
+    }
     const resolvedArgs = {
-      ...resolveBindings(step.args || {}, bindings),
+      ...subbed,
       _intent: { raw: opts.query || '', args: step.args || {} },
     };
     eventBus.emit('plan:step:start', { planId, index: i, step, resolvedArgs });

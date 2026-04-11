@@ -110,10 +110,25 @@ Astrion OS is a real business. From day one. Don't frame friend contributions as
 - DRAFT retrospective (not a real retro until soak-tested): `tasks/agent-core-sprint-DRAFT-2026-04-11.md`
 - **Why it's not shipped**: real Claude API round-trip NEVER verified in the sandbox (no ANTHROPIC_API_KEY). Planner was exercised end-to-end ONLY via `aiService._mockResponse` stub. Viraaj hasn't driven the Spotlight multi-turn panel with his own hands. Lessons #71-80 are real regardless. Lesson #80 is the warning about exactly this. Lesson #70 was in the session's active context when the over-compression happened — compression has an off switch and the session forgot to flip it.
 
-### 🔜 Next work (PLAN.md M3 — Dual-Process Runtime)
-**Agent Core Sprint SHIPPED 2026-04-11 same day as M2 + Polish Sprint.** See `tasks/agent-core-sprint-complete-2026-04-11.md` for the full retrospective. Deliverable query (`create a folder called Projects...`) verified end-to-end in preview, folder + file land in the VFS, Spotlight step panel renders green ✓, `intent-planner 15/15` + `context-bundle 4/4` + `files path-resolve 10/10` sanity tests all green. Stubbed `aiService._mockResponse` to test the planner without a Claude key; real Claude round-trip still needs a session with ANTHROPIC_API_KEY set.
+### 🔜 Next work — FINISH the Agent Core Sprint soak test (not M3 yet)
+**Agent Core Sprint is NOT shipped.** Code landed on branch `agent-core-sprint` (local), commits `0cd1b5c` + `69b9ad9`. A follow-up review session (2026-04-11 afternoon) deep-read every changed file, ran 11 adversarial tests through the real `intent:plan` handler chain under stub, found 3 real bugs the prior session missed, and fixed them on the same branch. See `tasks/agent-core-soak-test-BLOCKED-2026-04-11.md` for the full report and the exact 5-minute keyed-session checklist.
 
-Next milestone: **PLAN.md M3 (Dual-Process Runtime)** — this is when premium AI tier ships and revenue starts.
+Bugs the follow-up review found and fixed (all on-branch, NOT merged to main):
+1. **CRITICAL:** `summarizeContext()` threw `RangeError` on empty/null `bundle.timestamp`, silently killing every `intent:plan` that passed a bare `{}` context. Prior session's "defensive readers, never throws" claim was false. Fixed with `Number.isFinite` guard.
+2. **LOW:** `initConversationMemory()` was wired into the native boot branch but NOT the normal branch. Currently a no-op but inconsistent with the retrospective's claim. Fixed for symmetry.
+3. **LOW:** Unresolved `${binds.X}` references produced a confusing "path outside roots" error instead of a clean "unresolved binding" error. Fixed with a pre-execution scan in `executePlan`.
+4. **INFO:** Planner error labels conflated parse failures and schema failures. Fixed with distinct labels ("unparseable twice" vs "invalid twice").
+
+**First job of the NEXT session (still — the blocker hasn't lifted):**
+1. Get a real funded `ANTHROPIC_API_KEY` into the preview server env. Claude Code's sandbox exports the var name with an empty value; that's a dead end.
+2. `localStorage.removeItem('nova-ai-provider')` before any test (lesson #72).
+3. Run the 5-minute soak checklist in `tasks/agent-core-soak-test-BLOCKED-2026-04-11.md` section "The 5-minute keyed-session soak test."
+4. If every check passes: rename DRAFT retrospective to COMPLETE, update PLAN.md Agent Core section to ✅, fast-forward `main` → `agent-core-sprint`, write the real retrospective, bump the tag.
+5. If anything fails: debug in place, add findings to `tasks/agent-core-sprint-soak-<date>.md`, add lessons for anything new, do NOT merge to main.
+
+**Only after Agent Core is genuinely shipped does M3 start.** Do not skip ahead.
+
+After that: **PLAN.md M3 (Dual-Process Runtime)** — this is when premium AI tier ships and revenue starts.
 1. S1 runtime: bundle Ollama, always-on, handles simple intents + pattern-matched plans
 2. S2 budget manager: per-day + per-intent caps, multi-provider fallback
 3. Calibration tracker: post-hoc "did this work?" on conversation-turn nodes (substrate ready from Agent Core memory layer)

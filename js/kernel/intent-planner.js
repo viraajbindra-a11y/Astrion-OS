@@ -229,9 +229,14 @@ Try again. Respond with JSON only. No prose, no markdown.`;
     const retryPlan = tryParseJSON(retryRaw);
     const retryValidation = retryPlan ? validatePlan(retryPlan) : { ok: false, error: 'retry also un-parseable' };
     if (!retryValidation.ok) {
+      // Agent Core Sprint follow-up: prior error label was always "JSON
+      // invalid" even when JSON parsed fine but the schema rejected an
+      // unknown capability or an empty steps array. Distinguish parse
+      // failures from schema failures so the Spotlight error reads cleanly.
+      const kind = retryPlan ? 'invalid' : 'unparseable';
       return {
         status: 'failed',
-        error: `planner JSON invalid twice: ${retryValidation.error}`,
+        error: `planner output ${kind} twice: ${retryValidation.error}`,
         raw: retryRaw || raw,
       };
     }
