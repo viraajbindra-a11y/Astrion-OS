@@ -1,6 +1,13 @@
-// NOVA OS — Notification System with Notification Center
+// Astrion OS — Notification System with Notification Center
+//
+// Polish Sprint (2026-04-11): history now persists via localStorage so
+// reloads don't wipe the notification log. Capped at 200 entries; the
+// in-memory visible queue is still ephemeral.
 
 import { eventBus } from './event-bus.js';
+
+const STORAGE_KEY = 'astrion-notification-history';
+const MAX_HISTORY = 200;
 
 class NotificationManager {
   constructor() {
@@ -10,6 +17,39 @@ class NotificationManager {
     this.centerPanel = null;
     this.nextId = 0;
     this.isOpen = false;
+    this._loadHistory();
+  }
+
+  _loadHistory() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) {
+        this.history = parsed.slice(-MAX_HISTORY);
+        // ensure nextId doesn't collide with any restored entries
+        const maxId = this.history.reduce((m, n) => (typeof n.id === 'number' && n.id > m ? n.id : m), -1);
+        if (maxId >= 0) this.nextId = maxId + 1;
+      }
+    } catch (err) {
+      console.warn('[notifications] failed to load history', err);
+    }
+  }
+
+  _persistHistory() {
+    try {
+      // cap before writing to keep storage bounded
+      if (this.history.length > MAX_HISTORY) {
+        this.history = this.history.slice(-MAX_HISTORY);
+      }
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(this.history));
+    } catch (err) {
+      // quota exceeded or private mode — warn once, keep going
+      if (!this._persistWarned) {
+        this._persistWarned = true;
+        console.warn('[notifications] history persistence failed', err);
+      }
+    }
   }
 
   init() {
@@ -40,8 +80,15 @@ class NotificationManager {
     // Clear all button
     this.centerPanel.querySelector('#notif-clear-all').addEventListener('click', () => {
       this.history = [];
+      this._persistHistory();
       this._renderHistory();
     });
+
+    // If history was restored from localStorage before the DOM existed,
+    // render it now so the count badge reflects persisted notifications.
+    if (this.history.length > 0) {
+      eventBus.emit('notification:shown', { id: -1, title: 'restored', count: this.history.length });
+    }
 
     // Click outside to close
     document.addEventListener('click', (e) => {
@@ -117,9 +164,10 @@ class NotificationManager {
   show({ title, body, icon, duration = 4000, actions = [], urgent = false }) {
     const id = this.nextId++;
 
-    // Always add to history
+    // Always add to history (now persisted to localStorage, cap at MAX_HISTORY)
     this.history.push({ id, title, body, icon, time: Date.now() });
-    if (this.history.length > 50) this.history.shift();
+    if (this.history.length > MAX_HISTORY) this.history.shift();
+    this._persistHistory();
 
     // Suppress visible banner if Focus mode is on (unless marked urgent)
     if (!urgent) {

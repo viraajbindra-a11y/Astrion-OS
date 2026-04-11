@@ -255,6 +255,28 @@ export function parseIntent(query) {
   const words = lowered.split(/\s+/).filter(Boolean);
   if (words.length === 0) return null;
 
+  // ─── Math detection (runs BEFORE verb scan) ───
+  // Without this, "what is 42 * 17" matches the `explain` verb (via the
+  // "what" synonym) before the math pattern ever gets a chance. Strip
+  // common math prefixes, then check if the remainder is a pure expression.
+  // Lesson #62: math detection must pre-empt verb lookup for "what is X"
+  // and "calculate X" because those leading words are verb synonyms.
+  const mathStripped = lowered.replace(
+    /^(what\s+(is|s|'s|are)|what's|whats|calculate|calc|compute|solve|math|tell\s+me|how\s+much\s+is)\s+/i,
+    ''
+  ).trim().replace(/[?.]$/, '');
+  if (/\d/.test(mathStripped) && /^[\d\s+\-*/().%^]+$/.test(mathStripped)) {
+    return {
+      verb: 'compute',
+      target: 'calculator',
+      args: { expression: mathStripped },
+      confidence: 0.9,
+      raw,
+      parsedAt: Date.now(),
+      alternatives: [],
+    };
+  }
+
   // ─── Find the verb ───
   // Scan the first 3 tokens for any verb synonym (skipping stop words).
   let verbIdx = -1;
@@ -270,19 +292,6 @@ export function parseIntent(query) {
       verbCandidates = canonicals;
       break;
     }
-  }
-
-  // Special-case: math queries like "5 + 3" or "what is 5 * 17"
-  if (!verb && /^[^a-z]*\d[\d\s+\-*/().%^]*[\d)]\s*$/.test(lowered)) {
-    return {
-      verb: 'compute',
-      target: 'calculator',
-      args: { expression: raw.replace(/^(what is|calculate|compute|calc)\s+/i, '').trim() },
-      confidence: 0.88,
-      raw,
-      parsedAt: Date.now(),
-      alternatives: [],
-    };
   }
 
   if (!verb) return null;

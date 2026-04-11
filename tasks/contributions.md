@@ -71,15 +71,18 @@ Role tier: friend
 ---
 
 ### Naren — Hype Person + Designer
-First contribution: TBD (starter tasks sent)
+First contribution: 2026-04-11 (Astrion Brain hero wallpaper — pending Viraaj confirmation of which friend)
 Role tier: friend
 
 #### Contributions
 - Picked 2 jobs on 2026-04-11
 - **Asked the "how does pay work" question before the presentation, which prompted Viraaj to add the "The Deal" slide to the deck.** Meaningful contribution to transparency. Credit in lessons for that one.
+- **[2026-04-11] Hero wallpaper — "Astrion Brain"** — a full-bleed cyberpunk illustration of dual neural networks (brains) connected across a galaxy background with circuit-pattern edges and the ASTRION lockup. Shipped as `assets/wallpapers/astrion-brain.png` and promoted to the **default wallpaper** across both the web OS and the installer. This is a marketing-grade asset — it visually represents the dual-brain architecture (S1/S2) from the old PLAN.md and will be the first thing every user sees. **Viraaj to confirm which friend contributed this so the credit lands on the right person** — assumed Naren as designer, but could be Koa/Lauren/Jian. Shipped in the 2026-04-11 Polish Sprint Day 1 commit.
 
 #### What he's received
-- (Nothing shipped yet)
+- Default wallpaper slot in the web OS, the installer, AND (Day 9) the bootable ISO — every Astrion user starting from v0.2.0 sees this wallpaper on first boot unless they pick another.
+- Row in `assets/wallpapers/CREDITS.md` crediting the contributor (placeholder until Viraaj confirms name).
+- Line in the v0.2.0 release notes under "Contributors".
 
 ---
 

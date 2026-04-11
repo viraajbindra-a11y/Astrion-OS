@@ -18,6 +18,8 @@ export function registerSettings() {
 }
 
 const wallpapers = [
+  // Hero wallpaper — contributed by friend (see tasks/contributions.md)
+  { id: 'astrion-brain', name: 'Astrion Brain', colors: 'url("assets/wallpapers/astrion-brain.png")' },
   // Real SVG wallpapers
   { id: 'aurora',    name: 'Aurora',    colors: 'url("assets/wallpapers/aurora.svg")' },
   { id: 'ocean',     name: 'Sunset Bay', colors: 'url("assets/wallpapers/ocean.svg")' },
@@ -35,7 +37,7 @@ const wallpapers = [
 ];
 
 function initSettings(container) {
-  const currentWallpaper = localStorage.getItem('nova-wallpaper') || 'gradient-purple';
+  const currentWallpaper = localStorage.getItem('nova-wallpaper') || 'astrion-brain';
   let activeSection = 'appearance';
 
   const sections = {
@@ -544,10 +546,11 @@ function initSettings(container) {
   renderSection();
 }
 
-// Apply saved wallpaper on boot
+// Apply saved wallpaper on boot — defaults to the Astrion Brain hero
+// wallpaper (contributed by a friend — see tasks/contributions.md) if no
+// user preference has been saved yet.
 export function applyWallpaper() {
-  const id = localStorage.getItem('nova-wallpaper');
-  if (!id) return;
+  const id = localStorage.getItem('nova-wallpaper') || 'astrion-brain';
   const wp = wallpapers.find(w => w.id === id);
   if (wp) {
     const desktop = document.getElementById('desktop');

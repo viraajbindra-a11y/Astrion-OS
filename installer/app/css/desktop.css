@@ -1,13 +1,15 @@
-/* Desktop */
+/* Desktop — hero wallpaper is the Astrion Brain image (contributor credit
+   in tasks/contributions.md). applyWallpaper() overrides this if the user
+   has picked another. */
 #desktop {
   position: fixed;
   inset: 0;
-  background: url('../assets/wallpapers/default.jpg') center/cover no-repeat;
+  background: url('../assets/wallpapers/astrion-brain.png') center/cover no-repeat #0a0f1a;
   overflow: hidden;
 }
 
-/* Fallback gradient if wallpaper image fails */
-#desktop {
+/* Fallback gradient if the hero image fails to load */
+#desktop.wallpaper-failed {
   background-color: #1a1a2e;
   background-image:
     radial-gradient(ellipse at 20% 50%, rgba(72, 15, 120, 0.4) 0%, transparent 60%),

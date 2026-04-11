@@ -1,18 +1,10 @@
-/* Desktop */
+/* Desktop — default hero wallpaper is the Astrion Brain image. applyWallpaper()
+   in settings.js will override this on boot if the user has picked another. */
 #desktop {
   position: fixed;
   inset: 0;
-  background: url('../assets/wallpapers/default.jpg') center/cover no-repeat;
+  background: url('../assets/wallpapers/astrion-brain.png') center/cover no-repeat #0a0f1a;
   overflow: hidden;
-}
-
-/* Fallback gradient if wallpaper image fails */
-#desktop {
-  background-color: #1a1a2e;
-  background-image:
-    radial-gradient(ellipse at 20% 50%, rgba(72, 15, 120, 0.4) 0%, transparent 60%),
-    radial-gradient(ellipse at 80% 20%, rgba(0, 82, 180, 0.3) 0%, transparent 50%),
-    radial-gradient(ellipse at 60% 80%, rgba(120, 20, 80, 0.25) 0%, transparent 50%);
 }
 
 #desktop-icons {
