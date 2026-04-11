@@ -24,6 +24,56 @@ import { eventBus } from './event-bus.js';
 import { graphStore } from './graph-store.js';
 
 // ═══════════════════════════════════════════════════════════════
+// VFS PATH RESOLUTION (shared by files.* providers)
+// ═══════════════════════════════════════════════════════════════
+
+// Agent Core Sprint — Phase 1. The planner and user both say things like
+// "Desktop", "my documents", "/Desktop" — all need to resolve to a real
+// VFS path. We restrict writes to the five user-visible roots; anything
+// that escapes this set (or contains `..`) is hard-rejected.
+const VFS_ROOTS = ['/Desktop', '/Documents', '/Downloads', '/Pictures', '/Music'];
+const VFS_ROOT_ALIASES = {
+  desktop:    '/Desktop',
+  documents:  '/Documents',
+  docs:       '/Documents',
+  downloads:  '/Downloads',
+  pictures:   '/Pictures',
+  photos:     '/Pictures',
+  music:      '/Music',
+};
+
+function resolveVfsPath(raw) {
+  if (!raw || typeof raw !== 'string') return null;
+  let path = raw.trim();
+  // Strip "my " / "the " / leading articles
+  path = path.replace(/^(my|the|in|on)\s+/i, '');
+  // Alias lookup — lowercase literal roots or "desktop folder" → "/Desktop"
+  const aliasKey = path.toLowerCase().replace(/\s+folder$/i, '').trim();
+  if (VFS_ROOT_ALIASES[aliasKey]) return VFS_ROOT_ALIASES[aliasKey];
+  if (!path.startsWith('/')) path = '/' + path;
+  // Normalize: collapse double slashes, drop trailing slash
+  path = path.replace(/\/+/g, '/').replace(/\/$/, '') || '/';
+  return path;
+}
+
+function isPathWithinRoots(path) {
+  if (!path || typeof path !== 'string') return false;
+  if (path.includes('..')) return false;
+  if (path === '/') return false;
+  for (const root of VFS_ROOTS) {
+    if (path === root || path.startsWith(root + '/')) return true;
+  }
+  return false;
+}
+
+function joinVfsPath(parent, name) {
+  if (!parent || !name) return null;
+  const base = parent.replace(/\/$/, '');
+  const leaf = String(name).replace(/^\/+/, '');
+  return `${base}/${leaf}`;
+}
+
+// ═══════════════════════════════════════════════════════════════
 // HELPERS
 // ═══════════════════════════════════════════════════════════════
 
@@ -457,6 +507,104 @@ const screenshotTake = {
 registerCapability(screenshotTake);
 
 // ═══════════════════════════════════════════════════════════════
+// PROVIDER 11: files.createFolder — make a folder in the VFS
+// ═══════════════════════════════════════════════════════════════
+
+// Agent Core Sprint — Phase 1. The planner decomposes compound queries
+// like "create a folder called Projects on the Desktop and put a file in it"
+// into `files.createFolder` + `files.createFile`. Both accept plain props
+// (path, name, parent) because the JSON emitted by Claude isn't always in
+// exactly the same shape — we're tolerant at the capability layer.
+const filesCreateFolder = {
+  id: 'files.createFolder',
+  verb: 'make',
+  target: 'folder',
+  level: LEVEL.SANDBOX,
+  reversibility: REVERSIBILITY.BOUNDED,
+  blastRadius: BLAST_RADIUS.DIRECTORY,
+  summary: 'Create a folder in the VFS',
+  estimateCost: () => ({ timeMs: 150, irreversibilityTokens: 1 }),
+  validate: (args) => {
+    const name = args.name || args._intent?.args?.name;
+    const rawParent = args.path || args.parent || args.location || args._intent?.args?.location;
+    if (!name && !args.fullPath) return { ok: false, errors: ['Missing folder name'] };
+    const parent = args.fullPath ? null : resolveVfsPath(rawParent || '/Desktop');
+    const full = args.fullPath || (parent && name ? joinVfsPath(parent, name) : null);
+    if (!full) return { ok: false, errors: ['Could not resolve folder path'] };
+    if (!isPathWithinRoots(full)) {
+      return { ok: false, errors: [`Path outside allowed roots: ${full}`] };
+    }
+    return { ok: true, errors: [] };
+  },
+  execute: async function(args) {
+    return runCapability(this, args, async () => {
+      const name = args.name || args._intent?.args?.name;
+      const rawParent = args.path || args.parent || args.location || args._intent?.args?.location;
+      const parent = args.fullPath ? null : resolveVfsPath(rawParent || '/Desktop');
+      const fullPath = args.fullPath || joinVfsPath(parent, name);
+      if (!isPathWithinRoots(fullPath)) {
+        throw new Error(`Path outside allowed roots: ${fullPath}`);
+      }
+      await fileSystem.createFolder(fullPath);
+      safeNotify({
+        title: '📁 Folder created',
+        body: fullPath,
+      });
+      return { path: fullPath, name };
+    });
+  },
+};
+registerCapability(filesCreateFolder);
+
+// ═══════════════════════════════════════════════════════════════
+// PROVIDER 12: files.createFile — write a file in the VFS
+// ═══════════════════════════════════════════════════════════════
+
+const filesCreateFile = {
+  id: 'files.createFile',
+  verb: 'make',
+  target: 'file',
+  level: LEVEL.SANDBOX,
+  reversibility: REVERSIBILITY.BOUNDED,
+  blastRadius: BLAST_RADIUS.FILE,
+  summary: 'Create a file in the VFS',
+  estimateCost: () => ({ timeMs: 150, irreversibilityTokens: 1 }),
+  validate: (args) => {
+    const name = args.name || args._intent?.args?.name;
+    if (!name && !args.fullPath) return { ok: false, errors: ['Missing file name'] };
+    const rawParent = args.parent || args.path || args.location;
+    const parent = args.fullPath ? null : resolveVfsPath(rawParent || '/Documents');
+    const full = args.fullPath || (parent && name ? joinVfsPath(parent, name) : null);
+    if (!full) return { ok: false, errors: ['Could not resolve file path'] };
+    if (!isPathWithinRoots(full)) {
+      return { ok: false, errors: [`Path outside allowed roots: ${full}`] };
+    }
+    return { ok: true, errors: [] };
+  },
+  execute: async function(args) {
+    return runCapability(this, args, async () => {
+      const name = args.name || args._intent?.args?.name;
+      const rawParent = args.parent || args.path || args.location;
+      const parent = args.fullPath ? null : resolveVfsPath(rawParent || '/Documents');
+      const fullPath = args.fullPath || joinVfsPath(parent, name);
+      if (!isPathWithinRoots(fullPath)) {
+        throw new Error(`Path outside allowed roots: ${fullPath}`);
+      }
+      const content = typeof args.content === 'string'
+        ? args.content
+        : (args.body || args.text || '');
+      await fileSystem.writeFile(fullPath, content);
+      safeNotify({
+        title: '📄 File created',
+        body: fullPath + (content ? ` (${content.length} chars)` : ''),
+      });
+      return { path: fullPath, name, bytes: content.length };
+    });
+  },
+};
+registerCapability(filesCreateFile);
+
+// ═══════════════════════════════════════════════════════════════
 // PROVIDER BUNDLE EXPORT
 // ═══════════════════════════════════════════════════════════════
 
@@ -479,6 +627,45 @@ export const CORE_CAPABILITIES = [
   'volume.unmute',
   'translate.text',
   'screenshot.take',
+  'files.createFolder',
+  'files.createFile',
 ];
+
+// Path-resolution sanity check — runs only on localhost, at import time.
+// Catches regressions in the alias map + isPathWithinRoots guard.
+if (typeof window !== 'undefined' && window.location?.hostname === 'localhost') {
+  const pathTests = [
+    { in: 'Desktop',     expect: '/Desktop' },
+    { in: 'my documents', expect: '/Documents' },
+    { in: 'downloads folder', expect: '/Downloads' },
+    { in: '/Desktop',    expect: '/Desktop' },
+    { in: '/Desktop/',   expect: '/Desktop' },
+    { in: 'Photos',      expect: '/Pictures' },
+  ];
+  let pfail = 0;
+  for (const t of pathTests) {
+    const got = resolveVfsPath(t.in);
+    if (got !== t.expect) {
+      console.warn('[capability-providers] path-resolve FAIL:', JSON.stringify(t.in), '→', got, 'expected', t.expect);
+      pfail++;
+    }
+  }
+  const rootTests = [
+    { in: '/Desktop/Projects', expect: true },
+    { in: '/etc/passwd',       expect: false },
+    { in: '/Desktop/../etc',   expect: false },
+    { in: '/Music/song.mp3',   expect: true },
+  ];
+  for (const t of rootTests) {
+    const got = isPathWithinRoots(t.in);
+    if (got !== t.expect) {
+      console.warn('[capability-providers] root-guard FAIL:', t.in, '→', got, 'expected', t.expect);
+      pfail++;
+    }
+  }
+  if (pfail === 0) {
+    console.log(`[capability-providers] path sanity: ${pathTests.length + rootTests.length}/${pathTests.length + rootTests.length} pass`);
+  }
+}
 
 console.log(`[capability-providers] Registered ${CORE_CAPABILITIES.length} core capabilities`);

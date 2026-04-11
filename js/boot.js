@@ -16,6 +16,9 @@ import { processManager } from './kernel/process-manager.js';
 // `intent:execute` event bus channel.
 import './kernel/capability-providers.js';
 import { initIntentExecutor } from './kernel/intent-executor.js';
+// Agent Core Sprint — context surfaces + conversation memory for the planner.
+import { initContextBundle } from './kernel/context-bundle.js';
+import { initConversationMemory } from './kernel/conversation-memory.js';
 import { initMenubar } from './shell/menubar.js';
 import { initDock } from './shell/dock.js';
 import { initDesktop } from './shell/desktop.js';
@@ -137,6 +140,8 @@ import { initVolumeHud } from './shell/volume-hud.js';
     // nova-shell can still emit `intent:execute` and the executor will
     // respond. This is how native Search passes intents into Astrion.
     initIntentExecutor();
+    initContextBundle();
+    initConversationMemory();
 
     // Launch the requested app directly (no boot screen, no login)
     processManager.launch(window.__NOVA_LAUNCH_APP__);
@@ -342,6 +347,7 @@ import { initVolumeHud } from './shell/volume-hud.js';
   initDesktop();
   initSpotlight();
   initIntentExecutor();
+  initContextBundle();
   initControlCenter();
   initLaunchpad();
   notifications.init();

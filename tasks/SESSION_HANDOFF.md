@@ -1,6 +1,6 @@
 # Session Handoff — read this first in a new Claude session
 
-> **Last updated:** 2026-04-10 by the outgoing session.
+> **Last updated:** 2026-04-11 by the outgoing session (post Agent Core Sprint).
 > **Purpose:** Everything a fresh Claude session needs to pick up Astrion OS work without asking "what's going on?" questions.
 
 ---
@@ -98,19 +98,31 @@ Astrion OS is a real business. From day one. Don't frame friend contributions as
 - Plan file: `/Users/parul/.claude/plans/playful-chasing-stonebraker.md` (overwritten with Polish Sprint plan)
 - Retrospective: `tasks/polish-sprint-complete-2026-04-11.md`
 
-### 🔜 Next work (Agent Core Sprint)
-Viraaj's "Milestone 2: AI Agent Core" (his new naming, not PLAN.md's M2). Target 2-4 weeks. **~60% of this is already built** on top of M1 Intent Kernel + M2 Hypergraph. Real new work:
-1. Multi-step planning — current executor runs ONE capability, not a chain
-2. Clarifying-question flow — no disambiguation UX
-3. Conversation memory across turns
-4. Selection / cursor / recent terminal output / clipboard context surfaces
-5. Spotlight multi-turn UI with real-time action viz (single-shot today)
+- **Agent Core Sprint (Viraaj's "Milestone 2: AI Agent Core") — v0.3** — **SHIPPED 2026-04-11 (same afternoon as M2 + Polish Sprint).** Target was 2-4 weeks; shipped in one session via sprint compression (lessons #52, #70). Deliverable query: `"create a folder called Projects on the Desktop and put a file called ideas.txt in it with some project ideas"` → Astrion runs all 3 steps. Phases:
+  - Phase 1: `files.createFolder` + `files.createFile` capabilities with path-root guard (10/10 sanity)
+  - Phase 2: `js/kernel/context-bundle.js` — openApps + activeApp + clipboard + selection + terminal tail snapshot (4/4 sanity)
+  - Phase 3: `js/kernel/intent-planner.js` — catalog-aware prompt builder, JSON plan parser, schema validator against live capability registry, `routeQuery` heuristic router (15/15 sanity)
+  - Phase 4: `executePlan` added to `js/kernel/intent-executor.js` with binding resolver (`${binds.NAME}`), L2+ preview gate, full `plan:*` event lifecycle
+  - Phase 5: `js/kernel/conversation-memory.js` — session-scoped short-term memory as `conversation-turn` graph nodes, 10-min idle rollover, last-5-turns feed into planner prompt
+  - Phase 6: Spotlight multi-turn panel (streaming step status ⏳/▶/✓/✗, L2+ confirm gate UI, clarify-question UI, selection snapshot on `spotlight:will-open`, fast M1 path unchanged)
+  - Phase 7: lessons 71-80, PLAN.md Agent Core section, retrospective (`tasks/agent-core-sprint-complete-2026-04-11.md`), SESSION_HANDOFF bump
+- Plan file: `/Users/parul/.claude/plans/foamy-floating-snowflake.md`
+- Retrospective: `tasks/agent-core-sprint-complete-2026-04-11.md`
+- **Caveat**: real Claude API round-trip NOT verified in this preview sandbox (no ANTHROPIC_API_KEY). Planner logic exercised end-to-end by stubbing `aiService._mockResponse` with a canned plan. Lesson #80 documents this. Real Claude integration needs a later session with a key set.
 
-Deliverable: `"create a folder called Projects on the Desktop and put a file called ideas.txt in it with some project ideas"` → Astrion does all 3 steps in sequence.
+### 🔜 Next work (PLAN.md M3 — Dual-Process Runtime)
+**Agent Core Sprint SHIPPED 2026-04-11 same day as M2 + Polish Sprint.** See `tasks/agent-core-sprint-complete-2026-04-11.md` for the full retrospective. Deliverable query (`create a folder called Projects...`) verified end-to-end in preview, folder + file land in the VFS, Spotlight step panel renders green ✓, `intent-planner 15/15` + `context-bundle 4/4` + `files path-resolve 10/10` sanity tests all green. Stubbed `aiService._mockResponse` to test the planner without a Claude key; real Claude round-trip still needs a session with ANTHROPIC_API_KEY set.
 
-**Recommended:** start in a fresh session (this one is ~60%+ context). Read `tasks/polish-sprint-complete-2026-04-11.md` first, then this doc, then PLAN.md.
+Next milestone: **PLAN.md M3 (Dual-Process Runtime)** — this is when premium AI tier ships and revenue starts.
+1. S1 runtime: bundle Ollama, always-on, handles simple intents + pattern-matched plans
+2. S2 budget manager: per-day + per-intent caps, multi-provider fallback
+3. Calibration tracker: post-hoc "did this work?" on conversation-turn nodes (substrate ready from Agent Core memory layer)
+4. UI tags on every response: which brain + confidence %
+5. Auto-escalate categories where S1 accuracy < 70% to S2 permanently
 
-Also still on the backlog for after Agent Core Sprint: **PLAN.md M3 (Dual-Process Runtime)** — S1 local Ollama + S2 cloud Claude + calibration tracker. This is when premium AI tier ships and revenue starts. May or may not land in the same sprint as Agent Core.
+**~50% of the M3 substrate is already built:** the planner calls Claude today (just needs to try Ollama first and fall back); the `conversation-turn` graph nodes become the calibration feedback substrate; the `context-bundle` is ready to feed per-intent category data to the calibration tracker; the L2+ preview gate already shows the user which steps are touching real data.
+
+**Recommended:** start in a fresh session (this one will be ~80%+ context after Agent Core ships). Read `tasks/agent-core-sprint-complete-2026-04-11.md` first, then this doc, then PLAN.md.
 
 ### 🛣️ After M2
 - **M3** — Dual-process brain (S1 local Ollama + S2 cloud Claude + calibration tracker) — this is when premium AI tier ships + money starts

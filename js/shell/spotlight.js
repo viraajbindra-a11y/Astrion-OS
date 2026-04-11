@@ -11,8 +11,15 @@ import { processManager } from '../kernel/process-manager.js';
 import { fileSystem } from '../kernel/file-system.js';
 import { aiService } from '../kernel/ai-service.js';
 import { parseIntent, summarizeIntent, intentToNaturalLanguage } from '../kernel/intent-parser.js';
+// Agent Core Sprint — heuristic router + context snapshot for the planner.
+import { routeQuery } from '../kernel/intent-planner.js';
+import { getContextBundle } from '../kernel/context-bundle.js';
 
 let isOpen = false;
+// Agent Core Sprint: the id of the plan currently streaming in the panel,
+// so we can scope `plan:*` events and ignore stale ones after abort.
+let activePlanId = null;
+let pendingConfirmPlanId = null;
 
 export function initSpotlight() {
   const spotlight = document.getElementById('spotlight');
@@ -26,6 +33,30 @@ export function initSpotlight() {
       toggle();
     }
     if (e.key === 'Escape' && isOpen) {
+      // Agent Core Sprint: Escape behavior has three modes now:
+      //  1. A plan preview is awaiting confirm → abort it (don't close yet)
+      //  2. A plan is actively running → abort it
+      //  3. Otherwise → normal Spotlight close
+      if (pendingConfirmPlanId) {
+        eventBus.emit('plan:aborted', { planId: pendingConfirmPlanId, reason: 'user-aborted' });
+        pendingConfirmPlanId = null;
+        planState.awaitingConfirm = false;
+        resetPlanState();
+        activePlanId = null;
+        results.innerHTML = '';
+        input.disabled = false;
+        input.focus();
+        return;
+      }
+      if (activePlanId) {
+        eventBus.emit('plan:aborted', { planId: activePlanId, reason: 'user-aborted' });
+        activePlanId = null;
+        resetPlanState();
+        results.innerHTML = '';
+        input.disabled = false;
+        input.focus();
+        return;
+      }
       close();
     }
   });
@@ -69,6 +100,192 @@ export function initSpotlight() {
     });
   });
 
+  // ─── Agent Core Sprint — plan:* event subscriptions ───
+  // Render a streaming step panel in the Spotlight results area when a
+  // multi-step plan is running. Every event re-renders the panel using
+  // the current in-memory `planState`.
+  const planState = {
+    planId: null,
+    query: '',
+    reasoning: '',
+    steps: [],        // [{ cap, status: 'pending'|'running'|'done'|'failed', output?, error? }]
+    awaitingConfirm: false,
+    totalTokens: 0,
+    clarify: null,
+  };
+
+  function resetPlanState() {
+    planState.planId = null;
+    planState.query = '';
+    planState.reasoning = '';
+    planState.steps = [];
+    planState.awaitingConfirm = false;
+    planState.totalTokens = 0;
+    planState.clarify = null;
+  }
+
+  eventBus.on('plan:started', ({ planId, plan, query, totalTokens, reasoning }) => {
+    activePlanId = planId;
+    planState.planId = planId;
+    planState.query = query || '';
+    planState.reasoning = reasoning || '';
+    planState.totalTokens = totalTokens || 0;
+    planState.steps = (plan.steps || []).map(s => ({
+      cap: s.cap,
+      summary: s.args?.name || s.args?.path || s.cap,
+      status: 'pending',
+    }));
+    planState.clarify = null;
+    renderPlanPanel();
+    if (!isOpen) open(); // force Spotlight open if planner fired from elsewhere
+  });
+
+  eventBus.on('plan:preview', ({ planId, plan, totalTokens, reasoning }) => {
+    if (planId !== activePlanId) return;
+    pendingConfirmPlanId = planId;
+    planState.awaitingConfirm = true;
+    planState.totalTokens = totalTokens || 0;
+    planState.reasoning = reasoning || planState.reasoning;
+    planState.steps = (plan.steps || []).map(s => ({
+      cap: s.cap,
+      summary: s.args?.name || s.args?.path || s.cap,
+      status: 'awaiting-confirm',
+    }));
+    renderPlanPanel();
+  });
+
+  eventBus.on('plan:step:start', ({ planId, index }) => {
+    if (planId !== activePlanId) return;
+    if (planState.steps[index]) planState.steps[index].status = 'running';
+    renderPlanPanel();
+  });
+
+  eventBus.on('plan:step:done', ({ planId, index, output }) => {
+    if (planId !== activePlanId) return;
+    if (planState.steps[index]) {
+      planState.steps[index].status = 'done';
+      planState.steps[index].output = output;
+    }
+    renderPlanPanel();
+  });
+
+  eventBus.on('plan:step:fail', ({ planId, index, error }) => {
+    if (planId !== activePlanId) return;
+    if (planState.steps[index]) {
+      planState.steps[index].status = 'failed';
+      planState.steps[index].error = error;
+    }
+    renderPlanPanel();
+  });
+
+  eventBus.on('plan:completed', ({ planId }) => {
+    if (planId !== activePlanId) return;
+    // Mark any pending as done, then show "Ready" for ~1.2s before clearing
+    renderPlanPanel({ completed: true });
+    setTimeout(() => {
+      if (planState.planId === planId && isOpen) {
+        resetPlanState();
+        activePlanId = null;
+        results.innerHTML = '';
+        input.value = '';
+        input.disabled = false;
+        input.focus();
+      }
+    }, 1200);
+  });
+
+  eventBus.on('plan:failed', ({ planId, error, atStep }) => {
+    if (planId && planId !== activePlanId) return;
+    renderPlanPanel({ failed: true, error, atStep });
+  });
+
+  eventBus.on('plan:clarify', ({ query, question, choices }) => {
+    planState.clarify = { question, choices: Array.isArray(choices) ? choices : [] };
+    planState.query = query || planState.query;
+    renderPlanPanel();
+    if (!isOpen) open();
+  });
+
+  // ─── Render functions ───
+
+  function renderPlanPanel(extra = {}) {
+    if (!planState.planId && !planState.clarify) return;
+    const stepRows = planState.steps.map((s, i) => {
+      const icons = {
+        'pending':          '⏳',
+        'running':          '▶',
+        'done':             '✓',
+        'failed':           '✗',
+        'awaiting-confirm': '…',
+      };
+      const colors = {
+        'pending':          'rgba(255,255,255,0.5)',
+        'running':          '#8be9fd',
+        'done':             '#50fa7b',
+        'failed':           '#ff5f57',
+        'awaiting-confirm': '#f1fa8c',
+      };
+      return `<div class="spotlight-result-item" style="cursor:default;border-left:3px solid ${colors[s.status]};padding-left:13px;">
+        <div class="spotlight-result-icon" style="font-size:18px;color:${colors[s.status]};">${icons[s.status] || '·'}</div>
+        <div class="spotlight-result-text">
+          <div class="spotlight-result-title" style="color:${colors[s.status]};">${escapeHtml(s.summary)}</div>
+          <div class="spotlight-result-subtitle">${escapeHtml(s.cap)}${s.error ? ' · ' + escapeHtml(s.error) : ''}</div>
+        </div>
+      </div>`;
+    }).join('');
+
+    let header;
+    if (extra.failed) {
+      header = `<div class="spotlight-result-label" style="color:#ff5f57;">⚠️ Plan failed${extra.atStep >= 0 ? ' at step ' + (extra.atStep + 1) : ''}: ${escapeHtml(extra.error || 'unknown error')}</div>`;
+    } else if (extra.completed) {
+      header = `<div class="spotlight-result-label" style="color:#50fa7b;">✓ Done — ${escapeHtml(planState.query)}</div>`;
+    } else if (planState.awaitingConfirm) {
+      header = `<div class="spotlight-result-label" style="color:#f1fa8c;">⚠ This plan changes real data (${planState.totalTokens} tokens). Press <kbd style="background:rgba(255,255,255,0.1);padding:1px 6px;border-radius:3px;">↵ Enter</kbd> to confirm or <kbd>Esc</kbd> to abort.</div>`;
+    } else {
+      header = `<div class="spotlight-result-label">🧠 Planning · ${escapeHtml(planState.query)}</div>`;
+    }
+
+    const reasoning = planState.reasoning
+      ? `<div class="spotlight-result-subtitle" style="padding:4px 16px 8px 16px;opacity:0.8;">${escapeHtml(planState.reasoning)}</div>`
+      : '';
+
+    let clarifyBlock = '';
+    if (planState.clarify) {
+      clarifyBlock = `<div class="spotlight-result-group">
+        <div class="spotlight-result-label" style="color:#8be9fd;">❓ ${escapeHtml(planState.clarify.question)}</div>
+        ${planState.clarify.choices.map((c, i) => `
+          <div class="spotlight-result-item" data-action="clarify" data-choice="${escapeHtml(c)}">
+            <div class="spotlight-result-icon">${i + 1}</div>
+            <div class="spotlight-result-text">
+              <div class="spotlight-result-title">${escapeHtml(c)}</div>
+            </div>
+          </div>
+        `).join('')}
+      </div>`;
+    }
+
+    results.innerHTML = `
+      <div class="spotlight-result-group">
+        ${header}
+        ${reasoning}
+        ${stepRows}
+      </div>
+      ${clarifyBlock}
+    `;
+
+    // Wire clarify clicks: submitting the choice as a fresh planner turn
+    if (planState.clarify) {
+      results.querySelectorAll('[data-action="clarify"]').forEach(el => {
+        el.addEventListener('click', () => {
+          const choice = el.dataset.choice;
+          planState.clarify = null;
+          input.value = choice;
+          handleSubmit(choice);
+        });
+      });
+    }
+  }
+
   // Click backdrop to close
   spotlight.querySelector('.spotlight-backdrop').addEventListener('click', close);
 
@@ -98,6 +315,9 @@ export function initSpotlight() {
   }
 
   function open() {
+    // Agent Core Sprint: fire BEFORE focusing the Spotlight input so
+    // context-bundle can snapshot the user's selection before it gets wiped.
+    eventBus.emit('spotlight:will-open');
     spotlight.classList.remove('hidden');
     input.value = '';
     // Show suggested apps when empty
@@ -130,6 +350,8 @@ export function initSpotlight() {
     isOpen = false;
     input.value = '';
     results.innerHTML = '';
+    // Agent Core Sprint: let context-bundle drop the cached selection.
+    eventBus.emit('spotlight:closed');
   }
 
   async function handleQuery(query) {
@@ -254,10 +476,36 @@ export function initSpotlight() {
   }
 
   async function handleSubmit(query) {
-    // M1.P1 — if the query parses as an intent, dispatch to the kernel.
-    // The intent:execute event is handled by the step executor (M1.P3),
-    // which calls into capability providers (M1.P2) to actually do the work.
+    // Agent Core Sprint — if the Spotlight is waiting on an L2+ preview
+    // confirmation, Enter confirms the pending plan rather than submitting
+    // a new one.
+    if (pendingConfirmPlanId) {
+      const pid = pendingConfirmPlanId;
+      pendingConfirmPlanId = null;
+      planState.awaitingConfirm = false;
+      eventBus.emit('plan:confirmed', { planId: pid });
+      return;
+    }
+
+    // Agent Core Sprint — heuristic router: decide whether this query goes
+    // through the fast single-capability path or the multi-step planner.
     const intent = parseIntent(query);
+    const route = routeQuery(query, intent);
+    if (route === 'plan') {
+      // Multi-step planner — keep Spotlight open, stream per-step progress.
+      const context = getContextBundle();
+      input.disabled = true;
+      results.innerHTML = `<div class="spotlight-result-group">
+        <div class="spotlight-result-label">🧠 Planning…</div>
+        <div class="spotlight-result-subtitle" style="padding:8px 16px;opacity:0.7;">${escapeHtml(query)}</div>
+      </div>`;
+      eventBus.emit('intent:plan', { query, context, parsedIntent: intent });
+      return; // NB: no close() — plan:completed handler will reset the panel
+    }
+
+    // M1.P1 — fast single-shot path. The intent:execute event is handled
+    // by the step executor (M1.P3), which calls into capability providers
+    // (M1.P2) to actually do the work.
     if (intent && intent.confidence >= 0.55) {
       eventBus.emit('intent:execute', intent);
       close();

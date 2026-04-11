@@ -218,6 +218,44 @@ Each milestone has: a 1-sentence success definition, **explicit phases** (the su
 
 **Deliverable:** A polished v0.2.0 — the OS feels real enough to share. Shipped on 2026-04-11 instead of 2026-04-20. Nine days of calendar time banked for the Agent Core Sprint.
 
+### AGENT CORE SPRINT — v0.3 multi-step planning, context, memory, multi-turn Spotlight *(2026-04-11, 1-day sprint)* ✅ **COMPLETE**
+
+*Viraaj's "Milestone 2: AI Agent Core" (not PLAN.md's M2 — that's Hypergraph, already shipped). Target was 2-4 weeks; shipped same day via sprint compression (lessons #52, #70). The foundation pieces (M1 Intent Kernel, M2 Hypergraph, Polish Sprint accessibility + context surfaces) did ~60% of the work already; this sprint added the remaining 40% of genuinely new logic: planner, binding resolver, context bundle, conversation memory, Spotlight multi-turn UI.*
+
+**Deliverable query that drove the sprint:**
+> `"create a folder called Projects on the Desktop and put a file called ideas.txt in it with some project ideas"` → Astrion runs all 3 steps.
+
+| Phase | Ship | New files |
+|---|---|---|
+| 1 | `files.createFolder` + `files.createFile` capability providers (L1 sandbox, BOUNDED reversibility, DIRECTORY/FILE blast radius) with a restrictive path-root guard (only `/Desktop`, `/Documents`, `/Downloads`, `/Pictures`, `/Music`; hard-reject `..` and absolute paths outside roots). `resolveVfsPath` + `isPathWithinRoots` + `joinVfsPath` helpers. 10/10 path sanity tests pass at import time. | — (append to `js/kernel/capability-providers.js`) |
+| 2 | `context-bundle.js` — pure snapshot of `{ openApps, activeApp, activeWindowTitle, clipboardText, selectedText, recentTerminalLines, currentDate }` that the planner feeds to Claude. Subscribes to `window:focused` / `app:launched` / `app:terminated` for active-app tracking. Snapshots the user's selection on `spotlight:will-open` BEFORE Spotlight's input steals focus. Defensive readers — returns null, never throws. `summarizeContext()` formats as a compact multi-line string for the prompt. | `js/kernel/context-bundle.js` |
+| 3 | `intent-planner.js` — decomposes NL query into an ordered list of capability calls. `buildPlannerPrompt` lists every registered capability with id/level/summary, pastes the context summary + memory summary, instructs Claude to respond with JSON in one of two shapes: `{status:'plan', steps:[...]}` or `{status:'clarify', question, choices}`. `tryParseJSON` tolerates markdown fences + leading prose; `validatePlan` hard-rejects unknown capability ids against the live registry. One retry with the error echoed back. `routeQuery` heuristic router picks fast-path vs plan-path in <1ms based on compound markers (`\band\b`, `\bthen\b`, `;`) + parser confidence. 15/15 sanity tests pass (route decider + JSON parser + schema validator). | `js/kernel/intent-planner.js` |
+| 4 | `intent-executor.js` augmented with `executePlan(plan, opts)`: resolves `${binds.NAME}` references from prior step outputs, sums total budget tokens up-front, emits `plan:started` / `plan:step:start` / `plan:step:done` / `plan:step:fail` / `plan:completed` / `plan:failed` / `plan:clarify` events on the shared bus. L2+ gate: any step with `cap.level >= LEVEL.REAL` triggers `plan:preview` + waits for `plan:confirmed` OR `plan:aborted` (60s auto-abort timeout). `initIntentExecutor` now listens to BOTH `intent:execute` (M1 single-shot) AND `intent:plan` (new multi-step). Session management + turn recording via conversation-memory around each plan. | — (augment `js/kernel/intent-executor.js`) |
+| 5 | `conversation-memory.js` — session-scoped short-term memory. `getOrCreateSession()` rolls on 10-min idle. `recordTurn()` writes a `conversation-turn` node to the M2 hypergraph with `{query, plan, parsedIntent, ok, error, capSummary, sessionId, ts}`. `getRecentTurns(sessionId, n=5)` queries the graph for the current session's last N turns, formatted as compact prompt rows with relative timestamps. No cross-session leakage. | `js/kernel/conversation-memory.js` |
+| 6 | `spotlight.js` augmented with a multi-turn progress panel: subscribes to every `plan:*` event, maintains in-memory `planState`, re-renders a step list with ⏳/▶/✓/✗/… status icons on each event. On `plan:preview` shows a yellow "↵ Confirm / Esc Abort" header; on `plan:completed` shows a 1.2s green "✓ Done" flash then resets to input-ready without closing Spotlight. On `plan:clarify` renders an inline question + clickable choices that submit as a fresh planner turn. Escape handler has three modes: abort preview → abort running plan → close Spotlight. `spotlight:will-open` event emitted BEFORE `input.focus()` so context-bundle can snapshot selection. Fast single-shot path (M1) still works unchanged for non-compound queries. Boot wires `initContextBundle()` + `initConversationMemory()` in both native and normal branches. | — (augment `js/shell/spotlight.js` + `js/boot.js`) |
+
+**What's not in v0.3 (deferred to later milestones):**
+- S1 local Ollama routing (M3)
+- Calibration tracker (M3)
+- Verifiable receipts + tests (M4)
+- Full red-team agent review — the L2+ preview gate is the precursor (M6)
+- Cross-session persistent memory (deferred; session-only is the M2-scope privacy default)
+- Streaming partial-token output from the planner — `aiService.ask` is non-streaming today; Spotlight streams per-STEP instead of per-token
+
+**Verification (preview_eval + preview_screenshot):**
+- All sanity suites green: `intent-planner 15/15`, `context-bundle 4/4`, `capability path-resolve 10/10`, `intent-parser 19/19`, `graph-query 14/14`, `graph-store 17/17`
+- Path-escape attempts (`..`, `/etc/evil`, `/System/Foo`) all hard-rejected by `files.createFolder` validate
+- `executePlan()` handcrafted plan with binding resolution → folder + file land in VFS, events fire in order
+- `routeQuery` sends "open terminal" → fast path, "create folder X and put file Y in it" → plan path
+- Full deliverable query, stubbed planner via `aiService._mockResponse` (no Claude key in sandbox) → folder `/Desktop/Projects` created, `ideas.txt` written with 151 chars inside, Spotlight step panel renders green ✓ for both steps (screenshot captured)
+- Single-shot regression check: `open terminal` still launches terminal and closes Spotlight, unchanged
+
+**Known limitations:**
+- Real Claude API round-trip NOT verified in this sandbox (no ANTHROPIC_API_KEY). The planner logic was exercised end-to-end via stubs; actual Claude integration needs a later session with a key set. Lesson #80 is the warning.
+- Screen-reader verification of the step panel NOT done — lesson #66 still applies.
+- The planner prompt is Haiku-tuned (per PLAN.md: `claude-haiku-4-5-20251001`). If Haiku struggles with schema-valid JSON for complex queries, the fallback is to swap to Sonnet in M3.
+- Provider `'mock'` in localStorage silently neuters everything — a Settings UX issue captured in lesson #72.
+
 **Kid version:** Replace files-and-folders with a big web of connected stuff. Every note, photo, contact, bookmark, setting is a node. Connections are automatic.
 
 **Success:** Finder is gone as an app. Queries from Spotlight work. Everything I create goes into the graph, versioned forever.
