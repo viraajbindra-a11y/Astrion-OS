@@ -120,6 +120,11 @@
   animation: brain-pulse 1.2s ease-in-out infinite;
 }
 
+.menubar-brain[data-brain="offline"] .menubar-brain-tag {
+  background: #6272a4; /* muted gray-blue for offline/mock — no real AI connected */
+  color: #f8f8f2;
+}
+
 @keyframes brain-pulse {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }

@@ -30,13 +30,19 @@ function initBrainIndicator() {
     tag.textContent = '...';
   });
 
-  eventBus.on('ai:response', ({ brain, confidence }) => {
+  eventBus.on('ai:response', ({ brain, confidence, provider }) => {
     const which = (brain || 's1').toLowerCase();
     el.dataset.brain = which;
-    tag.textContent = which.toUpperCase();
-    if (confidence != null) {
-      el.title = `Brain: ${which.toUpperCase()} answered last. Confidence ${Math.round(confidence * 100)}%. (S1 = fast local, S2 = slow cloud. Click for reasoning trace — coming in M4.)`;
-    }
+    // Display label: S1/S2 for real AI, "OFF" for offline/mock
+    tag.textContent = which === 'offline' ? 'OFF' : which.toUpperCase();
+    const label = which === 'offline'
+      ? 'OFFLINE — no real AI connected'
+      : which === 's1'
+        ? 'S1 — fast local model'
+        : 'S2 — slow cloud model';
+    const confStr = confidence != null ? ` Confidence ${Math.round(confidence * 100)}%.` : '';
+    const provStr = provider ? ` (${provider})` : '';
+    el.title = `Brain: ${label}${provStr}.${confStr} (Click for reasoning trace — coming in M4.)`;
   });
 
   el.addEventListener('click', () => {

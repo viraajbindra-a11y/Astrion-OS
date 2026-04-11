@@ -1,6 +1,16 @@
 // Astrion OS — AI Service
 // Unified AI provider: Ollama (local), Anthropic (cloud), or mock fallback.
 // Configure in Settings > AI Assistant.
+//
+// Dual-process brain tagging (M3 seed): every ask() emits `ai:thinking`
+// before the call and `ai:response` with `{brain, confidence, provider}`
+// after. The menubar brain indicator (js/shell/menubar.js) subscribes to
+// these events to show which brain answered the last question.
+//   - Ollama success → brain: 's1' (fast local)
+//   - Anthropic success → brain: 's2' (slow cloud)
+//   - Mock fallback → brain: 'offline' (no real AI wired up)
+
+import { eventBus } from './event-bus.js';
 
 const AI_PROVIDER_KEY = 'nova-ai-provider';   // 'ollama' | 'anthropic' | 'mock'
 const AI_OLLAMA_URL_KEY = 'nova-ai-ollama-url';
@@ -53,25 +63,36 @@ class AIService {
 
     const provider = this.getProvider();
 
+    // Tell the brain indicator we're thinking (menubar pulses yellow)
+    eventBus.emit('ai:thinking');
+
     // Auto: try Ollama first, then Anthropic, then mock
     if (provider === 'auto' || provider === 'ollama') {
       const reply = await this._tryOllama(systemContext, messages, options);
       if (reply) {
         this._addToHistory(prompt, reply);
+        eventBus.emit('ai:response', { brain: 's1', confidence: 0.85, provider: 'ollama' });
         return reply;
       }
-      if (provider === 'ollama') return this._mockResponse(prompt);
+      if (provider === 'ollama') {
+        const mock = this._mockResponse(prompt);
+        eventBus.emit('ai:response', { brain: 'offline', confidence: 0.3, provider: 'mock' });
+        return mock;
+      }
     }
 
     if (provider === 'auto' || provider === 'anthropic') {
       const reply = await this._tryAnthropic(systemContext, messages, options);
       if (reply) {
         this._addToHistory(prompt, reply);
+        eventBus.emit('ai:response', { brain: 's2', confidence: 0.85, provider: 'anthropic' });
         return reply;
       }
     }
 
-    return this._mockResponse(prompt);
+    const mock = this._mockResponse(prompt);
+    eventBus.emit('ai:response', { brain: 'offline', confidence: 0.3, provider: 'mock' });
+    return mock;
   }
 
   async _tryOllama(system, messages, options) {
