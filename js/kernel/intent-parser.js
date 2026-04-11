@@ -39,7 +39,7 @@
  * match, then collapses to the canonical verb.
  */
 export const VERB_SYNONYMS = {
-  make:      ['make', 'create', 'new', 'add', 'build', 'generate', 'draft', 'write'],
+  make:      ['make', 'create', 'new', 'add', 'build', 'generate', 'draft', 'write', 'take', 'capture'],
   find:      ['find', 'search', 'lookup', 'locate', 'list', 'show', 'get', 'see'],
   open:      ['open', 'launch', 'start', 'run', 'fire', 'boot'],
   close:     ['close', 'quit', 'exit', 'kill', 'stop', 'end'],

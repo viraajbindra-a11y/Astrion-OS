@@ -273,7 +273,7 @@ const aiAsk = {
   estimateCost: () => ({ timeMs: 3000, irreversibilityTokens: 0 }),
   execute: async function(args) {
     return runCapability(this, args, async () => {
-      const prompt = args._intent?.raw || args.question || args._rawArgs || '';
+      const prompt = args._intent?.raw || args.question || args._rawArgs || args.topic || '';
       if (!prompt) throw new Error('No question');
       const answer = await aiService.ask(prompt);
       safeNotify({
@@ -285,6 +285,12 @@ const aiAsk = {
   },
 };
 registerCapability(aiAsk);
+
+// Register ai.ask as the handler for explain/summarize too — they all just
+// forward the raw query to the AI. This lets "explain recursion" and
+// "summarize this article" work without creating separate providers.
+registerCapability({ ...aiAsk, id: 'ai.explain', verb: 'explain' });
+registerCapability({ ...aiAsk, id: 'ai.summarize', verb: 'summarize' });
 
 // ═══════════════════════════════════════════════════════════════
 // PROVIDER 7: browser.navigate — open a URL
