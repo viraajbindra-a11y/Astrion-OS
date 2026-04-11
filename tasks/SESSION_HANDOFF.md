@@ -87,13 +87,30 @@ Astrion OS is a real business. From day one. Don't frame friend contributions as
 - Plan file: `/Users/parul/.claude/plans/playful-chasing-stonebraker.md` (two generations: M2.P1 then overwritten with M2.P2; Days 3-6 done empirically without plan mode)
 - Wake-up summary from the overnight session that shipped Day 1: `tasks/wake-up-2026-04-11.md`
 
-### 🔜 Next work
-M2 is done. Options for the next session:
-1. **M3 — Dual-Process Runtime** — S1 (local Ollama) + S2 (cloud Claude) + calibration tracker. This is when premium AI tier ships and revenue starts. Needs design doc first (~docs/architecture/dual-brain.md). See PLAN.md M3 section for phases.
-2. **Fix the pre-existing `intent-parser` failure** — `"what is 42 * 17"` returns `explain` instead of `compute`. 2-min fix, annoying the console on every boot.
-3. **Trigger a fresh ISO build** — push a `distro/**` change (e.g., comment bump in `distro/README.md`) to get a v0.1.95+ ISO with all M2 wiring baked in. Currently the web OS has M2 but the ISO doesn't.
+- **Polish Sprint (Viraaj's "Milestone 1") — v0.2.0** — **SHIPPED 2026-04-11 (same day as M2).** Target was 9 days (Apr 11 → Apr 20); shipped in ~1 afternoon via sprint compression. Commits:
+  - `a16a21b` — Day 1: hero wallpaper from Naren + notification persistence + intent-parser `what is 42 * 17` fix (19/19 now)
+  - `e24e447` — Day 1 follow-up: credit Naren properly
+  - `69e94b0` — Day 3-4: Finder v2 (arrow-key nav, Delete, range select, Cmd+A, PDF/audio/video previews)
+  - `78997ba` — Day 5: multi-monitor awareness (`windowManager.getActiveDisplay/getAllDisplays/centerInActiveDisplay`, lazy `refreshScreenDetails`)
+  - `069e747` — Day 6-7: auto-updater end-to-end (IPC + renderer events + notification center + `docs/auto-updater.md`) + installer rebrand (nova→astrion)
+  - `a94d048` — Day 8: aria-labels on shell + `js/shell/focus-trap.js` + Force Quit dialog retrofitted
+  - *(this commit)* — Day 9: v0.2.0 release, PLAN.md updated, lessons 62-70 added, package.json bumped, retrospective written, fresh ISO trigger pushed
+- Plan file: `/Users/parul/.claude/plans/playful-chasing-stonebraker.md` (overwritten with Polish Sprint plan)
+- Retrospective: `tasks/polish-sprint-complete-2026-04-11.md`
 
-Important: user chose "**M2 first, then M3**" (do the storage foundation before the dual-brain). Don't skip ahead.
+### 🔜 Next work (Agent Core Sprint)
+Viraaj's "Milestone 2: AI Agent Core" (his new naming, not PLAN.md's M2). Target 2-4 weeks. **~60% of this is already built** on top of M1 Intent Kernel + M2 Hypergraph. Real new work:
+1. Multi-step planning — current executor runs ONE capability, not a chain
+2. Clarifying-question flow — no disambiguation UX
+3. Conversation memory across turns
+4. Selection / cursor / recent terminal output / clipboard context surfaces
+5. Spotlight multi-turn UI with real-time action viz (single-shot today)
+
+Deliverable: `"create a folder called Projects on the Desktop and put a file called ideas.txt in it with some project ideas"` → Astrion does all 3 steps in sequence.
+
+**Recommended:** start in a fresh session (this one is ~60%+ context). Read `tasks/polish-sprint-complete-2026-04-11.md` first, then this doc, then PLAN.md.
+
+Also still on the backlog for after Agent Core Sprint: **PLAN.md M3 (Dual-Process Runtime)** — S1 local Ollama + S2 cloud Claude + calibration tracker. This is when premium AI tier ships and revenue starts. May or may not land in the same sprint as Agent Core.
 
 ### 🛣️ After M2
 - **M3** — Dual-process brain (S1 local Ollama + S2 cloud Claude + calibration tracker) — this is when premium AI tier ships + money starts

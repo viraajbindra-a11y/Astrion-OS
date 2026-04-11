@@ -202,6 +202,22 @@ Each milestone has: a 1-sentence success definition, **explicit phases** (the su
 
 ### M2 — Hypergraph Storage *(~4 weeks after M1)* ✅ **COMPLETE — shipped in a one-day sprint on 2026-04-11 across Days 1-6. Commits: `89db73d` (Day 1 graph-store), `5fa298f` (Day 2 graph-query), and a final squash commit for Days 3-6 (migration + app wiring + rewind + snapshots + polish).**
 
+### POLISH SPRINT — v0.2 foundation polish *(2026-04-11, 1-day sprint, all 9 days compressed)* ✅ **COMPLETE**
+
+*Interstitial sprint inserted between M2 and M3 at Viraaj's request: "proper operating system finished maxed out by Apr 20."* The target was 9 days of work (Apr 11 → Apr 20). Shipped all 9 days in one morning/afternoon on 2026-04-11 via sprint compression (lesson #52 again). Exploration found that ~70% of Viraaj's original checklist was ALREADY built; the real work was ~30%.
+
+| Day | What shipped | Commit |
+|---|---|---|
+| 1 | `what is 42 * 17` intent parser fix (now 19/19), notification history persistence (localStorage, 200-entry cap), Naren's Astrion Brain hero wallpaper as the new default across web OS + installer, CREDITS.md + contributions.md update | `a16a21b` / `e24e447` |
+| 2 | Subsumed into Day 1 — the hero wallpaper is the centerpiece; no generic JPG bulk-add needed | (same commits) |
+| 3-4 | Finder v2: arrow-key navigation, Delete/Backspace, Home/End, Cmd+A, Shift-click range select, Escape to clear, route-by-extension open (PDF → pdf-viewer, media → music/video-player, images → photos), inline PDF/audio/video/image/text previews, ARIA scaffolding | `69e94b0` |
+| 5 | Multi-monitor awareness: `getActiveDisplay()`, `getAllDisplays()`, async `refreshScreenDetails()` via Window Management API, `centerInActiveDisplay()`, `display:changed`/`display:active-changed` events — all with single-display fallback; permission prompt deferred until an app explicitly asks | `78997ba` |
+| 6-7 | Auto-updater end-to-end: rebrand installer/package.json (name/version/appId/productName → Astrion), wire Squirrel events through IPC to the renderer, manual "Check for Updates" path via `window.astrionElectron.updater`, auto-wire Astrion notification center for background update events, new `docs/auto-updater.md` | `069e747` |
+| 8 | Accessibility pass: 13 aria-labels on menubar, role=toolbar on dock, new `js/shell/focus-trap.js` utility (Tab cycling + onEscape + initialFocus + restore-focus), Force Quit dialog retrofitted as the first consumer | `a94d048` |
+| 9 | **v0.2.0 release** — PLAN.md updated (this section), lessons 62-70 added, package.json bumped, SESSION_HANDOFF.md bumped, retrospective written, fresh ISO build triggered via distro bump | *(this commit)* |
+
+**Deliverable:** A polished v0.2.0 — the OS feels real enough to share. Shipped on 2026-04-11 instead of 2026-04-20. Nine days of calendar time banked for the Agent Core Sprint.
+
 **Kid version:** Replace files-and-folders with a big web of connected stuff. Every note, photo, contact, bookmark, setting is a node. Connections are automatic.
 
 **Success:** Finder is gone as an app. Queries from Spotlight work. Everything I create goes into the graph, versioned forever.

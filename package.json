@@ -1,6 +1,6 @@
 {
   "name": "astrion-os",
-  "version": "1.0.0",
+  "version": "0.2.0",
   "type": "module",
   "description": "Astrion OS — AI-native operating system with 50 apps",
   "scripts": {

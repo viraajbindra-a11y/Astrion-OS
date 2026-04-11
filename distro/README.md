@@ -1,10 +1,15 @@
-# NOVA OS — Linux Distribution
+# Astrion OS — Linux Distribution
 
-A real operating system based on Debian, with NOVA OS as the desktop environment.
+A real operating system based on Debian, with Astrion OS as the desktop environment.
+
+> **v0.2.0 ISO (2026-04-11):** bundles the Polish Sprint — Naren's Astrion Brain
+> hero wallpaper as default, Finder v2 with keyboard nav and media previews,
+> multi-monitor awareness, auto-updater wiring, accessibility scaffolding,
+> and the M2 hypergraph storage layer.
 
 ## What this is
 
-NOVA OS is a complete Linux distribution. It's not a web app in a browser — it's a real operating system that:
+Astrion OS is a complete Linux distribution. It's not a web app in a browser — it's a real operating system that:
 - Boots on real hardware (UEFI + Legacy BIOS)
 - Runs real applications (Firefox, LibreOffice, GIMP, VS Code, etc.)
 - Has a real terminal with bash
