@@ -597,6 +597,189 @@ class GraphStore {
     });
   }
 
+  // ---------- rewind + snapshots (M2.P5) ----------
+  //
+  // rewindMutation(id) applies the inverse of a single mutation.
+  // rewindTo(timestamp) walks all mutations after the timestamp in reverse
+  //   order and rewinds each (best-effort, logs failures but doesn't abort).
+  // snapshot(label?) records the current max-mutation-timestamp as a
+  //   checkpoint and returns a snapshot id.
+  // restoreSnapshot(id) rewinds everything after the snapshot's checkpoint.
+  //
+  // NOTES:
+  // - Rewinds generate NEW mutations (e.g., rewinding a create_node
+  //   writes a delete_node mutation). This means the mutation log keeps
+  //   growing; you can rewind a rewind to get back to the original state.
+  // - Rewinding `update_node` reverts to the `before` props but creates
+  //   a new version (version counter advances). Provenance chain grows.
+  // - Rewinding `delete_node` restores the node with its ORIGINAL id via
+  //   the low-level `_restoreNode` helper. Cascaded edge removals are
+  //   SEPARATE mutations — callers using rewindTo get them for free.
+  // - Best-effort: if one mutation fails to rewind (e.g., the node was
+  //   deleted by another path), the others still proceed. Errors are
+  //   collected in the return value.
+
+  // Low-level helper: re-create a node with its ORIGINAL id and full fields.
+  // Used by rewindMutation when reverting a delete_node. Emits
+  // `graph:node:created` with a `restored: true` flag so subscribers can
+  // distinguish normal creates from rewinds.
+  async _restoreNode(nodeRecord, meta = {}) {
+    this._assertReady();
+    if (!nodeRecord || !nodeRecord.id) throw new Error('_restoreNode: invalid node record');
+    const now = Date.now();
+    const sanitized = _sanitizeMeta(meta);
+    const node = _cloneDeep(nodeRecord);
+    node.updatedAt = now;
+    // provenance chain carries forward
+    const mutation = {
+      id: _uuid('m'),
+      timestamp: now,
+      type: 'create_node',
+      nodeId: node.id,
+      before: null,
+      after: _cloneDeep(node),
+      restoredFrom: nodeRecord.contentHash,
+    };
+    if (sanitized.intentId) mutation.intentId = sanitized.intentId;
+    if (sanitized.capabilityId) mutation.capabilityId = sanitized.capabilityId;
+
+    await this._runTxn([STORES.NODES, STORES.MUTATIONS], 'readwrite', (tx) => {
+      tx.objectStore(STORES.NODES).put(node); // put (upsert) not add, in case caller races
+      tx.objectStore(STORES.MUTATIONS).add(mutation);
+    });
+
+    this._cacheSet(node.id, _cloneDeep(node));
+    this._emit(EVENTS.NODE_CREATED, {
+      node: _cloneDeep(node),
+      mutation: _cloneDeep(mutation),
+      restored: true,
+    });
+    return _cloneDeep(node);
+  }
+
+  async rewindMutation(mutationId, meta = {}) {
+    this._assertReady();
+    const mut = await this.getMutation(mutationId);
+    if (!mut) throw new Error(`rewindMutation: mutation ${mutationId} not found`);
+
+    const rewindMeta = { ..._sanitizeMeta(meta), capabilityId: 'graph.rewind' };
+
+    switch (mut.type) {
+      case 'create_node': {
+        // the node exists (we just created it) — delete it
+        const existing = await this._getNodeRaw(mut.nodeId);
+        if (!existing) return { ok: true, noop: true };
+        await this.deleteNode(mut.nodeId, rewindMeta);
+        return { ok: true };
+      }
+      case 'update_node': {
+        // revert to `before.props`; the version counter advances
+        if (!mut.before) return { ok: false, reason: 'no before snapshot' };
+        const existing = await this._getNodeRaw(mut.nodeId);
+        if (!existing) return { ok: false, reason: 'node missing' };
+        await this.updateNode(mut.nodeId, mut.before.props, rewindMeta);
+        return { ok: true };
+      }
+      case 'delete_node': {
+        // restore the node with its original id; edges come back via
+        // separate edge-mutation rewinds (rewindTo handles that for you)
+        if (!mut.before) return { ok: false, reason: 'no before snapshot' };
+        const existing = await this._getNodeRaw(mut.nodeId);
+        if (existing) return { ok: true, noop: true };
+        await this._restoreNode(mut.before, rewindMeta);
+        return { ok: true };
+      }
+      case 'add_edge': {
+        if (!mut.after) return { ok: false, reason: 'no after snapshot' };
+        const { from, kind, to } = mut.after;
+        await this.removeEdge(from, kind, to, rewindMeta);
+        return { ok: true };
+      }
+      case 'remove_edge': {
+        if (!mut.before) return { ok: false, reason: 'no before snapshot' };
+        const { from, kind, to, props } = mut.before;
+        await this.addEdge(from, kind, to, props || {}, rewindMeta);
+        return { ok: true };
+      }
+      default:
+        return { ok: false, reason: `unknown mutation type: ${mut.type}` };
+    }
+  }
+
+  async rewindTo(timestamp, meta = {}) {
+    this._assertReady();
+    if (typeof timestamp !== 'number') throw new Error('rewindTo: timestamp must be a number');
+    const mutations = await this.getMutationsSince(timestamp);
+    // reverse chronological order so cascaded changes undo in the correct order
+    mutations.sort((a, b) => b.timestamp - a.timestamp);
+    const results = { rewound: 0, skipped: 0, errors: [] };
+    for (const mut of mutations) {
+      try {
+        const r = await this.rewindMutation(mut.id, meta);
+        if (r.ok && !r.noop) results.rewound++;
+        else if (r.noop) results.skipped++;
+        else {
+          results.skipped++;
+          results.errors.push([mut.id, r.reason]);
+        }
+      } catch (err) {
+        results.errors.push([mut.id, err.message]);
+      }
+    }
+    return results;
+  }
+
+  async snapshot(label) {
+    this._assertReady();
+    // grab latest mutation timestamp as the checkpoint
+    const allSince = await this.getMutationsSince(0);
+    const latest = allSince.length ? allSince[allSince.length - 1].timestamp : 0;
+    const snap = {
+      id: _uuid('s'),
+      timestamp: Date.now(),
+      label: typeof label === 'string' ? label : undefined,
+      upTo: latest,
+    };
+    await this._runTxn([STORES.SNAPSHOTS], 'readwrite', (tx) => {
+      tx.objectStore(STORES.SNAPSHOTS).add(snap);
+    });
+    return _cloneDeep(snap);
+  }
+
+  async getSnapshot(id) {
+    this._assertReady();
+    const tx = this.db.transaction(STORES.SNAPSHOTS, 'readonly');
+    const result = await _req(tx.objectStore(STORES.SNAPSHOTS).get(id));
+    return result ? _cloneDeep(result) : null;
+  }
+
+  async listSnapshots() {
+    this._assertReady();
+    return new Promise((resolve, reject) => {
+      const out = [];
+      const tx = this.db.transaction(STORES.SNAPSHOTS, 'readonly');
+      const req = tx.objectStore(STORES.SNAPSHOTS).openCursor();
+      req.onsuccess = (e) => {
+        const cur = e.target.result;
+        if (cur) {
+          out.push(_cloneDeep(cur.value));
+          cur.continue();
+        } else {
+          out.sort((a, b) => b.timestamp - a.timestamp);
+          resolve(out);
+        }
+      };
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  async restoreSnapshot(snapshotId, meta = {}) {
+    this._assertReady();
+    const snap = await this.getSnapshot(snapshotId);
+    if (!snap) throw new Error(`restoreSnapshot: snapshot ${snapshotId} not found`);
+    return this.rewindTo(snap.upTo, meta);
+  }
+
   // ---------- internals ----------
 
   // Run an IDB transaction. `work` is a SYNCHRONOUS callback that receives
@@ -858,7 +1041,95 @@ if (typeof window !== 'undefined' && window.location?.hostname === 'localhost') 
       fail('test 12: threw', err);
     }
 
-    const TOTAL = 12;
+    // 13. rewindMutation undoes a create (node gone afterward)
+    try {
+      const n = await store.createNode('rewindable', { x: 1 });
+      // find the create mutation
+      const muts = await store.getMutationsSince(0);
+      const createMut = muts.reverse().find(m => m.type === 'create_node' && m.nodeId === n.id);
+      if (!createMut) { fail('test 13: create mutation not found'); }
+      else {
+        const r = await store.rewindMutation(createMut.id);
+        if (!r.ok) fail('test 13: rewind not ok', r);
+        const after = await store.getNode(n.id);
+        if (after) fail('test 13: node still exists after rewind');
+      }
+    } catch (err) {
+      fail('test 13: threw', err);
+    }
+
+    // 14. rewindMutation reverts an update (props match previous state)
+    try {
+      const n = await store.createNode('rewindupdate', { v: 1 });
+      const updated = await store.updateNode(n.id, { v: 2 });
+      const muts = await store.getMutationsSince(0);
+      const updateMut = muts.reverse().find(m => m.type === 'update_node' && m.nodeId === n.id);
+      if (!updateMut) { fail('test 14: update mutation not found'); }
+      else {
+        const r = await store.rewindMutation(updateMut.id);
+        if (!r.ok) fail('test 14: rewind not ok', r);
+        const after = await store.getNode(n.id);
+        if (!after || after.props.v !== 1) fail('test 14: props did not revert', after?.props);
+      }
+    } catch (err) {
+      fail('test 14: threw', err);
+    }
+
+    // 15. rewindMutation restores a deleted node with the same id
+    try {
+      const n = await store.createNode('rewinddelete', { label: 'keeper' });
+      const origId = n.id;
+      await store.deleteNode(n.id);
+      const muts = await store.getMutationsSince(0);
+      const delMut = muts.reverse().find(m => m.type === 'delete_node' && m.nodeId === origId);
+      if (!delMut) { fail('test 15: delete mutation not found'); }
+      else {
+        const r = await store.rewindMutation(delMut.id);
+        if (!r.ok) fail('test 15: rewind not ok', r);
+        const after = await store.getNode(origId);
+        if (!after || after.props.label !== 'keeper') fail('test 15: node not restored', after);
+        if (after.id !== origId) fail('test 15: id changed on restore');
+      }
+    } catch (err) {
+      fail('test 15: threw', err);
+    }
+
+    // 16. rewindTo walks mutations in reverse chronological order
+    try {
+      const checkpoint = Date.now();
+      await new Promise(r => setTimeout(r, 2));
+      const a = await store.createNode('batchrewind', { i: 1 });
+      await new Promise(r => setTimeout(r, 2));
+      const b = await store.createNode('batchrewind', { i: 2 });
+      await new Promise(r => setTimeout(r, 2));
+      const c = await store.createNode('batchrewind', { i: 3 });
+      const result = await store.rewindTo(checkpoint);
+      if (result.rewound < 3) fail('test 16: rewound count wrong', result);
+      for (const id of [a.id, b.id, c.id]) {
+        const still = await store.getNode(id);
+        if (still) fail('test 16: node still there after rewind', id);
+      }
+    } catch (err) {
+      fail('test 16: threw', err);
+    }
+
+    // 17. snapshot + restoreSnapshot round trip
+    try {
+      const preSnapshot = await store.createNode('snaptest', { state: 'before' });
+      const snap = await store.snapshot('before-changes');
+      await store.updateNode(preSnapshot.id, { state: 'after' });
+      const mid = await store.getNode(preSnapshot.id);
+      if (mid.props.state !== 'after') fail('test 17: update did not apply');
+      await store.restoreSnapshot(snap.id);
+      const restored = await store.getNode(preSnapshot.id);
+      if (!restored || restored.props.state !== 'before') fail('test 17: snapshot did not restore', restored);
+      const snapshots = await store.listSnapshots();
+      if (!snapshots.find(s => s.id === snap.id)) fail('test 17: snapshot missing from list');
+    } catch (err) {
+      fail('test 17: threw', err);
+    }
+
+    const TOTAL = 17;
     if (failures === 0) {
       console.log(`[graph-store] all ${TOTAL} sanity tests pass`);
     } else {

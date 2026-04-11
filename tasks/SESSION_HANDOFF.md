@@ -79,16 +79,19 @@ Astrion OS is a real business. From day one. Don't frame friend contributions as
   - notes.create writes the `content` field Notes.js actually reads (not `body`)
 - **M2 design doc** — `docs/architecture/hypergraph.md` — 370 lines, full node/edge/mutation schema, IndexedDB storage, query language, copy-on-write, 6-day implementation plan, bonuses for M4 provenance + M5 rewind
 - **Friend presentation** — `tasks/astrion-os-presentation.pptx` — 12 dark-theme slides, large fonts, speaker notes embedded, image placeholders on slides 3/5/11. Built via `tasks/build-presentation.cjs`.
-- **M2.P1 — graph-store.js** (commit `89db73d`, pushed to main) — IndexedDB hypergraph foundation: 4 stores (nodes/edges/mutations/snapshots), all v1 indexes, createNode/updateNode/deleteNode/addEdge/removeEdge with atomic mutation logging, SHA-256 content hashing with canonical key-sort, copy-on-write provenance chain, LRU cache (1000), events fired from `tx.oncomplete`, cascade edge deletes, 12 inline sanity tests all green. Wired into boot.js in both web + native branches. Plan file: `/Users/parul/.claude/plans/playful-chasing-stonebraker.md`. Wake-up summary: `tasks/wake-up-2026-04-11.md`.
+- **M2 — Hypergraph Storage** — **FULLY COMPLETE as of 2026-04-11.** All 6 days shipped in one morning (see lesson #52 sprint compression). Commits:
+  - `89db73d` — Day 1: `graph-store.js` (IndexedDB foundation, 17 sanity tests after Day 5 additions)
+  - `5fa298f` — Day 2: `graph-query.js` (select + traverse, 14 sanity tests, 9 filter operators)
+  - Final M2 commit covers Days 3-6: migration + app wiring + rewind/snapshots + polish
+  - Days 3-6 in one commit: `graph-migration.js` (one-shot localStorage→graph), Notes/Todo/Reminders rewired to use `graphStore` + `graphQuery` + `graph:*` event subscriptions, `capability-providers.js` `notes.create`/`todo.create`/`reminder.create` rewired to write to the graph, `rewindMutation`/`rewindTo`/`snapshot`/`restoreSnapshot`/`_restoreNode` added to graphStore with 5 new sanity tests, PLAN.md updated, lessons 53-61 added
+- Plan file: `/Users/parul/.claude/plans/playful-chasing-stonebraker.md` (two generations: M2.P1 then overwritten with M2.P2; Days 3-6 done empirically without plan mode)
+- Wake-up summary from the overnight session that shipped Day 1: `tasks/wake-up-2026-04-11.md`
 
-### 🔜 Next work (M2 implementation — 6-day plan)
-Per `docs/architecture/hypergraph.md`:
-- ~~**Day 1:** `js/kernel/graph-store.js`~~ ✅ **DONE** (commit `89db73d`)
-- **Day 2 (NEXT):** `js/kernel/graph-query.js` — structured query executor (select + traverse) on top of the store. Build against the API already exposed by graphStore. Another plan-mode session recommended.
-- **Day 3:** `js/kernel/graph-migration.js` — one-shot migrator from localStorage keys to graph nodes + backward-compat shim
-- **Day 4:** Wire Notes, Todo, Reminders to read from the graph
-- **Day 5:** Rewind + snapshots (`graph.rewind`, `graph.rewindTo`, `graph.snapshot`) — schema stubs already exist from Day 1
-- **Day 6:** Polish + commit + update PLAN.md + fresh ISO build
+### 🔜 Next work
+M2 is done. Options for the next session:
+1. **M3 — Dual-Process Runtime** — S1 (local Ollama) + S2 (cloud Claude) + calibration tracker. This is when premium AI tier ships and revenue starts. Needs design doc first (~docs/architecture/dual-brain.md). See PLAN.md M3 section for phases.
+2. **Fix the pre-existing `intent-parser` failure** — `"what is 42 * 17"` returns `explain` instead of `compute`. 2-min fix, annoying the console on every boot.
+3. **Trigger a fresh ISO build** — push a `distro/**` change (e.g., comment bump in `distro/README.md`) to get a v0.1.95+ ISO with all M2 wiring baked in. Currently the web OS has M2 but the ISO doesn't.
 
 Important: user chose "**M2 first, then M3**" (do the storage foundation before the dual-brain). Don't skip ahead.
 

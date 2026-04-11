@@ -21,6 +21,7 @@ import { fileSystem } from './file-system.js';
 import { aiService } from './ai-service.js';
 import { notifications } from './notifications.js';
 import { eventBus } from './event-bus.js';
+import { graphStore } from './graph-store.js';
 
 // ═══════════════════════════════════════════════════════════════
 // HELPERS
@@ -132,14 +133,17 @@ const notesCreate = {
       }
       const content = contentLines.join('\n');
 
-      // Notes app reads from localStorage 'nova-notes' with shape:
-      // { id, content, createdAt, updatedAt } — where title is derived
-      // from content.split('\n')[0].
-      const noteId = `note-${Date.now()}`;
-      const noteData = { id: noteId, content, createdAt: Date.now(), updatedAt: Date.now() };
-      const existing = JSON.parse(localStorage.getItem('nova-notes') || '[]');
-      existing.unshift(noteData);
-      localStorage.setItem('nova-notes', JSON.stringify(existing));
+      // M2.P4: write to the hypergraph. Notes app reads from the graph
+      // via graphQuery and refreshes on graph:node:created events.
+      const created = await graphStore.createNode('note', {
+        title,
+        content,
+        date: new Date().toISOString(),
+      }, {
+        createdBy: { kind: 'user' },
+        capabilityId: 'notes.create',
+        intentId: args._intent?.id,
+      });
 
       // Launch Notes so the user sees their new note
       processManager.launch('notes');
@@ -150,7 +154,7 @@ const notesCreate = {
         body: title + (args.items ? ` (${args.items.length} items)` : ''),
       });
 
-      return { noteId, title, itemCount: args.items?.length || 0 };
+      return { noteId: created.id, title, itemCount: args.items?.length || 0 };
     });
   },
 };
@@ -172,11 +176,15 @@ const todoCreate = {
   execute: async function(args) {
     return runCapability(this, args, async () => {
       const text = args.name || args._rawArgs || 'New todo';
-      const todoId = `todo-${Date.now()}`;
-      const item = { id: todoId, text, done: false, createdAt: Date.now() };
-      const existing = JSON.parse(localStorage.getItem('nova-todos') || '[]');
-      existing.unshift(item);
-      localStorage.setItem('nova-todos', JSON.stringify(existing));
+      // M2.P4: write to the hypergraph.
+      const created = await graphStore.createNode('todo', {
+        text,
+        done: false,
+      }, {
+        createdBy: { kind: 'user' },
+        capabilityId: 'todo.create',
+        intentId: args._intent?.id,
+      });
 
       processManager.launch('todo');
 
@@ -185,7 +193,7 @@ const todoCreate = {
         body: text,
       });
 
-      return { todoId, text };
+      return { todoId: created.id, text };
     });
   },
 };
@@ -208,18 +216,25 @@ const reminderCreate = {
     return runCapability(this, args, async () => {
       const text = args.name || args.topic || args._rawArgs || 'Reminder';
       const when = args.when || args.after || args.before || 'later';
-      const reminderId = `reminder-${Date.now()}`;
-      const item = { id: reminderId, text, when, createdAt: Date.now() };
-      const existing = JSON.parse(localStorage.getItem('nova-reminders') || '[]');
-      existing.unshift(item);
-      localStorage.setItem('nova-reminders', JSON.stringify(existing));
+      // M2.P4: write to the hypergraph. Reminders app groups by `list`;
+      // capability-created reminders go into the "Today" list by default.
+      const created = await graphStore.createNode('reminder', {
+        text,
+        when,
+        done: false,
+        list: 'Today',
+      }, {
+        createdBy: { kind: 'user' },
+        capabilityId: 'reminder.create',
+        intentId: args._intent?.id,
+      });
 
       safeNotify({
         title: '🔔 Reminder set',
         body: `${text} — ${when}`,
       });
 
-      return { reminderId, text, when };
+      return { reminderId: created.id, text, when };
     });
   },
 };

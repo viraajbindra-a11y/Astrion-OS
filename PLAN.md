@@ -200,7 +200,7 @@ Each milestone has: a 1-sentence success definition, **explicit phases** (the su
 
 ---
 
-### M2 — Hypergraph Storage *(~4 weeks after M1)*
+### M2 — Hypergraph Storage *(~4 weeks after M1)* ✅ **COMPLETE — shipped in a one-day sprint on 2026-04-11 across Days 1-6. Commits: `89db73d` (Day 1 graph-store), `5fa298f` (Day 2 graph-query), and a final squash commit for Days 3-6 (migration + app wiring + rewind + snapshots + polish).**
 
 **Kid version:** Replace files-and-folders with a big web of connected stuff. Every note, photo, contact, bookmark, setting is a node. Connections are automatic.
 
