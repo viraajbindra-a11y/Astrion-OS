@@ -103,6 +103,7 @@ static GtkWidget     *clock_label      = NULL;
 static GtkWidget     *battery_label    = NULL;
 static GtkWidget     *wifi_label       = NULL;
 static GtkWidget     *volume_label     = NULL;
+static GtkWidget     *bluetooth_label  = NULL;
 static GtkWidget     *date_label       = NULL;
 
 static NovaWindow     windows[MAX_WINDOWS];
@@ -234,6 +235,11 @@ static void show_volume_slider(void);
 static gboolean on_volume_label_click(GtkWidget *w, GdkEventButton *ev, gpointer d);
 static void on_volume_slider_changed(GtkRange *range, gpointer data);
 static void on_volume_mute_toggled(GtkToggleButton *btn, gpointer data);
+
+/* M0.P2: Native Bluetooth picker */
+static void show_bluetooth_picker(void);
+static gboolean on_bluetooth_label_click(GtkWidget *w, GdkEventButton *ev, gpointer d);
+static void on_bluetooth_row_activated(GtkListBox *box, GtkListBoxRow *row, gpointer d);
 
 /* App switcher forward declarations */
 static void show_app_switcher(void);
@@ -621,6 +627,208 @@ static gboolean on_wifi_label_click(GtkWidget *widget, GdkEventButton *event, gp
 {
     if (event->button == 1) {
         show_wifi_picker();
+        return TRUE;
+    }
+    return FALSE;
+}
+
+/* ═══════════════════════════════════════════════
+ * M0.P2: Native Bluetooth Picker Dialog
+ * ═══════════════════════════════════════════════
+ *
+ * Click the Bluetooth icon in the menubar → opens a dialog listing
+ * discoverable devices via `bluetoothctl scan + devices`. Click a row
+ * to pair + connect. Shows paired devices first, unpaired below.
+ */
+
+static void on_bluetooth_row_activated(GtkListBox *box, GtkListBoxRow *row, gpointer data)
+{
+    if (!row) return;
+    const char *mac = (const char *)g_object_get_data(G_OBJECT(row), "mac");
+    const char *paired = (const char *)g_object_get_data(G_OBJECT(row), "paired");
+    if (!mac || strlen(mac) == 0) return;
+
+    int is_paired = (paired && strcmp(paired, "yes") == 0);
+
+    char cmd[256];
+    if (is_paired) {
+        /* Already paired — just connect */
+        snprintf(cmd, sizeof(cmd),
+            "bluetoothctl connect %s 2>/dev/null &", mac);
+    } else {
+        /* Pair + trust + connect (bluetoothctl chained) */
+        snprintf(cmd, sizeof(cmd),
+            "(bluetoothctl pair %s; bluetoothctl trust %s; "
+            "bluetoothctl connect %s) 2>/dev/null &",
+            mac, mac, mac);
+    }
+    int r = system(cmd);
+    (void)r;
+}
+
+static void show_bluetooth_picker(void)
+{
+    /* Ensure bluetoothctl is powered on before scanning */
+    int r = system("bluetoothctl power on 2>/dev/null &");
+    (void)r;
+
+    GtkWidget *dialog = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+    gtk_window_set_title(GTK_WINDOW(dialog), "Bluetooth Devices");
+    gtk_window_set_default_size(GTK_WINDOW(dialog), 360, 420);
+    gtk_window_set_decorated(GTK_WINDOW(dialog), FALSE);
+    gtk_window_set_position(GTK_WINDOW(dialog), GTK_WIN_POS_CENTER);
+    gtk_window_set_modal(GTK_WINDOW(dialog), TRUE);
+    GtkStyleContext *ctx = gtk_widget_get_style_context(dialog);
+    gtk_style_context_add_class(ctx, "nova-about-dialog");
+
+    GtkWidget *outer = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
+    gtk_widget_set_margin_start(outer, 18);
+    gtk_widget_set_margin_end(outer, 18);
+    gtk_widget_set_margin_top(outer, 14);
+    gtk_widget_set_margin_bottom(outer, 14);
+    gtk_container_add(GTK_CONTAINER(dialog), outer);
+
+    /* Header */
+    GtkWidget *header = gtk_label_new(NULL);
+    gtk_label_set_markup(GTK_LABEL(header),
+        "<span size='16000' weight='bold' foreground='#ffffff'>"
+        "\xF0\x9F\x93\xB6 Bluetooth</span>");
+    gtk_widget_set_halign(header, GTK_ALIGN_START);
+    gtk_box_pack_start(GTK_BOX(outer), header, FALSE, FALSE, 0);
+
+    GtkWidget *hint = gtk_label_new(NULL);
+    gtk_label_set_markup(GTK_LABEL(hint),
+        "<span size='10000' foreground='#888888'>"
+        "Scanning for nearby devices…</span>");
+    gtk_widget_set_halign(hint, GTK_ALIGN_START);
+    gtk_box_pack_start(GTK_BOX(outer), hint, FALSE, FALSE, 4);
+
+    /* Scroll area */
+    GtkWidget *scroll = gtk_scrolled_window_new(NULL, NULL);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll),
+        GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    gtk_widget_set_vexpand(scroll, TRUE);
+    gtk_box_pack_start(GTK_BOX(outer), scroll, TRUE, TRUE, 10);
+
+    GtkWidget *list_box = gtk_list_box_new();
+    gtk_list_box_set_selection_mode(GTK_LIST_BOX(list_box), GTK_SELECTION_SINGLE);
+    gtk_container_add(GTK_CONTAINER(scroll), list_box);
+
+    /* Start scan with 3s timeout in background */
+    int scan_r = system("bluetoothctl --timeout 3 scan on 2>/dev/null &");
+    (void)scan_r;
+
+    /* List known devices (includes paired and recently seen) */
+    FILE *fp = popen("bluetoothctl devices 2>/dev/null", "r");
+    char line[512];
+    int count = 0;
+    if (fp) {
+        while (fgets(line, sizeof(line), fp)) {
+            line[strcspn(line, "\n")] = 0;
+            /* Format: "Device XX:XX:XX:XX:XX:XX Device Name" */
+            if (strncmp(line, "Device ", 7) != 0) continue;
+            char *mac_start = line + 7;
+            char *name_start = strchr(mac_start, ' ');
+            if (!name_start) continue;
+            *name_start = 0;
+            name_start++;
+
+            char mac[32];
+            char name[128];
+            strncpy(mac, mac_start, sizeof(mac) - 1);
+            mac[sizeof(mac) - 1] = 0;
+            strncpy(name, name_start, sizeof(name) - 1);
+            name[sizeof(name) - 1] = 0;
+
+            /* Check if paired */
+            char paired_cmd[128];
+            snprintf(paired_cmd, sizeof(paired_cmd),
+                "bluetoothctl info %s 2>/dev/null | grep -c 'Paired: yes'", mac);
+            FILE *pfp = popen(paired_cmd, "r");
+            int is_paired = 0;
+            if (pfp) {
+                char pbuf[16] = "";
+                if (fgets(pbuf, sizeof(pbuf), pfp)) {
+                    is_paired = (atoi(pbuf) > 0);
+                }
+                pclose(pfp);
+            }
+
+            count++;
+            GtkWidget *row = gtk_list_box_row_new();
+            GtkWidget *row_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
+            gtk_widget_set_margin_start(row_box, 10);
+            gtk_widget_set_margin_end(row_box, 10);
+            gtk_widget_set_margin_top(row_box, 8);
+            gtk_widget_set_margin_bottom(row_box, 8);
+
+            /* Icon — paired devices get a checkmark */
+            GtkWidget *icon = gtk_label_new(NULL);
+            if (is_paired) {
+                gtk_label_set_markup(GTK_LABEL(icon),
+                    "<span foreground='#8be9fd'>\xE2\x9C\x93</span>");
+            } else {
+                gtk_label_set_markup(GTK_LABEL(icon),
+                    "<span foreground='#555555'>\xE2\x97\x8B</span>");
+            }
+            gtk_widget_set_size_request(icon, 14, -1);
+            gtk_box_pack_start(GTK_BOX(row_box), icon, FALSE, FALSE, 0);
+
+            /* Name */
+            GtkWidget *name_label = gtk_label_new(name);
+            gtk_widget_set_halign(name_label, GTK_ALIGN_START);
+            gtk_label_set_ellipsize(GTK_LABEL(name_label), PANGO_ELLIPSIZE_END);
+            gtk_box_pack_start(GTK_BOX(row_box), name_label, TRUE, TRUE, 0);
+
+            /* MAC address in muted text */
+            GtkWidget *mac_label = gtk_label_new(NULL);
+            char mac_markup[128];
+            snprintf(mac_markup, sizeof(mac_markup),
+                "<span foreground='#666666' size='9000'>%s</span>", mac);
+            gtk_label_set_markup(GTK_LABEL(mac_label), mac_markup);
+            gtk_box_pack_start(GTK_BOX(row_box), mac_label, FALSE, FALSE, 0);
+
+            gtk_container_add(GTK_CONTAINER(row), row_box);
+            gtk_container_add(GTK_CONTAINER(list_box), row);
+
+            g_object_set_data_full(G_OBJECT(row), "mac",
+                g_strdup(mac), g_free);
+            g_object_set_data_full(G_OBJECT(row), "paired",
+                g_strdup(is_paired ? "yes" : "no"), g_free);
+        }
+        pclose(fp);
+    }
+
+    if (count == 0) {
+        GtkWidget *empty = gtk_label_new(NULL);
+        gtk_label_set_markup(GTK_LABEL(empty),
+            "<span foreground='#888888'>No devices found.\n"
+            "Make sure Bluetooth is on and try again.</span>");
+        gtk_widget_set_halign(empty, GTK_ALIGN_CENTER);
+        gtk_widget_set_margin_top(empty, 40);
+        gtk_container_add(GTK_CONTAINER(list_box), empty);
+    }
+
+    g_signal_connect(list_box, "row-activated",
+        G_CALLBACK(on_bluetooth_row_activated), NULL);
+
+    /* Close button */
+    GtkWidget *btn_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    gtk_widget_set_halign(btn_box, GTK_ALIGN_END);
+    gtk_box_pack_start(GTK_BOX(outer), btn_box, FALSE, FALSE, 0);
+
+    GtkWidget *close_btn = gtk_button_new_with_label("Close");
+    gtk_box_pack_end(GTK_BOX(btn_box), close_btn, FALSE, FALSE, 0);
+    g_signal_connect_swapped(close_btn, "clicked",
+        G_CALLBACK(gtk_widget_destroy), dialog);
+
+    gtk_widget_show_all(dialog);
+}
+
+static gboolean on_bluetooth_label_click(GtkWidget *widget, GdkEventButton *event, gpointer data)
+{
+    if (event->button == 1) {
+        show_bluetooth_picker();
         return TRUE;
     }
     return FALSE;
@@ -1455,6 +1663,19 @@ static void create_panel(void)
     gtk_box_pack_start(GTK_BOX(right_box), wifi_evbox, FALSE, FALSE, 0);
     update_wifi(wifi_label);
     g_timeout_add(15000, update_wifi, wifi_label);
+
+    /* Bluetooth icon — opens the native Bluetooth picker dialog (M0.P2).
+     * No status reader yet — we just show a static icon. Active
+     * connection status can be added in M0.P3. */
+    bluetooth_label = gtk_label_new(NULL);
+    gtk_label_set_markup(GTK_LABEL(bluetooth_label),
+        "<span foreground='#c0c0c0'>\xF0\x9F\x94\xB5</span>");
+    GtkWidget *bt_evbox = gtk_event_box_new();
+    gtk_widget_set_events(bt_evbox, GDK_BUTTON_PRESS_MASK);
+    gtk_container_add(GTK_CONTAINER(bt_evbox), bluetooth_label);
+    g_signal_connect(bt_evbox, "button-press-event",
+        G_CALLBACK(on_bluetooth_label_click), NULL);
+    gtk_box_pack_start(GTK_BOX(right_box), bt_evbox, FALSE, FALSE, 0);
 
     /* Volume — real, updated every 5 seconds (pactl). Click to open
      * native slider popover (M0.P2). Shows 🔈/🔉/🔊 + % or "Muted" or "N/A". */
