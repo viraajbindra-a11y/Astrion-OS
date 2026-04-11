@@ -2,6 +2,7 @@
 
 import { eventBus } from './kernel/event-bus.js';
 import { fileSystem } from './kernel/file-system.js';
+import { graphStore } from './kernel/graph-store.js';
 import { windowManager } from './kernel/window-manager.js';
 import { processManager } from './kernel/process-manager.js';
 
@@ -100,6 +101,7 @@ import { initVolumeHud } from './shell/volume-hud.js';
   if (window.__NOVA_NATIVE__ && window.__NOVA_LAUNCH_APP__) {
     console.log(`[NOVA Native] Launching app: ${window.__NOVA_LAUNCH_APP__}`);
     await fileSystem.init();
+    await graphStore.init();
 
     // Register ALL 52 apps so any of them can launch in native mode.
     // M0.P3: was previously only registering the first 16 — which meant
@@ -145,8 +147,9 @@ import { initVolumeHud } from './shell/volume-hud.js';
   // Phase 1: Boot animation
   await animate(progressBar, 30, 400);
 
-  // Init file system
+  // Init file system + hypergraph store (M2.P1)
   await fileSystem.init();
+  await graphStore.init();
   await animate(progressBar, 60, 300);
 
   // Register all apps
