@@ -2,6 +2,8 @@
 
 import { processManager } from '../kernel/process-manager.js';
 import { eventBus } from '../kernel/event-bus.js';
+import { getTodaySummary, getDailyCap, setDailyCap, resetBudget } from '../kernel/budget-manager.js';
+import { getAllAccuracy, getEscalatedCategories } from '../kernel/calibration-tracker.js';
 
 export function registerSettings() {
   processManager.register('settings', {
@@ -366,6 +368,9 @@ function initSettings(container) {
       </div>
     `;
 
+    // ─── M3 Budget & Calibration Dashboard ───
+    renderAIBudgetDashboard();
+
     // Save provider on change
     main.querySelector('#ai-provider').addEventListener('change', (e) => {
       localStorage.setItem('nova-ai-provider', e.target.value);
@@ -413,6 +418,109 @@ function initSettings(container) {
         status.textContent = '\u274C ' + err.message;
         status.style.color = '#ff3b30';
       }
+    });
+  }
+
+  async function renderAIBudgetDashboard() {
+    const summary = getTodaySummary();
+    const s1Stats = await getAllAccuracy('s1');
+    const escalated = await getEscalatedCategories();
+
+    const pct = Math.min(100, summary.percentUsed);
+    const barColor = pct > 80 ? '#ff3b30' : pct > 50 ? '#ffcc00' : '#34c759';
+
+    // Build category rows for calibration table
+    const catRows = Object.entries(s1Stats).map(([cat, s]) => {
+      const accColor = s.accuracy >= 0.7 ? '#34c759' : s.accuracy >= 0.5 ? '#ffcc00' : '#ff3b30';
+      const esc = escalated.find(e => e.category === cat);
+      return `<tr>
+        <td style="padding:4px 8px; font-size:12px; color:white;">${cat}</td>
+        <td style="padding:4px 8px; font-size:12px; color:${accColor}; font-weight:600;">${Math.round(s.accuracy * 100)}%</td>
+        <td style="padding:4px 8px; font-size:12px; color:rgba(255,255,255,0.5);">${s.total}</td>
+        <td style="padding:4px 8px; font-size:12px; color:rgba(255,255,255,0.5);">${s.avgResponseMs}ms</td>
+        <td style="padding:4px 8px; font-size:12px; color:${esc ? '#ff3b30' : '#34c759'};">${esc ? '→ S2' : 'S1'}</td>
+      </tr>`;
+    }).join('');
+
+    const dashboardHtml = `
+      <div class="settings-group" style="margin-top:16px;">
+        <div style="padding:8px 14px 4px; font-size:11px; font-weight:600; color:rgba(255,255,255,0.5); text-transform:uppercase; letter-spacing:0.5px;">Cloud AI Budget (S2)</div>
+        <div class="settings-row">
+          <div style="flex:1;">
+            <div style="display:flex; justify-content:space-between; margin-bottom:4px;">
+              <span style="font-size:12px; color:white;">$${summary.totalCostUsd.toFixed(4)} spent today</span>
+              <span style="font-size:12px; color:rgba(255,255,255,0.5);">$${summary.dailyCapUsd.toFixed(2)} cap</span>
+            </div>
+            <div style="height:8px; background:rgba(255,255,255,0.1); border-radius:4px; overflow:hidden;">
+              <div style="height:100%; width:${pct}%; background:${barColor}; border-radius:4px; transition:width 0.3s;"></div>
+            </div>
+            <div style="display:flex; justify-content:space-between; margin-top:6px;">
+              <span style="font-size:11px; color:rgba(255,255,255,0.4);">${summary.callCount} calls</span>
+              <span style="font-size:11px; color:rgba(255,255,255,0.4);">$${summary.remainingUsd.toFixed(4)} remaining</span>
+            </div>
+          </div>
+        </div>
+        <div class="settings-row">
+          <div>
+            <div class="settings-row-label">Daily Cap</div>
+            <div class="settings-row-desc">Max cloud AI spending per day (USD)</div>
+          </div>
+          <input type="number" id="ai-daily-cap" class="settings-select" value="${summary.dailyCapUsd}" step="0.10" min="0.01" max="50" style="width:80px; font-family:var(--mono,monospace); font-size:12px; text-align:right;">
+        </div>
+        <div class="settings-row">
+          <div>
+            <div class="settings-row-label">Reset Today's Budget</div>
+            <div class="settings-row-desc">Clear the daily spending counter</div>
+          </div>
+          <button class="settings-toggle" id="ai-reset-budget" style="padding:6px 14px; border-radius:6px; border:none; background:#ff3b30; color:white; font-size:12px; cursor:pointer; font-family:var(--font);">Reset</button>
+        </div>
+      </div>
+
+      <div class="settings-group" style="margin-top:16px;">
+        <div style="padding:8px 14px 4px; font-size:11px; font-weight:600; color:rgba(255,255,255,0.5); text-transform:uppercase; letter-spacing:0.5px;">Brain Calibration (S1 Accuracy)</div>
+        ${catRows.length > 0 ? `
+        <div style="padding:8px 14px;">
+          <table style="width:100%; border-collapse:collapse;">
+            <thead>
+              <tr style="border-bottom:1px solid rgba(255,255,255,0.1);">
+                <th style="padding:4px 8px; font-size:11px; color:rgba(255,255,255,0.4); text-align:left; font-weight:500;">Category</th>
+                <th style="padding:4px 8px; font-size:11px; color:rgba(255,255,255,0.4); text-align:left; font-weight:500;">Accuracy</th>
+                <th style="padding:4px 8px; font-size:11px; color:rgba(255,255,255,0.4); text-align:left; font-weight:500;">Samples</th>
+                <th style="padding:4px 8px; font-size:11px; color:rgba(255,255,255,0.4); text-align:left; font-weight:500;">Avg Time</th>
+                <th style="padding:4px 8px; font-size:11px; color:rgba(255,255,255,0.4); text-align:left; font-weight:500;">Brain</th>
+              </tr>
+            </thead>
+            <tbody>${catRows}</tbody>
+          </table>
+        </div>
+        ` : `
+        <div class="settings-row">
+          <div>
+            <div class="settings-row-label" style="color:rgba(255,255,255,0.4);">No calibration data yet</div>
+            <div class="settings-row-desc">Use Spotlight or Messages to generate samples. After 5+ samples per category, weak categories auto-escalate to S2.</div>
+          </div>
+        </div>
+        `}
+        ${escalated.length > 0 ? `
+        <div style="padding:4px 14px 8px;">
+          <div style="font-size:11px; color:#ff3b30;">⚠ ${escalated.length} categor${escalated.length === 1 ? 'y' : 'ies'} escalated to S2 (accuracy < 70%): ${escalated.map(e => e.category).join(', ')}</div>
+        </div>
+        ` : ''}
+      </div>
+    `;
+
+    // Append to main content
+    main.insertAdjacentHTML('beforeend', dashboardHtml);
+
+    // Wire up cap change
+    main.querySelector('#ai-daily-cap')?.addEventListener('change', (e) => {
+      setDailyCap(parseFloat(e.target.value) || 0.50);
+    });
+
+    // Wire up reset
+    main.querySelector('#ai-reset-budget')?.addEventListener('click', () => {
+      resetBudget();
+      renderAI(); // re-render the whole section
     });
   }
 

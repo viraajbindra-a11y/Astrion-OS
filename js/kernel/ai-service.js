@@ -11,6 +11,8 @@
 //   - Mock fallback → brain: 'offline' (no real AI wired up)
 
 import { eventBus } from './event-bus.js';
+import { checkBudget, recordS2Call } from './budget-manager.js';
+import { shouldEscalate, capCategory as getCapCategory } from './calibration-tracker.js';
 
 const AI_PROVIDER_KEY = 'nova-ai-provider';   // 'ollama' | 'anthropic' | 'mock'
 const AI_OLLAMA_URL_KEY = 'nova-ai-ollama-url';
@@ -65,36 +67,65 @@ class AIService {
     ];
 
     const provider = this.getProvider();
+    const startMs = Date.now();
 
     // Tell the brain indicator we're thinking (menubar pulses yellow)
     eventBus.emit('ai:thinking');
 
-    // Auto: try Ollama first, then Anthropic, then mock
-    if (provider === 'auto' || provider === 'ollama') {
+    // M3 escalation: check if this capability category should skip S1
+    const capCat = options.capCategory || 'general';
+    let skipS1 = false;
+    if (provider === 'auto') {
+      try { skipS1 = await shouldEscalate(capCat); } catch {}
+    }
+
+    // Auto: try Ollama first (unless escalated), then Anthropic, then mock
+    if ((provider === 'auto' && !skipS1) || provider === 'ollama') {
       const reply = await this._tryOllama(systemContext, messages, options);
       if (reply) {
         if (!skip) this._addToHistory(prompt, reply);
-        eventBus.emit('ai:response', { brain: 's1', confidence: 0.85, provider: 'ollama' });
+        const elapsed = Date.now() - startMs;
+        eventBus.emit('ai:response', { brain: 's1', confidence: 0.85, provider: 'ollama', responseTimeMs: elapsed, capCategory: capCat });
         return reply;
       }
       if (provider === 'ollama') {
         const mock = this._mockResponse(prompt);
-        eventBus.emit('ai:response', { brain: 'offline', confidence: 0.3, provider: 'mock' });
+        eventBus.emit('ai:response', { brain: 'offline', confidence: 0.3, provider: 'mock', capCategory: capCat });
         return mock;
       }
     }
 
     if (provider === 'auto' || provider === 'anthropic') {
-      const reply = await this._tryAnthropic(systemContext, messages, options);
-      if (reply) {
-        if (!skip) this._addToHistory(prompt, reply);
-        eventBus.emit('ai:response', { brain: 's2', confidence: 0.85, provider: 'anthropic' });
-        return reply;
+      // M3 budget gate: check spending limits before S2 call
+      const model = options.model || 'claude-haiku-4-5-20251001';
+      const budgetCheck = checkBudget({ inputTokens: 2000, outputTokens: 500, model });
+      if (!budgetCheck.allowed) {
+        console.warn('[ai-service] S2 budget exceeded:', budgetCheck.reason);
+        // Fall through to mock with a budget warning
+        const mock = `I'd love to help, but today's cloud AI budget has been reached. ${budgetCheck.reason}. Try again tomorrow, or use Ollama (free, local) in Settings > AI.`;
+        eventBus.emit('ai:response', { brain: 'offline', confidence: 0.3, provider: 'budget-exceeded', capCategory: capCat });
+        return mock;
+      }
+
+      const result = await this._tryAnthropicWithUsage(systemContext, messages, options);
+      if (result?.reply) {
+        if (!skip) this._addToHistory(prompt, result.reply);
+        const elapsed = Date.now() - startMs;
+        // Record actual token usage for budget tracking
+        recordS2Call({
+          inputTokens: result.usage?.input_tokens || 0,
+          outputTokens: result.usage?.output_tokens || 0,
+          model,
+          query: prompt.slice(0, 100),
+          ok: true,
+        });
+        eventBus.emit('ai:response', { brain: 's2', confidence: 0.95, provider: 'anthropic', responseTimeMs: elapsed, capCategory: capCat });
+        return result.reply;
       }
     }
 
     const mock = this._mockResponse(prompt);
-    eventBus.emit('ai:response', { brain: 'offline', confidence: 0.3, provider: 'mock' });
+    eventBus.emit('ai:response', { brain: 'offline', confidence: 0.3, provider: 'mock', capCategory: capCat });
     return mock;
   }
 
@@ -126,6 +157,15 @@ class AIService {
   }
 
   async _tryAnthropic(system, messages, options) {
+    const result = await this._tryAnthropicWithUsage(system, messages, options);
+    return result?.reply || null;
+  }
+
+  /**
+   * Try Anthropic and return both the reply text AND the usage stats.
+   * Used by ask() for M3 budget tracking.
+   */
+  async _tryAnthropicWithUsage(system, messages, options) {
     try {
       const res = await fetch('/api/ai', {
         method: 'POST',
@@ -141,7 +181,9 @@ class AIService {
 
       if (res.ok) {
         const data = await res.json();
-        return data.content?.[0]?.text || null;
+        const reply = data.content?.[0]?.text || null;
+        const usage = data.usage || null; // { input_tokens, output_tokens }
+        return reply ? { reply, usage } : null;
       }
     } catch {}
     return null;
