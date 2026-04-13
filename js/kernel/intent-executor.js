@@ -435,6 +435,36 @@ export function initIntentExecutor() {
         error: result.error || null,
         capSummary: `plan (${plan.steps.length} steps)`,
       });
+
+      // M3 seed: record calibration sample for each step that ran.
+      // The calibration tracker builds per-category accuracy stats that
+      // the future M3 router uses to decide S1 vs S2 escalation.
+      try {
+        const { recordSample, capCategory } = await import('./calibration-tracker.js');
+        const brain = localStorage.getItem('nova-ai-provider') === 'ollama' ? 's1'
+          : localStorage.getItem('nova-ai-provider') === 'anthropic' ? 's2'
+          : 's1'; // 'auto' defaults to S1 since Ollama is tried first
+        for (const r of (result.results || [])) {
+          await recordSample({
+            brain,
+            capCategory: capCategory(r.cap),
+            ok: true,
+            query,
+          });
+        }
+        // If plan failed, record the failure for the step that broke
+        if (!result.ok && result.atStep >= 0 && plan.steps[result.atStep]) {
+          await recordSample({
+            brain,
+            capCategory: capCategory(plan.steps[result.atStep].cap),
+            ok: false,
+            query,
+          });
+        }
+      } catch (err) {
+        // Calibration is non-critical; never block the executor
+        console.warn('[intent-executor] calibration recording failed:', err?.message);
+      }
     } catch (err) {
       console.warn('[intent-executor] plan handler threw:', err);
     }

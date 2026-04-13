@@ -19,6 +19,7 @@ import { initIntentExecutor } from './kernel/intent-executor.js';
 // Agent Core Sprint — context surfaces + conversation memory for the planner.
 import { initContextBundle } from './kernel/context-bundle.js';
 import { initConversationMemory } from './kernel/conversation-memory.js';
+import { initCalibrationTracker } from './kernel/calibration-tracker.js';
 import { initMenubar } from './shell/menubar.js';
 import { initDock } from './shell/dock.js';
 import { initDesktop } from './shell/desktop.js';
@@ -144,6 +145,7 @@ import { initVolumeHud } from './shell/volume-hud.js';
     initIntentExecutor();
     initContextBundle();
     initConversationMemory();
+    initCalibrationTracker();
 
     // Phase 0: kill mock provider trap in native path too (lesson #72)
     if (localStorage.getItem('nova-ai-provider') === 'mock') {
@@ -362,6 +364,7 @@ import { initVolumeHud } from './shell/volume-hud.js';
   // was false. Kept symmetric so the web preview + native shell behave
   // identically.
   initConversationMemory();
+  initCalibrationTracker();
 
   // Phase 0: kill mock provider trap permanently (lesson #72).
   // If a prior Settings test left provider='mock', every AI path silently
