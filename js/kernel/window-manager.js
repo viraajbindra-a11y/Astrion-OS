@@ -239,6 +239,9 @@ class WindowManager {
     const state = this.windows.get(id);
     if (!state) return;
 
+    // Abort any in-progress drag to release pointer capture & clean up
+    if (state._abortDrag) state._abortDrag();
+
     state.el.classList.add('closing');
     setTimeout(() => {
       state.el.remove();
@@ -249,7 +252,7 @@ class WindowManager {
       if (this.activeWindowId === id) {
         const remaining = [...this.windows.values()].filter(w => !w.minimized);
         if (remaining.length > 0) {
-          remaining.sort((a, b) => parseInt(b.el.style.zIndex) - parseInt(a.el.style.zIndex));
+          remaining.sort((a, b) => (parseInt(b.el.style.zIndex) || 0) - (parseInt(a.el.style.zIndex) || 0));
           this.focus(remaining[0].id);
         } else {
           this.activeWindowId = null;
@@ -280,7 +283,7 @@ class WindowManager {
     if (this.activeWindowId === id) {
       const remaining = [...this.windows.values()].filter(w => !w.minimized);
       if (remaining.length > 0) {
-        remaining.sort((a, b) => parseInt(b.el.style.zIndex) - parseInt(a.el.style.zIndex));
+        remaining.sort((a, b) => (parseInt(b.el.style.zIndex) || 0) - (parseInt(a.el.style.zIndex) || 0));
         this.focus(remaining[0].id);
       } else {
         this.activeWindowId = null;
@@ -357,6 +360,17 @@ class WindowManager {
   _setupDrag(el, id) {
     const titlebar = el.querySelector('.window-titlebar');
     let offsetX, offsetY, dragging = false;
+
+    const abortDrag = () => {
+      dragging = false;
+      el.style.transition = '';
+      const preview = document.getElementById('snap-preview');
+      if (preview) preview.style.display = 'none';
+    };
+
+    // Store abort fn on the window state so close() can call it
+    const state = this.windows.get(id);
+    if (state) state._abortDrag = abortDrag;
 
     titlebar.addEventListener('pointerdown', (e) => {
       if (e.target.closest('.window-buttons')) return;

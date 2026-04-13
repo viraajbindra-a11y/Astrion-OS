@@ -114,7 +114,11 @@ class NovaFileSystem {
       item.modified = Date.now();
       store.put(item);
     }
-    return new Promise(resolve => { tx.oncomplete = resolve; });
+    return new Promise((resolve, reject) => {
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+      tx.onabort = () => reject(tx.error || new Error('Rename transaction aborted'));
+    });
   }
 
   async search(query) {

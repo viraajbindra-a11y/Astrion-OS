@@ -152,27 +152,22 @@ function initTaskManager(container, instanceId) {
         </div>
       `;
 
-      // Sort click
-      el.querySelectorAll('[data-sort]').forEach(th => {
-        th.addEventListener('click', () => {
+      // Event delegation on the stable content element — avoids re-adding
+      // per-element listeners on every 2-second refresh cycle.
+      el.onclick = async (e) => {
+        // Sort header click
+        const th = e.target.closest('[data-sort]');
+        if (th) {
           if (sortKey === th.dataset.sort) sortDesc = !sortDesc;
           else { sortKey = th.dataset.sort; sortDesc = true; }
           loadTab();
-        });
-      });
-
-      // Hover shows kill button
-      el.querySelectorAll('.tm-row').forEach(row => {
-        const killBtn = row.querySelector('.tm-kill');
-        row.addEventListener('mouseenter', () => { row.style.background = 'rgba(255,255,255,0.04)'; if (killBtn) killBtn.style.display = 'block'; });
-        row.addEventListener('mouseleave', () => { row.style.background = ''; if (killBtn) killBtn.style.display = 'none'; });
-      });
-
-      // Kill process
-      el.querySelectorAll('.tm-kill').forEach(btn => {
-        btn.addEventListener('click', async (e) => {
+          return;
+        }
+        // Kill button click
+        const killBtn = e.target.closest('.tm-kill');
+        if (killBtn) {
           e.stopPropagation();
-          const pid = btn.dataset.pid;
+          const pid = killBtn.dataset.pid;
           if (!confirm(`Kill process ${pid}?`)) return;
           await fetch('/api/system/kill', {
             method: 'POST',
@@ -181,8 +176,24 @@ function initTaskManager(container, instanceId) {
           });
           notifications.show({ title: 'Process killed', body: `PID ${pid}`, icon: '\uD83D\uDED1', duration: 2000 });
           loadTab();
-        });
-      });
+        }
+      };
+      el.onmouseover = (e) => {
+        const row = e.target.closest('.tm-row');
+        if (row) {
+          row.style.background = 'rgba(255,255,255,0.04)';
+          const kb = row.querySelector('.tm-kill');
+          if (kb) kb.style.display = 'block';
+        }
+      };
+      el.onmouseout = (e) => {
+        const row = e.target.closest('.tm-row');
+        if (row) {
+          row.style.background = '';
+          const kb = row.querySelector('.tm-kill');
+          if (kb) kb.style.display = 'none';
+        }
+      };
     } catch (err) {
       el.innerHTML = `<div style="padding:40px; text-align:center; color:rgba(255,255,255,0.4);">Could not load processes<br><span style="font-size:11px;">${err.message}</span></div>`;
     }

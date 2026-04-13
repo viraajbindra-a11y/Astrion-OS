@@ -26,6 +26,58 @@ export function getChessState() {
  * @param {number} toC — destination column (0-7)
  * @returns {{ ok: boolean, captured?: string, error?: string }}
  */
+// Basic move shape validation (no check/checkmate/castling/en passant/promotion)
+function isValidMove(board, fromR, fromC, toR, toC) {
+  const piece = board[fromR][fromC];
+  const target = board[toR][toC];
+  const isWhite = piece === piece.toUpperCase();
+  // Can't capture own pieces
+  if (target !== ' ' && (target === target.toUpperCase()) === isWhite) return false;
+
+  const dr = toR - fromR, dc = toC - fromC;
+  const absDr = Math.abs(dr), absDc = Math.abs(dc);
+  const type = piece.toLowerCase();
+
+  if (type === 'p') {
+    const dir = isWhite ? -1 : 1;
+    const startRow = isWhite ? 6 : 1;
+    // Forward 1
+    if (dc === 0 && dr === dir && target === ' ') return true;
+    // Forward 2 from starting row
+    if (dc === 0 && dr === 2 * dir && fromR === startRow && target === ' ' && board[fromR + dir][fromC] === ' ') return true;
+    // Diagonal capture
+    if (absDc === 1 && dr === dir && target !== ' ') return true;
+    return false;
+  }
+  if (type === 'n') return (absDr === 2 && absDc === 1) || (absDr === 1 && absDc === 2);
+  if (type === 'k') return absDr <= 1 && absDc <= 1;
+
+  // Sliding pieces: check path is clear
+  function pathClear(stepR, stepC) {
+    let r = fromR + stepR, c = fromC + stepC;
+    while (r !== toR || c !== toC) {
+      if (board[r][c] !== ' ') return false;
+      r += stepR; c += stepC;
+    }
+    return true;
+  }
+
+  if (type === 'r') {
+    if (dr !== 0 && dc !== 0) return false;
+    return pathClear(Math.sign(dr), Math.sign(dc));
+  }
+  if (type === 'b') {
+    if (absDr !== absDc) return false;
+    return pathClear(Math.sign(dr), Math.sign(dc));
+  }
+  if (type === 'q') {
+    if (dr === 0 || dc === 0) return pathClear(Math.sign(dr), Math.sign(dc));
+    if (absDr === absDc) return pathClear(Math.sign(dr), Math.sign(dc));
+    return false;
+  }
+  return false;
+}
+
 export function makeChessMove(fromR, fromC, toR, toC) {
   if (!_game) return { ok: false, error: 'No chess game running' };
   if (fromR < 0 || fromR > 7 || fromC < 0 || fromC > 7 || toR < 0 || toR > 7 || toC < 0 || toC > 7) {
@@ -39,6 +91,7 @@ export function makeChessMove(fromR, fromC, toR, toC) {
     return { ok: false, error: `Not ${_game.turn}'s piece` };
   }
   if (fromR === toR && fromC === toC) return { ok: false, error: 'Source equals destination' };
+  if (!isValidMove(b, fromR, fromC, toR, toC)) return { ok: false, error: 'Illegal move' };
   const captured = b[toR][toC] !== ' ' ? b[toR][toC] : null;
   b[toR][toC] = piece;
   b[fromR][fromC] = ' ';

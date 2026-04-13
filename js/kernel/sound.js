@@ -18,7 +18,12 @@ class SoundSystem {
         return null;
       }
     }
-    if (this.ctx.state === 'suspended') this.ctx.resume();
+    if (this.ctx.state === 'suspended') {
+      // resume() only succeeds within a user gesture (click/keydown).
+      // Catch and ignore if called outside one — the next user-triggered
+      // sound call will resume it.
+      this.ctx.resume().catch(() => {});
+    }
     return this.ctx;
   }
 

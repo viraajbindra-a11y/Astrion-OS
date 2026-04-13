@@ -36,7 +36,8 @@ function getTodayKey() {
 }
 
 function getBudgetUsed() {
-  const stored = JSON.parse(localStorage.getItem(DAILY_BUDGET_KEY) || '{}');
+  let stored = {};
+  try { stored = JSON.parse(localStorage.getItem(DAILY_BUDGET_KEY) || '{}'); } catch {}
   const today = getTodayKey();
   if (stored.day !== today) return 0;
   return stored.used || 0;
@@ -55,7 +56,8 @@ function recordBudgetUsed(tokens) {
  */
 function reserveBudget(tokens) {
   const today = getTodayKey();
-  const stored = JSON.parse(localStorage.getItem(DAILY_BUDGET_KEY) || '{}');
+  let stored = {};
+  try { stored = JSON.parse(localStorage.getItem(DAILY_BUDGET_KEY) || '{}'); } catch {}
   const used = (stored.day === today) ? (stored.used || 0) : 0;
   const remaining = DAILY_TOKEN_LIMIT - used;
   if (tokens > remaining) return { ok: false, remaining };

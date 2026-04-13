@@ -1,5 +1,8 @@
 // NOVA OS — Boot Sequence
 
+// Patch localStorage first — prevents crashes on full storage / private browsing
+import './lib/safe-storage.js';
+
 import { eventBus } from './kernel/event-bus.js';
 import { fileSystem } from './kernel/file-system.js';
 import { graphStore } from './kernel/graph-store.js';

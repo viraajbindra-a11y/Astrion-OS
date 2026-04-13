@@ -26,7 +26,8 @@ const FLAG_KEY = 'astrion-graph-migrated-v1';
 // --- per-type migrators ---
 
 async function migrateNotes() {
-  const raw = JSON.parse(localStorage.getItem('nova-notes') || '[]');
+  let raw = [];
+  try { raw = JSON.parse(localStorage.getItem('nova-notes') || '[]'); } catch {}
   if (!Array.isArray(raw)) return 0;
   let count = 0;
   for (const n of raw) {
@@ -46,7 +47,8 @@ async function migrateNotes() {
 }
 
 async function migrateTodos() {
-  const raw = JSON.parse(localStorage.getItem('nova-todos') || '[]');
+  let raw = [];
+  try { raw = JSON.parse(localStorage.getItem('nova-todos') || '[]'); } catch {}
   if (!Array.isArray(raw)) return 0;
   let count = 0;
   for (let i = 0; i < raw.length; i++) {
@@ -63,7 +65,8 @@ async function migrateTodos() {
 }
 
 async function migrateReminders() {
-  const raw = JSON.parse(localStorage.getItem('nova-reminders') || 'null');
+  let raw = null;
+  try { raw = JSON.parse(localStorage.getItem('nova-reminders') || 'null'); } catch {}
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return 0;
   let count = 0;
   for (const listName of Object.keys(raw)) {

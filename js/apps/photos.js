@@ -65,7 +65,8 @@ function initPhotos(container) {
   const importBtn = container.querySelector('#photos-import-btn');
 
   // Load saved user photos
-  let userPhotos = JSON.parse(localStorage.getItem('nova-user-photos') || '[]');
+  let userPhotos = [];
+  try { userPhotos = JSON.parse(localStorage.getItem('nova-user-photos') || '[]'); } catch {}
 
   // Import button
   importBtn.addEventListener('click', () => uploadInput.click());

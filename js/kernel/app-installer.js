@@ -196,7 +196,9 @@ const appRegistry = {
 
 class AppInstaller {
   constructor() {
-    this.installed = new Set(JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'));
+    let saved = [];
+    try { saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); } catch {}
+    this.installed = new Set(saved);
   }
 
   getRegistry() {
