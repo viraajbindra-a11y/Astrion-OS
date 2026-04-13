@@ -540,7 +540,7 @@ if (typeof window !== 'undefined' && window.location?.hostname === 'localhost') 
     { input: 'increase volume to 80', expect: { verb: 'increase', target: 'volume' } },
     { input: 'take a screenshot', expect: { verb: 'make', target: 'screenshot' } },
     { input: 'read file snake.js', expect: { verb: 'find', target: 'file' } },
-    { input: 'search for registerMusic', expect: { verb: 'find' } },
+    { input: 'search files for registerMusic', expect: { verb: 'find', target: 'file' } },
     { input: 'random text that is not an intent', expect: null },
     { input: '', expect: null },
   ];
