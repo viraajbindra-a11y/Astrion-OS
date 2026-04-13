@@ -57,7 +57,7 @@ async function htmlToCanvas(element) {
   ctx.fillRect(0, 0, rect.width, rect.height);
   ctx.fillStyle = 'white';
   ctx.font = '16px Inter, sans-serif';
-  ctx.fillText('NOVA OS Screenshot', 20, 30);
+  ctx.fillText('Astrion OS Screenshot', 20, 30);
   ctx.fillStyle = 'rgba(255,255,255,0.5)';
   ctx.font = '12px Inter, sans-serif';
   ctx.fillText(new Date().toLocaleString(), 20, 50);

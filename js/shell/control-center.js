@@ -86,7 +86,7 @@ function open() {
       <div class="cc-now-playing-art">\uD83C\uDFB5</div>
       <div class="cc-now-playing-info">
         <div class="cc-now-playing-title">Not Playing</div>
-        <div class="cc-now-playing-artist">NOVA Music</div>
+        <div class="cc-now-playing-artist">Astrion Music</div>
       </div>
       <button class="cc-now-playing-btn">\u25B6</button>
     </div>

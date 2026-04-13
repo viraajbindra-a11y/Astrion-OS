@@ -14,7 +14,7 @@ const appRegistry = {
     name: 'Pomodoro Timer',
     icon: '\u23F2',
     category: 'Productivity',
-    dev: 'NOVA Labs',
+    dev: 'Astrion Labs',
     desc: 'Focus timer using the Pomodoro technique. 25 min work, 5 min break.',
     color: 'linear-gradient(135deg, #e53935, #b71c1c)',
     rating: 4.8,
@@ -126,7 +126,7 @@ const appRegistry = {
     price: 'Free',
     code: function(container) {
       container.innerHTML = `<div style="display:flex;height:100%;font-family:var(--font);">
-        <textarea id="md-input" style="flex:1;background:#1e1e1e;color:#e0e0e0;border:none;padding:16px;font-size:14px;font-family:var(--mono);resize:none;outline:none;border-right:1px solid rgba(255,255,255,0.1);" placeholder="# Write Markdown here\n\nType **bold**, *italic*, \`code\`..."># Hello World\n\nThis is **NOVA OS** Markdown Preview.\n\n- Item 1\n- Item 2\n- Item 3\n\n\`\`\`js\nconsole.log('Hello!');\n\`\`\`</textarea>
+        <textarea id="md-input" style="flex:1;background:#1e1e1e;color:#e0e0e0;border:none;padding:16px;font-size:14px;font-family:var(--mono);resize:none;outline:none;border-right:1px solid rgba(255,255,255,0.1);" placeholder="# Write Markdown here\n\nType **bold**, *italic*, \`code\`..."># Hello World\n\nThis is **Astrion OS** Markdown Preview.\n\n- Item 1\n- Item 2\n- Item 3\n\n\`\`\`js\nconsole.log('Hello!');\n\`\`\`</textarea>
         <div id="md-output" style="flex:1;padding:16px;overflow-y:auto;background:#fff;color:#333;font-size:14px;line-height:1.6;"></div>
       </div>`;
       const input = container.querySelector('#md-input'), output = container.querySelector('#md-output');
@@ -150,7 +150,7 @@ const appRegistry = {
     name: 'System Monitor',
     icon: '\uD83D\uDCCA',
     category: 'Utilities',
-    dev: 'NOVA Team',
+    dev: 'Astrion Team',
     desc: 'Monitor CPU, memory, and running processes in real-time.',
     color: 'linear-gradient(135deg, #2e7d32, #1b5e20)',
     rating: 4.4,
@@ -178,7 +178,7 @@ const appRegistry = {
             <span style="flex:2;">Process</span><span style="flex:1;text-align:right;">CPU</span><span style="flex:1;text-align:right;">Memory</span>
           </div>
           <div style="font-size:13px;">
-            <div style="display:flex;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.04);"><span style="flex:2;">NOVA Kernel</span><span style="flex:1;text-align:right;color:rgba(255,255,255,0.5);">${(1+Math.random()*3).toFixed(1)}%</span><span style="flex:1;text-align:right;color:rgba(255,255,255,0.5);">${(8+Math.random()*5).toFixed(0)} MB</span></div>
+            <div style="display:flex;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.04);"><span style="flex:2;">Astrion Kernel</span><span style="flex:1;text-align:right;color:rgba(255,255,255,0.5);">${(1+Math.random()*3).toFixed(1)}%</span><span style="flex:1;text-align:right;color:rgba(255,255,255,0.5);">${(8+Math.random()*5).toFixed(0)} MB</span></div>
             <div style="display:flex;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.04);"><span style="flex:2;">Window Manager</span><span style="flex:1;text-align:right;color:rgba(255,255,255,0.5);">${(0.5+Math.random()*2).toFixed(1)}%</span><span style="flex:1;text-align:right;color:rgba(255,255,255,0.5);">${(3+Math.random()*4).toFixed(0)} MB</span></div>
             <div style="display:flex;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.04);"><span style="flex:2;">AI Service</span><span style="flex:1;text-align:right;color:rgba(255,255,255,0.5);">${(0.2+Math.random()*1).toFixed(1)}%</span><span style="flex:1;text-align:right;color:rgba(255,255,255,0.5);">${(5+Math.random()*3).toFixed(0)} MB</span></div>
             <div style="display:flex;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.04);"><span style="flex:2;">File System</span><span style="flex:1;text-align:right;color:rgba(255,255,255,0.5);">${(0.1+Math.random()*0.5).toFixed(1)}%</span><span style="flex:1;text-align:right;color:rgba(255,255,255,0.5);">${(2+Math.random()*2).toFixed(0)} MB</span></div>

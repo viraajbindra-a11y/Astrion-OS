@@ -10,7 +10,7 @@ const PERMISSION_META = {
   location:     { label: 'Location',            icon: '\uD83D\uDCCD', desc: 'access your approximate location' },
   notifications:{ label: 'Notifications',       icon: '\uD83D\uDD14', desc: 'send you notifications' },
   clipboard:    { label: 'Clipboard',           icon: '\uD83D\uDCCB', desc: 'read and write your clipboard' },
-  files:        { label: 'All Files',           icon: '\uD83D\uDCC1', desc: 'read any file in your NOVA file system' },
+  files:        { label: 'All Files',           icon: '\uD83D\uDCC1', desc: 'read any file in your Astrion file system' },
   network:      { label: 'Network',             icon: '\uD83C\uDF10', desc: 'make network requests to any site' },
   contacts:     { label: 'Contacts',            icon: '\uD83D\uDC65', desc: 'access your contacts' },
   calendar:     { label: 'Calendar',            icon: '\uD83D\uDCC5', desc: 'read and modify your calendar' },

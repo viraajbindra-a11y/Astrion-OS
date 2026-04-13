@@ -467,11 +467,11 @@ export function initSpotlight() {
 
     // Always show AI option
     html += `<div class="spotlight-result-group">
-      <div class="spotlight-result-label">NOVA AI</div>
+      <div class="spotlight-result-label">Astrion AI</div>
       <div class="spotlight-result-item" data-action="ask-ai">
         <div class="spotlight-result-icon" style="background:linear-gradient(135deg,#007aff,#5856d6);border-radius:50%;color:white;font-size:14px;font-weight:bold;">N</div>
         <div class="spotlight-result-text">
-          <div class="spotlight-result-title">Ask NOVA: "${query.substring(0, 50)}"</div>
+          <div class="spotlight-result-title">Ask Astrion: "${query.substring(0, 50)}"</div>
           <div class="spotlight-result-subtitle">Press Enter to ask AI</div>
         </div>
       </div>
