@@ -11,7 +11,7 @@
 //   - Mock fallback → brain: 'offline' (no real AI wired up)
 
 import { eventBus } from './event-bus.js';
-import { checkBudget, recordS2Call } from './budget-manager.js';
+import { checkBudget, recordS2Call, getPerIntentCap } from './budget-manager.js';
 import { shouldEscalate, capCategory as getCapCategory } from './calibration-tracker.js';
 
 const AI_PROVIDER_KEY = 'nova-ai-provider';   // 'ollama' | 'anthropic' | 'mock'
@@ -85,12 +85,12 @@ class AIService {
       if (reply) {
         if (!skip) this._addToHistory(prompt, reply);
         const elapsed = Date.now() - startMs;
-        eventBus.emit('ai:response', { brain: 's1', confidence: 0.85, provider: 'ollama', responseTimeMs: elapsed, capCategory: capCat });
+        eventBus.emit('ai:response', { brain: 's1', confidence: 0.85, provider: 'ollama', responseTimeMs: elapsed, capCategory: capCat, model: options.model || this.getOllamaModel(), escalated: false, query: prompt.slice(0, 100) });
         return reply;
       }
       if (provider === 'ollama') {
         const mock = this._mockResponse(prompt);
-        eventBus.emit('ai:response', { brain: 'offline', confidence: 0.3, provider: 'mock', capCategory: capCat });
+        eventBus.emit('ai:response', { brain: 'offline', confidence: 0.3, provider: 'mock', capCategory: capCat, model: 'mock', escalated: false, query: prompt.slice(0, 100) });
         return mock;
       }
     }
@@ -98,12 +98,13 @@ class AIService {
     if (provider === 'auto' || provider === 'anthropic') {
       // M3 budget gate: check spending limits before S2 call
       const model = options.model || 'claude-haiku-4-5-20251001';
-      const budgetCheck = checkBudget({ inputTokens: 2000, outputTokens: 500, model });
+      const inputEstimate = Math.max(500, Math.min(8000, Math.round(prompt.length * 1.3)));
+      const budgetCheck = checkBudget({ inputTokens: inputEstimate, outputTokens: 500, model });
       if (!budgetCheck.allowed) {
         console.warn('[ai-service] S2 budget exceeded:', budgetCheck.reason);
         // Fall through to mock with a budget warning
         const mock = `I'd love to help, but today's cloud AI budget has been reached. ${budgetCheck.reason}. Try again tomorrow, or use Ollama (free, local) in Settings > AI.`;
-        eventBus.emit('ai:response', { brain: 'offline', confidence: 0.3, provider: 'budget-exceeded', capCategory: capCat });
+        eventBus.emit('ai:response', { brain: 'offline', confidence: 0.3, provider: 'budget-exceeded', capCategory: capCat, model, escalated: skipS1, query: prompt.slice(0, 100) });
         return mock;
       }
 
@@ -119,13 +120,13 @@ class AIService {
           query: prompt.slice(0, 100),
           ok: true,
         });
-        eventBus.emit('ai:response', { brain: 's2', confidence: 0.95, provider: 'anthropic', responseTimeMs: elapsed, capCategory: capCat });
+        eventBus.emit('ai:response', { brain: 's2', confidence: 0.95, provider: 'anthropic', responseTimeMs: elapsed, capCategory: capCat, model, escalated: skipS1, query: prompt.slice(0, 100) });
         return result.reply;
       }
     }
 
     const mock = this._mockResponse(prompt);
-    eventBus.emit('ai:response', { brain: 'offline', confidence: 0.3, provider: 'mock', capCategory: capCat });
+    eventBus.emit('ai:response', { brain: 'offline', confidence: 0.3, provider: 'mock', capCategory: capCat, model: 'mock', escalated: false, query: prompt.slice(0, 100) });
     return mock;
   }
 

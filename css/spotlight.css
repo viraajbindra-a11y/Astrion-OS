@@ -179,3 +179,81 @@
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
+
+/* M3 — Brain badge + feedback on AI responses */
+.spotlight-ai-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 16px 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.spotlight-brain-badge {
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  cursor: pointer;
+  transition: filter 0.2s ease;
+}
+
+.spotlight-brain-badge[data-brain="s1"] {
+  background: #8be9fd;
+  color: #0a0a1a;
+}
+
+.spotlight-brain-badge[data-brain="s2"] {
+  background: #bd93f9;
+  color: #0a0a1a;
+}
+
+.spotlight-brain-badge[data-brain="offline"] {
+  background: #6272a4;
+  color: #f8f8f2;
+}
+
+.spotlight-brain-badge:hover {
+  filter: brightness(1.15);
+}
+
+.spotlight-feedback {
+  display: flex;
+  gap: 4px;
+}
+
+.spotlight-fb-btn {
+  background: none;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-size: 12px;
+  cursor: pointer;
+  opacity: 0.6;
+  transition: opacity 0.15s, background 0.15s;
+}
+
+.spotlight-fb-btn:hover {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.spotlight-fb-btn:disabled {
+  cursor: default;
+}
+
+.spotlight-reasoning {
+  padding: 0 16px 8px;
+  font-size: 11px;
+  color: rgba(255, 255, 255, 0.6);
+  line-height: 1.6;
+}
+
+.spotlight-reasoning.hidden {
+  display: none;
+}
+
+.spotlight-reasoning-row {
+  padding: 1px 0;
+}

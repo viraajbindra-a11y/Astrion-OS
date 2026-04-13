@@ -14,6 +14,7 @@ import { parseIntent, summarizeIntent, intentToNaturalLanguage } from '../kernel
 // Agent Core Sprint — heuristic router + context snapshot for the planner.
 import { routeQuery } from '../kernel/intent-planner.js';
 import { getContextBundle } from '../kernel/context-bundle.js';
+import { recordSample } from '../kernel/calibration-tracker.js';
 
 let isOpen = false;
 // Agent Core Sprint: the id of the plan currently streaming in the panel,
@@ -100,6 +101,10 @@ export function initSpotlight() {
     });
   });
 
+  // ─── M3 — capture last AI brain metadata for badge/feedback ───
+  let lastAiMeta = null;
+  eventBus.on('ai:response', (meta) => { lastAiMeta = meta; });
+
   // ─── Agent Core Sprint — plan:* event subscriptions ───
   // Render a streaming step panel in the Spotlight results area when a
   // multi-step plan is running. Every event re-renders the panel using
@@ -180,18 +185,15 @@ export function initSpotlight() {
 
   eventBus.on('plan:completed', ({ planId }) => {
     if (planId !== activePlanId) return;
-    // Mark any pending as done, then show "Ready" for ~1.2s before clearing
+    // Mark any pending as done and show "Done" with brain badge + feedback.
+    // Don't auto-clear — let the user see the result, give feedback, then
+    // type a new query or press Escape. Input is re-enabled so typing works.
     renderPlanPanel({ completed: true });
-    setTimeout(() => {
-      if (planState.planId === planId && isOpen) {
-        resetPlanState();
-        activePlanId = null;
-        results.innerHTML = '';
-        input.value = '';
-        input.disabled = false;
-        input.focus();
-      }
-    }, 1200);
+    resetPlanState();
+    activePlanId = null;
+    input.value = '';
+    input.disabled = false;
+    input.focus();
   });
 
   eventBus.on('plan:failed', ({ planId, error, atStep }) => {
@@ -268,14 +270,72 @@ export function initSpotlight() {
       </div>`;
     }
 
+    // M3 — brain badge row after plan steps (when plan is done or failed)
+    let brainRow = '';
+    if ((extra.completed || extra.failed) && lastAiMeta) {
+      const meta = lastAiMeta;
+      const brainLabel = meta.brain === 'offline' ? 'OFF' : meta.brain.toUpperCase();
+      const confPct = meta.confidence != null ? Math.round(meta.confidence * 100) : '?';
+      const timeStr = meta.responseTimeMs ? `${(meta.responseTimeMs / 1000).toFixed(1)}s` : '';
+      brainRow = `<div class="spotlight-ai-meta">
+        <span class="spotlight-brain-badge" data-brain="${meta.brain}" title="Click for details">
+          ${brainLabel} · ${confPct}%${timeStr ? ' · ' + timeStr : ''}
+        </span>
+        <span class="spotlight-feedback">
+          <button class="spotlight-fb-btn" data-vote="up" title="Good answer">👍</button>
+          <button class="spotlight-fb-btn" data-vote="down" title="Bad answer">👎</button>
+        </span>
+      </div>`;
+    }
+
     results.innerHTML = `
       <div class="spotlight-result-group">
         ${header}
         ${reasoning}
         ${stepRows}
       </div>
+      ${brainRow}
       ${clarifyBlock}
     `;
+
+    // M3 — wire brain badge + feedback in plan panel
+    if (brainRow && lastAiMeta) {
+      const badge = results.querySelector('.spotlight-brain-badge');
+      if (badge) {
+        badge.addEventListener('click', () => {
+          let trace = results.querySelector('.spotlight-reasoning');
+          if (!trace) {
+            trace = document.createElement('div');
+            trace.className = 'spotlight-reasoning';
+            badge.closest('.spotlight-ai-meta').after(trace);
+          }
+          if (trace.style.display === 'none' || !trace.innerHTML) {
+            trace.style.display = '';
+            trace.innerHTML = buildReasoningTrace(lastAiMeta);
+          } else {
+            trace.style.display = 'none';
+          }
+        });
+      }
+      results.querySelectorAll('.spotlight-fb-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const isUp = btn.dataset.vote === 'up';
+          results.querySelectorAll('.spotlight-fb-btn').forEach(b => {
+            b.style.opacity = b === btn ? '1' : '0.3';
+            b.disabled = true;
+          });
+          const meta = lastAiMeta;
+          recordSample({
+            brain: meta.brain,
+            capCategory: meta.capCategory || 'general',
+            ok: isUp,
+            query: meta.query || '',
+            responseTimeMs: meta.responseTimeMs || 0,
+            userFeedback: true,
+          });
+        });
+      });
+    }
 
     // Wire clarify clicks: submitting the choice as a fresh planner turn
     if (planState.clarify) {
@@ -627,7 +687,79 @@ export function initSpotlight() {
       }
     }
 
-    results.innerHTML = `<div class="spotlight-ai-response">${escapeHtml(response)}</div>`;
+    renderAiResponse(results, response);
+  }
+
+  // ─── M3 — AI response with brain badge, feedback, reasoning trace ───
+
+  function renderAiResponse(container, text) {
+    const meta = lastAiMeta || { brain: 'offline', confidence: 0.3, provider: 'mock' };
+    const brainLabel = meta.brain === 'offline' ? 'OFF' : meta.brain.toUpperCase();
+    const confPct = meta.confidence != null ? Math.round(meta.confidence * 100) : '?';
+    const timeStr = meta.responseTimeMs ? `${(meta.responseTimeMs / 1000).toFixed(1)}s` : '';
+
+    container.innerHTML = `
+      <div class="spotlight-ai-response">${escapeHtml(text)}</div>
+      <div class="spotlight-ai-meta">
+        <span class="spotlight-brain-badge" data-brain="${meta.brain}" title="Click for details">
+          ${brainLabel} · ${confPct}%${timeStr ? ' · ' + timeStr : ''}
+        </span>
+        <span class="spotlight-feedback">
+          <button class="spotlight-fb-btn" data-vote="up" title="Good answer">👍</button>
+          <button class="spotlight-fb-btn" data-vote="down" title="Bad answer">👎</button>
+        </span>
+      </div>
+      <div class="spotlight-reasoning hidden"></div>
+    `;
+
+    // Badge click → toggle reasoning trace
+    const badge = container.querySelector('.spotlight-brain-badge');
+    const tracePanel = container.querySelector('.spotlight-reasoning');
+    badge.addEventListener('click', () => {
+      if (tracePanel.classList.contains('hidden')) {
+        tracePanel.classList.remove('hidden');
+        tracePanel.innerHTML = buildReasoningTrace(meta);
+      } else {
+        tracePanel.classList.add('hidden');
+      }
+    });
+
+    // Feedback buttons
+    container.querySelectorAll('.spotlight-fb-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const isUp = btn.dataset.vote === 'up';
+        container.querySelectorAll('.spotlight-fb-btn').forEach(b => {
+          b.style.opacity = b === btn ? '1' : '0.3';
+          b.disabled = true;
+        });
+        recordSample({
+          brain: meta.brain,
+          capCategory: meta.capCategory || 'general',
+          ok: isUp,
+          query: meta.query || '',
+          responseTimeMs: meta.responseTimeMs || 0,
+          userFeedback: true,
+        });
+      });
+    });
+  }
+
+  function buildReasoningTrace(meta) {
+    const brainName = meta.brain === 's1' ? 'S1 (Ollama local)'
+      : meta.brain === 's2' ? 'S2 (Claude cloud)' : 'Offline (mock)';
+    const model = meta.model || 'unknown';
+    const time = meta.responseTimeMs ? `${(meta.responseTimeMs / 1000).toFixed(1)}s` : 'n/a';
+    const conf = meta.confidence != null ? `${Math.round(meta.confidence * 100)}%` : 'n/a';
+    const escalated = meta.escalated
+      ? `<div class="spotlight-reasoning-row" style="color:#f1fa8c;">⚡ Escalated: S1 accuracy for "${escapeHtml(meta.capCategory || 'general')}" was below 70%</div>`
+      : '';
+    return `
+      <div class="spotlight-reasoning-row">Brain: ${escapeHtml(brainName)}</div>
+      <div class="spotlight-reasoning-row">Model: ${escapeHtml(model)}</div>
+      <div class="spotlight-reasoning-row">Response time: ${time}</div>
+      <div class="spotlight-reasoning-row">Confidence: ${conf}</div>
+      ${escalated}
+    `;
   }
 
   function handleResultClick(item, query) {
