@@ -1,6 +1,7 @@
 // NOVA OS — YouTube App (standalone video player + search)
 
 import { processManager } from '../kernel/process-manager.js';
+import { loadYouTubeAPI, extractVideoId, getYTApiKey, setYTApiKey, searchYouTube, escHtml, fmtTime } from '../lib/youtube-api.js';
 
 export function registerYouTube() {
   processManager.register('youtube', {
@@ -16,72 +17,6 @@ export function registerYouTube() {
       initYouTube(contentEl);
     }
   });
-}
-
-/* ─── YouTube IFrame API loader (shared singleton) ─── */
-let ytAPILoaded = false;
-let ytAPICallbacks = [];
-
-function loadYouTubeAPI() {
-  return new Promise(resolve => {
-    if (ytAPILoaded) return resolve();
-    if (window.YT && window.YT.Player) { ytAPILoaded = true; return resolve(); }
-    ytAPICallbacks.push(resolve);
-    if (document.querySelector('script[src*="youtube.com/iframe_api"]')) return;
-    const tag = document.createElement('script');
-    tag.src = 'https://www.youtube.com/iframe_api';
-    document.head.appendChild(tag);
-    window.onYouTubeIframeAPIReady = () => {
-      ytAPILoaded = true;
-      ytAPICallbacks.forEach(cb => cb());
-      ytAPICallbacks = [];
-    };
-  });
-}
-
-function extractVideoId(input) {
-  input = input.trim();
-  let m = input.match(/[?&]v=([a-zA-Z0-9_-]{11})/);
-  if (m) return m[1];
-  m = input.match(/youtu\.be\/([a-zA-Z0-9_-]{11})/);
-  if (m) return m[1];
-  m = input.match(/embed\/([a-zA-Z0-9_-]{11})/);
-  if (m) return m[1];
-  m = input.match(/music\.youtube\.com.*[?&]v=([a-zA-Z0-9_-]{11})/);
-  if (m) return m[1];
-  if (/^[a-zA-Z0-9_-]{11}$/.test(input)) return input;
-  return null;
-}
-
-const YT_API_KEY_STORAGE = 'astrion-yt-api-key';
-function getYTApiKey() { return localStorage.getItem(YT_API_KEY_STORAGE) || ''; }
-function setYTApiKey(key) { localStorage.setItem(YT_API_KEY_STORAGE, key); }
-
-async function searchYouTube(query, apiKey) {
-  if (!apiKey) return [];
-  const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=15&q=${encodeURIComponent(query)}&key=${apiKey}`;
-  try {
-    const res = await fetch(url);
-    if (!res.ok) return [];
-    const data = await res.json();
-    return (data.items || []).map(item => ({
-      id: item.id.videoId,
-      title: item.snippet.title,
-      channel: item.snippet.channelTitle,
-      thumb: item.snippet.thumbnails?.medium?.url || item.snippet.thumbnails?.default?.url || '',
-      description: item.snippet.description || '',
-    }));
-  } catch { return []; }
-}
-
-function escHtml(s) {
-  const d = document.createElement('div'); d.textContent = s; return d.innerHTML;
-}
-
-function fmtTime(sec) {
-  if (!sec || !isFinite(sec)) return '0:00';
-  const m = Math.floor(sec / 60), s = Math.floor(sec % 60);
-  return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
 /* ─── Main app init ─── */
@@ -316,16 +251,22 @@ function initYouTube(container) {
   }
 
   async function playVideo(videoId, title, channel) {
-    await initPlayer();
+    if (!videoId) return;
+    try {
+      await initPlayer();
+    } catch (e) {
+      titleEl.textContent = 'YouTube unavailable';
+      channelEl.textContent = 'Check your internet connection';
+      return;
+    }
+    if (!player) return;
     currentVideoId = videoId;
     player.loadVideoById(videoId);
-    isPlaying = true;
-    playBtn.textContent = '\u23F8';
+    // Let onStateChange sync the play button state
     titleEl.textContent = title || 'YouTube Video';
     channelEl.textContent = channel || '';
     startPoll();
 
-    // Highlight active result
     resultsEl.querySelectorAll('.yt-result-item').forEach(el => {
       el.classList.toggle('active', el.dataset.id === videoId);
     });
@@ -402,11 +343,11 @@ function initYouTube(container) {
   });
 
   pBar.addEventListener('click', e => {
-    if (!player) return;
+    if (!player || !currentVideoId) return;
     const rect = pBar.getBoundingClientRect();
     const pct = (e.clientX - rect.left) / rect.width;
-    const dur = player.getDuration() || 0;
-    player.seekTo(dur * pct, true);
+    const dur = player.getDuration();
+    if (dur > 0) player.seekTo(dur * pct, true);
   });
 
   // ── Progress polling ──
@@ -430,9 +371,11 @@ function initYouTube(container) {
   const observer = new MutationObserver(() => {
     if (!container.isConnected) {
       stopPoll();
-      if (player) { try { player.destroy(); } catch (_) {} player = null; }
+      try { if (player) player.destroy(); } catch (_) {} finally { player = null; }
       observer.disconnect();
     }
   });
-  observer.observe(container.parentElement || document.body, { childList: true, subtree: true });
+  if (container.parentElement) {
+    observer.observe(container.parentElement, { childList: true, subtree: true });
+  }
 }

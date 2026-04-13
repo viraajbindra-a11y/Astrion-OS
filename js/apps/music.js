@@ -1,6 +1,7 @@
 // NOVA OS — Music Player App (v3 — Radio + YouTube + Local Files)
 
 import { processManager } from '../kernel/process-manager.js';
+import { loadYouTubeAPI, extractVideoId, getYTApiKey, setYTApiKey, searchYouTube, escHtml, fmtTime } from '../lib/youtube-api.js';
 
 export function registerMusic() {
   processManager.register('music', {
@@ -330,45 +331,8 @@ class SynthEngine {
 
 /* ═══════════════════════════════════════════════════════════════════
    YOUTUBE PLAYER (wraps IFrame API)
+   Shared loader/utils imported from ../lib/youtube-api.js
    ═══════════════════════════════════════════════════════════════════ */
-let ytAPILoaded = false;
-let ytAPICallbacks = [];
-
-function loadYouTubeAPI() {
-  return new Promise(resolve => {
-    if (ytAPILoaded) return resolve();
-    if (window.YT && window.YT.Player) { ytAPILoaded = true; return resolve(); }
-    ytAPICallbacks.push(resolve);
-    if (document.querySelector('script[src*="youtube.com/iframe_api"]')) return;
-    const tag = document.createElement('script');
-    tag.src = 'https://www.youtube.com/iframe_api';
-    document.head.appendChild(tag);
-    window.onYouTubeIframeAPIReady = () => {
-      ytAPILoaded = true;
-      ytAPICallbacks.forEach(cb => cb());
-      ytAPICallbacks = [];
-    };
-  });
-}
-
-function extractVideoId(input) {
-  input = input.trim();
-  // youtube.com/watch?v=ID
-  let m = input.match(/[?&]v=([a-zA-Z0-9_-]{11})/);
-  if (m) return m[1];
-  // youtu.be/ID
-  m = input.match(/youtu\.be\/([a-zA-Z0-9_-]{11})/);
-  if (m) return m[1];
-  // youtube.com/embed/ID
-  m = input.match(/embed\/([a-zA-Z0-9_-]{11})/);
-  if (m) return m[1];
-  // music.youtube.com
-  m = input.match(/music\.youtube\.com.*[?&]v=([a-zA-Z0-9_-]{11})/);
-  if (m) return m[1];
-  // bare 11-char ID
-  if (/^[a-zA-Z0-9_-]{11}$/.test(input)) return input;
-  return null;
-}
 
 class YouTubePlayer {
   constructor(containerEl, onStateChange) {
@@ -478,6 +442,8 @@ class LocalPlayer {
   addFiles(files) {
     this.init();
     for (const file of files) {
+      // Skip non-audio files
+      if (!file.type.startsWith('audio/') && !/\.(mp3|wav|ogg|flac|m4a|aac|wma|opus|webm)$/i.test(file.name)) continue;
       const url = URL.createObjectURL(file);
       const name = file.name.replace(/\.[^.]+$/, '');
       this.playlist.push({ file, name, url });
@@ -521,30 +487,6 @@ class LocalPlayer {
     this.playlist = [];
     if (this.ctx) { this.ctx.close().catch(() => {}); this.ctx = null; }
   }
-}
-
-/* ═══════════════════════════════════════════════════════════════════
-   YOUTUBE SEARCH (Data API v3 — optional, needs API key)
-   ═══════════════════════════════════════════════════════════════════ */
-const YT_API_KEY_STORAGE = 'astrion-yt-api-key';
-
-function getYTApiKey() { return localStorage.getItem(YT_API_KEY_STORAGE) || ''; }
-function setYTApiKey(key) { localStorage.setItem(YT_API_KEY_STORAGE, key); }
-
-async function searchYouTube(query, apiKey) {
-  if (!apiKey) return [];
-  const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&videoCategoryId=10&maxResults=10&q=${encodeURIComponent(query)}&key=${apiKey}`;
-  try {
-    const res = await fetch(url);
-    if (!res.ok) return [];
-    const data = await res.json();
-    return (data.items || []).map(item => ({
-      id: item.id.videoId,
-      title: item.snippet.title,
-      channel: item.snippet.channelTitle,
-      thumb: item.snippet.thumbnails?.default?.url || '',
-    }));
-  } catch { return []; }
 }
 
 /* ═══════════════════════════════════════════════════════════════════
@@ -897,18 +839,23 @@ function initMusic(container) {
   }
 
   async function playYTVideo(videoId, title, channel) {
-    await initYTPlayer();
+    if (!videoId) return; // guard against invalid URLs
+    try {
+      await initYTPlayer();
+    } catch (e) {
+      nowTitle.textContent = 'YouTube unavailable';
+      nowArtist.textContent = 'Check your internet connection';
+      return;
+    }
     ytPlayer.playVideo(videoId);
     isPlaying = true; playBtn.textContent = '\u23F8';
     nowEmoji.textContent = '\u25B6';
     nowTitle.textContent = title || ytPlayer.getTitle();
     nowArtist.textContent = channel || 'YouTube';
-    // Add to history
-    if (!ytHistory.find(h => h.id === videoId)) {
-      ytHistory.unshift({ id: videoId, title: title || 'Video', channel: channel || '' });
-      if (ytHistory.length > 20) ytHistory.pop();
-    }
-    startFakeViz('#e91e63');
+    // Add to history (deduplicate)
+    ytHistory = ytHistory.filter(h => h.id !== videoId);
+    ytHistory.unshift({ id: videoId, title: title || 'Video', channel: channel || '' });
+    if (ytHistory.length > 20) ytHistory.pop();
   }
 
   ytSearchBtn.addEventListener('click', () => doYTSearch());
@@ -1006,7 +953,6 @@ function initMusic(container) {
             <div class="mv2-track-artist">${escHtml(r.channel)}</div>
           </div>
         `;
-        el.addEventListener('dblclick', () => playYTVideo(r.id, r.title, r.channel));
         el.addEventListener('click', () => playYTVideo(r.id, r.title, r.channel));
         contentEl.appendChild(el);
       });
@@ -1208,10 +1154,13 @@ function initMusic(container) {
     const rect = pBar.getBoundingClientRect();
     const pct = (e.clientX - rect.left) / rect.width;
     if (activeMode === 'youtube' && ytPlayer) {
-      ytPlayer.seekTo(ytPlayer.getDuration() * pct);
+      const dur = ytPlayer.getDuration();
+      if (dur > 0) ytPlayer.seekTo(dur * pct);
     } else if (activeMode === 'local') {
-      localPlayer.seekTo(localPlayer.getDuration() * pct);
+      const dur = localPlayer.getDuration();
+      if (dur > 0) localPlayer.seekTo(dur * pct);
     }
+    // Radio mode: synth engine doesn't support seeking
   });
 
   // ── Timers ──
@@ -1279,18 +1228,8 @@ function initMusic(container) {
     draw();
   }
 
-  // Fake animated viz for YouTube (no analyser data available)
-  let fakeVizPhase = 0;
-  function startFakeViz(color) {
-    stopViz();
-    fakeVizPhase = 0;
-    const cr = parseInt(color.slice(1,3),16), cg = parseInt(color.slice(3,5),16), cb = parseInt(color.slice(5,7),16);
-    const draw = () => {
-      vizRAF = requestAnimationFrame(draw);
-      // YouTube mode — viz canvas is hidden, skip drawing
-    };
-    // No need to animate — the YouTube video is visible instead
-  }
+  // YouTube mode: video is visible instead of visualizer, no RAF needed
+  function startFakeViz() { stopViz(); }
 
   function stopViz() {
     if (vizRAF) { cancelAnimationFrame(vizRAF); vizRAF = null; }
