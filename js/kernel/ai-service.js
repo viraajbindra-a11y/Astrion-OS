@@ -39,7 +39,7 @@ class AIService {
   }
 
   getOllamaModel() {
-    return localStorage.getItem(AI_OLLAMA_MODEL_KEY) || 'llama3.2';
+    return localStorage.getItem(AI_OLLAMA_MODEL_KEY) || 'qwen2.5:7b';
   }
 
   setOllamaModel(model) {

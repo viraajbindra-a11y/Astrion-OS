@@ -727,6 +727,36 @@ const codeSearch = {
 };
 registerCapability(codeSearch);
 
+/**
+ * Minimal unified-diff generator for code.writeFile preview. Shows which
+ * lines were added (+) and removed (-). Not a full Myers diff — just a
+ * simple line-by-line comparison that's good enough for AI-proposed edits.
+ */
+function simpleDiff(oldText, newText, fileName) {
+  const oldLines = (oldText || '').split('\n');
+  const newLines = (newText || '').split('\n');
+  const out = [`--- a/${fileName}`, `+++ b/${fileName}`];
+
+  // Walk both arrays and emit hunks. Very naive — no LCS, just scan for
+  // matching lines and emit context/add/remove as we go.
+  let oi = 0, ni = 0;
+  while (oi < oldLines.length || ni < newLines.length) {
+    if (oi < oldLines.length && ni < newLines.length && oldLines[oi] === newLines[ni]) {
+      // Context line — skip (we emit only changed lines for compactness)
+      oi++; ni++;
+    } else if (oi < oldLines.length && (ni >= newLines.length || !newLines.includes(oldLines[oi]))) {
+      out.push(`-${oldLines[oi]}`);
+      oi++;
+    } else if (ni < newLines.length) {
+      out.push(`+${newLines[ni]}`);
+      ni++;
+    } else {
+      oi++; ni++;
+    }
+  }
+  return out.join('\n');
+}
+
 const codeWriteFile = {
   id: 'code.writeFile',
   verb: 'edit',
@@ -764,12 +794,14 @@ const codeWriteFile = {
       }
       const data = await res.json();
 
-      // Generate a simple unified diff summary for the notification
-      const diffSummary = oldContent != null
-        ? `Updated ${data.path} (${data.bytes} bytes)`
-        : `Created ${data.path} (${data.bytes} bytes)`;
+      // Generate diff for the Spotlight/Messages preview
+      const isNew = oldContent == null;
+      const diff = isNew ? null : simpleDiff(oldContent, content, data.path);
+      const diffSummary = isNew
+        ? `Created ${data.path} (${data.bytes} bytes)`
+        : `Updated ${data.path} (${data.bytes} bytes)`;
       safeNotify({ title: '✏️ File written', body: diffSummary });
-      return { ...data, oldContent, isNew: oldContent == null };
+      return { ...data, oldContent, isNew, diff };
     });
   },
 };
