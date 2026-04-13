@@ -552,12 +552,16 @@ function initBattery() {
   }, 180000);
 }
 
-function showAboutDialog() {
+async function showAboutDialog() {
   // Remove any existing about dialog
   document.querySelectorAll('.about-dialog-overlay').forEach(d => d.remove());
+  const { trapFocus } = await import('./focus-trap.js');
 
   const overlay = document.createElement('div');
   overlay.className = 'about-dialog-overlay';
+  overlay.setAttribute('role', 'dialog');
+  overlay.setAttribute('aria-modal', 'true');
+  overlay.setAttribute('aria-label', 'About Astrion OS');
   overlay.style.cssText = `
     position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:96000;
     display:flex;align-items:center;justify-content:center;
@@ -592,7 +596,7 @@ function showAboutDialog() {
       </svg>
     </div>
     <div style="font-size:22px;font-weight:700;color:white;margin-bottom:4px;">Astrion OS</div>
-    <div style="font-size:12px;color:rgba(255,255,255,0.4);margin-bottom:16px;">Version 1.0.0 (Build 2026.04)</div>
+    <div style="font-size:12px;color:rgba(255,255,255,0.4);margin-bottom:16px;">Version 0.2.0 (Build 2026.04)</div>
     <div style="font-size:12px;color:rgba(255,255,255,0.5);line-height:1.6;">
       An AI-native operating system built from scratch.<br>
       Designed and developed by <strong style="color:rgba(255,255,255,0.8);">${userName}</strong>.
@@ -615,12 +619,13 @@ function showAboutDialog() {
   overlay.appendChild(dialog);
   document.body.appendChild(overlay);
 
-  // Close handlers
-  const close = () => overlay.remove();
+  const close = () => { releaseFocusTrap(); overlay.remove(); };
   dialog.querySelector('#about-close-btn').addEventListener('click', close);
   overlay.addEventListener('click', (e) => { if (e.target === overlay) close(); });
-  document.addEventListener('keydown', function handler(e) {
-    if (e.key === 'Escape') { close(); document.removeEventListener('keydown', handler); }
+
+  const releaseFocusTrap = trapFocus(dialog, {
+    onEscape: close,
+    initialFocus: '#about-close-btn',
   });
 }
 
