@@ -1,6 +1,6 @@
 # Session Handoff — read this first in a new Claude session
 
-> **Last updated:** 2026-04-11 by the outgoing session (post Agent Core Sprint).
+> **Last updated:** 2026-04-12 by the outgoing session (post Phase 0 + Phase 1 + M3 seeds).
 > **Purpose:** Everything a fresh Claude session needs to pick up Astrion OS work without asking "what's going on?" questions.
 
 ---
@@ -61,7 +61,7 @@ Astrion OS is a real business. From day one. Don't frame friend contributions as
 - **AI-native operating system** — not a web OS clone with AI bolted on
 - **Runs 3 ways:** browser demo, Electron desktop app (Mac/Windows), real bootable Linux ISO
 - **Native C/GTK3 desktop shell** in `distro/nova-renderer/nova-shell.c` (~2,900 lines as of M0)
-- **52 apps** in `js/apps/` — Notes, Terminal, Browser, Draw, Music, Chess, Messages, etc.
+- **53 apps** in `js/apps/` — Notes, Terminal, Browser, Draw, Music, Chess, Messages, YouTube, etc.
 - **Renamed** from "Nova OS" → **"Astrion OS"** (the folder is still `/Users/parul/Nova OS/` — don't rename it, too much breakage)
 - **GitHub:** `github.com/viraajbindra-a11y/Astrion-OS`
 - **Latest release:** check with `gh release list --limit 1 --json tagName`
@@ -153,15 +153,22 @@ Astrion OS is a real business. From day one. Don't frame friend contributions as
 |---|---|
 | `PLAN.md` | Full milestone roadmap, updated after each milestone ships |
 | `docs/architecture/hypergraph.md` | M2 design doc — read before implementing M2 |
-| `tasks/lessons.md` | 52 numbered lessons — grep before every design decision |
+| `tasks/lessons.md` | 97 numbered lessons — grep before every design decision |
 | `tasks/todo.md` | Current task checklist (durable artifact) |
 | `tasks/contributions.md` | Friend revenue-share log |
-| `js/kernel/intent-parser.js` | M1 parser — 591 lines, 19 inline sanity tests |
+| `js/kernel/intent-parser.js` | M1 parser — 19 inline sanity tests |
 | `js/kernel/capability-api.js` | M1 capability registry (LEVEL, REVERSIBILITY, BLAST_RADIUS) |
-| `js/kernel/capability-providers.js` | 13 core providers |
-| `js/kernel/intent-executor.js` | Wires parser → capability → events |
-| `js/shell/spotlight.js` | Spotlight UI that dispatches intents |
-| `js/boot.js` | Boot sequence — imports capability-providers, calls initIntentExecutor |
+| `js/kernel/capability-providers.js` | 21 core providers (files, code, notes, todo, reminder, ai, app, volume, translate, screenshot, chat) |
+| `js/kernel/intent-planner.js` | Agent Core planner — NL → JSON plan via LLM, routeQuery heuristic |
+| `js/kernel/intent-executor.js` | Wires parser → capability → events, executePlan with binding resolver |
+| `js/kernel/context-bundle.js` | Snapshot of open apps, active window, clipboard, selection for planner |
+| `js/kernel/conversation-memory.js` | Session-scoped turn recording on hypergraph |
+| `js/kernel/calibration-tracker.js` | M3 seed — records per-query accuracy stats for S1/S2 routing |
+| `js/kernel/budget-manager.js` | M3 seed — S2 daily/per-intent spending caps |
+| `js/apps/messages.js` | Phase 0 — chat interface that routes through the planner |
+| `js/shell/spotlight.js` | Spotlight UI with multi-turn plan panel, clarify flow, L2 confirm gate |
+| `js/boot.js` | Boot sequence — imports all kernel modules, both native + normal branches |
+| `server/index.js` | Express server — AI proxy + Phase 1 file I/O endpoints (/api/files/*) |
 | `distro/nova-renderer/nova-shell.c` | Native C/GTK3 shell (~2,900 lines) |
 | `distro/build.sh` | ISO build script — writes `.xinitrc`, installs packages, etc. |
 | `.github/workflows/build-iso.yml` | CI workflow that builds + auto-publishes ISO to release |
@@ -172,13 +179,15 @@ Astrion OS is a real business. From day one. Don't frame friend contributions as
 - **Markitdown for pptx verification:** `pip3 install "markitdown[pptx]"` then `python3 -m markitdown file.pptx`
 - **Preview server for the web OS:** `.claude/launch.json` has it configured; use `mcp__Claude_Preview__preview_*` tools
 - **Login gate in preview:** `document.getElementById('login-screen').click()` advances past it (lesson #32)
+- **Ollama (local AI):** installed via `brew install ollama`, model `qwen2.5:7b` pulled. Start with `ollama serve` (port 11434). Set `localStorage['nova-ai-provider'] = 'ollama'` and `localStorage['nova-ai-ollama-model'] = 'qwen2.5:7b'` in the browser. Provider `auto` tries Ollama first, then Anthropic, then mock. Provider `mock` is auto-cleared on boot (lesson #72).
 - **ISO builds:** push to `distro/**` triggers `build-iso.yml` which auto-publishes to latest release. Version comes from `gh release list --limit 1`, NOT `package.json` (lesson #35).
+- **Anthropic API key status:** Max (20x) plan, console.anthropic.com key authenticates but $0 credit balance. When API credits are needed (M3 S2), add prepaid credit or claim promo.
 
 ---
 
 ## 🧱 Things that will bite you (grep lessons.md for full list)
 
-Quick hits from the 52 lessons:
+Quick hits from the 97 lessons:
 - **#1:** Never use `rgba()` on X11 without a compositor — renders WHITE. Solid colors only.
 - **#5:** ESM imports must be at top of file in this repo (`"type": "module"`).
 - **#19:** Don't hallucinate features. `grep` or `ls` before claiming code exists.
@@ -191,6 +200,14 @@ Quick hits from the 52 lessons:
 - **#48:** Read the target app's source BEFORE writing to its localStorage key.
 - **#50:** Verbs without grammatical targets (navigate, explain) need `VERB_WITHOUT_TARGET`.
 - **#52:** Sprint compression works when the foundation is solid. M1 shipped in 4 hours because M0 was already built.
+- **#72:** `localStorage['nova-ai-provider'] === 'mock'` silently neuters every AI path. Auto-cleared on boot now.
+- **#83:** Stub verification ≠ shipped. Even thorough stub tests don't equal real AI testing.
+- **#84:** Local LLMs ramble past JSON close-brace if maxTokens too generous. Cap at 500.
+- **#87:** Weaker model soak tests are MORE informative — they test error paths.
+- **#88:** Planner calls must use `skipHistory: true` to avoid poisoning chat context.
+- **#89:** Don't use `executePlan()` from non-Spotlight contexts — it hijacks the UI. Messages has its own `executeStepsInChat`.
+- **#92:** User queries in LLM prompts must be `JSON.stringify`'d, not template-literal'd.
+- **#93:** Path traversal checks must run BEFORE normalization, not just after.
 
 ---
 
@@ -198,6 +215,6 @@ Quick hits from the 52 lessons:
 
 Paste something like this as your first message:
 
-> Hey, this is Viraaj. Read `tasks/SESSION_HANDOFF.md` first, then `PLAN.md`, then `docs/architecture/hypergraph.md`. We're about to start M2.P1 — the graph-store.js implementation. Use plan mode, follow the dad-rules.
+> Hey, this is Viraaj. Read `tasks/SESSION_HANDOFF.md` first, then the expansion plan at `.claude/plans/sorted-sprouting-candle.md`. We're working on the Agent Core Expansion — Phase 2 (Dual Brain / M3) is next. Use plan mode, follow the dad-rules. Ollama is installed (qwen2.5:7b on port 11434).
 
 That's it. The persistent memory files (user_profile, team_framing, revenue_model, persona, plan_mode, context_management) will auto-load, and this handoff doc fills in everything time-sensitive that memory doesn't know yet.
