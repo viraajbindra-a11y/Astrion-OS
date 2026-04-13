@@ -526,7 +526,7 @@ function initSettings(container) {
             <circle cx="40" cy="40" r="6" fill="var(--accent)"/>
           </svg>
         </div>
-        <div class="settings-about-name">NOVA OS</div>
+        <div class="settings-about-name">Astrion OS</div>
         <div class="settings-about-version">Version 0.1.0 (Early Prototype)</div>
         <div class="settings-about-info">
           An AI-native operating system built for the future.
@@ -535,9 +535,9 @@ function initSettings(container) {
           <br>
           Cross-platform via web technology.
           <br><br>
-          Built with love by the NOVA team.
+          Built with love by the Astrion team.
           <br><br>
-          \u00A9 ${new Date().getFullYear()} NOVA OS Project
+          \u00A9 ${new Date().getFullYear()} Astrion OS Project
         </div>
       </div>
     `;

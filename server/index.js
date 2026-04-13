@@ -3,10 +3,13 @@
 
 import express from 'express';
 import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
+import { dirname, join, resolve, relative, extname } from 'path';
 import dns from 'dns';
 import { WebSocketServer } from 'ws';
 import { spawn } from 'child_process';
+// Phase 1 — File I/O Bridge (Agent Core Expansion)
+import { readFile as fsReadFile, writeFile as fsWriteFile, readdir, stat, mkdir } from 'fs/promises';
+import { existsSync } from 'fs';
 
 // Force IPv4 DNS resolution first — many networks (including some home
 // Wi-Fi) have broken IPv6. Node's default undici fetch prefers IPv6 and
@@ -134,21 +137,23 @@ app.post('/api/update/check', async (req, res) => {
 
 // ─── Ollama proxy (local or remote LLM) ───
 app.post('/api/ai/ollama', async (req, res) => {
-  const { url, model, system, messages } = req.body;
+  const { url, model, system, messages, max_tokens } = req.body;
   const ollamaUrl = url || 'http://localhost:11434';
 
   try {
+    const ollamaBody = {
+      model: model || 'llama3.2',
+      messages: [
+        { role: 'system', content: system || 'You are Astrion, a helpful AI assistant.' },
+        ...messages,
+      ],
+      stream: false,
+    };
+    if (max_tokens) ollamaBody.options = { num_predict: max_tokens };
     const response = await fetch(`${ollamaUrl}/api/chat`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        model: model || 'llama3.2',
-        messages: [
-          { role: 'system', content: system || 'You are Astrion, a helpful AI assistant.' },
-          ...messages,
-        ],
-        stream: false,
-      }),
+      body: JSON.stringify(ollamaBody),
       signal: AbortSignal.timeout(30000),
     });
 
@@ -194,6 +199,183 @@ app.post('/api/ai', async (req, res) => {
   } catch (error) {
     console.error('Proxy error:', error.message);
     res.status(500).json({ error: error.message });
+  }
+});
+
+// ─── File I/O Bridge (Phase 1 — Agent Core Expansion) ───
+// Lets the AI agent read, write, list, and search real source files via
+// Express endpoints. The browser sandbox can't touch the filesystem
+// directly; these endpoints are the bridge. ALL paths are restricted to
+// the project root (the Astrion OS repo directory). No `..` traversal.
+// Write operations are L2 (the capability layer shows a diff for user
+// approval before calling POST /api/files/write).
+
+const PROJECT_ROOT = resolve(__dirname, '..');
+
+/**
+ * Resolve a user-provided path against PROJECT_ROOT. Returns null if the
+ * resolved path escapes the project root (traversal defense).
+ */
+function safeResolvePath(userPath) {
+  if (!userPath || typeof userPath !== 'string') return null;
+  const resolved = resolve(PROJECT_ROOT, userPath.replace(/^\/+/, ''));
+  // Must start with PROJECT_ROOT to prevent traversal
+  if (!resolved.startsWith(PROJECT_ROOT)) return null;
+  // Extra check: reject remaining ..
+  if (resolved.includes('..')) return null;
+  return resolved;
+}
+
+// GET /api/files/read?path=js/apps/snake.js&offset=0&limit=50
+// Returns { path, content, lines, totalLines }
+app.get('/api/files/read', async (req, res) => {
+  try {
+    const filePath = safeResolvePath(req.query.path);
+    if (!filePath) return res.status(400).json({ error: 'Invalid or disallowed path' });
+    if (!existsSync(filePath)) return res.status(404).json({ error: 'File not found' });
+
+    const s = await stat(filePath);
+    if (!s.isFile()) return res.status(400).json({ error: 'Not a file' });
+    // Cap at 500KB to prevent accidental binary reads
+    if (s.size > 512 * 1024) return res.status(413).json({ error: `File too large: ${s.size} bytes (max 512KB)` });
+
+    const raw = await fsReadFile(filePath, 'utf-8');
+    const allLines = raw.split('\n');
+    const offset = Math.max(0, parseInt(req.query.offset) || 0);
+    const limit = Math.min(500, Math.max(1, parseInt(req.query.limit) || 100));
+    const slice = allLines.slice(offset, offset + limit);
+
+    res.json({
+      path: relative(PROJECT_ROOT, filePath),
+      content: slice.join('\n'),
+      lines: slice.length,
+      totalLines: allLines.length,
+      offset,
+      limit,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/files/write { path, content }
+// Writes content to a file. Creates parent dirs if needed. Returns { path, bytes }.
+// The capability layer (code.writeFile, L2) gates this with a diff preview —
+// this endpoint trusts that the caller already has user approval.
+app.post('/api/files/write', async (req, res) => {
+  try {
+    const { path: userPath, content } = req.body;
+    const filePath = safeResolvePath(userPath);
+    if (!filePath) return res.status(400).json({ error: 'Invalid or disallowed path' });
+    if (typeof content !== 'string') return res.status(400).json({ error: 'Content must be a string' });
+    // Hard cap at 1MB per write
+    if (content.length > 1024 * 1024) return res.status(413).json({ error: 'Content too large (max 1MB)' });
+
+    // Safety: reject writes to critical infrastructure files
+    const rel = relative(PROJECT_ROOT, filePath);
+    const BLOCKED = ['.git/', 'node_modules/', '.env', 'package-lock.json'];
+    for (const b of BLOCKED) {
+      if (rel.startsWith(b) || rel === b.replace(/\/$/, '')) {
+        return res.status(403).json({ error: `Write blocked: ${b} is protected` });
+      }
+    }
+
+    // Ensure parent directory exists
+    const parentDir = resolve(filePath, '..');
+    await mkdir(parentDir, { recursive: true });
+
+    await fsWriteFile(filePath, content, 'utf-8');
+    res.json({ path: rel, bytes: content.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/files/list?path=js/apps&depth=1
+// Returns { path, entries: [{ name, type, size, ext }] }
+app.get('/api/files/list', async (req, res) => {
+  try {
+    const dirPath = safeResolvePath(req.query.path || '.');
+    if (!dirPath) return res.status(400).json({ error: 'Invalid or disallowed path' });
+    if (!existsSync(dirPath)) return res.status(404).json({ error: 'Directory not found' });
+
+    const s = await stat(dirPath);
+    if (!s.isDirectory()) return res.status(400).json({ error: 'Not a directory' });
+
+    const entries = await readdir(dirPath, { withFileTypes: true });
+    // Filter out hidden files and node_modules
+    const filtered = entries
+      .filter(e => !e.name.startsWith('.') && e.name !== 'node_modules')
+      .map(e => ({
+        name: e.name,
+        type: e.isDirectory() ? 'directory' : 'file',
+        ext: e.isFile() ? extname(e.name) : null,
+      }))
+      .sort((a, b) => {
+        if (a.type !== b.type) return a.type === 'directory' ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      });
+
+    res.json({
+      path: relative(PROJECT_ROOT, dirPath) || '.',
+      entries: filtered,
+      count: filtered.length,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/files/search?query=function&path=js/apps&ext=.js
+// Grep-like search. Returns { query, matches: [{ file, line, lineNumber, content }] }
+app.get('/api/files/search', async (req, res) => {
+  try {
+    const query = req.query.query;
+    if (!query || typeof query !== 'string') return res.status(400).json({ error: 'Missing query parameter' });
+    const searchRoot = safeResolvePath(req.query.path || '.');
+    if (!searchRoot) return res.status(400).json({ error: 'Invalid search path' });
+    if (!existsSync(searchRoot)) return res.status(404).json({ error: 'Search path not found' });
+
+    const extFilter = req.query.ext || null; // e.g. '.js'
+    const maxResults = Math.min(100, parseInt(req.query.limit) || 50);
+    const matches = [];
+
+    async function searchDir(dir, depth = 0) {
+      if (depth > 5 || matches.length >= maxResults) return;
+      const entries = await readdir(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        if (matches.length >= maxResults) break;
+        if (entry.name.startsWith('.') || entry.name === 'node_modules') continue;
+        const fullPath = resolve(dir, entry.name);
+        if (entry.isDirectory()) {
+          await searchDir(fullPath, depth + 1);
+        } else if (entry.isFile()) {
+          if (extFilter && extname(entry.name) !== extFilter) continue;
+          // Skip binary-ish files
+          const size = (await stat(fullPath)).size;
+          if (size > 256 * 1024) continue;
+          try {
+            const content = await fsReadFile(fullPath, 'utf-8');
+            const lines = content.split('\n');
+            for (let i = 0; i < lines.length; i++) {
+              if (matches.length >= maxResults) break;
+              if (lines[i].includes(query)) {
+                matches.push({
+                  file: relative(PROJECT_ROOT, fullPath),
+                  lineNumber: i + 1,
+                  content: lines[i].trim().slice(0, 200),
+                });
+              }
+            }
+          } catch { /* skip unreadable files */ }
+        }
+      }
+    }
+
+    await searchDir(searchRoot);
+    res.json({ query, path: relative(PROJECT_ROOT, searchRoot) || '.', matches, count: matches.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

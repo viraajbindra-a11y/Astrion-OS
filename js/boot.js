@@ -95,6 +95,7 @@ import { registerTypingTest } from './apps/typing-test.js';
 import { registerTodo } from './apps/todo.js';
 import { registerBeatStudio } from './apps/beat-studio.js';
 import { registerLiveChat } from './apps/live-chat.js';
+import { registerYouTube } from './apps/youtube.js';
 import { verifyPassword } from './kernel/crypto.js';
 import { sounds } from './kernel/sound.js';
 import { initVolumeHud } from './shell/volume-hud.js';
@@ -133,6 +134,7 @@ import { initVolumeHud } from './shell/volume-hud.js';
     registerChess(); registerSnake(); register2048();
     registerBudget(); registerQuotes(); registerTypingTest();
     registerTodo(); registerBeatStudio(); registerLiveChat();
+    registerYouTube();
 
     windowManager.init();
 
@@ -142,6 +144,11 @@ import { initVolumeHud } from './shell/volume-hud.js';
     initIntentExecutor();
     initContextBundle();
     initConversationMemory();
+
+    // Phase 0: kill mock provider trap in native path too (lesson #72)
+    if (localStorage.getItem('nova-ai-provider') === 'mock') {
+      localStorage.removeItem('nova-ai-provider');
+    }
 
     // Launch the requested app directly (no boot screen, no login)
     processManager.launch(window.__NOVA_LAUNCH_APP__);
@@ -216,6 +223,7 @@ import { initVolumeHud } from './shell/volume-hud.js';
   registerTodo();
   registerBeatStudio();
   registerLiveChat();
+  registerYouTube();
   await animate(progressBar, 85, 200);
 
   // Init kernel

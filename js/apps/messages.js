@@ -18,7 +18,7 @@ import { eventBus } from '../kernel/event-bus.js';
 const CONVERSATIONS_KEY = 'nova-messages-conversations';
 
 // Capability IDs whose output IS the reply — don't double-call AI for these
-const DIRECT_REPLY_CAPS = new Set(['ai.ask', 'ai.explain', 'ai.summarize']);
+const DIRECT_REPLY_CAPS = new Set(['ai.ask', 'ai.explain', 'ai.summarize', 'compute.calculate']);
 
 export function registerMessages() {
   processManager.register('messages', {
@@ -333,6 +333,13 @@ function initMessages(container) {
     const convo = conversations.find(c => c.id === activeConvo);
     if (!convo) return;
 
+    // Guard BEFORE render to prevent race window (audit bug #12)
+    const isAI = convo.isAI;
+    if (isAI) {
+      if (_processing) return;
+      _processing = true;
+    }
+
     // Push user bubble
     convo.messages.push({ from: 'me', text, time: Date.now() });
     saveConversations(conversations);
@@ -340,11 +347,7 @@ function initMessages(container) {
     sounds.tap();
 
     // Non-AI conversations: no response
-    if (!convo.isAI) return;
-
-    // Guard against interleaved rapid sends
-    if (_processing) return;
-    _processing = true;
+    if (!isAI) return;
 
     const input = container.querySelector('#msg-input');
     if (input) input.disabled = true;
@@ -368,6 +371,9 @@ function initMessages(container) {
         // ─── PURE CHAT FALLBACK ───
         reply = await aiService.ask(text);
       }
+
+      // Null guard — aiService.ask can return null if all providers fail (audit bug #14)
+      reply = reply || "I couldn't reach the AI right now. Check Settings > AI Assistant.";
 
       convo.messages.push({ from: 'them', text: reply, time: Date.now() });
       sounds.notification();

@@ -86,11 +86,18 @@ async function migrateReminders() {
 
 // --- public entry ---
 
+const MIGRATING_KEY = 'astrion-graph-migrating-v1';
+
 export async function migrateLocalStorageToGraph() {
   // flag short-circuit: don't migrate twice
   if (localStorage.getItem(FLAG_KEY) === 'done') {
     return { skipped: true, reason: 'already-migrated' };
   }
+  // Prevent concurrent migration from multiple tabs (audit bug #6)
+  if (localStorage.getItem(MIGRATING_KEY) === 'true') {
+    return { skipped: true, reason: 'migration-in-progress' };
+  }
+  localStorage.setItem(MIGRATING_KEY, 'true');
 
   // safety: if the graph already has content of any migrated type, assume
   // a previous run (or a dev manually seeded it) and refuse to double-fill.
@@ -114,6 +121,7 @@ export async function migrateLocalStorageToGraph() {
   catch (err) { results.errors.push(['reminders', err.message]); }
 
   localStorage.setItem(FLAG_KEY, 'done');
+  localStorage.removeItem(MIGRATING_KEY);
 
   const total = results.notes + results.todos + results.reminders;
   if (total > 0) {

@@ -112,6 +112,7 @@ class AIService {
           model,
           system,
           messages,
+          ...(options.maxTokens ? { max_tokens: options.maxTokens } : {}),
         }),
         signal: AbortSignal.timeout(30000),
       });

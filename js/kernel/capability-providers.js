@@ -45,6 +45,8 @@ const VFS_ROOT_ALIASES = {
 function resolveVfsPath(raw) {
   if (!raw || typeof raw !== 'string') return null;
   let path = raw.trim();
+  // Reject traversal BEFORE any normalization (TOCTOU defense)
+  if (path.includes('..')) return null;
   // Strip "my " / "the " / leading articles
   path = path.replace(/^(my|the|in|on)\s+/i, '');
   // Alias lookup — lowercase literal roots or "desktop folder" → "/Desktop"
@@ -53,6 +55,8 @@ function resolveVfsPath(raw) {
   if (!path.startsWith('/')) path = '/' + path;
   // Normalize: collapse double slashes, drop trailing slash
   path = path.replace(/\/+/g, '/').replace(/\/$/, '') || '/';
+  // Second check after normalize (belt-and-suspenders)
+  if (path.includes('..')) return null;
   return path;
 }
 
@@ -68,8 +72,10 @@ function isPathWithinRoots(path) {
 
 function joinVfsPath(parent, name) {
   if (!parent || !name) return null;
-  const base = parent.replace(/\/$/, '');
   const leaf = String(name).replace(/^\/+/, '');
+  // Reject slashes and traversal in leaf names
+  if (leaf.includes('/') || leaf.includes('..')) return null;
+  const base = parent.replace(/\/$/, '');
   return `${base}/${leaf}`;
 }
 
@@ -630,6 +636,146 @@ const chatSendAsAgent = {
 registerCapability(chatSendAsAgent);
 
 // ═══════════════════════════════════════════════════════════════
+// PROVIDERS: code.* — Server File I/O Bridge (Phase 1)
+// ═══════════════════════════════════════════════════════════════
+//
+// These capabilities let the AI read, list, search, and write real source
+// files by calling the Express /api/files/* endpoints added in Phase 1.
+// The browser VFS (fileSystem) is an in-browser IndexedDB store; these
+// capabilities bypass it and hit the actual filesystem via the server.
+
+const codeReadFile = {
+  id: 'code.readFile',
+  verb: 'find',  // "show me", "read", "find" all route here via "find file"
+  target: 'file',
+  level: LEVEL.OBSERVE,
+  reversibility: REVERSIBILITY.FREE,
+  blastRadius: BLAST_RADIUS.NONE,
+  summary: 'Read a source file from the project',
+  estimateCost: () => ({ timeMs: 200, irreversibilityTokens: 0 }),
+  execute: async function(args) {
+    return runCapability(this, args, async () => {
+      const path = args.path || args.name || args._rawArgs || '';
+      if (!path) throw new Error('No file path specified');
+      const offset = parseInt(args.offset) || 0;
+      const limit = parseInt(args.limit) || 100;
+      const res = await fetch(`/api/files/read?path=${encodeURIComponent(path)}&offset=${offset}&limit=${limit}`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: res.statusText }));
+        throw new Error(err.error || `Read failed: ${res.status}`);
+      }
+      const data = await res.json();
+      safeNotify({ title: '📄 File read', body: `${data.path} (${data.lines}/${data.totalLines} lines)` });
+      return data;
+    });
+  },
+};
+registerCapability(codeReadFile);
+
+const codeListDir = {
+  id: 'code.listDir',
+  verb: 'find',
+  target: 'folder',
+  level: LEVEL.OBSERVE,
+  reversibility: REVERSIBILITY.FREE,
+  blastRadius: BLAST_RADIUS.NONE,
+  summary: 'List files in a project directory',
+  estimateCost: () => ({ timeMs: 150, irreversibilityTokens: 0 }),
+  execute: async function(args) {
+    return runCapability(this, args, async () => {
+      const path = args.path || args.name || args._rawArgs || '.';
+      const res = await fetch(`/api/files/list?path=${encodeURIComponent(path)}`);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: res.statusText }));
+        throw new Error(err.error || `List failed: ${res.status}`);
+      }
+      const data = await res.json();
+      safeNotify({ title: '📂 Directory listed', body: `${data.path} (${data.count} entries)` });
+      return data;
+    });
+  },
+};
+registerCapability(codeListDir);
+
+const codeSearch = {
+  id: 'code.search',
+  verb: 'find',
+  target: '*',  // "search for X", "grep for X", "find X in code"
+  level: LEVEL.OBSERVE,
+  reversibility: REVERSIBILITY.FREE,
+  blastRadius: BLAST_RADIUS.NONE,
+  summary: 'Search for text in project source files (grep)',
+  estimateCost: () => ({ timeMs: 500, irreversibilityTokens: 0 }),
+  execute: async function(args) {
+    return runCapability(this, args, async () => {
+      const query = args.query || args.text || args._rawArgs || '';
+      if (!query) throw new Error('No search query');
+      const searchPath = args.path || '.';
+      const ext = args.ext || '';
+      const limit = parseInt(args.limit) || 50;
+      const url = `/api/files/search?query=${encodeURIComponent(query)}&path=${encodeURIComponent(searchPath)}&ext=${encodeURIComponent(ext)}&limit=${limit}`;
+      const res = await fetch(url);
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: res.statusText }));
+        throw new Error(err.error || `Search failed: ${res.status}`);
+      }
+      const data = await res.json();
+      safeNotify({ title: '🔍 Search complete', body: `"${query}" → ${data.count} matches` });
+      return data;
+    });
+  },
+};
+registerCapability(codeSearch);
+
+const codeWriteFile = {
+  id: 'code.writeFile',
+  verb: 'edit',
+  target: 'file',
+  level: LEVEL.REAL,      // L2 — touches user data, requires confirmation
+  reversibility: REVERSIBILITY.BOUNDED,
+  blastRadius: BLAST_RADIUS.FILE,
+  summary: 'Write or modify a source file in the project (requires approval)',
+  estimateCost: () => ({ timeMs: 300, irreversibilityTokens: 3 }),
+  execute: async function(args) {
+    return runCapability(this, args, async () => {
+      const path = args.path || args.name || '';
+      const content = args.content || args.text || '';
+      if (!path) throw new Error('No file path specified');
+      if (typeof content !== 'string') throw new Error('Content must be a string');
+
+      // Read current content for diff generation (if file exists)
+      let oldContent = null;
+      try {
+        const readRes = await fetch(`/api/files/read?path=${encodeURIComponent(path)}&limit=10000`);
+        if (readRes.ok) {
+          const readData = await readRes.json();
+          oldContent = readData.content;
+        }
+      } catch { /* file doesn't exist yet — that's fine */ }
+
+      const res = await fetch('/api/files/write', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ path, content }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: res.statusText }));
+        throw new Error(err.error || `Write failed: ${res.status}`);
+      }
+      const data = await res.json();
+
+      // Generate a simple unified diff summary for the notification
+      const diffSummary = oldContent != null
+        ? `Updated ${data.path} (${data.bytes} bytes)`
+        : `Created ${data.path} (${data.bytes} bytes)`;
+      safeNotify({ title: '✏️ File written', body: diffSummary });
+      return { ...data, oldContent, isNew: oldContent == null };
+    });
+  },
+};
+registerCapability(codeWriteFile);
+
+// ═══════════════════════════════════════════════════════════════
 // PROVIDER BUNDLE EXPORT
 // ═══════════════════════════════════════════════════════════════
 
@@ -655,6 +801,10 @@ export const CORE_CAPABILITIES = [
   'files.createFolder',
   'files.createFile',
   'chat.sendAsAgent',
+  'code.readFile',
+  'code.listDir',
+  'code.search',
+  'code.writeFile',
 ];
 
 // Path-resolution sanity check — runs only on localhost, at import time.

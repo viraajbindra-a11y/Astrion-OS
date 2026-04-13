@@ -62,6 +62,10 @@ export function registerCapability(cap) {
   if (!cap.id || !cap.execute) {
     throw new Error('Capability must have id + execute');
   }
+  // Warn on duplicate registration (audit bug #7 — prevents silent override)
+  if (registry.has(cap.id)) {
+    console.warn(`[capability-api] overwriting existing capability: ${cap.id}`);
+  }
   // Fill in defaults
   cap.level = cap.level ?? LEVEL.REAL;
   cap.reversibility = cap.reversibility ?? REVERSIBILITY.BOUNDED;

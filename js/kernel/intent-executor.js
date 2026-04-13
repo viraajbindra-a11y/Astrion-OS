@@ -48,6 +48,22 @@ function recordBudgetUsed(tokens) {
   localStorage.setItem(DAILY_BUDGET_KEY, JSON.stringify(stored));
 }
 
+/**
+ * Atomically check + reserve budget. Returns { ok, remaining } or { ok: false }.
+ * Prevents concurrent executePlan calls from both passing the budget check
+ * before either records usage (the race condition from the audit).
+ */
+function reserveBudget(tokens) {
+  const today = getTodayKey();
+  const stored = JSON.parse(localStorage.getItem(DAILY_BUDGET_KEY) || '{}');
+  const used = (stored.day === today) ? (stored.used || 0) : 0;
+  const remaining = DAILY_TOKEN_LIMIT - used;
+  if (tokens > remaining) return { ok: false, remaining };
+  // Reserve immediately (atomic read-modify-write via localStorage)
+  localStorage.setItem(DAILY_BUDGET_KEY, JSON.stringify({ day: today, used: used + tokens }));
+  return { ok: true, remaining: remaining - tokens };
+}
+
 export function getRemainingBudget() {
   return Math.max(0, DAILY_TOKEN_LIMIT - getBudgetUsed());
 }
@@ -277,9 +293,11 @@ export async function executePlan(plan, opts = {}) {
     resolved.push({ cap, step });
   }
 
-  const remaining = getRemainingBudget();
-  if (totalTokens > remaining) {
-    const error = `plan exceeds daily budget (${totalTokens} > ${remaining} tokens)`;
+  // Atomic budget reservation — prevents concurrent plans from both passing
+  // the check before either records usage (audit bug #3)
+  const budgetCheck = reserveBudget(totalTokens);
+  if (!budgetCheck.ok) {
+    const error = `plan exceeds daily budget (${totalTokens} > ${budgetCheck.remaining} tokens)`;
     eventBus.emit('plan:failed', { planId, error, atStep: -1 });
     return { ok: false, planId, bindings: {}, results: [], error };
   }
@@ -349,7 +367,7 @@ export async function executePlan(plan, opts = {}) {
       bindings[step.binds] = pickBindValue(result.output);
     }
     results.push({ index: i, cap: cap.id, output: result.output, provenance: result.provenance });
-    recordBudgetUsed(cap.estimateCost(resolvedArgs).irreversibilityTokens || 0);
+    // Budget already reserved atomically upfront (reserveBudget) — no per-step recording needed
     eventBus.emit('plan:step:done', { planId, index: i, step, output: result.output });
   }
 
