@@ -10,18 +10,30 @@ body { background:#1a1a22; color:#e0e0e0; font-family:-apple-system,'Inter',syst
 .logo { text-align:center; margin:40px 0 24px; }
 .logo span { font-size:28px; font-weight:300; letter-spacing:2px; }
 .logo span b { color:#007aff; font-weight:600; }
-.search-box { max-width:600px; margin:0 auto 32px; display:flex; gap:8px; }
+.search-box { max-width:640px; margin:0 auto 32px; display:flex; gap:8px; }
 .search-box input { flex:1; padding:12px 18px; border-radius:24px; border:1px solid rgba(255,255,255,0.12); background:rgba(255,255,255,0.06); color:white; font-size:15px; outline:none; }
 .search-box input:focus { border-color:#007aff; }
 .search-box button { padding:12px 24px; border-radius:24px; border:none; background:#007aff; color:white; font-size:14px; cursor:pointer; font-weight:500; }
-.results { max-width:600px; margin:0 auto; }
-.result { padding:16px 0; border-bottom:1px solid rgba(255,255,255,0.06); }
-.result-url { font-size:12px; color:#007aff; margin-bottom:4px; }
-.result-title { font-size:16px; font-weight:500; color:white; margin-bottom:4px; cursor:pointer; }
+.results { max-width:640px; margin:0 auto; }
+.section-label { font-size:11px; color:rgba(255,255,255,0.35); text-transform:uppercase; letter-spacing:1px; margin:20px 0 8px; padding-left:2px; }
+.result { padding:14px 16px; border-radius:12px; margin-bottom:6px; background:rgba(255,255,255,0.03); transition:background 0.15s; }
+.result:hover { background:rgba(255,255,255,0.06); }
+.result-url { font-size:11px; color:#007aff; margin-bottom:4px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.result-title { font-size:15px; font-weight:500; color:white; margin-bottom:4px; cursor:pointer; }
 .result-title:hover { text-decoration:underline; }
-.result-desc { font-size:13px; color:rgba(255,255,255,0.5); line-height:1.5; }
+.result-desc { font-size:13px; color:rgba(255,255,255,0.5); line-height:1.6; }
 .loading { text-align:center; padding:40px; color:rgba(255,255,255,0.4); }
-.powered { text-align:center; margin-top:24px; font-size:11px; color:rgba(255,255,255,0.25); }
+.instant-answer { background:rgba(0,122,255,0.08); border:1px solid rgba(0,122,255,0.15); border-radius:14px; padding:18px 20px; margin-bottom:16px; }
+.instant-answer .ia-title { font-size:13px; color:#007aff; font-weight:600; margin-bottom:6px; }
+.instant-answer .ia-text { font-size:14px; color:rgba(255,255,255,0.85); line-height:1.6; }
+.instant-answer .ia-source { font-size:11px; color:rgba(255,255,255,0.3); margin-top:8px; }
+.instant-answer .ia-source a { color:#007aff; text-decoration:none; }
+.engine-links { display:flex; flex-wrap:wrap; gap:8px; margin-top:20px; padding-top:16px; border-top:1px solid rgba(255,255,255,0.06); }
+.engine-link { padding:8px 16px; background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.08); border-radius:20px; color:#e0e0e0; text-decoration:none; font-size:12px; display:flex; align-items:center; gap:6px; transition:background 0.15s; }
+.engine-link:hover { background:rgba(255,255,255,0.1); }
+.powered { text-align:center; margin-top:24px; font-size:11px; color:rgba(255,255,255,0.2); }
+.wiki-thumb { width:120px; height:90px; border-radius:8px; object-fit:cover; flex-shrink:0; }
+.result-with-img { display:flex; gap:14px; }
 </style>
 </head>
 <body>
@@ -31,7 +43,7 @@ body { background:#1a1a22; color:#e0e0e0; font-family:-apple-system,'Inter',syst
   <button id="go">Search</button>
 </div>
 <div class="results" id="results"></div>
-<div class="powered">Search results via DuckDuckGo Instant Answer API</div>
+<div class="powered">Wikipedia + DuckDuckGo Instant Answers</div>
 
 <script>
 const params = new URLSearchParams(window.location.search);
@@ -47,64 +59,157 @@ input.onkeydown = (e) => { if (e.key === 'Enter') doSearch(input.value); };
 async function doSearch(query) {
   if (!query.trim()) return;
   results.innerHTML = '<div class="loading">Searching...</div>';
+  document.title = `${query} — Astrion Search`;
 
-  try {
-    // Use DuckDuckGo Instant Answer API (no iframe needed — just JSON)
-    const res = await fetch(`https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`);
-    const data = await res.json();
+  // Fire all searches in parallel
+  const [ddg, wiki] = await Promise.allSettled([
+    fetchDDG(query),
+    fetchWikipedia(query),
+  ]);
 
-    let html = '';
+  let html = '';
 
-    // Abstract (main answer)
-    if (data.AbstractText) {
-      html += `<div class="result">
-        <div class="result-url">${data.AbstractSource || 'Source'}</div>
-        <div class="result-title" onclick="window.open('${data.AbstractURL}','_blank')">${data.Heading || query}</div>
-        <div class="result-desc">${data.AbstractText}</div>
-      </div>`;
-    }
+  // ─── Instant Answer (DDG or Wikipedia) ───
+  const ddgData = ddg.status === 'fulfilled' ? ddg.value : null;
+  const wikiData = wiki.status === 'fulfilled' ? wiki.value : null;
 
-    // Related topics
-    if (data.RelatedTopics) {
-      data.RelatedTopics.slice(0, 8).forEach(topic => {
-        if (topic.Text && topic.FirstURL) {
-          const title = topic.Text.split(' - ')[0] || topic.Text.slice(0, 60);
-          html += `<div class="result">
-            <div class="result-url">${topic.FirstURL.replace('https://','').split('/')[0]}</div>
-            <div class="result-title" onclick="window.open('${topic.FirstURL}','_blank')">${title}</div>
-            <div class="result-desc">${topic.Text.slice(0, 200)}</div>
-          </div>`;
-        }
-      });
-    }
+  // Best instant answer: DDG Answer > DDG Abstract > Wikipedia extract
+  if (ddgData?.Answer) {
+    html += `<div class="instant-answer">
+      <div class="ia-title">Instant Answer</div>
+      <div class="ia-text" style="font-size:22px;font-weight:300;">${esc(ddgData.Answer)}</div>
+    </div>`;
+  }
 
-    // Instant answer
-    if (data.Answer) {
-      html = `<div class="result">
-        <div class="result-title">${query}</div>
-        <div class="result-desc" style="font-size:20px;color:white;font-weight:300;">${data.Answer}</div>
-      </div>` + html;
-    }
-
-    // Always show web search links at the bottom
-    const engines = [
-      { name: 'Google', url: `https://www.google.com/search?q=${encodeURIComponent(query)}`, icon: '\uD83D\uDD0D' },
-      { name: 'Wikipedia', url: `https://en.wikipedia.org/wiki/Special:Search?search=${encodeURIComponent(query)}`, icon: '\uD83D\uDCDA' },
-      { name: 'YouTube', url: `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`, icon: '\u25B6\uFE0F' },
-      { name: 'Reddit', url: `https://www.reddit.com/search/?q=${encodeURIComponent(query)}`, icon: '\uD83D\uDCAC' },
-      { name: 'GitHub', url: `https://github.com/search?q=${encodeURIComponent(query)}`, icon: '\uD83D\uDC31' },
-    ];
-    html += `<div style="margin-top:16px;padding-top:16px;border-top:1px solid rgba(255,255,255,0.08);">
-      <div style="font-size:11px;color:rgba(255,255,255,0.4);margin-bottom:10px;">Search on:</div>
-      <div style="display:flex;flex-wrap:wrap;gap:8px;">
-        ${engines.map(e => `<a href="${e.url}" target="_blank" style="padding:8px 16px;background:rgba(255,255,255,0.06);border-radius:20px;color:#e0e0e0;text-decoration:none;font-size:12px;display:flex;align-items:center;gap:6px;">${e.icon} ${e.name}</a>`).join('')}
+  // Wikipedia card (if we got a good result)
+  if (wikiData && wikiData.extract && wikiData.extract.length > 50) {
+    const thumb = wikiData.thumbnail ? `<img class="wiki-thumb" src="${wikiData.thumbnail}" alt="">` : '';
+    html += `<div class="instant-answer">
+      <div class="ia-title">Wikipedia</div>
+      <div class="result-with-img">
+        ${thumb}
+        <div>
+          <div class="ia-text">${esc(wikiData.extract.slice(0, 400))}${wikiData.extract.length > 400 ? '...' : ''}</div>
+          <div class="ia-source"><a href="https://en.wikipedia.org/wiki/${encodeURIComponent(wikiData.title)}" target="_blank">Read more on Wikipedia</a></div>
+        </div>
       </div>
     </div>`;
-
-    results.innerHTML = html;
-  } catch (err) {
-    results.innerHTML = `<div class="loading">Search failed. <a href="https://www.google.com/search?q=${encodeURIComponent(query)}" target="_blank" style="color:#007aff;">Try Google</a></div>`;
+  } else if (ddgData?.AbstractText) {
+    // DDG abstract as fallback
+    html += `<div class="instant-answer">
+      <div class="ia-title">${esc(ddgData.Heading || query)}</div>
+      <div class="ia-text">${esc(ddgData.AbstractText.slice(0, 400))}</div>
+      <div class="ia-source"><a href="${ddgData.AbstractURL || '#'}" target="_blank">${esc(ddgData.AbstractSource || 'Source')}</a></div>
+    </div>`;
   }
+
+  // ─── DDG Related Topics ───
+  if (ddgData?.RelatedTopics?.length > 0) {
+    const topics = ddgData.RelatedTopics.filter(t => t.Text && t.FirstURL).slice(0, 6);
+    if (topics.length > 0) {
+      html += `<div class="section-label">Related</div>`;
+      topics.forEach(topic => {
+        const title = topic.Text.split(' - ')[0] || topic.Text.slice(0, 80);
+        const desc = topic.Text.length > 80 ? topic.Text.slice(0, 200) : topic.Text;
+        const domain = topic.FirstURL.replace('https://','').split('/')[0];
+        html += `<div class="result">
+          <div class="result-url">${esc(domain)}</div>
+          <div class="result-title" onclick="window.open('${topic.FirstURL}','_blank')">${esc(title)}</div>
+          <div class="result-desc">${esc(desc)}</div>
+        </div>`;
+      });
+    }
+  }
+
+  // ─── Wikipedia "See Also" (if no DDG results) ───
+  if (wikiData?.links?.length > 0 && (!ddgData?.RelatedTopics?.length)) {
+    html += `<div class="section-label">Related Pages</div>`;
+    wikiData.links.slice(0, 5).forEach(link => {
+      html += `<div class="result">
+        <div class="result-url">en.wikipedia.org</div>
+        <div class="result-title" onclick="window.open('https://en.wikipedia.org/wiki/${encodeURIComponent(link)}','_blank')">${esc(link)}</div>
+      </div>`;
+    });
+  }
+
+  // ─── Always show external search engine links ───
+  const engines = [
+    { name: 'Google', url: `https://www.google.com/search?q=${encodeURIComponent(query)}`, icon: '🔍' },
+    { name: 'DuckDuckGo', url: `https://duckduckgo.com/?q=${encodeURIComponent(query)}`, icon: '🦆' },
+    { name: 'Wikipedia', url: `https://en.wikipedia.org/wiki/Special:Search?search=${encodeURIComponent(query)}`, icon: '📚' },
+    { name: 'YouTube', url: `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`, icon: '▶️' },
+    { name: 'Reddit', url: `https://www.reddit.com/search/?q=${encodeURIComponent(query)}`, icon: '💬' },
+    { name: 'GitHub', url: `https://github.com/search?q=${encodeURIComponent(query)}`, icon: '🐱' },
+    { name: 'Stack Overflow', url: `https://stackoverflow.com/search?q=${encodeURIComponent(query)}`, icon: '📋' },
+  ];
+  html += `<div class="section-label">Open in</div>
+    <div class="engine-links">
+      ${engines.map(e => `<a class="engine-link" href="${e.url}" target="_blank">${e.icon} ${e.name}</a>`).join('')}
+    </div>`;
+
+  if (!html || html.trim() === '') {
+    html = `<div class="loading">No results found. Try one of the search engines below.</div>` + html;
+  }
+
+  results.innerHTML = html;
+}
+
+// ─── DuckDuckGo Instant Answer API ───
+async function fetchDDG(query) {
+  const res = await fetch(`https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`);
+  if (!res.ok) return null;
+  return res.json();
+}
+
+// ─── Wikipedia REST API ───
+async function fetchWikipedia(query) {
+  try {
+    const res = await fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(query)}`);
+    if (!res.ok) {
+      // Try search endpoint if direct lookup fails
+      const searchRes = await fetch(`https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=${encodeURIComponent(query)}&format=json&origin=*&srlimit=1`);
+      if (!searchRes.ok) return null;
+      const searchData = await searchRes.json();
+      const firstHit = searchData?.query?.search?.[0];
+      if (!firstHit) return null;
+      // Fetch the summary for the first search result
+      const summaryRes = await fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(firstHit.title)}`);
+      if (!summaryRes.ok) return null;
+      const summary = await summaryRes.json();
+      return {
+        title: summary.title,
+        extract: summary.extract || '',
+        thumbnail: summary.thumbnail?.source || null,
+        links: [],
+      };
+    }
+    const data = await res.json();
+    // Also fetch links
+    let links = [];
+    try {
+      const linksRes = await fetch(`https://en.wikipedia.org/w/api.php?action=query&titles=${encodeURIComponent(data.title)}&prop=links&pllimit=10&format=json&origin=*`);
+      if (linksRes.ok) {
+        const linksData = await linksRes.json();
+        const pages = linksData?.query?.pages;
+        if (pages) {
+          const page = Object.values(pages)[0];
+          links = (page?.links || []).map(l => l.title).filter(t => !t.includes(':'));
+        }
+      }
+    } catch {}
+    return {
+      title: data.title,
+      extract: data.extract || '',
+      thumbnail: data.thumbnail?.source || null,
+      links,
+    };
+  } catch { return null; }
+}
+
+function esc(s) {
+  const d = document.createElement('div');
+  d.textContent = s || '';
+  return d.innerHTML;
 }
 </script>
 </body>

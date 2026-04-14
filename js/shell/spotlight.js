@@ -899,7 +899,7 @@ export function initSpotlight() {
       close();
     } else if (action === 'web-search') {
       const q = item.dataset.query;
-      if (q) processManager.launch('browser', { initialUrl: `https://www.google.com/search?q=${encodeURIComponent(q)}` });
+      if (q) processManager.launch('browser', { initialUrl: `search.html?q=${encodeURIComponent(q)}` });
       close();
     } else if (action === 'copy') {
       const text = item.dataset.copy;
