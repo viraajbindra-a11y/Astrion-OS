@@ -96,6 +96,56 @@ function tryUnitConversion(query) {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// CURRENCY CONVERSION (approximate, offline rates)
+// ═══════════════════════════════════════════════════════════════
+// These are approximate rates for offline use. Not financial advice!
+// Rates relative to 1 USD (updated ~Apr 2026 approximations)
+
+const CURRENCY_RATES = {
+  usd: 1, dollar: 1, dollars: 1, '$': 1,
+  eur: 0.92, euro: 0.92, euros: 0.92,
+  gbp: 0.79, pound: 0.79, pounds: 0.79, '£': 0.79,
+  jpy: 151, yen: 151, '¥': 151,
+  cad: 1.36, cny: 7.24, yuan: 7.24,
+  aud: 1.53, inr: 83.5, rupee: 83.5, rupees: 83.5,
+  krw: 1340, won: 1340,
+  brl: 5.0, real: 5.0,
+  mxn: 17.1, peso: 17.1, pesos: 17.1,
+  chf: 0.88, franc: 0.88, francs: 0.88,
+  sek: 10.5, krona: 10.5,
+  nok: 10.7, sgd: 1.34,
+  hkd: 7.82, nzd: 1.64,
+  btc: 0.000015, bitcoin: 0.000015,
+};
+
+// "50 usd to eur" or "$100 in yen" or "100 dollars to euros"
+const CURRENCY_RE = /^([\d,.]+)\s*(\$|£|¥|[a-z]+)\s+(?:in|to|as)\s+(\$|£|¥|[a-z]+)$/i;
+
+function tryCurrencyConversion(query) {
+  const m = query.match(CURRENCY_RE);
+  if (!m) return null;
+  const val = parseFloat(m[1].replace(/,/g, ''));
+  const fromKey = m[2].toLowerCase();
+  const toKey = m[3].toLowerCase();
+  if (isNaN(val)) return null;
+
+  const fromRate = CURRENCY_RATES[fromKey];
+  const toRate = CURRENCY_RATES[toKey];
+  if (!fromRate || !toRate) return null;
+
+  // Convert: amount in fromCurrency → USD → toCurrency
+  const usd = val / fromRate;
+  const result = usd * toRate;
+  const display = result < 1 ? result.toPrecision(4) : result < 100 ? result.toFixed(2) : Math.round(result).toLocaleString();
+
+  return {
+    icon: '💱',
+    title: `${display} ${toKey}`,
+    subtitle: `${val.toLocaleString()} ${fromKey} ≈ ${display} ${toKey} (approximate rate)`,
+  };
+}
+
+// ═══════════════════════════════════════════════════════════════
 // TIME ZONES
 // ═══════════════════════════════════════════════════════════════
 
@@ -409,6 +459,7 @@ function getDayOfYear(d) {
 export function getSmartAnswer(query) {
   if (!query || query.length < 2) return null;
   return tryUnitConversion(query)
+      || tryCurrencyConversion(query)
       || tryTimeZone(query)
       || tryColorPreview(query)
       || tryPercentage(query)
