@@ -187,8 +187,8 @@ export function initEmojiPicker() {
         toggle();
       }
     }
-    // Also Ctrl+;
-    if (e.ctrlKey && e.key === ';') {
+    // Also Ctrl+; or Ctrl+. (Windows/Linux emoji shortcut)
+    if (e.ctrlKey && (e.key === ';' || e.key === '.')) {
       e.preventDefault();
       toggle();
     }
