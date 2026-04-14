@@ -369,14 +369,16 @@ function initTaskManager(container, instanceId) {
   // Auto-refresh every 2 seconds
   refreshTimer = setInterval(loadTab, 2000);
 
-  // Cleanup observer
+  // Cleanup observer — use isConnected (standard pattern in Astrion)
   const observer = new MutationObserver(() => {
-    if (!document.contains(container)) {
+    if (!container.isConnected) {
       clearInterval(refreshTimer);
       observer.disconnect();
     }
   });
-  observer.observe(document.body, { childList: true, subtree: true });
+  if (container.parentElement) {
+    observer.observe(container.parentElement, { childList: true, subtree: true });
+  }
 }
 
 function formatBytes(bytes) {

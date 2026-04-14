@@ -18,6 +18,7 @@ import { recordSample } from '../kernel/calibration-tracker.js';
 import { graphStore } from '../kernel/graph-store.js';
 import { query as graphQuery } from '../kernel/graph-query.js';
 import { getRecentApps } from './recent-apps.js';
+import { getSmartAnswer } from '../lib/smart-answers.js';
 
 let isOpen = false;
 // Agent Core Sprint: the id of the plan currently streaming in the panel,
@@ -512,6 +513,22 @@ export function initSpotlight() {
       } catch {}
     }
 
+    // Smart instant answers — unit conversion, time zones, colors, etc.
+    const smart = getSmartAnswer(query);
+    if (smart) {
+      const iconHtml = smart.iconIsHtml ? smart.icon : `<div class="spotlight-result-icon" style="font-size:20px;">${smart.icon}</div>`;
+      html += `<div class="spotlight-result-group">
+        <div class="spotlight-result-label">Instant Answer</div>
+        <div class="spotlight-result-item" data-action="${smart.copyValue ? 'copy' : 'none'}" ${smart.copyValue ? `data-copy="${escapeHtml(smart.copyValue)}"` : ''} style="cursor:${smart.copyValue ? 'pointer' : 'default'};">
+          ${iconHtml}
+          <div class="spotlight-result-text">
+            <div class="spotlight-result-title" style="font-size:20px;font-weight:400;">${smart.title}</div>
+            <div class="spotlight-result-subtitle">${smart.subtitle}${smart.copyValue ? ' · Click to copy' : ''}</div>
+          </div>
+        </div>
+      </div>`;
+    }
+
     // Search apps
     const apps = processManager.getAllApps();
     const matchedApps = apps.filter(a =>
@@ -868,6 +885,14 @@ export function initSpotlight() {
         processManager.launch('reminders', { openNodeId: nodeId });
       }
       close();
+    } else if (action === 'copy') {
+      const text = item.dataset.copy;
+      if (text) {
+        navigator.clipboard.writeText(text).catch(() => {});
+        // Flash feedback
+        item.style.background = 'rgba(0,122,255,0.2)';
+        setTimeout(() => { item.style.background = ''; }, 300);
+      }
     } else if (action === 'ask-ai') {
       handleSubmit(query);
     }

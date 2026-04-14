@@ -123,11 +123,12 @@ function createWidget(id, opts) {
 
   // Initial render + updates
   opts.render(el);
+  let updateTimer = null;
   if (opts.updateInterval) {
-    setInterval(() => opts.render(el), opts.updateInterval);
+    updateTimer = setInterval(() => opts.render(el), opts.updateInterval);
   }
 
-  widgets.set(id, { el, opts });
+  widgets.set(id, { el, opts, updateTimer });
 }
 
 function getSavedPos(id) {

@@ -278,7 +278,7 @@ import { initVolumeHud } from './shell/volume-hud.js';
   loginScreen.style.transition = 'opacity 0.6s ease';
   requestAnimationFrame(() => { loginScreen.style.opacity = '1'; });
   updateLoginClock();
-  setInterval(updateLoginClock, 1000);
+  const loginClockTimer = setInterval(updateLoginClock, 1000);
 
   // Show saved username
   const savedName = localStorage.getItem('nova-username');
@@ -355,6 +355,7 @@ import { initVolumeHud } from './shell/volume-hud.js';
   loginScreen.style.transform = 'scale(1.05)';
   await sleep(500);
   loginScreen.classList.add('hidden');
+  clearInterval(loginClockTimer);
 
   // Show desktop
   desktop.classList.remove('hidden');
