@@ -169,10 +169,12 @@ async function initNotes(container, instanceId) {
         <button class="notes-toolbar-btn" data-action="italic" title="Italic"><i>I</i></button>
         <button class="notes-toolbar-btn" data-action="list" title="List">\u2022</button>
         <div class="notes-toolbar-separator"></div>
+        <button class="notes-toolbar-btn" data-action="preview" title="Markdown Preview">\uD83D\uDC41</button>
         <button class="notes-toolbar-btn" data-action="delete" title="Delete Note">\uD83D\uDDD1</button>
         <button class="notes-toolbar-btn notes-toolbar-ai" data-action="ai" title="AI Assist">\u2728 AI</button>
       </div>
       <textarea class="notes-textarea" placeholder="Start writing...">${content}</textarea>
+      <div class="notes-preview" style="display:none; flex:1; padding:16px; overflow-y:auto; font-size:14px; line-height:1.7; color:var(--text-primary);"></div>
       <div class="notes-statusbar">
         <span>${content.length} characters</span>
         <span>Last edited: ${new Date(dateStr).toLocaleString()}</span>
@@ -212,7 +214,20 @@ async function initNotes(container, instanceId) {
       const action = e.target.closest('.notes-toolbar-btn')?.dataset.action;
       if (!action) return;
 
-      if (action === 'bold') {
+      if (action === 'preview') {
+        const previewEl = editorEl.querySelector('.notes-preview');
+        const isPreview = previewEl.style.display !== 'none';
+        if (isPreview) {
+          previewEl.style.display = 'none';
+          textarea.style.display = '';
+        } else {
+          // Simple markdown → HTML (no library needed)
+          const md = textarea.value;
+          previewEl.innerHTML = simpleMarkdown(md);
+          previewEl.style.display = '';
+          textarea.style.display = 'none';
+        }
+      } else if (action === 'bold') {
         wrapSelection(textarea, '**', '**');
       } else if (action === 'italic') {
         wrapSelection(textarea, '_', '_');
@@ -301,4 +316,37 @@ function escapeHtml(text) {
   const div = document.createElement('div');
   div.textContent = text;
   return div.innerHTML;
+}
+
+/**
+ * Simple markdown → HTML renderer. No external library.
+ * Supports: headers, bold, italic, code, links, lists, blockquotes, hr.
+ */
+function simpleMarkdown(md) {
+  let html = escapeHtml(md);
+  // Headers
+  html = html.replace(/^### (.+)$/gm, '<h3 style="margin:12px 0 6px;font-size:16px;">$1</h3>');
+  html = html.replace(/^## (.+)$/gm, '<h2 style="margin:14px 0 8px;font-size:18px;">$1</h2>');
+  html = html.replace(/^# (.+)$/gm, '<h1 style="margin:16px 0 10px;font-size:22px;">$1</h1>');
+  // Bold + italic
+  html = html.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/\*(.+?)\*/g, '<em>$1</em>');
+  html = html.replace(/__(.+?)__/g, '<strong>$1</strong>');
+  html = html.replace(/_(.+?)_/g, '<em>$1</em>');
+  // Code blocks
+  html = html.replace(/```([\s\S]*?)```/g, '<pre style="background:rgba(255,255,255,0.06);padding:12px;border-radius:8px;font-family:monospace;font-size:12px;overflow-x:auto;">$1</pre>');
+  // Inline code
+  html = html.replace(/`([^`]+)`/g, '<code style="background:rgba(255,255,255,0.08);padding:2px 6px;border-radius:4px;font-family:monospace;font-size:12px;">$1</code>');
+  // Links
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" style="color:var(--accent);">$1</a>');
+  // Blockquotes
+  html = html.replace(/^&gt; (.+)$/gm, '<blockquote style="border-left:3px solid var(--accent);padding-left:12px;color:rgba(255,255,255,0.6);margin:8px 0;">$1</blockquote>');
+  // Horizontal rule
+  html = html.replace(/^---$/gm, '<hr style="border:none;border-top:1px solid rgba(255,255,255,0.1);margin:16px 0;">');
+  // Unordered lists
+  html = html.replace(/^[\-\*] (.+)$/gm, '<li style="margin-left:20px;">$1</li>');
+  // Line breaks
+  html = html.replace(/\n/g, '<br>');
+  return html;
 }
