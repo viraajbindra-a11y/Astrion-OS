@@ -88,6 +88,11 @@ export function initMenubar() {
       chess: 'Chess', snake: 'Snake', '2048': '2048',
       budget: 'Budget', quotes: 'Quotes',
       'typing-test': 'Typing Test', todo: 'Todo',
+      youtube: 'YouTube', 'pixel-art': 'Pixel Art',
+      tetris: 'Tetris', minesweeper: 'Minesweeper',
+      'matrix-rain': 'Matrix Rain', 'neon-void': 'Neon Void',
+      'beat-studio': 'Beat Studio', 'live-chat': 'Live Chat',
+      'code-runner': 'Code Runner', 'emoji-search': 'Emoji Search',
     };
     document.getElementById('menubar-app-name').textContent = appNames[app] || title || 'Finder';
   });
