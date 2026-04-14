@@ -309,6 +309,25 @@ async function initTextEditor(container, instanceId, options = {}) {
       textarea.dispatchEvent(new Event('input'));
     }
 
+    // Cmd+G / Ctrl+G to go to line
+    if ((e.metaKey || e.ctrlKey) && e.key === 'g') {
+      e.preventDefault();
+      const lineNum = prompt('Go to line:');
+      if (lineNum) {
+        const n = parseInt(lineNum);
+        if (n > 0) {
+          const lines = textarea.value.split('\n');
+          let pos = 0;
+          for (let i = 0; i < Math.min(n - 1, lines.length); i++) pos += lines[i].length + 1;
+          textarea.setSelectionRange(pos, pos);
+          textarea.focus();
+          // Scroll the line into view
+          const lineH = parseInt(getComputedStyle(textarea).lineHeight) || 18;
+          textarea.scrollTop = Math.max(0, (n - 5) * lineH);
+        }
+      }
+    }
+
     // Cmd+S / Ctrl+S to save
     if ((e.metaKey || e.ctrlKey) && e.key === 's') {
       e.preventDefault();
