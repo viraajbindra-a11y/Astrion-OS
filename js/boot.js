@@ -105,6 +105,7 @@ import { registerLiveChat } from './apps/live-chat.js';
 import { registerYouTube } from './apps/youtube.js';
 import { registerPixelArt } from './apps/pixel-art.js';
 import { registerAnimate } from './apps/animate.js';
+import { registerVideoEditor } from './apps/video-editor.js';
 import { registerTetris } from './apps/tetris.js';
 import { registerMinesweeper } from './apps/minesweeper.js';
 import { registerMatrixRain } from './apps/matrix-rain.js';
@@ -150,6 +151,7 @@ import { initVolumeHud } from './shell/volume-hud.js';
     registerYouTube(); registerPixelArt(); registerTetris();
     registerMinesweeper(); registerMatrixRain(); registerNeonVoid();
     registerAnimate();
+    registerVideoEditor();
 
     windowManager.init();
 
@@ -246,6 +248,7 @@ import { initVolumeHud } from './shell/volume-hud.js';
   registerMatrixRain();
   registerNeonVoid();
   registerAnimate();
+  registerVideoEditor();
   await animate(progressBar, 85, 200);
 
   // Init kernel
