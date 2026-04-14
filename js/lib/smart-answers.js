@@ -351,6 +351,18 @@ function tryFun(query) {
     return { icon: '🔑', title: uuid, subtitle: 'Click to copy', copyValue: uuid };
   }
 
+  // System info shortcuts
+  if (q === 'battery' || q === 'battery level') {
+    if (navigator.getBattery) {
+      // Return a promise-like result — the caller will handle async
+      return { icon: '🔋', title: 'Checking...', subtitle: 'Battery status', action: 'launch', appId: 'system-info' };
+    }
+    return { icon: '🔋', title: 'Battery', subtitle: 'Open System Info', action: 'launch', appId: 'system-info' };
+  }
+  if (q === 'memory' || q === 'ram' || q === 'cpu' || q === 'disk' || q === 'storage' || q === 'system info') {
+    return { icon: '💻', title: 'System Info', subtitle: 'Open System Info app', action: 'launch', appId: 'system-info' };
+  }
+
   // Random color
   if (q === 'random color' || q === 'random colour' || q === 'color' || q === 'generate color') {
     const hex = '#' + Math.floor(Math.random()*16777215).toString(16).padStart(6, '0');
