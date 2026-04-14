@@ -1,6 +1,7 @@
 // NOVA OS — Settings App
 
 import { processManager } from '../kernel/process-manager.js';
+import { windowManager } from '../kernel/window-manager.js';
 import { eventBus } from '../kernel/event-bus.js';
 import { getTodaySummary, getDailyCap, setDailyCap, resetBudget } from '../kernel/budget-manager.js';
 import { getAllAccuracy, getEscalatedCategories } from '../kernel/calibration-tracker.js';
@@ -776,6 +777,10 @@ function initSettings(container) {
   }
 
   function renderAbout() {
+    const appCount = processManager.getAllApps().length;
+    const uptime = formatUptime();
+    const storageUsed = estimateStorageUsed();
+
     main.innerHTML = `
       <div class="settings-about">
         <div class="settings-about-logo">
@@ -786,20 +791,58 @@ function initSettings(container) {
           </svg>
         </div>
         <div class="settings-about-name">Astrion OS</div>
-        <div class="settings-about-version">Version 0.1.0 (Early Prototype)</div>
+        <div class="settings-about-version">Version 0.2.0</div>
         <div class="settings-about-info">
-          An AI-native operating system built for the future.
-          <br><br>
-          AI deeply integrated into every app and workflow.
+          An AI-native operating system designed for the future.
           <br>
-          Cross-platform via web technology.
-          <br><br>
-          Built with love by the Astrion team.
-          <br><br>
-          \u00A9 ${new Date().getFullYear()} Astrion OS Project
+          Built with vanilla JS, no frameworks, 100% from scratch.
+        </div>
+        <div style="margin-top:20px; display:grid; grid-template-columns:1fr 1fr; gap:8px; max-width:360px;">
+          <div style="background:rgba(255,255,255,0.04); padding:12px; border-radius:10px; text-align:center;">
+            <div style="font-size:24px; font-weight:300; color:var(--accent);">${appCount}</div>
+            <div style="font-size:10px; color:rgba(255,255,255,0.4); margin-top:2px;">Apps</div>
+          </div>
+          <div style="background:rgba(255,255,255,0.04); padding:12px; border-radius:10px; text-align:center;">
+            <div style="font-size:24px; font-weight:300; color:var(--accent);">${uptime}</div>
+            <div style="font-size:10px; color:rgba(255,255,255,0.4); margin-top:2px;">Uptime</div>
+          </div>
+          <div style="background:rgba(255,255,255,0.04); padding:12px; border-radius:10px; text-align:center;">
+            <div style="font-size:24px; font-weight:300; color:var(--accent);">${storageUsed}</div>
+            <div style="font-size:10px; color:rgba(255,255,255,0.4); margin-top:2px;">Storage Used</div>
+          </div>
+          <div style="background:rgba(255,255,255,0.04); padding:12px; border-radius:10px; text-align:center;">
+            <div style="font-size:24px; font-weight:300; color:var(--accent);">${windowManager.windows.size}</div>
+            <div style="font-size:10px; color:rgba(255,255,255,0.4); margin-top:2px;">Open Windows</div>
+          </div>
+        </div>
+        <div style="margin-top:16px; font-size:11px; color:rgba(255,255,255,0.25); text-align:center;">
+          \u00A9 ${new Date().getFullYear()} Astrion OS &middot; Made by Viraaj
         </div>
       </div>
     `;
+  }
+
+  function formatUptime() {
+    const ms = performance.now();
+    const s = Math.floor(ms / 1000);
+    if (s < 60) return s + 's';
+    const m = Math.floor(s / 60);
+    if (m < 60) return m + 'm';
+    const h = Math.floor(m / 60);
+    return h + 'h ' + (m % 60) + 'm';
+  }
+
+  function estimateStorageUsed() {
+    try {
+      let total = 0;
+      for (let i = 0; i < localStorage.length; i++) {
+        const key = localStorage.key(i);
+        total += (key.length + (localStorage.getItem(key) || '').length) * 2; // UTF-16
+      }
+      if (total < 1024) return total + ' B';
+      if (total < 1024 * 1024) return (total / 1024).toFixed(1) + ' KB';
+      return (total / (1024 * 1024)).toFixed(1) + ' MB';
+    } catch { return '?'; }
   }
 
   renderSection();
