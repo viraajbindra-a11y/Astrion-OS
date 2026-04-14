@@ -24,6 +24,7 @@ function initCalculator(container) {
   let shouldReset = false;
   let lastOperator = null;
   let lastOperand = null;
+  const calcHistory = [];
 
   container.innerHTML = `
     <div class="calculator-app">
@@ -52,10 +53,15 @@ function initCalculator(container) {
         <button class="calc-btn" data-action="decimal">.</button>
         <button class="calc-btn operator equals" data-action="equals">=</button>
       </div>
+      <div id="calc-history" style="
+        max-height:80px; overflow-y:auto; padding:0 12px 8px;
+        font-size:11px; color:rgba(255,255,255,0.35);
+      "></div>
     </div>
   `;
 
   const resultEl = container.querySelector('#calc-result');
+  const historyEl = container.querySelector('#calc-history');
   const exprEl = container.querySelector('#calc-expr');
 
   container.querySelector('.calculator-buttons').addEventListener('click', (e) => {
@@ -113,8 +119,13 @@ function initCalculator(container) {
         if (lastOperator) {
           lastOperand = parseFloat(display);
           const result = calculate(parseFloat(expression), lastOperator, lastOperand);
-          exprEl.textContent = `${expression} ${lastOperator} ${display} =`;
+          const historyExpr = `${expression} ${lastOperator} ${display}`;
+          exprEl.textContent = `${historyExpr} =`;
           display = formatNumber(result);
+          // Track history
+          calcHistory.unshift({ expr: historyExpr, result: display });
+          if (calcHistory.length > 20) calcHistory.pop();
+          renderHistory();
           lastOperator = null;
           expression = '';
           shouldReset = true;
@@ -175,6 +186,16 @@ function initCalculator(container) {
       resultEl.textContent = display;
     }
   });
+
+  function renderHistory() {
+    if (!historyEl) return;
+    historyEl.innerHTML = calcHistory.map(h =>
+      `<div style="display:flex;justify-content:space-between;padding:2px 0;border-bottom:1px solid rgba(255,255,255,0.04);">
+        <span>${h.expr}</span>
+        <span style="color:rgba(255,255,255,0.6);font-weight:500;">= ${h.result}</span>
+      </div>`
+    ).join('');
+  }
 
   // Make focusable for keyboard input
   container.setAttribute('tabindex', '0');
