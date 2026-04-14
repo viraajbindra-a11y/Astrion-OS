@@ -1,6 +1,7 @@
 // NOVA OS — Dock
 
 import { processManager } from '../kernel/process-manager.js';
+import { windowManager } from '../kernel/window-manager.js';
 import { eventBus } from '../kernel/event-bus.js';
 
 // Core apps in dock — rest accessible via App Grid (F4) or Search (Cmd+Space)
@@ -51,6 +52,15 @@ export function initDock() {
     };
 
     item.addEventListener('click', launchApp);
+    // Middle-click to close all windows of this app
+    item.addEventListener('auxclick', (e) => {
+      if (e.button === 1) { // middle click
+        e.preventDefault();
+        for (const [id, state] of windowManager.windows) {
+          if (state.app === app.id) windowManager.close(id);
+        }
+      }
+    });
     item.addEventListener('keydown', (e) => {
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault();
