@@ -257,18 +257,50 @@ function initBrowser(container, instanceId, options = {}) {
       const old = viewport.querySelector('.browser-home, .browser-error, iframe');
       if (old) old.remove();
 
-      // Heavy JS-dependent sites break through proxy — use embedded YouTube
-      // player for YouTube, open other heavy sites with a notice
+      // ── Special site handling ──
+      // Some JS-heavy sites break through the proxy. Handle them smartly.
+
+      // YouTube: use official embed player
       const EMBED_YOUTUBE = /(?:youtube\.com\/watch\?v=|youtu\.be\/)([\w-]{11})/;
       const ytMatch = url.match(EMBED_YOUTUBE);
       if (ytMatch) {
-        // Embed YouTube via their official embed player (works in iframes)
         const iframe = document.createElement('iframe');
         iframe.style.cssText = 'width:100%;height:100%;border:none;';
         iframe.src = `https://www.youtube.com/embed/${ytMatch[1]}?autoplay=1&rel=0`;
         iframe.allow = 'autoplay; encrypted-media';
         iframe.allowFullscreen = true;
         viewport.appendChild(iframe);
+        loadingBar.style.width = '100%';
+        setTimeout(() => { loadingBar.style.width = '0%'; }, 500);
+        return;
+      }
+
+      // Google search: redirect to our search page
+      const googleSearchMatch = url.match(/google\.com\/search\?.*q=([^&]+)/);
+      if (googleSearchMatch) {
+        const query = decodeURIComponent(googleSearchMatch[1]);
+        navigate(`search.html?q=${encodeURIComponent(query)}`);
+        return;
+      }
+
+      // Heavy JS sites (Google, GitHub, Twitter, etc.): show in a mini browser
+      // with a prominent "Open in real browser" option
+      const HEAVY_SITES = ['google.com', 'github.com', 'twitter.com', 'x.com', 'facebook.com', 'instagram.com', 'linkedin.com', 'discord.com', 'notion.so', 'figma.com'];
+      const urlDomain = url.replace(/^https?:\/\//, '').split('/')[0].replace(/^www\./, '');
+      if (HEAVY_SITES.some(s => urlDomain === s || urlDomain.endsWith('.' + s))) {
+        // Show a nice interstitial with an embedded version + open in tab CTA
+        viewport.innerHTML = `
+          <div style="display:flex;flex-direction:column;height:100%;background:#1a1a22;">
+            <div style="padding:12px 16px;display:flex;align-items:center;gap:12px;background:rgba(255,200,0,0.08);border-bottom:1px solid rgba(255,200,0,0.15);">
+              <span style="font-size:16px;">⚡</span>
+              <div style="flex:1;font-size:12px;color:rgba(255,255,255,0.7);">
+                <strong>${urlDomain}</strong> works best in a full browser.
+                The proxy version may have limited functionality.
+              </div>
+              <a href="${url}" target="_blank" style="padding:6px 16px;background:var(--accent);color:white;border-radius:8px;text-decoration:none;font-size:12px;font-weight:500;white-space:nowrap;">Open in Tab ↗</a>
+            </div>
+            <iframe src="/api/proxy?url=${encodeURIComponent(url)}" style="flex:1;border:none;width:100%;background:white;"></iframe>
+          </div>`;
         loadingBar.style.width = '100%';
         setTimeout(() => { loadingBar.style.width = '0%'; }, 500);
         return;
