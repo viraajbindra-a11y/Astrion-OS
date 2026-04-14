@@ -180,7 +180,7 @@ async function initFinder(container, instanceId, startPath) {
       link.addEventListener('mouseleave', () => link.style.background = '');
       pathEl.appendChild(link);
     });
-    statusEl.textContent = `${files.length} item${files.length !== 1 ? 's' : ''}`;
+    updateStatusBar();
     backBtn.disabled = historyIndex <= 0;
     forwardBtn.disabled = historyIndex >= history.length - 1;
 
@@ -343,10 +343,27 @@ async function initFinder(container, instanceId, startPath) {
       const i = Number(el.dataset.index);
       if (selectedIndices.has(i)) el.classList.add('selected');
       else el.classList.remove('selected');
-      // Mark the cursor element so CSS can give it a distinct outline
       if (i === cursorIndex) el.classList.add('cursor');
       else el.classList.remove('cursor');
     });
+    updateStatusBar();
+  }
+
+  function updateStatusBar() {
+    const total = currentFiles.length;
+    const selected = selectedIndices.size;
+    if (selected > 0) {
+      // Sum sizes of selected files
+      let totalSize = 0;
+      for (const idx of selectedIndices) {
+        const f = currentFiles[idx];
+        if (f && f.size) totalSize += f.size;
+      }
+      const sizeStr = totalSize > 0 ? ` (${formatFileSize(totalSize)})` : '';
+      statusEl.textContent = `${selected} of ${total} selected${sizeStr}`;
+    } else {
+      statusEl.textContent = `${total} item${total !== 1 ? 's' : ''}`;
+    }
   }
 
   function refreshPreview(file) {
