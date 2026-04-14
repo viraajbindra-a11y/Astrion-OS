@@ -174,6 +174,7 @@ class WindowManager {
           <button class="win-btn minimize" data-action="minimize" title="Minimize" aria-label="Minimize window"></button>
           <button class="win-btn maximize" data-action="maximize" title="Maximize" aria-label="Maximize window"></button>
         </div>
+        <img class="window-title-icon" src="/assets/icons/${app}.svg" alt="" style="width:14px;height:14px;border-radius:3px;margin-right:4px;vertical-align:middle;" onerror="this.style.display='none'">
         <span class="window-title">${title}</span>
       </div>
       <div class="window-content" id="window-content-${id}"></div>
