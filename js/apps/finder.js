@@ -63,6 +63,13 @@ async function initFinder(container, instanceId, startPath) {
             <button class="finder-action-btn" id="finder-newfile-${instanceId}" title="New File" style="background:none;border:none;color:var(--text-secondary);font-size:14px;cursor:pointer;padding:4px 6px;border-radius:4px;">📄+</button>
             <button class="finder-action-btn" id="finder-newfolder-${instanceId}" title="New Folder" style="background:none;border:none;color:var(--text-secondary);font-size:14px;cursor:pointer;padding:4px 6px;border-radius:4px;">📁+</button>
             <div style="width:1px;height:16px;background:rgba(255,255,255,0.1);margin:0 4px;"></div>
+            <select id="finder-sort-${instanceId}" style="background:rgba(255,255,255,0.06);border:1px solid rgba(255,255,255,0.1);color:var(--text-secondary);font-size:11px;border-radius:4px;padding:2px 4px;font-family:var(--font);outline:none;cursor:pointer;" title="Sort by">
+              <option value="name">Name</option>
+              <option value="date">Date</option>
+              <option value="size">Size</option>
+              <option value="type">Type</option>
+            </select>
+            <div style="width:1px;height:16px;background:rgba(255,255,255,0.1);margin:0 4px;"></div>
             <button class="finder-view-btn" id="finder-grid-${instanceId}" aria-label="Grid view" title="Grid view" style="opacity:1">&#9638;</button>
             <button class="finder-view-btn" id="finder-list-${instanceId}" aria-label="List view" title="List view" style="opacity:0.4">&#9776;</button>
             <input type="text" class="finder-search" id="finder-search-${instanceId}" placeholder="Search..." aria-label="Search files">
@@ -100,6 +107,14 @@ async function initFinder(container, instanceId, startPath) {
     filesContainer.classList.add('list-view');
     gridBtn.style.opacity = '0.4';
     listBtn.style.opacity = '1';
+  });
+
+  // Sort dropdown
+  let sortBy = 'name';
+  const sortSelect = container.querySelector(`#finder-sort-${instanceId}`);
+  sortSelect.addEventListener('change', () => {
+    sortBy = sortSelect.value;
+    loadFiles();
   });
 
   // New File / New Folder buttons
@@ -169,7 +184,21 @@ async function initFinder(container, instanceId, startPath) {
   }
 
   async function loadFiles() {
-    const files = await fileSystem.readDir(currentPath);
+    let files = await fileSystem.readDir(currentPath);
+    // Sort: folders first, then by selected criteria
+    files = files.sort((a, b) => {
+      // Folders always first
+      if (a.type === 'folder' && b.type !== 'folder') return -1;
+      if (a.type !== 'folder' && b.type === 'folder') return 1;
+      if (sortBy === 'date') return (b.modified || 0) - (a.modified || 0);
+      if (sortBy === 'size') return (b.size || 0) - (a.size || 0);
+      if (sortBy === 'type') {
+        const extA = (fileSystem.getExtension?.(a.path) || '').toLowerCase();
+        const extB = (fileSystem.getExtension?.(b.path) || '').toLowerCase();
+        return extA.localeCompare(extB) || fileSystem.getFileName(a.path).localeCompare(fileSystem.getFileName(b.path));
+      }
+      return fileSystem.getFileName(a.path).localeCompare(fileSystem.getFileName(b.path));
+    });
     currentFiles = files;
     selectedIndices = new Set();
     cursorIndex = -1;
