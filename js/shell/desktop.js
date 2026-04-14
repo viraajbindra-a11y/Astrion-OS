@@ -69,12 +69,16 @@ function setupContextMenu() {
     e.preventDefault();
 
     menuItems.innerHTML = `
-      <div class="context-menu-item" data-action="new-folder">New Folder</div>
-      <div class="context-menu-item" data-action="new-file">New File</div>
+      <div class="context-menu-item" data-action="new-folder">\uD83D\uDCC1 New Folder</div>
+      <div class="context-menu-item" data-action="new-file">\uD83D\uDCC4 New File</div>
       <div class="context-menu-separator"></div>
-      <div class="context-menu-item" data-action="change-wallpaper">Change Wallpaper</div>
+      <div class="context-menu-item" data-action="open-terminal">\uD83D\uDDA5 Open Terminal Here</div>
+      <div class="context-menu-item" data-action="open-finder">\uD83D\uDCC2 Open in Finder</div>
       <div class="context-menu-separator"></div>
-      <div class="context-menu-item" data-action="refresh">Refresh Desktop</div>
+      <div class="context-menu-item" data-action="change-wallpaper">\uD83C\uDF05 Change Wallpaper</div>
+      <div class="context-menu-item" data-action="tile-windows">\u2B1C Grid Tile Windows</div>
+      <div class="context-menu-separator"></div>
+      <div class="context-menu-item" data-action="refresh">\uD83D\uDD04 Refresh Desktop</div>
     `;
 
     menu.classList.remove('hidden');
@@ -102,8 +106,14 @@ function setupContextMenu() {
         await fileSystem.writeFile(`/Desktop/${name}`, '');
         loadDesktopIcons();
       }
+    } else if (action === 'open-terminal') {
+      processManager.launch('terminal', { cwd: '/Desktop' });
+    } else if (action === 'open-finder') {
+      processManager.launch('finder', { openPath: '/Desktop' });
     } else if (action === 'change-wallpaper') {
       processManager.launch('settings');
+    } else if (action === 'tile-windows') {
+      eventBus.emit('shortcut:tile-windows');
     } else if (action === 'refresh') {
       loadDesktopIcons();
     }
