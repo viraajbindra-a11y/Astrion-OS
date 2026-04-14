@@ -20,7 +20,7 @@ export function registerBrowser() {
 }
 
 function initBrowser(container, instanceId, options = {}) {
-  let currentUrl = options.url || '';
+  let currentUrl = options.url || options.initialUrl || '';
   const isElectron = !!window.novaElectron?.browser;
 
   const bookmarks = [
@@ -44,6 +44,19 @@ function initBrowser(container, instanceId, options = {}) {
         </div>
         <button class="browser-nav-btn" id="brw-home-${instanceId}" title="Home">\uD83C\uDFE0</button>
         <button class="browser-nav-btn" id="brw-external-${instanceId}" title="Open in Firefox" style="font-size:11px; opacity:0.6;">\uD83E\uDD8A</button>
+      </div>
+      <div class="browser-tab-bar" id="brw-tabs-${instanceId}" style="
+        display:flex; align-items:center; gap:2px; padding:0 8px; height:32px;
+        background:rgba(0,0,0,0.15); border-bottom:1px solid rgba(255,255,255,0.04); flex-shrink:0;
+      ">
+        <div class="browser-tab active" id="brw-tab-${instanceId}" style="
+          display:flex; align-items:center; gap:6px; padding:5px 14px; border-radius:8px 8px 0 0;
+          background:rgba(255,255,255,0.06); font-size:11px; color:rgba(255,255,255,0.8);
+          max-width:220px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis;
+        ">
+          <span id="brw-tab-favicon-${instanceId}" style="font-size:12px;">\uD83C\uDF10</span>
+          <span id="brw-tab-title-${instanceId}">New Tab</span>
+        </div>
       </div>
       <div class="browser-viewport" id="brw-viewport-${instanceId}">
         <div class="browser-loading" id="brw-loading-${instanceId}">
@@ -103,7 +116,7 @@ function initBrowser(container, instanceId, options = {}) {
   // Listen for title/url updates from Electron
   if (isElectron) {
     window.novaElectron.browser.onTitle((title) => {
-      windowManager.setTitle(instanceId, title);
+      updateTab(title, currentUrl);
     });
     window.novaElectron.browser.onUrl((url) => {
       urlInput.value = url;
@@ -111,10 +124,30 @@ function initBrowser(container, instanceId, options = {}) {
     });
   }
 
+  const tabTitle = container.querySelector(`#brw-tab-title-${instanceId}`);
+  const tabFavicon = container.querySelector(`#brw-tab-favicon-${instanceId}`);
+
+  function updateTab(title, url) {
+    const domain = url.replace(/^https?:\/\//, '').split('/')[0];
+    const displayTitle = title || domain || 'New Tab';
+    if (tabTitle) tabTitle.textContent = displayTitle;
+    windowManager.setTitle(instanceId, displayTitle);
+    // Try to set a fitting emoji for the favicon
+    if (domain.includes('google')) { if (tabFavicon) tabFavicon.textContent = '\uD83D\uDD0D'; }
+    else if (domain.includes('youtube')) { if (tabFavicon) tabFavicon.textContent = '\u25B6\uFE0F'; }
+    else if (domain.includes('github')) { if (tabFavicon) tabFavicon.textContent = '\uD83D\uDC31'; }
+    else if (domain.includes('reddit')) { if (tabFavicon) tabFavicon.textContent = '\uD83D\uDCAC'; }
+    else if (domain.includes('wikipedia')) { if (tabFavicon) tabFavicon.textContent = '\uD83D\uDCDA'; }
+    else if (domain.includes('twitter') || domain.includes('x.com')) { if (tabFavicon) tabFavicon.textContent = '\uD83D\uDC26'; }
+    else if (url.includes('search.html')) { if (tabFavicon) tabFavicon.textContent = '\uD83D\uDD0D'; }
+    else { if (tabFavicon) tabFavicon.textContent = '\uD83C\uDF10'; }
+  }
+
   function navigate(url) {
     currentUrl = url;
     urlInput.value = url;
     loadingBar.style.width = '50%';
+    updateTab(null, url);
 
     if (isElectron) {
       // Use REAL Chromium browser engine
@@ -132,8 +165,6 @@ function initBrowser(container, instanceId, options = {}) {
 
       setTimeout(() => { loadingBar.style.width = '100%'; }, 500);
       setTimeout(() => { loadingBar.style.width = '0%'; }, 800);
-
-      windowManager.setTitle(instanceId, url.replace(/^https?:\/\//, '').split('/')[0]);
 
       // Update BrowserView bounds when window moves/resizes
       setupBrowserViewTracking(viewport);
@@ -198,7 +229,6 @@ function initBrowser(container, instanceId, options = {}) {
         }, 3000);
       }
 
-      windowManager.setTitle(instanceId, url.replace(/^https?:\/\//, '').split('/')[0]);
     }
   }
 
