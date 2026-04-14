@@ -170,13 +170,14 @@ async function initNotes(container, instanceId) {
         <button class="notes-toolbar-btn" data-action="list" title="List">\u2022</button>
         <div class="notes-toolbar-separator"></div>
         <button class="notes-toolbar-btn" data-action="preview" title="Markdown Preview">\uD83D\uDC41</button>
+        <button class="notes-toolbar-btn" data-action="export" title="Export as .md">\uD83D\uDCE4</button>
         <button class="notes-toolbar-btn" data-action="delete" title="Delete Note">\uD83D\uDDD1</button>
         <button class="notes-toolbar-btn notes-toolbar-ai" data-action="ai" title="AI Assist">\u2728 AI</button>
       </div>
       <textarea class="notes-textarea" placeholder="Start writing...">${content}</textarea>
       <div class="notes-preview" style="display:none; flex:1; padding:16px; overflow-y:auto; font-size:14px; line-height:1.7; color:var(--text-primary);"></div>
       <div class="notes-statusbar">
-        <span>${content.length} characters</span>
+        <span>${content.trim() ? content.trim().split(/\s+/).length : 0} words · ${content.length} chars</span>
         <span>Last edited: ${new Date(dateStr).toLocaleString()}</span>
       </div>
     `;
@@ -233,6 +234,15 @@ async function initNotes(container, instanceId) {
         wrapSelection(textarea, '_', '_');
       } else if (action === 'list') {
         insertAtCursor(textarea, '\n- ');
+      } else if (action === 'export') {
+        const content = textarea.value;
+        const title = (content.split('\n')[0] || 'note').replace(/[^a-zA-Z0-9 ]/g, '').trim() || 'note';
+        const blob = new Blob([content], { type: 'text/markdown' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `${title}.md`;
+        a.click();
+        URL.revokeObjectURL(a.href);
       } else if (action === 'delete') {
         if (confirm('Delete this note?')) {
           try {
