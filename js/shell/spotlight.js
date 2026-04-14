@@ -517,9 +517,11 @@ export function initSpotlight() {
     const smart = getSmartAnswer(query);
     if (smart) {
       const iconHtml = smart.iconIsHtml ? smart.icon : `<div class="spotlight-result-icon" style="font-size:20px;">${smart.icon}</div>`;
+      const smartAction = smart.action === 'launch' ? 'launch' : smart.copyValue ? 'copy' : 'none';
+      const smartData = smart.action === 'launch' ? `data-app="${smart.appId}"` : smart.copyValue ? `data-copy="${escapeHtml(smart.copyValue)}"` : '';
       html += `<div class="spotlight-result-group">
         <div class="spotlight-result-label">Instant Answer</div>
-        <div class="spotlight-result-item" data-action="${smart.copyValue ? 'copy' : 'none'}" ${smart.copyValue ? `data-copy="${escapeHtml(smart.copyValue)}"` : ''} style="cursor:${smart.copyValue ? 'pointer' : 'default'};">
+        <div class="spotlight-result-item" data-action="${smartAction}" ${smartData} style="cursor:${smartAction !== 'none' ? 'pointer' : 'default'};">
           ${iconHtml}
           <div class="spotlight-result-text">
             <div class="spotlight-result-title" style="font-size:20px;font-weight:400;">${smart.title}</div>

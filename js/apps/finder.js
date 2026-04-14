@@ -512,6 +512,15 @@ async function initFinder(container, instanceId, startPath) {
         }
       }},
       { separator: true },
+      { label: 'Open in Terminal', action: () => {
+        // Open terminal at the file's parent directory (or the folder itself)
+        const dir = file.type === 'folder' ? file.path : file.path.substring(0, file.path.lastIndexOf('/')) || '/';
+        processManager.launch('terminal', { cwd: dir });
+      }},
+      { label: 'Copy Path', action: async () => {
+        try { await navigator.clipboard.writeText(file.path); } catch {}
+      }},
+      { separator: true },
       { label: 'Get Info', action: () => {
         const info = `Name: ${name}\nPath: ${file.path}\nType: ${file.type}\nCreated: ${new Date(file.created).toLocaleString()}\nModified: ${new Date(file.modified).toLocaleString()}`;
         alert(info);

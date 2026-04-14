@@ -321,6 +321,23 @@ function tryFun(query) {
     }
   }
 
+  // Timer — "timer 5m", "timer 30s", "set timer for 10 minutes"
+  const timerMatch = q.match(/(?:timer|set\s+(?:a\s+)?timer\s+(?:for\s+)?)?(\d+)\s*(s|sec|seconds?|m|min|minutes?|h|hours?)\s*(?:timer)?/i);
+  if (timerMatch && (q.includes('timer') || q.includes('set'))) {
+    const val = parseInt(timerMatch[1]);
+    const unit = timerMatch[2][0].toLowerCase();
+    const seconds = unit === 'h' ? val * 3600 : unit === 'm' ? val * 60 : val;
+    const display = seconds >= 3600 ? `${Math.floor(seconds/3600)}h ${Math.floor((seconds%3600)/60)}m`
+                  : seconds >= 60 ? `${Math.floor(seconds/60)}m ${seconds%60 ? seconds%60+'s' : ''}`
+                  : `${seconds}s`;
+    return { icon: '⏲️', title: `Timer: ${display.trim()}`, subtitle: 'Open Clock app to start', action: 'launch', appId: 'clock' };
+  }
+
+  // Stopwatch
+  if (q === 'stopwatch' || q === 'start stopwatch') {
+    return { icon: '⏱️', title: 'Stopwatch', subtitle: 'Open Clock app', action: 'launch', appId: 'clock' };
+  }
+
   // Lorem ipsum
   if (q === 'lorem ipsum' || q === 'lorem' || q === 'placeholder text') {
     const text = 'Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris.';
