@@ -623,10 +623,21 @@ export function initSpotlight() {
       </div>`;
     }
 
-    // Search apps
+    // Search apps (by name, ID, or alias)
+    const APP_ALIASES = {
+      calc: 'calculator', term: 'terminal', msg: 'messages', chat: 'messages',
+      files: 'finder', fm: 'finder', edit: 'text-editor', code: 'text-editor',
+      web: 'browser', safari: 'browser', chrome: 'browser', mail: 'messages',
+      paint: 'draw', pic: 'photos', img: 'photos', vid: 'video-player',
+      cam: 'photos', sys: 'system-info', task: 'activity-monitor', htop: 'activity-monitor',
+      pwd: 'password-gen', pw: 'password-gen', md: 'markdown', yt: 'youtube',
+      todo: 'todo', note: 'notes', remind: 'reminders', cal: 'calendar',
+      clk: 'clock', time: 'clock', weather: 'weather', set: 'settings',
+    };
+    const aliasMatch = APP_ALIASES[lower];
     const apps = processManager.getAllApps();
     const matchedApps = apps.filter(a =>
-      a.name.toLowerCase().includes(lower) || a.id.includes(lower)
+      a.name.toLowerCase().includes(lower) || a.id.includes(lower) || a.id === aliasMatch
     );
 
     if (matchedApps.length > 0) {
