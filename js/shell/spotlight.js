@@ -17,6 +17,7 @@ import { getContextBundle } from '../kernel/context-bundle.js';
 import { recordSample } from '../kernel/calibration-tracker.js';
 import { graphStore } from '../kernel/graph-store.js';
 import { query as graphQuery } from '../kernel/graph-query.js';
+import { getRecentApps } from './recent-apps.js';
 
 let isOpen = false;
 // Agent Core Sprint: the id of the plan currently streaming in the panel,
@@ -361,7 +362,28 @@ export function initSpotlight() {
     clearTimeout(debounceTimer);
     const query = input.value.trim();
     if (!query) {
-      results.innerHTML = '';
+      // Re-show recent/suggested when query is cleared
+      const recents = getRecentApps();
+      const allApps = processManager.getAllApps();
+      const fallbackNames = ['Notes', 'Terminal', 'Messages', 'Browser', 'Music', 'Weather', 'Calculator', 'Beat Studio'];
+      const appItems = recents.length >= 3
+        ? recents.slice(0, 8).map(r => allApps.find(a => a.id === r.appId)).filter(Boolean)
+        : fallbackNames.map(name => allApps.find(a => a.name === name)).filter(Boolean);
+      const sectionLabel = recents.length >= 3 ? 'Recent' : 'Suggested';
+      results.innerHTML = `
+        <div class="spotlight-result-group">
+          <div class="spotlight-result-label">${sectionLabel}</div>
+          ${appItems.map(app => `<div class="spotlight-result-item" data-action="launch" data-app="${app.id}">
+              <div class="spotlight-result-icon">${app.icon}</div>
+              <div class="spotlight-result-text">
+                <div class="spotlight-result-title">${app.name}</div>
+                <div class="spotlight-result-subtitle">Application</div>
+              </div>
+            </div>`).join('')}
+        </div>`;
+      results.querySelectorAll('.spotlight-result-item').forEach(item => {
+        item.addEventListener('click', () => handleResultClick(item, ''));
+      });
       return;
     }
     debounceTimer = setTimeout(() => handleQuery(query), 200);
@@ -390,23 +412,24 @@ export function initSpotlight() {
     // handleSubmit disables it, but if the plan ends in clarify/abort/fail
     // without hitting plan:completed, input stays disabled forever.
     input.disabled = false;
-    // Show suggested apps when empty
-    const suggestions = ['Notes', 'Terminal', 'Messages', 'Browser', 'Music', 'Weather', 'Calculator', 'Beat Studio'];
+    // Show recent apps (if any), otherwise fall back to static suggestions
+    const recents = getRecentApps();
+    const allApps = processManager.getAllApps();
+    const fallbackNames = ['Notes', 'Terminal', 'Messages', 'Browser', 'Music', 'Weather', 'Calculator', 'Beat Studio'];
+    const appItems = recents.length >= 3
+      ? recents.slice(0, 8).map(r => allApps.find(a => a.id === r.appId)).filter(Boolean)
+      : fallbackNames.map(name => allApps.find(a => a.name === name)).filter(Boolean);
+    const sectionLabel = recents.length >= 3 ? 'Recent' : 'Suggested';
     results.innerHTML = `
       <div class="spotlight-result-group">
-        <div class="spotlight-result-label">Suggested</div>
-        ${suggestions.map(name => {
-          const apps = processManager.getAllApps();
-          const app = apps.find(a => a.name === name);
-          if (!app) return '';
-          return `<div class="spotlight-result-item" data-action="launch" data-app="${app.id}">
+        <div class="spotlight-result-label">${sectionLabel}</div>
+        ${appItems.map(app => `<div class="spotlight-result-item" data-action="launch" data-app="${app.id}">
             <div class="spotlight-result-icon">${app.icon}</div>
             <div class="spotlight-result-text">
               <div class="spotlight-result-title">${app.name}</div>
               <div class="spotlight-result-subtitle">Application</div>
             </div>
-          </div>`;
-        }).join('')}
+          </div>`).join('')}
       </div>`;
     results.querySelectorAll('.spotlight-result-item').forEach(item => {
       item.addEventListener('click', () => handleResultClick(item, ''));

@@ -878,7 +878,7 @@ function initMusic(container) {
       return;
     }
     ytSearchBtn.textContent = '...';
-    ytResults = await searchYouTube(val, key);
+    ytResults = await searchYouTube(val, key, 10, { videoCategoryId: '10' });
     ytSearchBtn.textContent = '\uD83D\uDD0D Search';
     renderContent();
   }

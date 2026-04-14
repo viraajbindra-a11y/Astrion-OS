@@ -63,6 +63,7 @@ import { initSpaces } from './shell/spaces.js';
 import { initNightShift } from './shell/night-shift.js';
 import { initFocusMode } from './shell/focus-mode.js';
 import { initIdleLock } from './shell/idle-lock.js';
+import { initRecentApps } from './shell/recent-apps.js';
 import { registerVault } from './apps/vault.js';
 import { registerMessages } from './apps/messages.js';
 import { initScreensaver } from './shell/screensaver.js';
@@ -410,6 +411,7 @@ import { initVolumeHud } from './shell/volume-hud.js';
   initNightShift();
   initFocusMode();
   initIdleLock();
+  initRecentApps();
   initVolumeHud();
 
   // Boot chime (disabled — users found it annoying)

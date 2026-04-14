@@ -193,6 +193,7 @@ class WindowManager {
       id, title, app, el,
       minimized: false,
       maximized: false,
+      pinned: false,
       prevBounds: null,
       minWidth, minHeight,
     };
@@ -202,6 +203,7 @@ class WindowManager {
     this._setupResize(el, id, minWidth, minHeight);
     this._setupButtons(el, id);
     this._setupFocusOnClick(el, id);
+    this._setupTitlebarMenu(el, id);
     this._setupOpacityControl(el);
     this.focus(id);
 
@@ -219,12 +221,40 @@ class WindowManager {
       w.el.classList.add('inactive');
     }
 
-    state.el.style.zIndex = ++this.topZ;
+    // Pinned windows stay above everything (z-index 90000+)
+    if (state.pinned) {
+      state.el.style.zIndex = 90000 + (++this.topZ % 1000);
+    } else {
+      state.el.style.zIndex = ++this.topZ;
+    }
+    // Re-enforce ALL pinned windows stay on top
+    for (const [wid, w] of this.windows) {
+      if (w.pinned && wid !== id) {
+        w.el.style.zIndex = 90000 + (++this.topZ % 1000);
+      }
+    }
+
     state.el.classList.add('active');
     state.el.classList.remove('inactive');
     this.activeWindowId = id;
 
     eventBus.emit('window:focused', { id, title: state.title, app: state.app });
+  }
+
+  /**
+   * Toggle always-on-top for a window. Pinned windows float above all others.
+   */
+  togglePin(id) {
+    const state = this.windows.get(id);
+    if (!state) return;
+    state.pinned = !state.pinned;
+    state.el.classList.toggle('pinned', state.pinned);
+    if (state.pinned) {
+      state.el.style.zIndex = 90000 + (++this.topZ % 1000);
+    } else {
+      state.el.style.zIndex = ++this.topZ;
+    }
+    eventBus.emit('window:pinned', { id, pinned: state.pinned, app: state.app });
   }
 
   deactivateAll() {
@@ -308,6 +338,59 @@ class WindowManager {
     state.minimized = false;
     this.focus(id);
     eventBus.emit('window:unminimized', { id });
+  }
+
+  /**
+   * Toggle mini/PiP mode — shrinks window to a small always-on-top floating
+   * widget in the bottom-right corner. Great for music, video, or chat.
+   */
+  toggleMini(id) {
+    const state = this.windows.get(id);
+    if (!state) return;
+
+    if (state.miniMode) {
+      // Restore from mini
+      Object.assign(state.el.style, {
+        width: state.miniPrev.width,
+        height: state.miniPrev.height,
+        left: state.miniPrev.left,
+        top: state.miniPrev.top,
+        borderRadius: '',
+        transition: 'all 0.25s cubic-bezier(0.16,1,0.3,1)',
+      });
+      state.el.classList.remove('mini-mode');
+      state.miniMode = false;
+      state.pinned = false;
+      state.el.classList.remove('pinned');
+      state.el.style.zIndex = ++this.topZ;
+      setTimeout(() => { state.el.style.transition = ''; }, 300);
+      eventBus.emit('window:mini-exit', { id, app: state.app });
+    } else {
+      // Enter mini mode
+      state.miniPrev = {
+        width: state.el.style.width,
+        height: state.el.style.height,
+        left: state.el.style.left,
+        top: state.el.style.top,
+      };
+      const dockH = 78;
+      const miniW = 320, miniH = 200;
+      state.el.style.transition = 'all 0.25s cubic-bezier(0.16,1,0.3,1)';
+      Object.assign(state.el.style, {
+        width: miniW + 'px',
+        height: miniH + 'px',
+        left: (window.innerWidth - miniW - 16) + 'px',
+        top: (window.innerHeight - dockH - miniH - 16) + 'px',
+        borderRadius: '14px',
+      });
+      state.el.classList.add('mini-mode');
+      state.miniMode = true;
+      state.pinned = true;
+      state.el.classList.add('pinned');
+      state.el.style.zIndex = 90000 + (++this.topZ % 1000);
+      setTimeout(() => { state.el.style.transition = ''; }, 300);
+      eventBus.emit('window:mini-enter', { id, app: state.app });
+    }
   }
 
   maximize(id) {
@@ -485,6 +568,78 @@ class WindowManager {
     });
   }
 
+  // Right-click titlebar context menu — pin, close, minimize, etc.
+  _setupTitlebarMenu(el, id) {
+    const titlebar = el.querySelector('.window-titlebar');
+    titlebar.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      // Remove any existing titlebar menu
+      document.querySelectorAll('.wm-context-menu').forEach(m => m.remove());
+
+      const state = this.windows.get(id);
+      if (!state) return;
+
+      const menu = document.createElement('div');
+      menu.className = 'wm-context-menu';
+      menu.style.cssText = `
+        position: fixed; left: ${e.clientX}px; top: ${e.clientY}px;
+        background: rgba(30, 30, 36, 0.95); backdrop-filter: blur(30px);
+        -webkit-backdrop-filter: blur(30px);
+        border: 1px solid rgba(255,255,255,0.1); border-radius: 10px;
+        padding: 4px; z-index: 99998; font-family: var(--font);
+        min-width: 180px; box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+        animation: wmMenuFade 0.12s ease;
+      `;
+
+      const items = [
+        { label: state.pinned ? '📌 Unpin from Top' : '📌 Pin on Top', action: () => this.togglePin(id) },
+        { label: state.miniMode ? '⬜ Exit Mini Mode' : '🖼 Mini Mode (PiP)', action: () => this.toggleMini(id) },
+        { label: state.maximized ? '↙ Restore' : '⬜ Maximize', action: () => this.maximize(id) },
+        { label: '➖ Minimize', action: () => this.minimize(id) },
+        { sep: true },
+        { label: '✕ Close', action: () => this.close(id), danger: true },
+      ];
+
+      items.forEach(item => {
+        if (item.sep) {
+          const sep = document.createElement('div');
+          sep.style.cssText = 'height:1px; background:rgba(255,255,255,0.08); margin:4px 8px;';
+          menu.appendChild(sep);
+          return;
+        }
+        const row = document.createElement('div');
+        row.textContent = item.label;
+        row.style.cssText = `
+          padding: 7px 12px; border-radius: 6px; font-size: 12px;
+          color: ${item.danger ? '#ff6b6b' : 'rgba(255,255,255,0.9)'};
+          cursor: pointer; transition: background 0.1s;
+        `;
+        row.addEventListener('mouseenter', () => row.style.background = 'rgba(255,255,255,0.08)');
+        row.addEventListener('mouseleave', () => row.style.background = 'transparent');
+        row.addEventListener('click', () => { menu.remove(); item.action(); });
+        menu.appendChild(row);
+      });
+
+      // Inject menu animation once
+      if (!document.getElementById('wm-menu-styles')) {
+        const s = document.createElement('style');
+        s.id = 'wm-menu-styles';
+        s.textContent = `
+          @keyframes wmMenuFade { from { opacity:0; transform:scale(0.96); } to { opacity:1; transform:scale(1); } }
+        `;
+        document.head.appendChild(s);
+      }
+
+      document.body.appendChild(menu);
+
+      // Close on outside click
+      const closeMenu = (ev) => {
+        if (!menu.contains(ev.target)) { menu.remove(); document.removeEventListener('mousedown', closeMenu); }
+      };
+      setTimeout(() => document.addEventListener('mousedown', closeMenu), 10);
+    });
+  }
+
   // Alt+scroll on titlebar adjusts window opacity (20% → 100%)
   _setupOpacityControl(el) {
     const titlebar = el.querySelector('.window-titlebar');
@@ -497,25 +652,53 @@ class WindowManager {
     }, { passive: false });
   }
 
-  // Window snapping
-  _updateSnapPreview(x, y) {
-    let preview = document.getElementById('snap-preview');
+  // Window snapping — edges for half-screen, corners for quarter-screen
+  _getSnapZone(x, y) {
     const menuH = 28;
     const dockH = 78;
-    const snapZone = 24;
+    const snap = 24;        // edge zone width
+    const corner = 60;      // corner zone extends further from edge
+    const W = window.innerWidth;
+    const H = window.innerHeight;
+    const halfW = '50vw';
+    const fullW = '100vw';
+    const halfH = `calc((100vh - ${menuH}px - ${dockH}px) / 2)`;
+    const fullH = `calc(100vh - ${menuH}px - ${dockH}px)`;
+    const midY = menuH + (H - menuH - dockH) / 2;
 
-    if (x <= snapZone) {
-      // Snap left
+    // Corner zones (check before edges — corners are a subset of edges)
+    if (x <= snap && y <= menuH + corner) {
+      return { left: '0', top: menuH + 'px', width: halfW, height: halfH, zone: 'top-left' };
+    }
+    if (x <= snap && y >= H - dockH - corner) {
+      return { left: '0', top: `calc(${menuH}px + ${halfH})`, width: halfW, height: halfH, zone: 'bottom-left' };
+    }
+    if (x >= W - snap && y <= menuH + corner) {
+      return { left: halfW, top: menuH + 'px', width: halfW, height: halfH, zone: 'top-right' };
+    }
+    if (x >= W - snap && y >= H - dockH - corner) {
+      return { left: halfW, top: `calc(${menuH}px + ${halfH})`, width: halfW, height: halfH, zone: 'bottom-right' };
+    }
+    // Edge zones
+    if (x <= snap) {
+      return { left: '0', top: menuH + 'px', width: halfW, height: fullH, zone: 'left' };
+    }
+    if (x >= W - snap) {
+      return { left: halfW, top: menuH + 'px', width: halfW, height: fullH, zone: 'right' };
+    }
+    if (y <= menuH + 4) {
+      return { left: '0', top: menuH + 'px', width: fullW, height: fullH, zone: 'maximize' };
+    }
+    return null;
+  }
+
+  _updateSnapPreview(x, y) {
+    const zone = this._getSnapZone(x, y);
+    let preview = document.getElementById('snap-preview');
+
+    if (zone) {
       if (!preview) preview = this._createSnapPreview();
-      Object.assign(preview.style, { left: '0', top: menuH + 'px', width: '50vw', height: `calc(100vh - ${menuH}px - ${dockH}px)`, display: 'block' });
-    } else if (x >= window.innerWidth - snapZone) {
-      // Snap right
-      if (!preview) preview = this._createSnapPreview();
-      Object.assign(preview.style, { left: '50vw', top: menuH + 'px', width: '50vw', height: `calc(100vh - ${menuH}px - ${dockH}px)`, display: 'block' });
-    } else if (y <= menuH + 4) {
-      // Snap maximize
-      if (!preview) preview = this._createSnapPreview();
-      Object.assign(preview.style, { left: '0', top: menuH + 'px', width: '100vw', height: `calc(100vh - ${menuH}px - ${dockH}px)`, display: 'block' });
+      Object.assign(preview.style, { left: zone.left, top: zone.top, width: zone.width, height: zone.height, display: 'block' });
     } else {
       if (preview) preview.style.display = 'none';
     }
@@ -523,26 +706,22 @@ class WindowManager {
 
   _handleSnap(x, y, id) {
     const preview = document.getElementById('snap-preview');
-    if (preview) { preview.style.display = 'none'; }
+    if (preview) preview.style.display = 'none';
 
     const state = this.windows.get(id);
     if (!state) return;
 
-    const menuH = 28;
-    const dockH = 78;
-    const snapZone = 24;
+    const zone = this._getSnapZone(x, y);
+    if (!zone) return;
 
-    if (x <= snapZone) {
-      state.prevBounds = { left: state.el.style.left, top: state.el.style.top, width: state.el.style.width, height: state.el.style.height };
-      state.el.style.transition = 'all 0.2s ease';
-      Object.assign(state.el.style, { left: '0px', top: menuH + 'px', width: '50vw', height: `calc(100vh - ${menuH}px - ${dockH}px)` });
-    } else if (x >= window.innerWidth - snapZone) {
-      state.prevBounds = { left: state.el.style.left, top: state.el.style.top, width: state.el.style.width, height: state.el.style.height };
-      state.el.style.transition = 'all 0.2s ease';
-      Object.assign(state.el.style, { left: '50vw', top: menuH + 'px', width: '50vw', height: `calc(100vh - ${menuH}px - ${dockH}px)` });
-    } else if (y <= menuH + 4) {
+    if (zone.zone === 'maximize') {
       this.maximize(id);
+      return;
     }
+
+    state.prevBounds = { left: state.el.style.left, top: state.el.style.top, width: state.el.style.width, height: state.el.style.height };
+    state.el.style.transition = 'all 0.2s ease';
+    Object.assign(state.el.style, { left: zone.left, top: zone.top, width: zone.width, height: zone.height });
   }
 
   _createSnapPreview() {

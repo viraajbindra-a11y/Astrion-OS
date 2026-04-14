@@ -245,3 +245,36 @@
 .window.active:hover {
   box-shadow: 0 28px 90px rgba(0, 0, 0, 0.55), 0 0 0 0.5px rgba(255, 255, 255, 0.1);
 }
+
+/* ── Mini Mode (PiP) ── */
+.window.mini-mode {
+  min-width: 200px !important;
+  min-height: 120px !important;
+  border-radius: 14px;
+  box-shadow: 0 16px 50px rgba(0, 0, 0, 0.6), 0 0 0 0.5px rgba(255, 255, 255, 0.15);
+}
+.window.mini-mode .window-titlebar {
+  padding: 4px 8px;
+  min-height: 24px;
+}
+.window.mini-mode .window-title {
+  font-size: 10px;
+}
+.window.mini-mode .win-btn {
+  width: 10px;
+  height: 10px;
+}
+
+/* ── Pinned indicator ── */
+.window.pinned .window-titlebar {
+  position: relative;
+}
+.window.pinned .window-titlebar::after {
+  content: '\uD83D\uDCCC';
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 10px;
+  opacity: 0.6;
+}

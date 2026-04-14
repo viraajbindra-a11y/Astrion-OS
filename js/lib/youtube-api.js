@@ -83,10 +83,16 @@ export function setYTApiKey(key) {
 /**
  * Search YouTube using the Data API v3.
  * Returns array of { id, title, channel, thumb, description }.
+ * @param {string} query
+ * @param {string} apiKey
+ * @param {number} maxResults
+ * @param {object} [opts]
+ * @param {string} [opts.videoCategoryId] — e.g. '10' for Music. Omit for all categories.
  */
-export async function searchYouTube(query, apiKey, maxResults = 10) {
+export async function searchYouTube(query, apiKey, maxResults = 10, opts = {}) {
   if (!apiKey) return [];
-  const url = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&videoCategoryId=10&maxResults=${maxResults}&q=${encodeURIComponent(query)}&key=${apiKey}`;
+  let url = `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=${maxResults}&q=${encodeURIComponent(query)}&key=${apiKey}`;
+  if (opts.videoCategoryId) url += `&videoCategoryId=${opts.videoCategoryId}`;
   try {
     const res = await fetch(url);
     if (!res.ok) return [];

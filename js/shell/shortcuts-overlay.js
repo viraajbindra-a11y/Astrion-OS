@@ -10,6 +10,7 @@ const SHORTCUTS = [
   { keys: 'Ctrl + /', action: 'Show this shortcuts overlay' },
   { keys: 'Alt + Tab', action: 'Switch between windows' },
   { keys: 'Alt + Scroll', action: 'Window transparency (on titlebar)' },
+  { keys: 'Right-click titlebar', action: 'Pin on top, minimize, close' },
   { keys: 'Escape', action: 'Close current dialog / Spotlight' },
   { keys: 'F4', action: 'Open App Grid (Launchpad)' },
   { keys: 'Arrow Keys', action: 'Navigate files / games' },
