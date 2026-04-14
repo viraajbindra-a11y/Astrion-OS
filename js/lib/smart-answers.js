@@ -351,6 +351,19 @@ function tryFun(query) {
     return { icon: '🔑', title: uuid, subtitle: 'Click to copy', copyValue: uuid };
   }
 
+  // Random color
+  if (q === 'random color' || q === 'random colour' || q === 'color' || q === 'generate color') {
+    const hex = '#' + Math.floor(Math.random()*16777215).toString(16).padStart(6, '0');
+    const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16);
+    return {
+      icon: `<div style="width:28px;height:28px;border-radius:6px;background:${hex};border:1px solid rgba(255,255,255,0.2);"></div>`,
+      iconIsHtml: true,
+      title: hex.toUpperCase(),
+      subtitle: `rgb(${r}, ${g}, ${b}) · Click to copy`,
+      copyValue: hex,
+    };
+  }
+
   // Date / today
   if (q === 'today' || q === 'date' || q === 'what day is it' || q === 'whats the date') {
     const now = new Date();
