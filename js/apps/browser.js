@@ -23,7 +23,11 @@ function initBrowser(container, instanceId, options = {}) {
   let currentUrl = options.url || options.initialUrl || '';
   const isElectron = !!window.novaElectron?.browser;
 
-  const bookmarks = [
+  // History stack for web mode (Electron handles its own)
+  const historyStack = [];
+  let historyIndex = -1;
+
+  const DEFAULT_BOOKMARKS = [
     { name: 'Google', url: 'https://www.google.com', icon: '\uD83D\uDD0D' },
     { name: 'YouTube', url: 'https://www.youtube.com', icon: '\u25B6\uFE0F' },
     { name: 'Wikipedia', url: 'https://en.wikipedia.org', icon: '\uD83D\uDCDA' },
@@ -31,6 +35,29 @@ function initBrowser(container, instanceId, options = {}) {
     { name: 'Reddit', url: 'https://www.reddit.com', icon: '\uD83E\uDD16' },
     { name: 'Twitter', url: 'https://x.com', icon: '\uD83D\uDC26' },
   ];
+  let bookmarks;
+  try { bookmarks = JSON.parse(localStorage.getItem('nova-browser-bookmarks')) || [...DEFAULT_BOOKMARKS]; }
+  catch { bookmarks = [...DEFAULT_BOOKMARKS]; }
+
+  function saveBookmarks() {
+    try { localStorage.setItem('nova-browser-bookmarks', JSON.stringify(bookmarks)); } catch {}
+  }
+
+  function addBookmark(name, url) {
+    if (bookmarks.some(b => b.url === url)) return; // already bookmarked
+    const icon = url.includes('youtube') ? '\u25B6\uFE0F' : url.includes('github') ? '\uD83D\uDC31' : url.includes('reddit') ? '\uD83D\uDCAC' : url.includes('wikipedia') ? '\uD83D\uDCDA' : '\uD83C\uDF10';
+    bookmarks.push({ name: name || new URL(url).hostname, url, icon });
+    saveBookmarks();
+  }
+
+  function removeBookmark(url) {
+    const idx = bookmarks.findIndex(b => b.url === url);
+    if (idx >= 0) { bookmarks.splice(idx, 1); saveBookmarks(); }
+  }
+
+  function isBookmarked(url) {
+    return bookmarks.some(b => b.url === url);
+  }
 
   container.innerHTML = `
     <div class="browser-app">
@@ -42,8 +69,9 @@ function initBrowser(container, instanceId, options = {}) {
           <span class="browser-url-lock">\uD83D\uDD12</span>
           <input type="text" class="browser-url-input" id="brw-url-${instanceId}" placeholder="Search or enter URL..." value="${currentUrl}" spellcheck="false">
         </div>
+        <button class="browser-nav-btn" id="brw-bookmark-${instanceId}" title="Bookmark this page" style="font-size:14px;">☆</button>
         <button class="browser-nav-btn" id="brw-home-${instanceId}" title="Home">\uD83C\uDFE0</button>
-        <button class="browser-nav-btn" id="brw-external-${instanceId}" title="Open in Firefox" style="font-size:11px; opacity:0.6;">\uD83E\uDD8A</button>
+        <button class="browser-nav-btn" id="brw-external-${instanceId}" title="Open in new tab" style="font-size:11px; opacity:0.6;">↗</button>
       </div>
       <div class="browser-tab-bar" id="brw-tabs-${instanceId}" style="
         display:flex; align-items:center; gap:2px; padding:0 8px; height:32px;
@@ -87,10 +115,18 @@ function initBrowser(container, instanceId, options = {}) {
 
   // Nav buttons
   container.querySelector(`#brw-back-${instanceId}`).addEventListener('click', () => {
-    if (isElectron) window.novaElectron.browser.back();
+    if (isElectron) { window.novaElectron.browser.back(); return; }
+    if (historyIndex > 0) {
+      historyIndex--;
+      navigateNoHistory(historyStack[historyIndex]);
+    }
   });
   container.querySelector(`#brw-fwd-${instanceId}`).addEventListener('click', () => {
-    if (isElectron) window.novaElectron.browser.forward();
+    if (isElectron) { window.novaElectron.browser.forward(); return; }
+    if (historyIndex < historyStack.length - 1) {
+      historyIndex++;
+      navigateNoHistory(historyStack[historyIndex]);
+    }
   });
   container.querySelector(`#brw-reload-${instanceId}`).addEventListener('click', () => {
     if (isElectron) window.novaElectron.browser.reload();
@@ -103,13 +139,35 @@ function initBrowser(container, instanceId, options = {}) {
     if (isElectron) window.novaElectron.browser.close();
     showHome();
   });
+
+  // Bookmark button — toggle bookmark for current page
+  const bookmarkBtn = container.querySelector(`#brw-bookmark-${instanceId}`);
+  function updateBookmarkBtn() {
+    if (currentUrl && isBookmarked(currentUrl)) {
+      bookmarkBtn.textContent = '★';
+      bookmarkBtn.title = 'Remove bookmark';
+      bookmarkBtn.style.color = '#ffd60a';
+    } else {
+      bookmarkBtn.textContent = '☆';
+      bookmarkBtn.title = 'Bookmark this page';
+      bookmarkBtn.style.color = '';
+    }
+  }
+  bookmarkBtn.addEventListener('click', () => {
+    if (!currentUrl) return;
+    if (isBookmarked(currentUrl)) {
+      removeBookmark(currentUrl);
+    } else {
+      const domain = currentUrl.replace(/^https?:\/\//, '').split('/')[0];
+      addBookmark(domain, currentUrl);
+    }
+    updateBookmarkBtn();
+  });
+
   container.querySelector(`#brw-external-${instanceId}`).addEventListener('click', () => {
     if (currentUrl) {
-      fetch('/api/browser/open', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: currentUrl }),
-      });
+      // Open in actual browser tab
+      window.open(currentUrl, '_blank');
     }
   });
 
@@ -143,6 +201,15 @@ function initBrowser(container, instanceId, options = {}) {
     else { if (tabFavicon) tabFavicon.textContent = '\uD83C\uDF10'; }
   }
 
+  let _skipHistory = false;
+
+  /** Navigate without adding to history (used by back/forward) */
+  function navigateNoHistory(url) {
+    _skipHistory = true;
+    navigate(url);
+    _skipHistory = false;
+  }
+
   function navigate(url) {
     // Clean up proxy URLs — extract the real URL if someone passed a proxy link
     if (url.includes('/api/proxy?url=')) {
@@ -151,10 +218,21 @@ function initBrowser(container, instanceId, options = {}) {
     if (url.includes('api.allorigins.win/raw?url=')) {
       try { url = decodeURIComponent(url.split('api.allorigins.win/raw?url=')[1]); } catch {}
     }
+
+    // Push to history stack (trim forward history on new navigation)
+    if (!isElectron && !_skipHistory) {
+      if (historyIndex < historyStack.length - 1) {
+        historyStack.splice(historyIndex + 1);
+      }
+      historyStack.push(url);
+      historyIndex = historyStack.length - 1;
+    }
+
     currentUrl = url;
     urlInput.value = url;
     loadingBar.style.width = '50%';
     updateTab(null, url);
+    updateBookmarkBtn();
 
     if (isElectron) {
       // Use REAL Chromium browser engine
@@ -178,6 +256,23 @@ function initBrowser(container, instanceId, options = {}) {
     } else {
       const old = viewport.querySelector('.browser-home, .browser-error, iframe');
       if (old) old.remove();
+
+      // Heavy JS-dependent sites break through proxy — use embedded YouTube
+      // player for YouTube, open other heavy sites with a notice
+      const EMBED_YOUTUBE = /(?:youtube\.com\/watch\?v=|youtu\.be\/)([\w-]{11})/;
+      const ytMatch = url.match(EMBED_YOUTUBE);
+      if (ytMatch) {
+        // Embed YouTube via their official embed player (works in iframes)
+        const iframe = document.createElement('iframe');
+        iframe.style.cssText = 'width:100%;height:100%;border:none;';
+        iframe.src = `https://www.youtube.com/embed/${ytMatch[1]}?autoplay=1&rel=0`;
+        iframe.allow = 'autoplay; encrypted-media';
+        iframe.allowFullscreen = true;
+        viewport.appendChild(iframe);
+        loadingBar.style.width = '100%';
+        setTimeout(() => { loadingBar.style.width = '0%'; }, 500);
+        return;
+      }
 
       // Detect: running with Express server (localhost:3000 / ISO)?
       const hasServer = window.location.port === '3000' || window.__NOVA_NATIVE__;
