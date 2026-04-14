@@ -17,6 +17,8 @@ const SHORTCUTS = [
   { keys: 'Ctrl + Shift + C', action: 'Cascade all windows' },
   { keys: 'Ctrl + Shift + D', action: 'Toggle dock visibility' },
   { keys: 'Ctrl + .', action: 'Emoji picker' },
+  { keys: 'Ctrl + Shift + V', action: 'Clipboard history' },
+  { keys: 'Ctrl + Space', action: 'Spotlight search' },
   { keys: 'Escape', action: 'Close current dialog / Spotlight' },
   { keys: 'F4', action: 'Open App Grid (Launchpad)' },
   { keys: 'Arrow Keys', action: 'Navigate files / games' },
