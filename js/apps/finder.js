@@ -194,9 +194,13 @@ async function initFinder(container, instanceId, startPath) {
       el.setAttribute('role', 'option');
       el.setAttribute('aria-label', `${file.type === 'folder' ? 'Folder' : 'File'}: ${name}`);
       el.tabIndex = 0;
+      // Format file size
+      const sizeStr = file.type === 'folder' ? '' : formatFileSize(file.size || 0);
+      const modStr = file.modified ? timeAgo(file.modified) : '';
       el.innerHTML = `
         <div class="finder-file-icon">${icon}</div>
         <div class="finder-file-name">${escapeHtml(name)}</div>
+        ${sizeStr || modStr ? `<div class="finder-file-meta" style="font-size:9px;color:rgba(255,255,255,0.3);margin-top:1px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${[sizeStr, modStr].filter(Boolean).join(' · ')}</div>` : ''}
       `;
 
       el.addEventListener('click', (e) => {
@@ -603,6 +607,27 @@ async function initFinder(container, instanceId, startPath) {
 
   function escapeHtml(text) {
     return (text == null ? '' : String(text)).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  function formatFileSize(bytes) {
+    if (!bytes || bytes <= 0) return '';
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    if (bytes < 1024 * 1024 * 1024) return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+    return (bytes / (1024 * 1024 * 1024)).toFixed(2) + ' GB';
+  }
+
+  function timeAgo(ts) {
+    const diff = Date.now() - ts;
+    const s = Math.floor(diff / 1000);
+    if (s < 60) return 'just now';
+    const m = Math.floor(s / 60);
+    if (m < 60) return `${m}m ago`;
+    const h = Math.floor(m / 60);
+    if (h < 24) return `${h}h ago`;
+    const d = Math.floor(h / 24);
+    if (d < 7) return `${d}d ago`;
+    return new Date(ts).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   }
 
   // Drop files into the current directory (from Desktop or external)
