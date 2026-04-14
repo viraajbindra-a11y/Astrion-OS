@@ -293,7 +293,81 @@ function initMessages(container) {
     }).join('');
 
     chat.scrollTop = chat.scrollHeight;
+
+    // Smart reply suggestions — show quick-action chips after AI messages
+    if (convo.isAI && convo.messages.length > 0) {
+      const last = convo.messages[convo.messages.length - 1];
+      if (last.from === 'them') {
+        const suggestions = getSmartReplies(last.text, convo.messages);
+        if (suggestions.length > 0) {
+          const chipsEl = document.createElement('div');
+          chipsEl.id = 'msg-smart-replies';
+          chipsEl.style.cssText = 'display:flex; gap:6px; flex-wrap:wrap; padding:4px 0; justify-content:flex-end;';
+          suggestions.forEach(s => {
+            const chip = document.createElement('button');
+            chip.textContent = s;
+            chip.style.cssText = `
+              padding:6px 12px; border-radius:16px; border:1px solid rgba(255,255,255,0.12);
+              background:rgba(255,255,255,0.05); color:rgba(255,255,255,0.8);
+              font-size:11px; cursor:pointer; font-family:var(--font);
+              transition:all 0.15s;
+            `;
+            chip.addEventListener('mouseenter', () => { chip.style.background = 'rgba(255,255,255,0.12)'; });
+            chip.addEventListener('mouseleave', () => { chip.style.background = 'rgba(255,255,255,0.05)'; });
+            chip.addEventListener('click', () => {
+              const input = container.querySelector('#msg-input');
+              if (input) { input.value = s; input.focus(); }
+            });
+            chipsEl.appendChild(chip);
+          });
+          chat.appendChild(chipsEl);
+        }
+      }
+    }
+
+    chat.scrollTop = chat.scrollHeight;
     container.querySelector('#msg-input')?.focus();
+  }
+
+  /**
+   * Generate smart reply suggestions based on the last AI message.
+   * Pure pattern matching — no AI call needed.
+   */
+  function getSmartReplies(lastMsg, allMessages) {
+    const lower = lastMsg.toLowerCase();
+    const replies = [];
+
+    // Question detection — suggest yes/no + elaboration
+    if (/\?$/.test(lastMsg.trim()) || /\b(would you|do you|should i|can i|want me to)\b/i.test(lower)) {
+      replies.push('Yes, please!', 'No thanks');
+    }
+    // AI offered help
+    if (/\b(anything else|help you with|can i help|what else|need anything)\b/i.test(lower)) {
+      replies.push("That's all, thanks!", 'Tell me a fun fact');
+    }
+    // AI explained something
+    if (/\b(here's|explanation|means that|in other words|basically)\b/i.test(lower)) {
+      replies.push('Explain more', 'Give me an example', 'Thanks!');
+    }
+    // AI created/did something
+    if (/\b(created|done|finished|made|here you go|all set)\b/i.test(lower)) {
+      replies.push('Thanks!', 'Can you change it?');
+    }
+    // AI couldn't do something
+    if (/\b(sorry|couldn't|can't|unable|failed|error)\b/i.test(lower)) {
+      replies.push('Try again', "That's okay");
+    }
+    // Greeting
+    if (allMessages.length <= 2 || /\b(hello|hi|hey|welcome)\b/i.test(lower)) {
+      if (replies.length === 0) replies.push("What can you do?", 'Tell me a joke', "What's the weather?");
+    }
+
+    // Fallback if nothing matched
+    if (replies.length === 0) {
+      replies.push('Tell me more', 'Thanks!');
+    }
+
+    return replies.slice(0, 3);
   }
 
   // ─── Typing indicator helpers ───

@@ -178,6 +178,7 @@ async function initTextEditor(container, instanceId, options = {}) {
       <div class="texteditor-statusbar">
         <div class="texteditor-statusbar-left">
           <span id="editor-cursor-${instanceId}">Ln 1, Col 1</span>
+          <span id="editor-words-${instanceId}">${content.trim() ? content.trim().split(/\s+/).length : 0} words</span>
           <span id="editor-chars-${instanceId}">${content.length} chars</span>
         </div>
         <div class="texteditor-statusbar-right">
@@ -192,6 +193,7 @@ async function initTextEditor(container, instanceId, options = {}) {
   const highlightEl = container.querySelector(`#editor-highlight-${instanceId}`);
   const lineNumbers = container.querySelector(`#editor-lines-${instanceId}`);
   const cursorInfo = container.querySelector(`#editor-cursor-${instanceId}`);
+  const wordCount = container.querySelector(`#editor-words-${instanceId}`);
   const charCount = container.querySelector(`#editor-chars-${instanceId}`);
   const fileNameEl = container.querySelector(`#editor-filename-${instanceId}`);
   const langEl = container.querySelector(`#editor-lang-${instanceId}`);
@@ -206,6 +208,8 @@ async function initTextEditor(container, instanceId, options = {}) {
     fileNameEl.textContent = (filePath ? fileSystem.getFileName(filePath) : 'Untitled') + ' \u2022';
     updateLineNumbers();
     updateHighlight();
+    const words = textarea.value.trim() ? textarea.value.trim().split(/\s+/).length : 0;
+    wordCount.textContent = `${words} words`;
     charCount.textContent = `${textarea.value.length} chars`;
   });
 

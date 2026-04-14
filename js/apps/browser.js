@@ -223,9 +223,16 @@ function initBrowser(container, instanceId, options = {}) {
   };
   window.addEventListener('message', navHandler);
 
-  // Cleanup when window closes
-  const cleanup = () => window.removeEventListener('message', navHandler);
-  container.addEventListener('DOMNodeRemoved', cleanup, { once: true });
+  // Cleanup when window closes — use MutationObserver (DOMNodeRemoved is deprecated)
+  const _browserObserver = new MutationObserver(() => {
+    if (!container.isConnected) {
+      window.removeEventListener('message', navHandler);
+      _browserObserver.disconnect();
+    }
+  });
+  if (container.parentElement) {
+    _browserObserver.observe(container.parentElement, { childList: true, subtree: true });
+  }
 
   function setupBrowserViewTracking(viewport) {
     // Continuously update BrowserView position to match the window

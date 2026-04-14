@@ -175,8 +175,7 @@ function renderList() {
   list.innerHTML = '';
   history.forEach((item, i) => {
     const preview = item.text.length > 80 ? item.text.slice(0, 80) + '…' : item.text;
-    const isUrl = /^https?:\/\//.test(item.text);
-    const icon = isUrl ? '\uD83D\uDD17' : (item.text.length > 100 ? '\uD83D\uDCC4' : '\uD83D\uDCDD');
+    const detected = detectContentType(item.text);
     const time = timeAgo(item.time);
 
     const el = document.createElement('div');
@@ -188,11 +187,19 @@ function renderList() {
     `;
     el.addEventListener('mouseenter', () => el.style.background = 'rgba(255,255,255,0.08)');
     el.addEventListener('mouseleave', () => el.style.background = 'transparent');
+
+    // Color swatch for hex colors
+    const iconHtml = detected.type === 'color'
+      ? `<div style="width:28px;height:28px;border-radius:6px;background:${escapeHtml(item.text.trim())};border:1px solid rgba(255,255,255,0.2);flex-shrink:0;"></div>`
+      : `<div style="font-size: 16px; flex-shrink: 0;">${detected.icon}</div>`;
+
     el.innerHTML = `
-      <div style="font-size: 16px; flex-shrink: 0;">${icon}</div>
+      ${iconHtml}
       <div style="flex: 1; min-width: 0;">
         <div style="font-size: 12px; color: rgba(255,255,255,0.9); white-space: pre-wrap; word-break: break-word;">${escapeHtml(preview)}</div>
-        <div style="font-size: 10px; color: rgba(255,255,255,0.4); margin-top: 2px;">${time}</div>
+        <div style="font-size: 10px; color: rgba(255,255,255,0.4); margin-top: 2px;">
+          <span style="color:rgba(255,255,255,0.5);">${detected.label}</span> · ${time}
+        </div>
       </div>
     `;
     el.addEventListener('click', async () => {
@@ -212,6 +219,37 @@ function close() {
     panel.style.animation = 'clipboardPop 0.12s reverse forwards';
     setTimeout(() => { panel?.remove(); panel = null; }, 120);
   }
+}
+
+/**
+ * Detect the content type of clipboard text — smart categorization.
+ * Returns { icon, label, type }.
+ */
+function detectContentType(text) {
+  if (!text) return { icon: '📝', label: 'Text', type: 'text' };
+  const t = text.trim();
+
+  // URL
+  if (/^https?:\/\//i.test(t)) return { icon: '🔗', label: 'URL', type: 'url' };
+  // Email
+  if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(t)) return { icon: '📧', label: 'Email', type: 'email' };
+  // Hex color
+  if (/^#[0-9a-f]{3,8}$/i.test(t)) return { icon: '🎨', label: 'Color', type: 'color' };
+  // Phone number (loose)
+  if (/^[\d+\-() .]{7,20}$/.test(t) && /\d{7,}/.test(t.replace(/\D/g, ''))) return { icon: '📞', label: 'Phone', type: 'phone' };
+  // JSON
+  if ((t.startsWith('{') && t.endsWith('}')) || (t.startsWith('[') && t.endsWith(']'))) {
+    try { JSON.parse(t); return { icon: '{ }', label: 'JSON', type: 'json' }; } catch {}
+  }
+  // Code (heuristic: has semicolons + braces or function/const/let/import)
+  if (/(?:function\s|const\s|let\s|import\s|=>|;\s*$)/m.test(t) && t.length > 30) return { icon: '💻', label: 'Code', type: 'code' };
+  // Number
+  if (/^-?[\d,]+\.?\d*$/.test(t)) return { icon: '🔢', label: 'Number', type: 'number' };
+  // File path
+  if (/^[\/~][\w./-]+/.test(t) || /^[A-Z]:\\/.test(t)) return { icon: '📁', label: 'Path', type: 'path' };
+  // Long text
+  if (t.length > 100) return { icon: '📄', label: `${t.split(/\s+/).length} words`, type: 'long' };
+  return { icon: '📝', label: 'Text', type: 'text' };
 }
 
 function escapeHtml(str) {

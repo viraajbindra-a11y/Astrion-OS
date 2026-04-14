@@ -18,6 +18,7 @@ export function registerClock() {
 
 function initClock(container) {
   let activeTab = 'world';
+  let worldTimer = null;
   let swRunning = false, swTime = 0, swInterval = null, swLaps = [];
   let tmRunning = false, tmTime = 0, tmInterval = null;
 
@@ -85,7 +86,10 @@ function initClock(container) {
       }).join('')}
     </div>`;
 
-    if (activeTab === 'world') setTimeout(renderWorld, 1000);
+    if (activeTab === 'world') {
+      clearTimeout(worldTimer);
+      worldTimer = setTimeout(renderWorld, 1000);
+    }
   }
 
   function renderStopwatch() {
@@ -201,6 +205,7 @@ function initClock(container) {
     if (!container.isConnected) {
       clearInterval(swInterval);
       clearInterval(tmInterval);
+      clearTimeout(worldTimer);
       _obs.disconnect();
     }
   });
