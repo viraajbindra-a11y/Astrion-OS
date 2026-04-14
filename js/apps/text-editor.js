@@ -376,23 +376,13 @@ async function initTextEditor(container, instanceId, options = {}) {
         document.execCommand('redo');
         break;
       case 'find':
-        const query = prompt('Find:');
-        if (query) {
-          const idx = textarea.value.indexOf(query, textarea.selectionEnd);
-          if (idx >= 0) {
-            textarea.setSelectionRange(idx, idx + query.length);
-            textarea.focus();
-          } else {
-            // Wrap search from beginning
-            const idx2 = textarea.value.indexOf(query);
-            if (idx2 >= 0) {
-              textarea.setSelectionRange(idx2, idx2 + query.length);
-              textarea.focus();
-            }
-          }
-        }
+        toggleFindBar();
         break;
       case 'replace':
+        toggleFindBar(true);
+        break;
+      case '_old_replace':
+        // Legacy replace — kept for reference
         const findStr = prompt('Find:');
         if (findStr) {
           const replaceStr = prompt('Replace with:');
@@ -460,6 +450,88 @@ async function initTextEditor(container, instanceId, options = {}) {
       textarea.classList.remove('highlighting');
     }
   }
+
+  // ─── Inline Find Bar (Ctrl+F) ───
+  let findBarEl = null;
+  let findMatchIdx = -1;
+
+  function toggleFindBar() {
+    if (findBarEl) {
+      findBarEl.remove();
+      findBarEl = null;
+      textarea.focus();
+      return;
+    }
+    findBarEl = document.createElement('div');
+    findBarEl.style.cssText = `
+      display:flex; gap:6px; align-items:center; padding:6px 10px;
+      background:rgba(30,30,36,0.95); border-bottom:1px solid rgba(255,255,255,0.08);
+      font-size:12px;
+    `;
+    findBarEl.innerHTML = `
+      <input type="text" placeholder="Find..." style="
+        flex:1; padding:5px 10px; border-radius:6px; border:1px solid rgba(255,255,255,0.1);
+        background:rgba(255,255,255,0.06); color:white; font-size:12px; font-family:var(--font); outline:none; min-width:120px;
+      " class="te-find-input">
+      <span class="te-find-count" style="color:rgba(255,255,255,0.4); font-size:10px; min-width:40px;">0/0</span>
+      <button class="te-find-prev" style="background:none;border:none;color:rgba(255,255,255,0.6);cursor:pointer;font-size:14px;padding:2px 6px;" title="Previous">\u25B2</button>
+      <button class="te-find-next" style="background:none;border:none;color:rgba(255,255,255,0.6);cursor:pointer;font-size:14px;padding:2px 6px;" title="Next">\u25BC</button>
+      <button class="te-find-close" style="background:none;border:none;color:rgba(255,255,255,0.4);cursor:pointer;font-size:14px;padding:2px 6px;" title="Close">\u2715</button>
+    `;
+
+    // Insert at top of the editor container
+    container.querySelector('.texteditor-editor').parentElement.insertBefore(
+      findBarEl, container.querySelector('.texteditor-editor')
+    );
+
+    const findInput = findBarEl.querySelector('.te-find-input');
+    const countEl = findBarEl.querySelector('.te-find-count');
+    findInput.focus();
+
+    const doFind = (dir = 1) => {
+      const q = findInput.value;
+      if (!q) { countEl.textContent = '0/0'; return; }
+
+      const text = textarea.value;
+      const matches = [];
+      let pos = 0;
+      while ((pos = text.indexOf(q, pos)) !== -1) { matches.push(pos); pos += q.length; }
+      if (matches.length === 0) { countEl.textContent = '0/0'; return; }
+
+      const cursor = textarea.selectionEnd;
+      if (dir === 1) {
+        findMatchIdx = matches.findIndex(m => m >= cursor);
+        if (findMatchIdx === -1) findMatchIdx = 0;
+      } else {
+        findMatchIdx = 0;
+        for (let i = matches.length - 1; i >= 0; i--) {
+          if (matches[i] < textarea.selectionStart) { findMatchIdx = i; break; }
+        }
+      }
+
+      textarea.setSelectionRange(matches[findMatchIdx], matches[findMatchIdx] + q.length);
+      textarea.focus();
+      countEl.textContent = `${findMatchIdx + 1}/${matches.length}`;
+    };
+
+    findInput.addEventListener('input', () => doFind(1));
+    findInput.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter') { ev.preventDefault(); doFind(ev.shiftKey ? -1 : 1); }
+      if (ev.key === 'Escape') { ev.preventDefault(); toggleFindBar(); }
+    });
+    findBarEl.querySelector('.te-find-next').addEventListener('click', () => doFind(1));
+    findBarEl.querySelector('.te-find-prev').addEventListener('click', () => doFind(-1));
+    findBarEl.querySelector('.te-find-close').addEventListener('click', () => toggleFindBar());
+  }
+
+  // Ctrl+F opens find bar
+  container.addEventListener('keydown', (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
+      e.preventDefault();
+      e.stopPropagation();
+      toggleFindBar();
+    }
+  });
 
   textarea.focus();
 }
