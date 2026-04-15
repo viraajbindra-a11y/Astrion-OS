@@ -119,6 +119,8 @@ import { registerWordle } from './apps/wordle.js';
 import { registerMeditation } from './apps/meditation.js';
 import { registerSoundboard } from './apps/soundboard.js';
 import { registerCountdown } from './apps/countdown.js';
+import { registerReactionTest } from './apps/reaction-test.js';
+import { registerColorPalette } from './apps/color-palette.js';
 import { verifyPassword } from './kernel/crypto.js';
 import { sounds } from './kernel/sound.js';
 import { initVolumeHud } from './shell/volume-hud.js';
@@ -170,6 +172,8 @@ import { initVolumeHud } from './shell/volume-hud.js';
     registerMeditation();
     registerSoundboard();
     registerCountdown();
+    registerReactionTest();
+    registerColorPalette();
 
     windowManager.init();
 
@@ -276,6 +280,8 @@ import { initVolumeHud } from './shell/volume-hud.js';
   registerMeditation();
   registerSoundboard();
   registerCountdown();
+  registerReactionTest();
+  registerColorPalette();
   await animate(progressBar, 85, 200);
 
   // Init kernel

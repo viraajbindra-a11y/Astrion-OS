@@ -494,7 +494,133 @@ function tryFun(query) {
     return { icon: '⏱️', title: `${ts}`, subtitle: 'Current Unix timestamp · Click to copy', copyValue: String(ts) };
   }
 
+  // Age calculator — "age 1999-05-15" or "how old 2010-03-20"
+  const ageMatch = q.match(/^(?:age|how old|born)\s+(\d{4}[-/]\d{1,2}[-/]\d{1,2})$/i);
+  if (ageMatch) {
+    const birth = new Date(ageMatch[1]);
+    if (!isNaN(birth.getTime())) {
+      const now = new Date();
+      let age = now.getFullYear() - birth.getFullYear();
+      if (now.getMonth() < birth.getMonth() || (now.getMonth() === birth.getMonth() && now.getDate() < birth.getDate())) age--;
+      const days = Math.floor((now - birth) / 86400000);
+      return { icon: '🎂', title: `${age} years old`, subtitle: `${days.toLocaleString()} days since birth` };
+    }
+  }
+
+  // Roman numerals — "42 in roman" or "roman XLII"
+  const romanToMatch = q.match(/^(\d+)\s+(?:in|to)\s+roman$/i);
+  if (romanToMatch) {
+    const num = parseInt(romanToMatch[1]);
+    if (num > 0 && num <= 3999) {
+      const roman = toRoman(num);
+      return { icon: '🏛️', title: roman, subtitle: `${num} in Roman numerals · Click to copy`, copyValue: roman };
+    }
+  }
+  const romanFromMatch = q.match(/^roman\s+([IVXLCDM]+)$/i);
+  if (romanFromMatch) {
+    const num = fromRoman(romanFromMatch[1].toUpperCase());
+    if (num > 0) return { icon: '🏛️', title: `${num}`, subtitle: `${romanFromMatch[1].toUpperCase()} = ${num}`, copyValue: String(num) };
+  }
+
+  // Binary — "42 in binary" or "101010 in decimal"
+  const binMatch = q.match(/^(\d+)\s+(?:in|to)\s+binary$/i);
+  if (binMatch) {
+    const bin = parseInt(binMatch[1]).toString(2);
+    return { icon: '💾', title: bin, subtitle: `${binMatch[1]} in binary · Click to copy`, copyValue: bin };
+  }
+  const binDecMatch = q.match(/^([01]+)\s+(?:in|to)\s+decimal$/i);
+  if (binDecMatch && binDecMatch[1].length > 1) {
+    const dec = parseInt(binDecMatch[1], 2);
+    return { icon: '💾', title: `${dec}`, subtitle: `Binary ${binDecMatch[1]} = ${dec}`, copyValue: String(dec) };
+  }
+
+  // Reverse text — "reverse hello world"
+  const reverseMatch = q.match(/^reverse\s+(.+)/i);
+  if (reverseMatch) {
+    const reversed = [...reverseMatch[1]].reverse().join('');
+    return { icon: '🔄', title: reversed, subtitle: 'Reversed text · Click to copy', copyValue: reversed };
+  }
+
+  // ROT13 — "rot13 hello"
+  const rot13Match = q.match(/^rot13\s+(.+)/i);
+  if (rot13Match) {
+    const rot = rot13Match[1].replace(/[a-zA-Z]/g, c => String.fromCharCode(c.charCodeAt(0) + (c.toLowerCase() < 'n' ? 13 : -13)));
+    return { icon: '🔐', title: rot, subtitle: 'ROT13 encoded · Click to copy', copyValue: rot };
+  }
+
+  // Tip calculator — "tip 45.50" or "tip on 80" or "20% tip on 60"
+  const tipMatch = q.match(/^(?:(\d+)%?\s+)?tip\s+(?:on\s+)?(?:\$)?([\d.]+)$/i) || q.match(/^tip\s+(?:on\s+)?(?:\$)?([\d.]+)(?:\s+(\d+)%)?$/i);
+  if (tipMatch) {
+    const amount = parseFloat(tipMatch[2] || tipMatch[1]);
+    const pct = parseInt(tipMatch[1] || tipMatch[3] || '18');
+    if (!isNaN(amount)) {
+      const tip15 = (amount * 0.15).toFixed(2);
+      const tip18 = (amount * 0.18).toFixed(2);
+      const tip20 = (amount * 0.20).toFixed(2);
+      return { icon: '💵', title: `$${tip18} (18%)`, subtitle: `15%: $${tip15} · 20%: $${tip20} · Total: $${(amount + parseFloat(tip18)).toFixed(2)}` };
+    }
+  }
+
+  // Morse code — "morse hello"
+  const morseMatch = q.match(/^morse\s+(.+)/i);
+  if (morseMatch) {
+    const MORSE = {'A':'.-','B':'-...','C':'-.-.','D':'-..','E':'.','F':'..-.','G':'--.','H':'....','I':'..','J':'.---','K':'-.-','L':'.-..','M':'--','N':'-.','O':'---','P':'.--.','Q':'--.-','R':'.-.','S':'...','T':'-','U':'..-','V':'...-','W':'.--','X':'-..-','Y':'-.--','Z':'--..','0':'-----','1':'.----','2':'..---','3':'...--','4':'....-','5':'.....','6':'-....','7':'--...','8':'---..','9':'----.',' ':' / '};
+    const morse = morseMatch[1].toUpperCase().split('').map(c => MORSE[c] || c).join(' ');
+    return { icon: '📡', title: morse, subtitle: 'Morse code · Click to copy', copyValue: morse };
+  }
+
+  // Emoji meaning — "emoji 🔥"
+  const emojiMatch = q.match(/^emoji\s+(.+)/i);
+  if (emojiMatch) {
+    const MEANINGS = {'🔥':'fire/hot/lit','❤️':'love/heart','😂':'laughing/crying','💀':'dead/skull','✨':'sparkles/magic','🎉':'party/celebration','👑':'crown/king/queen','🤔':'thinking','😭':'crying','🥺':'pleading','💪':'strong/flex','🙏':'pray/thanks','👀':'eyes/looking','🫠':'melting','🤡':'clown','💅':'sassy/nails','🧠':'brain/smart','⚡':'lightning/fast','🌊':'wave/ocean','🎯':'target/bullseye'};
+    const emoji = emojiMatch[1].trim();
+    const meaning = MEANINGS[emoji];
+    if (meaning) return { icon: emoji, title: meaning, subtitle: `Meaning of ${emoji}` };
+  }
+
+  // Day of week — "what day was 2000-01-01"
+  const dayOfMatch = q.match(/^what\s+day\s+(?:is|was)\s+(\d{4}[-/]\d{1,2}[-/]\d{1,2})$/i);
+  if (dayOfMatch) {
+    const d = new Date(dayOfMatch[1]);
+    if (!isNaN(d.getTime())) {
+      return { icon: '📅', title: d.toLocaleDateString('en-US', { weekday: 'long' }), subtitle: d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' }) };
+    }
+  }
+
+  // Motivation / quote
+  if (q === 'motivate me' || q === 'motivation' || q === 'inspire' || q === 'quote') {
+    const quotes = [
+      'The best time to plant a tree was 20 years ago. The second best time is now.',
+      'Every expert was once a beginner.',
+      'Code is like humor. When you have to explain it, it\'s bad.',
+      'The only way to do great work is to love what you do.',
+      'Ships don\'t sink because of the water around them. They sink because of the water that gets in them.',
+      'It always seems impossible until it\'s done.',
+      'Don\'t watch the clock; do what it does. Keep going.',
+      'The future belongs to those who believe in the beauty of their dreams.',
+    ];
+    return { icon: '💡', title: quotes[Math.floor(Math.random() * quotes.length)], subtitle: 'Daily motivation' };
+  }
+
   return null;
+}
+
+function toRoman(num) {
+  const vals = [[1000,'M'],[900,'CM'],[500,'D'],[400,'CD'],[100,'C'],[90,'XC'],[50,'L'],[40,'XL'],[10,'X'],[9,'IX'],[5,'V'],[4,'IV'],[1,'I']];
+  let result = '';
+  for (const [v, s] of vals) { while (num >= v) { result += s; num -= v; } }
+  return result;
+}
+
+function fromRoman(s) {
+  const vals = {'I':1,'V':5,'X':10,'L':50,'C':100,'D':500,'M':1000};
+  let result = 0;
+  for (let i = 0; i < s.length; i++) {
+    const cur = vals[s[i]] || 0;
+    const next = vals[s[i+1]] || 0;
+    result += cur < next ? -cur : cur;
+  }
+  return result;
 }
 
 function getWeekNumber(d) {

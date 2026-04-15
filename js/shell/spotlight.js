@@ -638,6 +638,9 @@ export function initSpotlight() {
       speed: 'speed-test', wifi: 'speed-test', zen: 'meditation',
       breathe: 'meditation', relax: 'meditation', sfx: 'soundboard',
       sound: 'soundboard', timer: 'timer', event: 'countdown',
+      reaction: 'reaction-test', reflex: 'reaction-test',
+      palette: 'color-palette', colors: 'color-palette',
+      word: 'wordle', guess: 'wordle',
     };
     const aliasMatch = APP_ALIASES[lower];
     const apps = processManager.getAllApps();

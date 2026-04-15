@@ -98,7 +98,8 @@ export function initMenubar() {
       animate: 'Animate Studio', 'video-editor': 'Video Editor',
       'ai-art': 'AI Art Generator', wordle: 'Wordle',
       meditation: 'Meditation', soundboard: 'Soundboard',
-      countdown: 'Countdown',
+      countdown: 'Countdown', 'reaction-test': 'Reaction Test',
+      'color-palette': 'Color Palette',
     };
     document.getElementById('menubar-app-name').textContent = appNames[app] || title || 'Finder';
   });
