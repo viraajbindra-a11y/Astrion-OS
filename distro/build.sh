@@ -86,8 +86,8 @@ apt-get install -y -qq libwebkit2gtk-4.0-dev libgtk-3-dev librsvg2-dev librsvg2-
 # Utilities only (no polybar, no plank, no rofi — Astrion OS has its own native shell)
 apt-get install -y -qq dunst feh
 
-# Keep a lightweight browser for external web browsing (not the shell)
-apt-get install -y -qq firefox-esr || true
+# Chromium browser — the real browser for Astrion OS
+apt-get install -y -qq chromium || apt-get install -y -qq chromium-browser || true
 
 # Terminal + file manager + text editor
 apt-get install -y -qq xfce4-terminal thunar thunar-archive-plugin tumbler mousepad geany
@@ -255,7 +255,7 @@ echo "  Compiling NOVA native renderer..."
 mkdir -p "$CHROOT/opt/nova-os/renderer"
 cp "$SCRIPT_DIR/nova-renderer/nova-shell.c" "$CHROOT/opt/nova-os/renderer/"
 cp "$SCRIPT_DIR/nova-renderer/nova-renderer.c" "$CHROOT/opt/nova-os/renderer/"
-cp "$SCRIPT_DIR/nova-renderer/astrion-browser.c" "$CHROOT/opt/nova-os/renderer/"
+# astrion-browser removed — using Chromium instead
 cp "$SCRIPT_DIR/nova-renderer/Makefile" "$CHROOT/opt/nova-os/renderer/"
 cp "$SCRIPT_DIR/nova-renderer/nova-start.sh" "$CHROOT/opt/nova-os/renderer/"
 cp "$SCRIPT_DIR/nova-renderer/nova-first-boot.sh" "$CHROOT/opt/nova-os/renderer/"

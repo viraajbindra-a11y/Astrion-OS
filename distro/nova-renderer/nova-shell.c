@@ -1752,9 +1752,9 @@ static void on_dock_icon_clicked(GtkWidget *widget, gpointer data)
 {
     NovaApp *app = (NovaApp *)data;
 
-    /* Browser: launch native astrion-browser instead of web app */
+    /* Browser: launch Chromium instead of web app */
     if (strcmp(app->id, "browser") == 0) {
-        g_spawn_command_line_async("astrion-browser", NULL);
+        g_spawn_command_line_async("chromium --no-first-run --disable-default-apps", NULL);
         return;
     }
 
