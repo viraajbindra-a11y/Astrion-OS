@@ -2322,19 +2322,34 @@ static void on_launcher_entry_changed(GtkEditable *editable, gpointer data)
             gtk_widget_set_opacity(type_label, 0.5);
             gtk_box_pack_end(GTK_BOX(row), type_label, FALSE, FALSE, 8);
 
-            /* Make it clickable */
+            /* Make it clickable — use button-press-event which has 3 args:
+             * (GtkWidget *widget, GdkEventButton *event, gpointer user_data)
+             * We need a wrapper since on_dock_icon_clicked expects "clicked" sig */
             GtkWidget *evbox = gtk_event_box_new();
             gtk_container_add(GTK_CONTAINER(evbox), row);
 
             NovaApp *app = &app_registry[i];
             g_signal_connect(evbox, "button-press-event",
-                G_CALLBACK(on_dock_icon_clicked), app);
+                G_CALLBACK(on_launcher_result_clicked), app);
 
             gtk_box_pack_start(GTK_BOX(launcher_results), evbox, FALSE, FALSE, 2);
         }
     }
 
     gtk_widget_show_all(launcher_results);
+}
+
+/* Wrapper for launcher result clicks — button-press-event has 3 args */
+static gboolean on_launcher_result_clicked(GtkWidget *widget, GdkEventButton *event, gpointer data)
+{
+    NovaApp *app = (NovaApp *)data;
+    nova_hide_launcher();
+    if (strcmp(app->id, "browser") == 0) {
+        g_spawn_command_line_async("chromium --no-first-run --disable-default-apps", NULL);
+    } else {
+        nova_launch_app(app);
+    }
+    return TRUE;
 }
 
 static void on_launcher_entry_activate(GtkEntry *entry, gpointer data)
