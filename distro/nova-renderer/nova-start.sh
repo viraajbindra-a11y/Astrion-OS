@@ -11,7 +11,9 @@ export DESKTOP_SESSION=nova
 # Audio
 pulseaudio --start 2>/dev/null &
 
-# Network applet
+# Network — ensure NetworkManager is running for WiFi
+sudo systemctl start NetworkManager 2>/dev/null || sudo service NetworkManager start 2>/dev/null || true
+sleep 1
 nm-applet --indicator 2>/dev/null &
 
 # Power management

@@ -86,6 +86,9 @@ apt-get install -y -qq libwebkit2gtk-4.0-dev libgtk-3-dev librsvg2-dev librsvg2-
 # Utilities only (no polybar, no plank, no rofi — Astrion OS has its own native shell)
 apt-get install -y -qq dunst feh
 
+# Network manager — required for WiFi picker in nova-shell (nmcli)
+apt-get install -y -qq network-manager wpasupplicant wireless-tools || true
+
 # Chromium browser — the real browser for Astrion OS
 apt-get install -y -qq chromium || apt-get install -y -qq chromium-browser || true
 

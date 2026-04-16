@@ -373,10 +373,25 @@ function initBrowser(container, instanceId, options = {}) {
       return;
     }
 
-    // Google → local search
+    // Google → local search (both homepage and search results)
     const googleMatch = url.match(/google\.com\/search\?.*q=([^&]+)/);
     if (googleMatch) {
       navigateTab(tab, `search.html?q=${encodeURIComponent(decodeURIComponent(googleMatch[1]))}`);
+      return;
+    }
+    // Google homepage → redirect to Astrion search (Google blocks proxy)
+    if (/^https?:\/\/(www\.)?google\.(com|co\.\w+|[a-z]{2,3})\/?(\?.*)?$/i.test(url)) {
+      navigateTab(tab, 'search.html');
+      return;
+    }
+
+    // Block sites known to crash the proxy
+    const BLOCKED_DOMAINS = ['facebook.com', 'instagram.com', 'twitter.com', 'x.com', 'tiktok.com', 'linkedin.com'];
+    const urlDomain = getDomain(url).toLowerCase();
+    if (BLOCKED_DOMAINS.some(d => urlDomain.includes(d))) {
+      tab.title = getDomain(url);
+      updateTabMeta(tab);
+      showBlockedPage(tab, url);
       return;
     }
 

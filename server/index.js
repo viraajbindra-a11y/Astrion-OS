@@ -763,7 +763,7 @@ app.get('/app/:appId', (req, res) => {
   <style>
     /* Native mode: no shell chrome, just the app content filling the window */
     body.nova-native-app { background: #1e1e2e; margin: 0; padding: 0; overflow: hidden; }
-    body.nova-native-app #windows-container { position: fixed; inset: 0; }
+    body.nova-native-app #windows-container { position: fixed; inset: 0; overflow: auto; }
     body.nova-native-app #desktop { display: none !important; }
     body.nova-native-app #menubar { display: none !important; }
     body.nova-native-app #dock { display: none !important; }
@@ -781,6 +781,7 @@ app.get('/app/:appId', (req, res) => {
     body.nova-native-app .window .window-titlebar { display: none !important; }
     body.nova-native-app .window .window-content {
       height: 100% !important; border-radius: 0 !important;
+      overflow: auto !important;
     }
   </style>
 </head>
