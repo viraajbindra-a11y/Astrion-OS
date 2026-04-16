@@ -1189,39 +1189,50 @@ static void apply_css_theme(void)
         ".nova-window-btn {\n"
         "  min-width: 16px;\n"
         "  min-height: 16px;\n"
+        "  max-width: 16px;\n"
+        "  max-height: 16px;\n"
         "  border-radius: 50%;\n"
         "  padding: 0;\n"
         "  margin: 2px;\n"
         "  border: none;\n"
+        "  background-image: none;\n"
+        "  box-shadow: none;\n"
+        "  outline: none;\n"
         "}\n"
         "\n"
         ".nova-window-close {\n"
-        "  background: #ff5f57;\n"
+        "  background-color: #ff5f57;\n"
+        "  background-image: none;\n"
         "  border-radius: 50%;\n"
         "  border: none;\n"
         "}\n"
         ".nova-window-close:hover {\n"
-        "  background: #ff3b30;\n"
+        "  background-color: #ff3b30;\n"
+        "  background-image: none;\n"
         "  border: none;\n"
         "}\n"
         "\n"
         ".nova-window-minimize {\n"
-        "  background: #ffbd2e;\n"
+        "  background-color: #ffbd2e;\n"
+        "  background-image: none;\n"
         "  border-radius: 50%;\n"
         "  border: none;\n"
         "}\n"
         ".nova-window-minimize:hover {\n"
-        "  background: #ff9500;\n"
+        "  background-color: #ff9500;\n"
+        "  background-image: none;\n"
         "  border: none;\n"
         "}\n"
         "\n"
         ".nova-window-maximize {\n"
-        "  background: #28c840;\n"
+        "  background-color: #28c840;\n"
+        "  background-image: none;\n"
         "  border-radius: 50%;\n"
         "  border: none;\n"
         "}\n"
         ".nova-window-maximize:hover {\n"
-        "  background: #34c759;\n"
+        "  background-color: #34c759;\n"
+        "  background-image: none;\n"
         "  border: none;\n"
         "}\n"
         "\n"
@@ -2186,8 +2197,33 @@ static gboolean on_app_context_menu(WebKitWebView *v, WebKitContextMenu *m,
 static void on_app_window_destroy(gpointer data)
 {
     NovaWindow *nw = (NovaWindow *)data;
+    /* If nova_close_window already cleaned up (window==NULL), skip.
+     * This prevents double-compaction when close button triggers both
+     * nova_close_window() and the GTK "destroy" signal. */
+    if (!nw->window) return;
+
+    /* Window closed via Alt+F4 or WM — need to compact here */
     nw->window = NULL;
     nw->webview = NULL;
+
+    if (focused_window == nw) focused_window = NULL;
+
+    int idx = (int)(nw - windows);
+    if (idx >= 0 && idx < window_count) {
+        for (int i = idx; i < window_count - 1; i++) {
+            windows[i] = windows[i + 1];
+        }
+        window_count--;
+        memset(&windows[window_count], 0, sizeof(NovaWindow));
+
+        if (!focused_window && window_count > 0) {
+            for (int i = window_count - 1; i >= 0; i--) {
+                if (windows[i].window) { focused_window = &windows[i]; break; }
+            }
+        }
+    }
+
+    update_dock();
 }
 
 static void on_app_load_changed(WebKitWebView *view, WebKitLoadEvent event, gpointer data)
@@ -2377,7 +2413,11 @@ static void nova_launch_app(NovaApp *app)
 static void nova_close_window(NovaWindow *nwin)
 {
     if (!nwin || !nwin->window) return;
-    gtk_widget_destroy(nwin->window);
+
+    /* Mark window NULL BEFORE gtk_widget_destroy so the destroy callback
+     * (on_app_window_destroy) sees window==NULL and skips compaction —
+     * we handle compaction here instead. */
+    GtkWidget *win = nwin->window;
     nwin->window = NULL;
     nwin->webview = NULL;
     nwin->app = NULL;
@@ -2386,6 +2426,24 @@ static void nova_close_window(NovaWindow *nwin)
         focused_window = NULL;
     }
 
+    /* Find this slot and compact the array */
+    int idx = (int)(nwin - windows);
+    if (idx >= 0 && idx < window_count) {
+        for (int i = idx; i < window_count - 1; i++) {
+            windows[i] = windows[i + 1];
+        }
+        window_count--;
+        memset(&windows[window_count], 0, sizeof(NovaWindow));
+
+        /* Refocus the topmost remaining window */
+        if (!focused_window && window_count > 0) {
+            for (int i = window_count - 1; i >= 0; i--) {
+                if (windows[i].window) { focused_window = &windows[i]; break; }
+            }
+        }
+    }
+
+    gtk_widget_destroy(win);
     update_dock();
 }
 
