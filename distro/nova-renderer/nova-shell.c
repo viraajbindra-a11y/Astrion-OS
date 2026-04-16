@@ -282,6 +282,7 @@ static void hide_app_switcher(void);
 
 /* Desktop right-click menu */
 static void on_apple_menu_about(GtkMenuItem *item, gpointer data);
+static gboolean on_desktop_icon_clicked(GtkWidget *w, GdkEventButton *ev, gpointer path);
 
 /* Popup overlay forward declarations */
 static void hide_screensaver_cb(GtkWidget *w, gpointer data);
@@ -1429,6 +1430,18 @@ static gboolean on_desktop_button_press(GtkWidget *widget, GdkEventButton *event
     return FALSE;
 }
 
+static gboolean on_desktop_icon_clicked(GtkWidget *w, GdkEventButton *ev, gpointer path)
+{
+    if (ev->type == GDK_2BUTTON_PRESS && ev->button == 1) {
+        /* Double-click: open with xdg-open */
+        char cmd[1200];
+        snprintf(cmd, sizeof(cmd), "xdg-open \"%s\" &", (const char *)path);
+        g_spawn_command_line_async(cmd, NULL);
+        return TRUE;
+    }
+    return FALSE;
+}
+
 static void create_desktop(void)
 {
     desktop_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
@@ -1447,6 +1460,106 @@ static void create_desktop(void)
     gtk_container_add(GTK_CONTAINER(overlay), drawing);
     g_signal_connect(drawing, "draw", G_CALLBACK(on_desktop_draw), NULL);
 
+    /* Desktop icons — scan ~/Desktop and show files */
+    GtkWidget *icon_grid = gtk_flow_box_new();
+    gtk_flow_box_set_orientation(GTK_FLOW_BOX(icon_grid), GTK_ORIENTATION_VERTICAL);
+    gtk_flow_box_set_max_children_per_line(GTK_FLOW_BOX(icon_grid), 20);
+    gtk_flow_box_set_selection_mode(GTK_FLOW_BOX(icon_grid), GTK_SELECTION_NONE);
+    gtk_flow_box_set_column_spacing(GTK_FLOW_BOX(icon_grid), 8);
+    gtk_flow_box_set_row_spacing(GTK_FLOW_BOX(icon_grid), 4);
+    gtk_widget_set_halign(icon_grid, GTK_ALIGN_END);
+    gtk_widget_set_valign(icon_grid, GTK_ALIGN_START);
+    gtk_widget_set_margin_top(icon_grid, PANEL_HEIGHT + 12);
+    gtk_widget_set_margin_end(icon_grid, 16);
+    gtk_widget_set_margin_bottom(icon_grid, DOCK_HEIGHT + 20);
+
+    /* Populate desktop icons */
+    {
+        const char *home = g_get_home_dir();
+        char desktop_path[512];
+        snprintf(desktop_path, sizeof(desktop_path), "%s/Desktop", home);
+        GDir *dir = g_dir_open(desktop_path, 0, NULL);
+        if (dir) {
+            const gchar *name;
+            while ((name = g_dir_read_name(dir)) != NULL) {
+                if (name[0] == '.') continue; /* skip hidden */
+                char full_path[1024];
+                snprintf(full_path, sizeof(full_path), "%s/%s", desktop_path, name);
+
+                /* Determine icon based on type */
+                const char *icon_str = "\xF0\x9F\x93\x84"; /* file icon */
+                if (g_file_test(full_path, G_FILE_TEST_IS_DIR)) {
+                    icon_str = "\xF0\x9F\x93\x81"; /* folder icon */
+                } else {
+                    /* Check extension */
+                    const char *ext = strrchr(name, '.');
+                    if (ext) {
+                        if (g_ascii_strcasecmp(ext, ".png") == 0 || g_ascii_strcasecmp(ext, ".jpg") == 0 ||
+                            g_ascii_strcasecmp(ext, ".jpeg") == 0 || g_ascii_strcasecmp(ext, ".gif") == 0)
+                            icon_str = "\xF0\x9F\x96\xBC\xEF\xB8\x8F"; /* image */
+                        else if (g_ascii_strcasecmp(ext, ".mp3") == 0 || g_ascii_strcasecmp(ext, ".wav") == 0 ||
+                                 g_ascii_strcasecmp(ext, ".flac") == 0)
+                            icon_str = "\xF0\x9F\x8E\xB5"; /* music */
+                        else if (g_ascii_strcasecmp(ext, ".mp4") == 0 || g_ascii_strcasecmp(ext, ".mkv") == 0)
+                            icon_str = "\xF0\x9F\x8E\xAC"; /* video */
+                        else if (g_ascii_strcasecmp(ext, ".pdf") == 0)
+                            icon_str = "\xF0\x9F\x93\x95"; /* book */
+                        else if (g_ascii_strcasecmp(ext, ".txt") == 0 || g_ascii_strcasecmp(ext, ".md") == 0)
+                            icon_str = "\xF0\x9F\x93\x9D"; /* text */
+                        else if (g_ascii_strcasecmp(ext, ".js") == 0 || g_ascii_strcasecmp(ext, ".py") == 0 ||
+                                 g_ascii_strcasecmp(ext, ".c") == 0 || g_ascii_strcasecmp(ext, ".html") == 0)
+                            icon_str = "\xF0\x9F\x92\xBB"; /* code */
+                        else if (g_ascii_strcasecmp(ext, ".zip") == 0 || g_ascii_strcasecmp(ext, ".tar") == 0)
+                            icon_str = "\xF0\x9F\x93\xA6"; /* package */
+                    }
+                }
+
+                GtkWidget *item_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+                gtk_widget_set_size_request(item_box, 80, 80);
+
+                GtkWidget *icon_lbl = gtk_label_new(icon_str);
+                PangoAttrList *a = pango_attr_list_new();
+                pango_attr_list_insert(a, pango_attr_size_new(32 * PANGO_SCALE));
+                gtk_label_set_attributes(GTK_LABEL(icon_lbl), a);
+                pango_attr_list_unref(a);
+                gtk_box_pack_start(GTK_BOX(item_box), icon_lbl, FALSE, FALSE, 4);
+
+                /* Truncate long names */
+                char short_name[24];
+                if (strlen(name) > 20) {
+                    strncpy(short_name, name, 17);
+                    short_name[17] = '\0';
+                    strcat(short_name, "...");
+                } else {
+                    strncpy(short_name, name, sizeof(short_name) - 1);
+                    short_name[sizeof(short_name) - 1] = '\0';
+                }
+
+                GtkWidget *name_lbl = gtk_label_new(short_name);
+                PangoAttrList *na = pango_attr_list_new();
+                pango_attr_list_insert(na, pango_attr_size_new(9 * PANGO_SCALE));
+                pango_attr_list_insert(na, pango_attr_foreground_new(60000, 60000, 60000));
+                gtk_label_set_attributes(GTK_LABEL(name_lbl), na);
+                pango_attr_list_unref(na);
+                gtk_label_set_ellipsize(GTK_LABEL(name_lbl), PANGO_ELLIPSIZE_END);
+                gtk_label_set_max_width_chars(GTK_LABEL(name_lbl), 12);
+                gtk_box_pack_start(GTK_BOX(item_box), name_lbl, FALSE, FALSE, 0);
+
+                /* Make clickable — open with xdg-open */
+                GtkWidget *ev = gtk_event_box_new();
+                gtk_event_box_set_visible_window(GTK_EVENT_BOX(ev), FALSE);
+                gtk_container_add(GTK_CONTAINER(ev), item_box);
+                char *path_copy = g_strdup(full_path);
+                g_signal_connect_data(ev, "button-press-event",
+                    G_CALLBACK(on_desktop_icon_clicked), path_copy,
+                    (GClosureNotify)g_free, 0);
+                gtk_flow_box_insert(GTK_FLOW_BOX(icon_grid), ev, -1);
+            }
+            g_dir_close(dir);
+        }
+    }
+    gtk_overlay_add_overlay(GTK_OVERLAY(overlay), icon_grid);
+
     /* Invisible event box on top to catch right-clicks */
     GtkWidget *evbox = gtk_event_box_new();
     gtk_event_box_set_visible_window(GTK_EVENT_BOX(evbox), FALSE);
@@ -1454,10 +1567,6 @@ static void create_desktop(void)
     g_signal_connect(evbox, "button-press-event", G_CALLBACK(on_desktop_button_press), NULL);
     gtk_overlay_add_overlay(GTK_OVERLAY(overlay), evbox);
 
-    /* No gtk_widget_set_app_paintable here — we draw via the "draw" signal on
-     * the GtkDrawingArea, which runs regardless of app-paintable. Setting it
-     * would ask GTK for an RGBA visual we can't composite on bare X11. See
-     * tasks/lessons.md #1. */
     gtk_widget_show_all(desktop_window);
     gtk_window_fullscreen(GTK_WINDOW(desktop_window));
 }
