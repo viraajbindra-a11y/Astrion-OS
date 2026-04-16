@@ -641,6 +641,9 @@ export function initSpotlight() {
       reaction: 'reaction-test', reflex: 'reaction-test',
       palette: 'color-palette', colors: 'color-palette',
       word: 'wordle', guess: 'wordle',
+      rps: 'rock-paper-scissors', ttt: 'tic-tac-toe', xo: 'tic-tac-toe',
+      facts: 'random-facts', trivia: 'random-facts', bmi: 'bmi-calc',
+      health: 'bmi-calc', weight: 'bmi-calc',
     };
     const aliasMatch = APP_ALIASES[lower];
     const apps = processManager.getAllApps();

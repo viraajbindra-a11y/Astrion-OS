@@ -99,7 +99,9 @@ export function initMenubar() {
       'ai-art': 'AI Art Generator', wordle: 'Wordle',
       meditation: 'Meditation', soundboard: 'Soundboard',
       countdown: 'Countdown', 'reaction-test': 'Reaction Test',
-      'color-palette': 'Color Palette',
+      'color-palette': 'Color Palette', 'rock-paper-scissors': 'RPS',
+      'tic-tac-toe': 'Tic Tac Toe', 'random-facts': 'Random Facts',
+      'bmi-calc': 'BMI Calculator',
     };
     document.getElementById('menubar-app-name').textContent = appNames[app] || title || 'Finder';
   });

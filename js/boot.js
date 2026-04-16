@@ -121,6 +121,10 @@ import { registerSoundboard } from './apps/soundboard.js';
 import { registerCountdown } from './apps/countdown.js';
 import { registerReactionTest } from './apps/reaction-test.js';
 import { registerColorPalette } from './apps/color-palette.js';
+import { registerRockPaperScissors } from './apps/rock-paper-scissors.js';
+import { registerTicTacToe } from './apps/tic-tac-toe.js';
+import { registerRandomFacts } from './apps/random-facts.js';
+import { registerBmiCalc } from './apps/bmi-calc.js';
 import { verifyPassword } from './kernel/crypto.js';
 import { sounds } from './kernel/sound.js';
 import { initVolumeHud } from './shell/volume-hud.js';
@@ -161,6 +165,10 @@ import { initVolumeHud } from './shell/volume-hud.js';
     registerEmojiKitchen(); registerWordle(); registerMeditation();
     registerSoundboard(); registerCountdown(); registerReactionTest();
     registerColorPalette();
+    registerRockPaperScissors();
+    registerTicTacToe();
+    registerRandomFacts();
+    registerBmiCalc();
 
     windowManager.init();
     initSpotlight();
@@ -217,6 +225,10 @@ import { initVolumeHud } from './shell/volume-hud.js';
     registerCountdown();
     registerReactionTest();
     registerColorPalette();
+    registerRockPaperScissors();
+    registerTicTacToe();
+    registerRandomFacts();
+    registerBmiCalc();
 
     windowManager.init();
 
@@ -325,6 +337,10 @@ import { initVolumeHud } from './shell/volume-hud.js';
   registerCountdown();
   registerReactionTest();
   registerColorPalette();
+  registerRockPaperScissors();
+  registerTicTacToe();
+  registerRandomFacts();
+  registerBmiCalc();
   await animate(progressBar, 85, 200);
 
   // Init kernel

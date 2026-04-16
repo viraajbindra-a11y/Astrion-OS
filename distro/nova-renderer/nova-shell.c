@@ -226,6 +226,10 @@ static NovaApp app_registry[] = {
     { "countdown",      "Countdown",        "\xE2\x8F\xB3",     "/app/countdown",        FALSE, TRUE  },
     { "reaction-test",  "Reaction Test",    "\xE2\x9A\xA1",     "/app/reaction-test",    FALSE, TRUE  },
     { "color-palette",  "Color Palette",    "\xF0\x9F\x8E\xA8", "/app/color-palette",    FALSE, TRUE  },
+    { "rock-paper-scissors","Rock Paper Scissors","\xE2\x9C\x8A","/app/rock-paper-scissors",FALSE,TRUE },
+    { "tic-tac-toe",    "Tic Tac Toe",      "\xE2\x9D\x8C",     "/app/tic-tac-toe",      FALSE, TRUE  },
+    { "random-facts",   "Random Facts",     "\xF0\x9F\xA7\xA0", "/app/random-facts",     FALSE, TRUE  },
+    { "bmi-calc",       "BMI Calculator",   "\xE2\x9A\x96\xEF\xB8\x8F", "/app/bmi-calc", FALSE, TRUE  },
     { NULL, NULL, NULL, NULL, FALSE, FALSE } /* Sentinel */
 };
 
@@ -2370,8 +2374,12 @@ static void on_launcher_entry_activate(GtkEntry *entry, gpointer data)
         for (char *p = app_lower; *p; p++) *p = tolower(*p);
 
         if (strstr(app_lower, lower) || strstr(app_registry[i].id, lower)) {
-            nova_launch_app(&app_registry[i]);
             nova_hide_launcher();
+            if (strcmp(app_registry[i].id, "browser") == 0) {
+                g_spawn_command_line_async("chromium --no-first-run --disable-default-apps", NULL);
+            } else {
+                nova_launch_app(&app_registry[i]);
+            }
             return;
         }
     }
