@@ -127,6 +127,49 @@ import { initVolumeHud } from './shell/volume-hud.js';
 
 // Boot sequence
 (async function boot() {
+  // ─── Native Spotlight Popup Mode ───
+  // When nova-shell opens Spotlight as a WebKitGTK popup, we just need
+  // apps registered + Spotlight initialized + auto-opened.
+  if (window.__NOVA_SPOTLIGHT_POPUP__) {
+    await fileSystem.init();
+    await graphStore.init();
+    await migrateLocalStorageToGraph();
+
+    // Register all apps so Spotlight can find them
+    registerFinder(); registerNotes(); registerTerminal();
+    registerCalculator(); registerSettings(); registerTextEditor();
+    registerDraw(); registerBrowser(); registerMusic();
+    registerCalendar(); registerAppStore(); registerPhotos();
+    registerWeather(); registerClock(); registerReminders();
+    registerActivityMonitor();
+    registerVault(); registerMessages(); registerScreenRecorder();
+    registerTrash(); registerInstaller(); registerStickyNotes();
+    registerContacts(); registerMaps(); registerVoiceMemos();
+    registerPomodoro(); registerPdfViewer(); registerKanban();
+    registerHabitTracker(); registerVideoPlayer(); registerSystemInfo();
+    registerTranslator(); registerUnitConverter(); registerColorPicker();
+    registerStopwatch(); registerTimer(); registerWhiteboard();
+    registerPasswordGen(); registerMarkdown(); registerQrCode();
+    registerDictionary(); registerJournal(); registerFlashcards();
+    registerChess(); registerSnake(); register2048();
+    registerBudget(); registerQuotes(); registerTypingTest();
+    registerTodo(); registerBeatStudio(); registerLiveChat();
+    registerYouTube(); registerPixelArt(); registerTetris();
+    registerMinesweeper(); registerMatrixRain(); registerNeonVoid();
+    registerAnimate(); registerVideoEditor(); registerAiArt();
+    registerSudoku(); registerSpeedTest(); registerRecipeBook();
+    registerEmojiKitchen(); registerWordle(); registerMeditation();
+    registerSoundboard(); registerCountdown(); registerReactionTest();
+    registerColorPalette();
+
+    windowManager.init();
+    initSpotlight();
+
+    // Auto-open Spotlight after a tiny delay
+    setTimeout(() => eventBus.emit('spotlight:toggle'), 300);
+    return;
+  }
+
   // ─── Native App Mode ───
   // When running inside nova-shell (our C renderer), each app opens in its own
   // native GTK window. The server sends a page with __NOVA_LAUNCH_APP__ set.

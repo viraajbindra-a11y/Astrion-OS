@@ -692,6 +692,36 @@ render();
 </script></body></html>`);
 });
 
+// ─── Spotlight popup for native shell ───
+// Full Astrion boot in a popup window, auto-opens Spotlight with smart answers
+app.get('/popup/spotlight', (req, res) => {
+  res.send(`<!DOCTYPE html><html><head>
+<meta charset="UTF-8">
+<link rel="stylesheet" href="/css/system.css">
+<link rel="stylesheet" href="/css/desktop.css">
+<link rel="stylesheet" href="/css/window.css">
+<link rel="stylesheet" href="/css/spotlight.css">
+<link rel="stylesheet" href="/css/menubar.css">
+<link rel="stylesheet" href="/css/dock.css">
+<style>
+  body { background:#1e1e2e; margin:0; overflow:hidden; }
+  #desktop, #menubar, #dock, #boot-screen, #login-screen, #windows-container { display:none !important; }
+</style>
+</head><body>
+<div id="boot-screen" class="hidden"><div class="boot-progress-bar"></div></div>
+<div id="login-screen" class="hidden"></div>
+<div id="desktop"></div>
+<div id="menubar"></div>
+<div id="dock"></div>
+<div id="windows-container"></div>
+<script>
+  window.__NOVA_NATIVE__ = true;
+  window.__NOVA_SPOTLIGHT_POPUP__ = true;
+</script>
+<script type="module" src="/js/boot.js"></script>
+</body></html>`);
+});
+
 // ─── Native Shell App Routes ───
 // When nova-shell (the native C renderer) opens an app,
 // it loads /app/terminal, /app/notes, etc.

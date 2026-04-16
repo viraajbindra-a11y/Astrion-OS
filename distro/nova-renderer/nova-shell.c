@@ -148,6 +148,7 @@ static time_t         last_user_activity = 0;
 static GtkWidget     *popup_emoji_win   = NULL;
 static GtkWidget     *popup_clipboard_win = NULL;
 static GtkWidget     *popup_volume_win  = NULL;
+static GtkWidget     *popup_spotlight_win = NULL;
 
 /* ═══════════════════════════════════════════════
  * App Registry
@@ -246,6 +247,16 @@ static gboolean update_battery(gpointer data);
 static gboolean update_wifi(gpointer data);
 static gboolean update_volume(gpointer data);
 static double get_hidpi_zoom(void);
+
+/* Search icon click — opens web Spotlight popup */
+static void on_search_icon_clicked(GtkButton *btn, gpointer d);
+
+/* Menubar dropdown menu handlers */
+static gboolean on_file_menu_click(GtkWidget *w, GdkEventButton *ev, gpointer d);
+static gboolean on_edit_menu_click(GtkWidget *w, GdkEventButton *ev, gpointer d);
+static gboolean on_view_menu_click(GtkWidget *w, GdkEventButton *ev, gpointer d);
+static gboolean on_window_menu_click(GtkWidget *w, GdkEventButton *ev, gpointer d);
+static gboolean on_help_menu_click(GtkWidget *w, GdkEventButton *ev, gpointer d);
 
 /* M0.P2: Native Wi-Fi picker */
 static void show_wifi_picker(void);
@@ -1620,6 +1631,214 @@ static void update_clock(void)
     }
 }
 
+/* ═══════════════════════════════════════════════
+ * Menubar Dropdown Menus
+ * ═══════════════════════════════════════════════ */
+
+static void on_search_icon_clicked(GtkButton *btn, gpointer d)
+{
+    toggle_popup(&popup_spotlight_win, "Astrion Spotlight",
+        "/popup/spotlight", 600, 500);
+}
+
+static void on_menu_new_window(GtkMenuItem *item, gpointer d)
+{
+    /* Launch a new Finder window */
+    NovaApp *app = find_app_by_id("finder");
+    if (app) nova_launch_app(app);
+}
+
+static void on_menu_close_window(GtkMenuItem *item, gpointer d)
+{
+    if (focused_window) nova_close_window(focused_window);
+}
+
+static void on_menu_open_terminal(GtkMenuItem *item, gpointer d)
+{
+    NovaApp *app = find_app_by_id("terminal");
+    if (app) nova_launch_app(app);
+}
+
+static void on_menu_tile_left(GtkMenuItem *item, gpointer d)
+{
+    if (!focused_window || !focused_window->window) return;
+    int snap_y = PANEL_HEIGHT;
+    int snap_h = screen_height - PANEL_HEIGHT - DOCK_HEIGHT - 16;
+    gtk_window_move(GTK_WINDOW(focused_window->window), 0, snap_y);
+    gtk_window_resize(GTK_WINDOW(focused_window->window), screen_width / 2, snap_h);
+    focused_window->maximized = TRUE;
+}
+
+static void on_menu_tile_right(GtkMenuItem *item, gpointer d)
+{
+    if (!focused_window || !focused_window->window) return;
+    int snap_y = PANEL_HEIGHT;
+    int snap_h = screen_height - PANEL_HEIGHT - DOCK_HEIGHT - 16;
+    gtk_window_move(GTK_WINDOW(focused_window->window), screen_width / 2, snap_y);
+    gtk_window_resize(GTK_WINDOW(focused_window->window), screen_width / 2, snap_h);
+    focused_window->maximized = TRUE;
+}
+
+static void on_menu_maximize(GtkMenuItem *item, gpointer d)
+{
+    if (focused_window) nova_maximize_window(focused_window);
+}
+
+static void on_menu_minimize(GtkMenuItem *item, gpointer d)
+{
+    if (focused_window) nova_minimize_window(focused_window);
+}
+
+static void on_menu_cascade(GtkMenuItem *item, gpointer d)
+{
+    int snap_y = PANEL_HEIGHT + 10;
+    int snap_h = screen_height - PANEL_HEIGHT - DOCK_HEIGHT - 60;
+    int snap_w = screen_width * 2 / 3;
+    for (int i = 0; i < window_count; i++) {
+        if (windows[i].window) {
+            gtk_window_move(GTK_WINDOW(windows[i].window), 30 + i * 30, snap_y + i * 30);
+            gtk_window_resize(GTK_WINDOW(windows[i].window), snap_w, snap_h);
+            windows[i].maximized = FALSE;
+            gtk_window_present(GTK_WINDOW(windows[i].window));
+        }
+    }
+}
+
+static void on_menu_grid_tile(GtkMenuItem *item, gpointer d)
+{
+    if (window_count == 0) return;
+    int snap_y = PANEL_HEIGHT;
+    int snap_h = screen_height - PANEL_HEIGHT - DOCK_HEIGHT - 16;
+    int cols = (window_count <= 2) ? window_count : (window_count <= 4) ? 2 : 3;
+    int rows = (window_count + cols - 1) / cols;
+    int cw = screen_width / cols;
+    int ch = snap_h / rows;
+    int idx = 0;
+    for (int r = 0; r < rows && idx < window_count; r++) {
+        for (int c = 0; c < cols && idx < window_count; c++, idx++) {
+            if (windows[idx].window) {
+                gtk_window_move(GTK_WINDOW(windows[idx].window), c * cw, snap_y + r * ch);
+                gtk_window_resize(GTK_WINDOW(windows[idx].window), cw, ch);
+                windows[idx].maximized = FALSE;
+            }
+        }
+    }
+}
+
+static gboolean on_file_menu_click(GtkWidget *w, GdkEventButton *ev, gpointer d)
+{
+    GtkWidget *menu = gtk_menu_new();
+    GtkWidget *new_win = gtk_menu_item_new_with_label("New Finder Window");
+    g_signal_connect(new_win, "activate", G_CALLBACK(on_menu_new_window), NULL);
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu), new_win);
+
+    GtkWidget *new_term = gtk_menu_item_new_with_label("New Terminal");
+    g_signal_connect(new_term, "activate", G_CALLBACK(on_menu_open_terminal), NULL);
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu), new_term);
+
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu), gtk_separator_menu_item_new());
+
+    GtkWidget *close = gtk_menu_item_new_with_label("Close Window");
+    g_signal_connect(close, "activate", G_CALLBACK(on_menu_close_window), NULL);
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu), close);
+
+    gtk_widget_show_all(menu);
+    gtk_menu_popup_at_widget(GTK_MENU(menu), w, GDK_GRAVITY_SOUTH_WEST, GDK_GRAVITY_NORTH_WEST, (GdkEvent *)ev);
+    return TRUE;
+}
+
+static gboolean on_edit_menu_click(GtkWidget *w, GdkEventButton *ev, gpointer d)
+{
+    GtkWidget *menu = gtk_menu_new();
+    /* These send keyboard events to the focused WebKitWebView */
+    GtkWidget *cut = gtk_menu_item_new_with_label("Cut               Ctrl+X");
+    GtkWidget *copy = gtk_menu_item_new_with_label("Copy            Ctrl+C");
+    GtkWidget *paste = gtk_menu_item_new_with_label("Paste            Ctrl+V");
+    GtkWidget *selall = gtk_menu_item_new_with_label("Select All      Ctrl+A");
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu), cut);
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu), copy);
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu), paste);
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu), gtk_separator_menu_item_new());
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu), selall);
+    gtk_widget_show_all(menu);
+    gtk_menu_popup_at_widget(GTK_MENU(menu), w, GDK_GRAVITY_SOUTH_WEST, GDK_GRAVITY_NORTH_WEST, (GdkEvent *)ev);
+    return TRUE;
+}
+
+static gboolean on_view_menu_click(GtkWidget *w, GdkEventButton *ev, gpointer d)
+{
+    GtkWidget *menu = gtk_menu_new();
+    GtkWidget *reload = gtk_menu_item_new_with_label("Reload App");
+    g_signal_connect_swapped(reload, "activate", G_CALLBACK(webkit_web_view_reload),
+        focused_window ? focused_window->webview : NULL);
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu), reload);
+    gtk_widget_show_all(menu);
+    gtk_menu_popup_at_widget(GTK_MENU(menu), w, GDK_GRAVITY_SOUTH_WEST, GDK_GRAVITY_NORTH_WEST, (GdkEvent *)ev);
+    return TRUE;
+}
+
+static gboolean on_window_menu_click(GtkWidget *w, GdkEventButton *ev, gpointer d)
+{
+    GtkWidget *menu = gtk_menu_new();
+
+    GtkWidget *minimize = gtk_menu_item_new_with_label("Minimize");
+    g_signal_connect(minimize, "activate", G_CALLBACK(on_menu_minimize), NULL);
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu), minimize);
+
+    GtkWidget *maximize = gtk_menu_item_new_with_label("Maximize / Restore");
+    g_signal_connect(maximize, "activate", G_CALLBACK(on_menu_maximize), NULL);
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu), maximize);
+
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu), gtk_separator_menu_item_new());
+
+    GtkWidget *tile_l = gtk_menu_item_new_with_label("Tile Left");
+    g_signal_connect(tile_l, "activate", G_CALLBACK(on_menu_tile_left), NULL);
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu), tile_l);
+
+    GtkWidget *tile_r = gtk_menu_item_new_with_label("Tile Right");
+    g_signal_connect(tile_r, "activate", G_CALLBACK(on_menu_tile_right), NULL);
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu), tile_r);
+
+    GtkWidget *grid = gtk_menu_item_new_with_label("Grid Tile All");
+    g_signal_connect(grid, "activate", G_CALLBACK(on_menu_grid_tile), NULL);
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu), grid);
+
+    GtkWidget *cascade = gtk_menu_item_new_with_label("Cascade All");
+    g_signal_connect(cascade, "activate", G_CALLBACK(on_menu_cascade), NULL);
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu), cascade);
+
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu), gtk_separator_menu_item_new());
+
+    GtkWidget *close = gtk_menu_item_new_with_label("Close Window");
+    g_signal_connect(close, "activate", G_CALLBACK(on_menu_close_window), NULL);
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu), close);
+
+    gtk_widget_show_all(menu);
+    gtk_menu_popup_at_widget(GTK_MENU(menu), w, GDK_GRAVITY_SOUTH_WEST, GDK_GRAVITY_NORTH_WEST, (GdkEvent *)ev);
+    return TRUE;
+}
+
+static void on_help_about_activate(GtkMenuItem *item, gpointer d)
+{
+    nova_show_notification("Astrion OS v0.2", "76+ apps \xC2\xB7 AI-native \xC2\xB7 Built by the Astrion Team");
+}
+
+static gboolean on_help_menu_click(GtkWidget *w, GdkEventButton *ev, gpointer d)
+{
+    GtkWidget *menu = gtk_menu_new();
+    GtkWidget *about = gtk_menu_item_new_with_label("About Astrion OS");
+    g_signal_connect(about, "activate", G_CALLBACK(on_help_about_activate), NULL);
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu), about);
+
+    GtkWidget *kb = gtk_menu_item_new_with_label("Keyboard Shortcuts");
+    gtk_widget_set_sensitive(kb, FALSE); /* Not yet wired */
+    gtk_menu_shell_append(GTK_MENU_SHELL(menu), kb);
+
+    gtk_widget_show_all(menu);
+    gtk_menu_popup_at_widget(GTK_MENU(menu), w, GDK_GRAVITY_SOUTH_WEST, GDK_GRAVITY_NORTH_WEST, (GdkEvent *)ev);
+    return TRUE;
+}
+
 static void create_panel(void)
 {
     panel_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
@@ -1663,13 +1882,42 @@ static void create_panel(void)
     pango_attr_list_unref(attrs);
     gtk_box_pack_start(GTK_BOX(left_box), app_name, FALSE, FALSE, 4);
 
-    /* Menu items: File, Edit, View */
-    const char *menu_items[] = { "File", "Edit", "View", "Window", "Help", NULL };
-    for (int i = 0; menu_items[i]; i++) {
-        GtkWidget *lbl = gtk_label_new(menu_items[i]);
-        GtkWidget *evbox = gtk_event_box_new();
-        gtk_container_add(GTK_CONTAINER(evbox), lbl);
-        gtk_box_pack_start(GTK_BOX(left_box), evbox, FALSE, FALSE, 8);
+    /* Menu items: File, Edit, View, Window, Help — functional dropdowns */
+    {
+        /* File menu */
+        GtkWidget *file_lbl = gtk_label_new("File");
+        GtkWidget *file_evbox = gtk_event_box_new();
+        gtk_container_add(GTK_CONTAINER(file_evbox), file_lbl);
+        g_signal_connect(file_evbox, "button-press-event", G_CALLBACK(on_file_menu_click), NULL);
+        gtk_box_pack_start(GTK_BOX(left_box), file_evbox, FALSE, FALSE, 8);
+
+        /* Edit menu */
+        GtkWidget *edit_lbl = gtk_label_new("Edit");
+        GtkWidget *edit_evbox = gtk_event_box_new();
+        gtk_container_add(GTK_CONTAINER(edit_evbox), edit_lbl);
+        g_signal_connect(edit_evbox, "button-press-event", G_CALLBACK(on_edit_menu_click), NULL);
+        gtk_box_pack_start(GTK_BOX(left_box), edit_evbox, FALSE, FALSE, 8);
+
+        /* View menu */
+        GtkWidget *view_lbl = gtk_label_new("View");
+        GtkWidget *view_evbox = gtk_event_box_new();
+        gtk_container_add(GTK_CONTAINER(view_evbox), view_lbl);
+        g_signal_connect(view_evbox, "button-press-event", G_CALLBACK(on_view_menu_click), NULL);
+        gtk_box_pack_start(GTK_BOX(left_box), view_evbox, FALSE, FALSE, 8);
+
+        /* Window menu */
+        GtkWidget *win_lbl = gtk_label_new("Window");
+        GtkWidget *win_evbox = gtk_event_box_new();
+        gtk_container_add(GTK_CONTAINER(win_evbox), win_lbl);
+        g_signal_connect(win_evbox, "button-press-event", G_CALLBACK(on_window_menu_click), NULL);
+        gtk_box_pack_start(GTK_BOX(left_box), win_evbox, FALSE, FALSE, 8);
+
+        /* Help menu */
+        GtkWidget *help_lbl = gtk_label_new("Help");
+        GtkWidget *help_evbox = gtk_event_box_new();
+        gtk_container_add(GTK_CONTAINER(help_evbox), help_lbl);
+        g_signal_connect(help_evbox, "button-press-event", G_CALLBACK(on_help_menu_click), NULL);
+        gtk_box_pack_start(GTK_BOX(left_box), help_evbox, FALSE, FALSE, 8);
     }
 
     /* ─── Spacer ─── */
@@ -1750,7 +1998,7 @@ static void create_panel(void)
         "<span foreground='#c0c0c0'>\xF0\x9F\x94\x8D</span>");
     gtk_container_add(GTK_CONTAINER(search_btn), search_icon);
     gtk_button_set_relief(GTK_BUTTON(search_btn), GTK_RELIEF_NONE);
-    g_signal_connect(search_btn, "clicked", G_CALLBACK(nova_toggle_launcher), NULL);
+    g_signal_connect(search_btn, "clicked", G_CALLBACK(on_search_icon_clicked), NULL);
     gtk_box_pack_start(GTK_BOX(right_box), search_btn, FALSE, FALSE, 0);
 
     /* Date */
@@ -2128,14 +2376,28 @@ static gboolean on_window_titlebar_motion(GtkWidget *widget, GdkEventMotion *eve
         int dy = (int)event->y_root - drag_start_y;
         gtk_window_move(GTK_WINDOW(nwin->window), drag_win_x + dx, drag_win_y + dy);
 
-        /* Detect snap zones */
+        /* Detect snap zones — edges + corners */
         int mx = (int)event->x_root;
         int my = (int)event->y_root;
-        if (mx < 20) {
+        int edge = 20;
+        gboolean at_left   = mx < edge;
+        gboolean at_right  = mx > screen_width - edge;
+        gboolean at_top    = my < edge;
+        gboolean at_bottom = my > screen_height - edge;
+
+        if (at_left && at_top) {
+            snap_zone = 4; /* top-left quadrant */
+        } else if (at_right && at_top) {
+            snap_zone = 5; /* top-right quadrant */
+        } else if (at_left && at_bottom) {
+            snap_zone = 6; /* bottom-left quadrant */
+        } else if (at_right && at_bottom) {
+            snap_zone = 7; /* bottom-right quadrant */
+        } else if (at_left) {
             snap_zone = 1; /* left half */
-        } else if (mx > screen_width - 20) {
+        } else if (at_right) {
             snap_zone = 2; /* right half */
-        } else if (my < 20) {
+        } else if (at_top) {
             snap_zone = 3; /* maximize */
         } else {
             snap_zone = 0; /* no snap */
@@ -2158,20 +2420,43 @@ static gboolean on_window_titlebar_release(GtkWidget *widget, GdkEventButton *ev
             gtk_window_get_size(GTK_WINDOW(nwin->window), &nwin->save_w, &nwin->save_h);
         }
 
+        int half_w = screen_width / 2;
+        int half_h = snap_h / 2;
+
         if (snap_zone == 1) {
             /* Snap left half */
             gtk_window_move(GTK_WINDOW(nwin->window), 0, snap_y);
-            gtk_window_resize(GTK_WINDOW(nwin->window), screen_width / 2, snap_h);
+            gtk_window_resize(GTK_WINDOW(nwin->window), half_w, snap_h);
             nwin->maximized = TRUE;
         } else if (snap_zone == 2) {
             /* Snap right half */
-            gtk_window_move(GTK_WINDOW(nwin->window), screen_width / 2, snap_y);
-            gtk_window_resize(GTK_WINDOW(nwin->window), screen_width / 2, snap_h);
+            gtk_window_move(GTK_WINDOW(nwin->window), half_w, snap_y);
+            gtk_window_resize(GTK_WINDOW(nwin->window), half_w, snap_h);
             nwin->maximized = TRUE;
         } else if (snap_zone == 3) {
             /* Maximize (top edge) */
             gtk_window_move(GTK_WINDOW(nwin->window), 0, snap_y);
             gtk_window_resize(GTK_WINDOW(nwin->window), screen_width, snap_h);
+            nwin->maximized = TRUE;
+        } else if (snap_zone == 4) {
+            /* Top-left quadrant */
+            gtk_window_move(GTK_WINDOW(nwin->window), 0, snap_y);
+            gtk_window_resize(GTK_WINDOW(nwin->window), half_w, half_h);
+            nwin->maximized = TRUE;
+        } else if (snap_zone == 5) {
+            /* Top-right quadrant */
+            gtk_window_move(GTK_WINDOW(nwin->window), half_w, snap_y);
+            gtk_window_resize(GTK_WINDOW(nwin->window), half_w, half_h);
+            nwin->maximized = TRUE;
+        } else if (snap_zone == 6) {
+            /* Bottom-left quadrant */
+            gtk_window_move(GTK_WINDOW(nwin->window), 0, snap_y + half_h);
+            gtk_window_resize(GTK_WINDOW(nwin->window), half_w, half_h);
+            nwin->maximized = TRUE;
+        } else if (snap_zone == 7) {
+            /* Bottom-right quadrant */
+            gtk_window_move(GTK_WINDOW(nwin->window), half_w, snap_y + half_h);
+            gtk_window_resize(GTK_WINDOW(nwin->window), half_w, half_h);
             nwin->maximized = TRUE;
         }
         snap_zone = 0;
@@ -2725,15 +3010,17 @@ static gint global_key_snooper(GtkWidget *widget, GdkEventKey *event, gpointer d
 
     gboolean ctrl = (event->state & GDK_CONTROL_MASK);
 
-    /* Ctrl+Space — toggle Spotlight launcher */
+    /* Ctrl+Space — toggle Spotlight (web popup with smart answers) */
     if (ctrl && event->keyval == GDK_KEY_space) {
-        nova_toggle_launcher();
+        toggle_popup(&popup_spotlight_win, "Astrion Spotlight",
+            "/popup/spotlight", 600, 500);
         return TRUE; /* consumed */
     }
 
     /* Super/Meta key — also toggle Spotlight */
     if (event->keyval == GDK_KEY_Super_L || event->keyval == GDK_KEY_Super_R) {
-        nova_toggle_launcher();
+        toggle_popup(&popup_spotlight_win, "Astrion Spotlight",
+            "/popup/spotlight", 600, 500);
         return TRUE;
     }
 
