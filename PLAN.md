@@ -357,27 +357,38 @@ Each milestone has: a 1-sentence success definition, **explicit phases** (the su
 
 ---
 
-### M4 — Verifiable Code Generation *(~6 weeks after M3)*
+### M4 — Verifiable Code Generation *(~6 weeks after M3 — P1/P2/P3 shipped 2026-04-18)*
 
 **Kid version:** When Astrion writes code, it also writes the tests that prove it works. You get a receipt: "here's the spec in plain English, here's the code, here are the tests, all pass."
 
 **Success:** "Build me a habit tracker app" → spec → tests → code → app appears in dock, fully working, with a provenance trail.
 
 **Phases:**
-- **M4.P1 — Spec-from-Intent** *(Week 1–2)*
-  - S2 converts intent → plain-English spec (acceptance criteria, not code)
-  - User sees the spec and approves BEFORE any code is written (Socratic gate)
-  - Spec is frozen once approved
-- **M4.P2 — Tests-from-Spec** *(Week 2–3)*
-  - Generate tests from the frozen spec (not from code that doesn't exist yet)
-  - Tests live in a sandbox; code must pass them to be promoted
-- **M4.P3 — Code-to-Pass-Tests + Sandbox Executor** *(Week 3–5)*
-  - S2 writes code targeting the tests
-  - Code runs in a sandboxed WebKit context with limited syscalls
-  - If tests fail, S2 iterates up to N times, then asks user for help
-- **M4.P4 — Provenance + App Promotion** *(Week 5–6)*
-  - Every generated app is a node in the graph with: original intent, spec, tests, code, prompt chain, model version, seed
-  - Promotion from sandbox → dock requires red-team signoff (from M6) OR user's explicit L2 unlock (until M6 ships)
+- **M4.P1 — Spec-from-Intent** ✅ **2026-04-18**
+  - ✅ `js/kernel/spec-generator.js`: `generateSpec(intent)` returns `{goal, acceptance_criteria[], non_goals[], ux_notes, open_questions[], status:'draft'}` via `aiService.askWithMeta` with one retry on schema/parse fail.
+  - ✅ Schema validator caps criteria at 12, rejects empty goal/criteria, requires arrays where appropriate.
+  - ✅ Spec stored as `'spec'` graph node. Lifecycle: draft → frozen (user approval) or rejected (with reason).
+  - ✅ Capabilities: `spec.generate` (L0) + `spec.freeze` (L2 user-approval gate).
+  - ✅ Helpers: `getSpec`, `getFrozenSpecByIntent`, `listRecentSpecs`.
+  - Socratic UI in Spotlight (M4.P1.b) — deferred. CLI / capability path works.
+- **M4.P2 — Tests-from-Spec** ✅ **2026-04-18**
+  - ✅ `js/kernel/test-generator.js`: `generateTests(specId)` requires the spec to be FROZEN; rejects drafts so users can't accidentally test against unapproved criteria.
+  - ✅ Each test has `{title, setup, act, assert, criterionIndex}` — JS code strings. Schema validator: one test per criterion, code blob < 400 chars, no `import`/`require`/`fetch`/`eval`/`Function` tokens.
+  - ✅ Suite stored as `'test-suite'` graph node with a `'covers'` edge to the spec.
+  - ✅ Capability: `tests.generate` (L0). Helpers: `getTestSuite`, `getSuitesForSpec`, `recordSuiteRun`.
+- **M4.P3 — Sandbox Executor** ✅ **2026-04-18**
+  - ✅ `js/kernel/test-runner.js`: iframe with `sandbox="allow-scripts"` (NOT `allow-same-origin`) → unique origin, no parent window/storage/network access. Bootstrap exposes a tiny matcher (`.toBe / .toEqual / .toBeTruthy / .toBeFalsy / .toContain / .toBeGreaterThan / .toBeLessThan`).
+  - ✅ `runSingleTest(test)` and `runSuite(suiteId)`. Per-test 5s + suite 30s hard timeouts.
+  - ✅ Reuses one sandbox per `runSuite` call; results recorded back via `recordSuiteRun()` so each suite node carries `lastRunAt`/`lastRunPasses`/`lastRunResults`.
+  - ✅ Capability: `tests.run` (L1 SANDBOX, FREE reversibility).
+  - Verified: sandbox blocks `localStorage` access from inside (parent storage isolated).
+  - Code-from-tests iteration loop (S2 writes code targeting failing tests) — deferred to M4.P3.b.
+- **M4.P4 — Provenance + App Promotion** ⏳ pending
+  - Every generated app would be a graph node with: original intent, spec, tests, code, prompt chain, model version, seed.
+  - Promotion from sandbox → dock requires red-team signoff (from M6) OR explicit user L2 unlock (until M6 ships).
+  - The 'spec'+'test-suite' nodes already give half the provenance; a 'generated-app' node + edge schema lands in M4.P4.
+
+**Verification:** All M4.P1/P2/P3 paths are exercised by `test/v03-verification.html` against a stubbed AI. **85/85 tests** green offline. Real Anthropic key required only for soak-testing prompt quality — wiring is proven.
 
 **Demo script:** "build me a pomodoro timer with 25-min work + 5-min break" → spec → tests → code → tests pass → app in dock → works.
 
