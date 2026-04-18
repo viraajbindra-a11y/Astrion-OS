@@ -890,6 +890,81 @@ await test('branch.merge capability registered with L2 user-approval gate',
 await test('branch.discard capability registered (L1)',
   () => !!branchDiscardCap && branchDiscardCap.level === 1);
 
+// ═══ 14. Operation interceptor (M5.P2) ═══
+section('14. Operation interceptor (M5.P2 — L2+ preview gate)');
+
+const ictrMod = await import('/js/kernel/operation-interceptor.js');
+const { LEVEL: LVL } = await import('/js/kernel/capability-api.js');
+
+// Fake L1 capability — should run directly without interception
+const fakeL1 = {
+  id: 'fake.l1',
+  level: LVL.SANDBOX,
+  blastRadius: 'none',
+  reversibility: 'free',
+  execute: async (args) => ({ ok: true, output: { ran: 'l1', args } }),
+};
+const l1Result = await ictrMod.interceptedExecute(fakeL1, { x: 1 });
+await test('interceptedExecute on L1 cap runs directly without preview',
+  () => l1Result.ok && l1Result.output.ran === 'l1');
+
+// Fake L2 capability — should emit preview and wait for confirm
+const fakeL2 = {
+  id: 'fake.l2',
+  level: LVL.REAL,
+  blastRadius: 'file',
+  reversibility: 'bounded',
+  summary: 'fake L2 cap',
+  execute: async (args) => ({ ok: true, output: { ran: 'l2', args } }),
+};
+
+// Auto-confirm after 50ms so the test doesn't hang
+let previewSeen = null;
+const onPrev = (p) => { previewSeen = p; setTimeout(() => eventBus.emit('interception:confirm', { id: p.id }), 50); };
+eventBus.on('interception:preview', onPrev);
+const l2Result = await ictrMod.interceptedExecute(fakeL2, { y: 2 });
+eventBus.off('interception:preview', onPrev);
+
+await test('L2 preview event fires with cap details',
+  () => previewSeen && previewSeen.cap.id === 'fake.l2' && previewSeen.cap.level === 2);
+await test('L2 preview includes args verbatim',
+  () => previewSeen && previewSeen.args.y === 2);
+await test('L2 preview has interception id',
+  () => previewSeen && typeof previewSeen.id === 'string' && previewSeen.id.length > 0);
+await test('after confirm, capability ran and result is ok',
+  () => l2Result.ok && l2Result.output.ran === 'l2');
+
+// Abort path
+const onPrev2 = (p) => setTimeout(() => eventBus.emit('interception:abort', { id: p.id, reason: 'user said no' }), 50);
+eventBus.on('interception:preview', onPrev2);
+const abortedResult = await ictrMod.interceptedExecute(fakeL2, { z: 3 });
+eventBus.off('interception:preview', onPrev2);
+await test('aborted L2 returns ok=false with reason',
+  () => !abortedResult.ok && /aborted: user said no/.test(abortedResult.error));
+
+// Auto-abort timeout
+const beforeTimeout = Date.now();
+const timeoutResult = await ictrMod.interceptedExecute(fakeL2, { t: 4 }, { timeoutMs: 200 });
+const elapsed = Date.now() - beforeTimeout;
+await test('timeout aborts the interception within bound',
+  () => !timeoutResult.ok && /auto-aborted/.test(timeoutResult.error) && elapsed >= 200 && elapsed < 1500);
+
+// skipInterception bypass
+const onPrevShouldNotFire = () => { throw new Error('preview fired despite skipInterception'); };
+eventBus.on('interception:preview', onPrevShouldNotFire);
+const bypassResult = await ictrMod.interceptedExecute(fakeL2, { b: 5 }, { skipInterception: true });
+eventBus.off('interception:preview', onPrevShouldNotFire);
+await test('skipInterception=true bypasses the gate',
+  () => bypassResult.ok && bypassResult.output.ran === 'l2');
+
+// requestConfirmation directly
+const onPrev3 = (p) => setTimeout(() => eventBus.emit('interception:confirm', { id: p.id }), 30);
+eventBus.on('interception:preview', onPrev3);
+const directConfirm = await ictrMod.requestConfirmation(fakeL2, { d: 6 });
+eventBus.off('interception:preview', onPrev3);
+await test('requestConfirmation resolves with ok=true on confirm',
+  () => directConfirm.ok === true && directConfirm.id);
+
 // ═══ Summary ═══
 const total = passCount + failCount;
 const summary = document.getElementById('summary');
