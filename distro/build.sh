@@ -183,6 +183,28 @@ apt-get install -y -qq waydroid 2>/dev/null || \
 apt-get install -y -qq cage weston 2>/dev/null || true
 
 # ═══════════════════════════════════════════════════
+# Ollama — local LLM runtime (M3.P1 S1 brain)
+# Bundled so Astrion has a working "fast brain" out of the box.
+# The installer creates /usr/local/bin/ollama + the ollama systemd
+# service. The actual model is NOT bundled (it would push the ISO
+# past the 2GB GitHub release cap); the user can pull qwen2.5:0.5b
+# from Settings > AI on first launch when network is up.
+# https://ollama.com
+# ═══════════════════════════════════════════════════
+echo "Installing Ollama (S1 local LLM runtime)..."
+curl -fsSL https://ollama.com/install.sh | sh 2>/dev/null || \
+  echo "  Ollama install failed (no network in chroot?) — continuing without S1 runtime"
+
+# Make sure the systemd unit is enabled so ollama starts on boot.
+# The official installer creates /etc/systemd/system/ollama.service
+# but does NOT enable it inside a chroot. Enable it manually.
+if [ -f /etc/systemd/system/ollama.service ]; then
+  systemctl enable ollama.service 2>/dev/null || \
+    ln -sf /etc/systemd/system/ollama.service \
+           /etc/systemd/system/multi-user.target.wants/ollama.service
+fi
+
+# ═══════════════════════════════════════════════════
 # Linux-Surface kernel — adds full support for Microsoft Surface devices
 # (multi-touch, pen pressure, accurate battery, sensors, Surface Dock)
 # https://github.com/linux-surface/linux-surface

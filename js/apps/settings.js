@@ -310,7 +310,7 @@ function initSettings(container) {
   function renderAI() {
     const currentProvider = localStorage.getItem('nova-ai-provider') || 'auto';
     const ollamaUrl = localStorage.getItem('nova-ai-ollama-url') || 'http://localhost:11434';
-    const ollamaModel = localStorage.getItem('nova-ai-ollama-model') || 'llama3.2';
+    const ollamaModel = localStorage.getItem('nova-ai-ollama-model') || 'qwen2.5:7b';
 
     main.innerHTML = `
       <div class="settings-section-title">AI Assistant</div>
@@ -342,7 +342,7 @@ function initSettings(container) {
         <div class="settings-row">
           <div>
             <div class="settings-row-label">Model</div>
-            <div class="settings-row-desc">e.g. llama3.2, mistral, phi3, gemma2</div>
+            <div class="settings-row-desc">e.g. qwen2.5:7b, qwen2.5:1.5b, llama3.2, phi3 — pull via <code>ollama pull MODEL</code></div>
           </div>
           <input type="text" id="ai-ollama-model" class="settings-select" value="${ollamaModel}" style="width:180px; font-family:var(--mono,monospace); font-size:12px;">
         </div>
@@ -352,6 +352,13 @@ function initSettings(container) {
             <div class="settings-row-desc" id="ai-test-status">Click to verify Ollama is reachable</div>
           </div>
           <button class="settings-toggle" id="ai-test-btn" style="padding:6px 14px; border-radius:6px; border:none; background:var(--accent); color:white; font-size:12px; cursor:pointer; font-family:var(--font);">Test</button>
+        </div>
+        <div class="settings-row">
+          <div>
+            <div class="settings-row-label">Download Model</div>
+            <div class="settings-row-desc" id="ai-pull-status">Pull the named model into the running Ollama (size: 0.5b ≈ 400MB, 7b ≈ 4GB)</div>
+          </div>
+          <button class="settings-toggle" id="ai-pull-btn" style="padding:6px 14px; border-radius:6px; border:none; background:#8b5cf6; color:white; font-size:12px; cursor:pointer; font-family:var(--font);">Pull</button>
         </div>
       </div>
 
@@ -423,6 +430,64 @@ function initSettings(container) {
         status.textContent = '\u274C ' + err.message;
         status.style.color = '#ff3b30';
       }
+    });
+
+    // Pull model — streams ndjson progress from /api/ai/ollama-pull
+    main.querySelector('#ai-pull-btn').addEventListener('click', async () => {
+      const status = main.querySelector('#ai-pull-status');
+      const btn = main.querySelector('#ai-pull-btn');
+      const url = main.querySelector('#ai-ollama-url').value.trim();
+      const model = main.querySelector('#ai-ollama-model').value.trim();
+      if (!model) { status.textContent = 'Set a model name first'; return; }
+      btn.disabled = true; btn.textContent = 'Pulling…';
+      status.style.color = 'rgba(255,255,255,0.65)';
+      status.textContent = `Starting pull for ${model}…`;
+      try {
+        const res = await fetch('/api/ai/ollama-pull', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ url, model }),
+        });
+        if (!res.ok || !res.body) {
+          const errText = await res.text().catch(() => '');
+          status.textContent = '\u274C Pull rejected: ' + (errText || res.statusText);
+          status.style.color = '#ff3b30';
+          btn.disabled = false; btn.textContent = 'Pull';
+          return;
+        }
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = '';
+        let lastStatus = '';
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const lines = buf.split('\n');
+          buf = lines.pop() || '';
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            try {
+              const obj = JSON.parse(line);
+              if (obj.error) { lastStatus = '\u274C ' + obj.error; }
+              else if (obj.status) {
+                let pct = '';
+                if (obj.completed && obj.total) {
+                  pct = ' ' + Math.round((obj.completed / obj.total) * 100) + '%';
+                }
+                lastStatus = obj.status + pct;
+              }
+              status.textContent = lastStatus;
+            } catch {}
+          }
+        }
+        status.textContent = '\u2705 Done. Model ' + model + ' is ready.';
+        status.style.color = '#34c759';
+      } catch (err) {
+        status.textContent = '\u274C ' + err.message;
+        status.style.color = '#ff3b30';
+      }
+      btn.disabled = false; btn.textContent = 'Pull';
     });
   }
 
