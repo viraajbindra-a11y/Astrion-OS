@@ -1130,6 +1130,71 @@ await test('L1 cap preview does NOT trigger red-team enrichment',
 
 aiService.askWithMeta = realAskForRed;
 
+// ═══ 16. Rubber-stamp tracker (M6.P4) ═══
+section('16. Rubber-stamp tracker (M6.P4)');
+
+const rsMod = await import('/js/kernel/rubber-stamp-tracker.js');
+rsMod.resetStats();
+rsMod.initRubberStampTracker();
+
+// Helper: simulate an interception cycle with a controlled delay
+async function rapid() {
+  const id = 'rs-rapid-' + Date.now() + Math.random();
+  eventBus.emit('interception:preview', { id, cap: { level: 2 }, args: {}, timeoutMs: 60000 });
+  await new Promise(r => setTimeout(r, 50)); // < READ_FLOOR_MS
+  eventBus.emit('interception:confirm', { id });
+}
+async function considered() {
+  const id = 'rs-considered-' + Date.now() + Math.random();
+  eventBus.emit('interception:preview', { id, cap: { level: 2 }, args: {}, timeoutMs: 60000 });
+  await new Promise(r => setTimeout(r, 1700)); // > READ_FLOOR_MS (1500)
+  eventBus.emit('interception:confirm', { id });
+}
+
+// 3 rapid + 1 considered → rapidRate 0.75
+for (let i = 0; i < 3; i++) await rapid();
+await considered();
+const stats1 = rsMod.getStats();
+await test('tracker counted 4 samples', () => stats1.total === 4);
+await test('tracker counted 3 rapid + 1 considered',
+  () => stats1.rapid === 3 && stats1.considered === 1);
+await test('rapidRate is 0.75', () => stats1.rapidRate === 0.75);
+
+// Aborts
+const id2 = 'rs-abort-' + Date.now();
+eventBus.emit('interception:preview', { id: id2, cap: { level: 2 }, args: {}, timeoutMs: 60000 });
+eventBus.emit('interception:abort', { id: id2, reason: 'user-aborted' });
+const stats2 = rsMod.getStats();
+await test('user-aborted is counted as aborted', () => stats2.aborted === 1);
+
+// Timeouts
+const id3 = 'rs-timeout-' + Date.now();
+eventBus.emit('interception:preview', { id: id3, cap: { level: 2 }, args: {}, timeoutMs: 60000 });
+eventBus.emit('interception:abort', { id: id3, reason: 'auto-aborted after 60000ms' });
+const stats3 = rsMod.getStats();
+await test('auto-abort is counted as timeout', () => stats3.timedOut === 1);
+
+// Warning emission: need 20+ samples with rapidRate >= 0.80
+rsMod.resetStats();
+let warned = null;
+const onWarn = (e) => { warned = e; };
+eventBus.on('socratic:rubberstamp-warning', onWarn);
+for (let i = 0; i < 20; i++) await rapid(); // 20 rapid confirms = 100% rate
+eventBus.off('socratic:rubberstamp-warning', onWarn);
+await test('socratic:rubberstamp-warning fires after threshold reached',
+  () => warned && warned.samples >= 20);
+await test('warning includes rapidRate >= 0.80',
+  () => warned && warned.rapidRate >= 0.80);
+
+// Cooldown: re-running shouldn't re-warn within 24h
+warned = null;
+eventBus.on('socratic:rubberstamp-warning', onWarn);
+for (let i = 0; i < 5; i++) await rapid();
+eventBus.off('socratic:rubberstamp-warning', onWarn);
+await test('warning respects 24h cooldown', () => warned === null);
+
+rsMod.resetStats();
+
 // ═══ Summary ═══
 const total = passCount + failCount;
 const summary = document.getElementById('summary');

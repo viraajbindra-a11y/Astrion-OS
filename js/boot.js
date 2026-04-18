@@ -242,6 +242,9 @@ import { initVolumeHud } from './shell/volume-hud.js';
     // M6.P1: subscribe the red-team agent to interception:preview so
     // every L2+ cap gets an adversarial review before the user confirms.
     (await import('./kernel/red-team.js')).initRedTeamAgent();
+    // M6.P4: track rubber-stamp rate (rapid confirms / total) and
+    // emit a Socratic warning if it crosses 80% over 20+ samples.
+    (await import('./kernel/rubber-stamp-tracker.js')).initRubberStampTracker();
 
     // Phase 0: kill mock provider trap in native path too (lesson #72)
     if (localStorage.getItem('nova-ai-provider') === 'mock') {
@@ -488,6 +491,8 @@ import { initVolumeHud } from './shell/volume-hud.js';
   // M6.P1: subscribe the red-team agent to interception:preview so
   // every L2+ cap gets an adversarial review before the user confirms.
   (await import('./kernel/red-team.js')).initRedTeamAgent();
+  // M6.P4: rubber-stamp tracker.
+  (await import('./kernel/rubber-stamp-tracker.js')).initRubberStampTracker();
 
   // Phase 0: kill mock provider trap permanently (lesson #72).
   // If a prior Settings test left provider='mock', every AI path silently
