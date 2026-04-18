@@ -652,6 +652,107 @@ await test('getLastRun returns the last run summary', () => last && last.passes 
 
 aiService.askWithMeta = realAskForTests;
 
+// ═══ 11. Code generator with TDD iteration (M4.P3.b) ═══
+section('11. Code generator (M4.P3.b — code-from-tests, iterate)');
+
+const codeMod = await import('/js/kernel/code-generator.js');
+
+// Build a frozen spec + suite first via stubs.
+const codeSpecReply = JSON.stringify({
+  goal: 'tiny stack',
+  acceptance_criteria: [
+    'Given an empty stack, when I push an item, then size is 1.',
+    'Given a stack with one item, when I pop, then I get the item back and size is 0.',
+    'Given an empty stack, when I pop, then I get undefined.',
+  ],
+  non_goals: [],
+  ux_notes: '',
+  open_questions: [],
+});
+const codeTestsReply = JSON.stringify({
+  tests: [
+    { title: 'push increments size', setup: 'const s = new Stack();', act: 's.push(1);', assert: 'expect(s.size()).toBe(1);', criterionIndex: 0 },
+    { title: 'pop returns last and decrements', setup: 'const s = new Stack(); s.push(7);', act: 'const v = s.pop();', assert: 'expect(v).toBe(7); expect(s.size()).toBe(0);', criterionIndex: 1 },
+    { title: 'pop on empty returns undefined', setup: 'const s = new Stack();', act: 'const v = s.pop();', assert: 'expect(v === undefined).toBeTruthy();', criterionIndex: 2 },
+  ],
+});
+const codeMeta = { brain: 'offline', confidence: 0.3, provider: 'mock', capCategory: 'code', model: 'mock', escalated: false, responseTimeMs: 1 };
+
+// Counter so the stub can simulate retry-then-pass.
+let codeAttemptCounter = 0;
+const buggyCode = 'class Stack { constructor() { this.items = []; } push(x) { this.items.push(x); } pop() { return this.items.pop(); } size() { return 999; } }'; // size() lies → first 2 tests fail
+const goodCode = 'class Stack { constructor() { this.items = []; } push(x) { this.items.push(x); } pop() { return this.items.pop(); } size() { return this.items.length; } }';
+
+aiService.askWithMeta = async (prompt) => {
+  if (prompt.includes('spec generator')) return { reply: codeSpecReply, meta: codeMeta };
+  if (prompt.includes('test generator')) return { reply: codeTestsReply, meta: codeMeta };
+  if (prompt.includes('code generator')) {
+    codeAttemptCounter++;
+    // First attempt: buggy. Second attempt: correct.
+    return {
+      reply: JSON.stringify({
+        code: codeAttemptCounter >= 2 ? goodCode : buggyCode,
+        summary: codeAttemptCounter >= 2 ? 'fixed size()' : 'first try',
+      }),
+      meta: codeMeta,
+    };
+  }
+  return realAskForTests(prompt);
+};
+
+// Build the spec + suite
+const codeSpec = await specMod.generateSpec('build me a stack');
+const codeSpecId = await specMod.storeSpec(codeSpec.spec);
+await specMod.freezeSpec(codeSpecId);
+const codeGenTests = await testsMod.generateTests(codeSpecId);
+const codeSuiteId = await testsMod.storeTestSuite(codeGenTests.suite);
+
+// First scenario: bad-then-good code, should converge in 2 attempts
+codeAttemptCounter = 0;
+const codeRunResult = await codeMod.generateCode(codeSuiteId, { maxAttempts: 3 });
+
+await test('code.generate converges to ok status', () => codeRunResult.status === 'ok');
+await test('code.generate uses 2 attempts (bad then good)', () => codeRunResult.attempts === 2);
+await test('code.generate final code matches the good Stack class',
+  () => codeRunResult.code.includes('this.items.length'));
+await test('code.generate finalResults all pass',
+  () => codeRunResult.finalResults && codeRunResult.finalResults.passes === codeRunResult.finalResults.total);
+await test('code.generate history has both attempts',
+  () => codeRunResult.history.length === 2);
+await test('code.generate history attempt 1 has failures',
+  () => codeRunResult.history[0].results && codeRunResult.history[0].results.passes < codeRunResult.history[0].results.total);
+
+// Storage round-trip
+const codeNodeId = await codeMod.storeGeneratedCode(codeSuiteId, codeRunResult);
+await test('storeGeneratedCode returns a graph node id', () => typeof codeNodeId === 'string' && codeNodeId.length > 0);
+const storedCode = await codeMod.getGeneratedCode(codeNodeId);
+await test('getGeneratedCode reads the code back', () => storedCode?.code?.includes('this.items.length'));
+await test('storedCode preserves attempts count', () => storedCode?.attempts === 2);
+
+// Failure scenario: code never converges (returns buggy every time)
+aiService.askWithMeta = async (prompt) => {
+  if (prompt.includes('code generator')) return { reply: JSON.stringify({ code: buggyCode, summary: 'always wrong' }), meta: codeMeta };
+  if (prompt.includes('spec generator')) return { reply: codeSpecReply, meta: codeMeta };
+  if (prompt.includes('test generator')) return { reply: codeTestsReply, meta: codeMeta };
+  return realAskForTests(prompt);
+};
+const codeFailResult = await codeMod.generateCode(codeSuiteId, { maxAttempts: 2 });
+await test('code.generate fails after maxAttempts when never converges',
+  () => codeFailResult.status === 'failed' && codeFailResult.attempts === 2);
+
+// Forbidden token rejection
+aiService.askWithMeta = async () => ({ reply: JSON.stringify({ code: 'fetch("/x"); class Stack {}', summary: 'bad' }), meta: codeMeta });
+const forbiddenResult = await codeMod.generateCode(codeSuiteId, { maxAttempts: 1 });
+await test('code.generate rejects forbidden token (treats as failed attempt)',
+  () => forbiddenResult.status === 'failed');
+
+// Capability registration
+const codeGenCap = getCapability('code.generate');
+await test('code.generate capability registered with L1 sandbox',
+  () => !!codeGenCap && codeGenCap.level === 1);
+
+aiService.askWithMeta = realAskForTests;
+
 // ═══ Summary ═══
 const total = passCount + failCount;
 const summary = document.getElementById('summary');

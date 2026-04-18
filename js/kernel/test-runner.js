@@ -41,6 +41,10 @@ const SUITE_TIMEOUT_MS = 30000; // whole suite hard timeout
 const SANDBOX_HTML = `<!DOCTYPE html>
 <html><body><script>
 (function(){
+  // M4.P3.b: shared code loaded once via a 'load' message. Subsequent
+  // 'run' messages execute setup/act/assert with this code in scope.
+  var sharedCode = '';
+
   // Tiny matcher — same surface as the test-generator prompt promises.
   function expect(actual) {
     return {
@@ -84,11 +88,10 @@ const SANDBOX_HTML = `<!DOCTYPE html>
   function runOne(test) {
     const start = performance.now();
     try {
-      // Build a single function body: setup + act + assert, with
-      // expect in scope. No access to window/document/parent — the
-      // iframe sandbox attribute already strips those (or they are
-      // null because of unique origin).
-      const body = test.setup + '\\n' + test.act + '\\n' + test.assert;
+      // Prepend sharedCode (from 'load' message) so the test body
+      // can reference whatever App / helper the code generator
+      // produced. Single function body: shared + setup + act + assert.
+      const body = sharedCode + '\\n' + test.setup + '\\n' + test.act + '\\n' + test.assert;
       // eslint-disable-next-line no-new-func
       const fn = new Function('expect', body);
       fn(expect);
@@ -99,7 +102,20 @@ const SANDBOX_HTML = `<!DOCTYPE html>
   }
 
   window.addEventListener('message', function(ev) {
-    if (!ev.data || ev.data.type !== 'run') return;
+    if (!ev.data) return;
+    if (ev.data.type === 'load') {
+      // Validate the shared code parses BEFORE storing it, so a bad
+      // load fails the whole suite up-front instead of every test.
+      try {
+        new Function(ev.data.code || '');
+        sharedCode = ev.data.code || '';
+        parent.postMessage({ type: 'loaded' }, '*');
+      } catch (err) {
+        parent.postMessage({ type: 'load-error', error: String(err && err.message || err) }, '*');
+      }
+      return;
+    }
+    if (ev.data.type !== 'run') return;
     var index = ev.data.index;
     var test = ev.data.test;
     var result = runOne(test);
@@ -125,6 +141,22 @@ function createSandbox() {
         window.removeEventListener('message', onMsg);
         resolve({
           iframe,
+          load(code) {
+            return new Promise((res, rej) => {
+              const handler = (ev) => {
+                if (ev.source !== iframe.contentWindow) return;
+                if (ev.data && ev.data.type === 'loaded') {
+                  window.removeEventListener('message', handler);
+                  res(true);
+                } else if (ev.data && ev.data.type === 'load-error') {
+                  window.removeEventListener('message', handler);
+                  rej(new Error('sandbox load: ' + ev.data.error));
+                }
+              };
+              window.addEventListener('message', handler);
+              iframe.contentWindow.postMessage({ type: 'load', code }, '*');
+            });
+          },
           run(index, test) {
             return new Promise((res) => {
               const handler = (ev) => {
@@ -184,9 +216,13 @@ export async function runSingleTest(test) {
  * the whole batch (cheaper than per-test). Records the run via
  * recordSuiteRun() so the suite node has lastRunAt + lastRunResults.
  *
- * Returns { suiteId, total, passes, fails, results, durationMs }.
+ * @param {string} suiteId
+ * @param {object} [opts]
+ * @param {string} [opts.sharedCode] — JS evaluated once before tests
+ *   run, e.g. the App class produced by M4.P3.b code generation.
+ * @returns {Promise<{suiteId, total, passes, fails, results, durationMs}>}
  */
-export async function runSuite(suiteId) {
+export async function runSuite(suiteId, opts = {}) {
   if (!suiteId || typeof suiteId !== 'string') {
     throw new Error('runSuite: suiteId required');
   }
@@ -200,6 +236,9 @@ export async function runSuite(suiteId) {
   const sandbox = await createSandbox();
   const results = [];
   try {
+    if (typeof opts.sharedCode === 'string' && opts.sharedCode.length > 0) {
+      await sandbox.load(opts.sharedCode);
+    }
     // Hard timeout for the entire suite — guards against an iframe
     // that loads but never responds.
     const suiteTimer = setTimeout(() => {

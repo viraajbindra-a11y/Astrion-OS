@@ -477,7 +477,8 @@ const testsRun = {
       const suiteId = args.suiteId || args.id;
       if (!suiteId) throw new Error('tests.run: suiteId required');
       const mod = await import('./test-runner.js');
-      const result = await mod.runSuite(suiteId);
+      const opts = args.sharedCode ? { sharedCode: args.sharedCode } : {};
+      const result = await mod.runSuite(suiteId, opts);
       safeNotify({
         title: result.passes === result.total ? '✅ All tests passed' : `❌ ${result.fails} test${result.fails === 1 ? '' : 's'} failed`,
         body: `${result.passes}/${result.total} in ${result.durationMs}ms`,
@@ -487,6 +488,44 @@ const testsRun = {
   },
 };
 registerCapability(testsRun);
+
+// ═══════════════════════════════════════════════════════════════
+// PROVIDER 6.8: code.generate — M4.P3.b
+//   Iterate code until the suite passes (or maxAttempts hits).
+//   Stores the resulting artifact as a 'generated-code' graph node
+//   linked back to the suite via an 'implements' edge.
+// ═══════════════════════════════════════════════════════════════
+
+const codeGenerate = {
+  id: 'code.generate',
+  verb: 'generate',
+  target: 'code',
+  level: LEVEL.SANDBOX,
+  reversibility: REVERSIBILITY.FREE,
+  blastRadius: BLAST_RADIUS.NONE,
+  summary: 'Generate JS code that satisfies a test suite, iterating up to N times (M4.P3.b)',
+  estimateCost: (args) => ({ timeMs: 9000 * (args.maxAttempts || 3), irreversibilityTokens: 0 }),
+  execute: async function(args) {
+    return runCapability(this, args, async () => {
+      const suiteId = args.suiteId || args.id;
+      if (!suiteId) throw new Error('code.generate: suiteId required');
+      const mod = await import('./code-generator.js');
+      const result = await mod.generateCode(suiteId, { maxAttempts: args.maxAttempts });
+      let codeId = null;
+      if (result.status === 'ok') {
+        codeId = await mod.storeGeneratedCode(suiteId, result);
+      }
+      safeNotify({
+        title: result.status === 'ok' ? '🛠 Code passed all tests' : '❌ Code generation failed',
+        body: result.status === 'ok'
+          ? `${result.attempts} attempt${result.attempts === 1 ? '' : 's'}, ${result.finalResults.total} tests`
+          : (result.error || 'unknown'),
+      });
+      return { codeId, suiteId, status: result.status, attempts: result.attempts };
+    });
+  },
+};
+registerCapability(codeGenerate);
 
 // ═══════════════════════════════════════════════════════════════
 // PROVIDER 7: browser.navigate — open a URL
@@ -1141,6 +1180,7 @@ export const CORE_CAPABILITIES = [
   'spec.freeze',
   'tests.generate',
   'tests.run',
+  'code.generate',
   'browser.navigate',
   'volume.set',
   'volume.decrease',
