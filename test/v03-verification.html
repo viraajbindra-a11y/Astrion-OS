@@ -528,6 +528,130 @@ await test('generateTests rejects forbidden token after retry', async () => {
 
 aiService.askWithMeta = realAskForTests;
 
+// ═══ 10. Sandboxed test runner (M4.P3) ═══
+section('10. Sandboxed test runner (M4.P3)');
+
+const runnerMod = await import('/js/kernel/test-runner.js');
+
+// Run a single passing test
+const passingTest = {
+  title: 'simple add',
+  setup: 'const x = 2; const y = 3;',
+  act: 'const sum = x + y;',
+  assert: 'expect(sum).toBe(5);',
+};
+const passResult = await runnerMod.runSingleTest(passingTest);
+await test('runSingleTest returns ok=true on passing test', () => passResult.ok === true);
+await test('runSingleTest reports duration', () => typeof passResult.durationMs === 'number' && passResult.durationMs >= 0);
+
+// Run a single failing test
+const failingTest = {
+  title: 'wrong arithmetic',
+  setup: 'const x = 2;',
+  act: 'const y = x + x;',
+  assert: 'expect(y).toBe(99);',
+};
+const failResult = await runnerMod.runSingleTest(failingTest);
+await test('runSingleTest returns ok=false on failing test', () => failResult.ok === false);
+await test('runSingleTest captures error message', () => typeof failResult.error === 'string' && failResult.error.length > 0);
+
+// Run a test that uses toContain
+const containsTest = {
+  title: 'array contains',
+  setup: 'const items = ["water","exercise","read"];',
+  act: '',
+  assert: 'expect(items).toContain("exercise");',
+};
+const containsResult = await runnerMod.runSingleTest(containsTest);
+await test('runSingleTest handles toContain matcher', () => containsResult.ok === true);
+
+// Sandbox isolation: try to read parent window — should fail because
+// of unique-origin sandbox (allow-scripts but NOT allow-same-origin).
+const isolationTest = {
+  title: 'cannot read parent storage',
+  setup: '',
+  act: '',
+  // localStorage is a no-op in sandboxed iframes with unique origin —
+  // accessing it throws a SecurityError. Catch + rethrow with a fixed
+  // message so we can assert on it.
+  assert: 'try { localStorage.getItem("nova-ai-provider"); throw new Error("STORAGE_ACCESSIBLE"); } catch (e) { if (e.message === "STORAGE_ACCESSIBLE") throw e; }',
+};
+const isolationResult = await runnerMod.runSingleTest(isolationTest);
+await test('sandbox blocks parent localStorage access', () => isolationResult.ok === true);
+
+// Build a frozen spec + suite + run it end-to-end
+aiService.askWithMeta = async (prompt) => {
+  if (prompt.includes('spec generator')) {
+    return { reply: specSubReply, meta: testsStubMeta };
+  }
+  if (prompt.includes('test generator')) {
+    return {
+      reply: JSON.stringify({
+        tests: [
+          { title: '1+1 = 2', setup: 'const x = 1;', act: 'const y = x + 1;', assert: 'expect(y).toBe(2);', criterionIndex: 0 },
+          { title: 'string contains substring', setup: 'const s = "hello world";', act: '', assert: 'expect(s).toContain("world");', criterionIndex: 1 },
+          { title: 'truthy check', setup: '', act: '', assert: 'expect(true).toBeTruthy();', criterionIndex: 2 },
+        ],
+      }),
+      meta: testsStubMeta,
+    };
+  }
+  return realAskForTests(prompt);
+};
+const e2eSpec = await specMod.generateSpec('build me a habit tracker');
+const e2eSpecId = await specMod.storeSpec(e2eSpec.spec);
+await specMod.freezeSpec(e2eSpecId);
+const e2eGen = await testsMod.generateTests(e2eSpecId);
+const e2eSuiteId = await testsMod.storeTestSuite(e2eGen.suite);
+const runResult = await runnerMod.runSuite(e2eSuiteId);
+
+await test('runSuite returns total + passes + fails', () => runResult.total === 3 && runResult.passes === 3 && runResult.fails === 0);
+await test('runSuite returns per-test results array', () => Array.isArray(runResult.results) && runResult.results.length === 3);
+await test('runSuite recorded run on suite node (lastRunAt set)', async () => {
+  const after = await testsMod.getTestSuite(e2eSuiteId);
+  return typeof after.lastRunAt === 'number' && after.lastRunPasses === 3;
+});
+
+// runSuite with one failing test
+aiService.askWithMeta = async (prompt) => {
+  if (prompt.includes('spec generator')) return { reply: specSubReply, meta: testsStubMeta };
+  if (prompt.includes('test generator')) {
+    return {
+      reply: JSON.stringify({
+        tests: [
+          { title: 'pass', setup: '', act: '', assert: 'expect(1).toBe(1);', criterionIndex: 0 },
+          { title: 'fail', setup: '', act: '', assert: 'expect(1).toBe(2);', criterionIndex: 1 },
+          { title: 'pass', setup: '', act: '', assert: 'expect(true).toBeTruthy();', criterionIndex: 2 },
+        ],
+      }),
+      meta: testsStubMeta,
+    };
+  }
+  return realAskForTests(prompt);
+};
+const mixSpec = await specMod.generateSpec('build me a habit tracker');
+const mixSpecId = await specMod.storeSpec(mixSpec.spec);
+await specMod.freezeSpec(mixSpecId);
+const mixGen = await testsMod.generateTests(mixSpecId);
+const mixSuiteId = await testsMod.storeTestSuite(mixGen.suite);
+const mixRun = await runnerMod.runSuite(mixSuiteId);
+
+await test('runSuite reports correct pass/fail counts on mixed suite', () => mixRun.passes === 2 && mixRun.fails === 1);
+await test('runSuite per-result error captured for failing test', () => {
+  const failing = mixRun.results.find(r => !r.ok);
+  return failing && typeof failing.error === 'string' && failing.error.length > 0;
+});
+
+// Capability registration
+const testsRunCap = getCapability('tests.run');
+await test('tests.run capability registered with L1 sandbox', () => !!testsRunCap && testsRunCap.level === 1);
+
+// getLastRun convenience
+const last = await runnerMod.getLastRun(mixSuiteId);
+await test('getLastRun returns the last run summary', () => last && last.passes === 2 && last.total === 3);
+
+aiService.askWithMeta = realAskForTests;
+
 // ═══ Summary ═══
 const total = passCount + failCount;
 const summary = document.getElementById('summary');

@@ -457,6 +457,38 @@ const testsGenerate = {
 registerCapability(testsGenerate);
 
 // ═══════════════════════════════════════════════════════════════
+// PROVIDER 6.7: tests.run — M4.P3
+//   Execute a stored test suite in an iframe sandbox (allow-scripts,
+//   no allow-same-origin → unique origin, no parent access). Records
+//   per-test results back onto the suite node.
+// ═══════════════════════════════════════════════════════════════
+
+const testsRun = {
+  id: 'tests.run',
+  verb: 'run',
+  target: 'tests',
+  level: LEVEL.SANDBOX,
+  reversibility: REVERSIBILITY.FREE,
+  blastRadius: BLAST_RADIUS.NONE,
+  summary: 'Run a stored test suite in an isolated sandbox (M4.P3)',
+  estimateCost: (args) => ({ timeMs: 3000, irreversibilityTokens: 0 }),
+  execute: async function(args) {
+    return runCapability(this, args, async () => {
+      const suiteId = args.suiteId || args.id;
+      if (!suiteId) throw new Error('tests.run: suiteId required');
+      const mod = await import('./test-runner.js');
+      const result = await mod.runSuite(suiteId);
+      safeNotify({
+        title: result.passes === result.total ? '✅ All tests passed' : `❌ ${result.fails} test${result.fails === 1 ? '' : 's'} failed`,
+        body: `${result.passes}/${result.total} in ${result.durationMs}ms`,
+      });
+      return result;
+    });
+  },
+};
+registerCapability(testsRun);
+
+// ═══════════════════════════════════════════════════════════════
 // PROVIDER 7: browser.navigate — open a URL
 // ═══════════════════════════════════════════════════════════════
 
@@ -1108,6 +1140,7 @@ export const CORE_CAPABILITIES = [
   'spec.generate',
   'spec.freeze',
   'tests.generate',
+  'tests.run',
   'browser.navigate',
   'volume.set',
   'volume.decrease',
