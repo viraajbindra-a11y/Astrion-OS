@@ -25,6 +25,11 @@ export function registerTimer() {
         el.querySelector('#tm-reset').onclick=()=>{clearInterval(interval);running=false;remaining=totalSec;render();};
       }
       render();
+      // Cleanup on window close — prevents timer leak
+      const _obs = new MutationObserver(() => {
+        if (!el.isConnected) { clearInterval(interval); _obs.disconnect(); }
+      });
+      if (el.parentElement) _obs.observe(el.parentElement, { childList: true, subtree: true });
     }
   });
 }
