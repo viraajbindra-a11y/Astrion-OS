@@ -275,7 +275,13 @@ export async function rewindBranch(branchId) {
     throw new Error('only committed branches can be rewound (status=' + branch.status + ')');
   }
   const tag = branchTag(branchId);
-  const since = (branch.committedAt || branch.createdAt || 0) - 1;
+  // graph-store's getMutationsSince uses lowerBound(timestamp, EXCLUSIVE),
+  // so mutations at exactly committedAt would be missed. Use createdAt
+  // (which is always strictly before any mutation this branch produced)
+  // and rely on the capabilityId filter to scope the result. This handles
+  // the rapid-fire case where merge mutations land in the same millisecond
+  // as committedAt.
+  const since = (branch.createdAt || 0) - 1;
   const all = await graphStore.getMutationsSince(since);
   const ours = all.filter(m => m.capabilityId === tag);
   // Reverse chronological order so cascading effects undo correctly

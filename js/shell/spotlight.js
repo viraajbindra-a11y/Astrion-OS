@@ -208,6 +208,42 @@ export function initSpotlight() {
   // operation-interceptor's interception:preview event, renders a small
   // panel with cap details + args + "↵ Confirm / Esc Abort" header, and
   // emits interception:confirm or interception:abort on user input.
+  // M6.P1: red-team agent emits interception:enriched once it has
+  // analysed the pending interception. Append the risks list to the
+  // panel below the args summary.
+  eventBus.on('interception:enriched', ({ id, ok, review, error }) => {
+    if (id !== pendingInterceptionId) return;
+    const panel = results.querySelector('.spotlight-result-group');
+    if (!panel) return;
+    let html = '';
+    if (!ok) {
+      html = `<div style="margin-top:8px;padding-top:8px;border-top:1px dashed rgba(255,255,255,0.1);font-size:11px;color:rgba(255,255,255,0.4);">
+        🤖 red-team unavailable: ${escapeHtml(error || 'unknown')}
+      </div>`;
+    } else if (!review.risks.length) {
+      html = `<div style="margin-top:8px;padding-top:8px;border-top:1px dashed rgba(255,255,255,0.1);font-size:11px;color:#a6e3a1;">
+        🤖 red-team: ${escapeHtml(review.summary || 'no concerns')}
+      </div>`;
+    } else {
+      const sevColor = { high: '#ff5555', medium: '#fab387', low: '#f1fa8c' };
+      const recColor = { abort: '#ff5555', review: '#fab387', proceed: '#a6e3a1' };
+      const riskRows = review.risks.map(r =>
+        `<div style="font-size:11px;margin:4px 0;padding-left:14px;position:relative;">
+          <span style="position:absolute;left:0;color:${sevColor[r.severity] || '#fff'};">●</span>
+          <strong>${escapeHtml(r.label)}</strong>
+          <span style="color:rgba(255,255,255,0.5);font-size:10px;"> [${escapeHtml(r.severity)}]</span>
+          <div style="color:rgba(255,255,255,0.65);">${escapeHtml(r.reason)}</div>
+        </div>`).join('');
+      html = `<div style="margin-top:8px;padding-top:8px;border-top:1px dashed rgba(255,255,255,0.1);">
+        <div style="font-size:11px;color:${recColor[review.recommendation] || '#fff'};font-weight:600;margin-bottom:4px;">
+          🤖 red-team: ${escapeHtml(review.recommendation)} — ${escapeHtml(review.summary || '')}
+        </div>
+        ${riskRows}
+      </div>`;
+    }
+    panel.insertAdjacentHTML('beforeend', html);
+  });
+
   eventBus.on('interception:preview', ({ id, cap, args, timeoutMs, requiresTypedConfirmation }) => {
     pendingInterceptionId = id;
     pendingInterceptionCap = cap;

@@ -239,6 +239,9 @@ import { initVolumeHud } from './shell/volume-hud.js';
     initContextBundle();
     initConversationMemory();
     initCalibrationTracker();
+    // M6.P1: subscribe the red-team agent to interception:preview so
+    // every L2+ cap gets an adversarial review before the user confirms.
+    (await import('./kernel/red-team.js')).initRedTeamAgent();
 
     // Phase 0: kill mock provider trap in native path too (lesson #72)
     if (localStorage.getItem('nova-ai-provider') === 'mock') {
@@ -482,6 +485,9 @@ import { initVolumeHud } from './shell/volume-hud.js';
   // identically.
   initConversationMemory();
   initCalibrationTracker();
+  // M6.P1: subscribe the red-team agent to interception:preview so
+  // every L2+ cap gets an adversarial review before the user confirms.
+  (await import('./kernel/red-team.js')).initRedTeamAgent();
 
   // Phase 0: kill mock provider trap permanently (lesson #72).
   // If a prior Settings test left provider='mock', every AI path silently

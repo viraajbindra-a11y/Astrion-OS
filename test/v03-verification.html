@@ -34,6 +34,10 @@
 <script type="module">
 // ─── Force offline path so no real network calls fire ───
 localStorage.setItem('nova-ai-provider', 'mock');
+// Reset the daily irreversibility-token budget so re-runs don't hit the
+// 50-token-per-day cap (executor-budget) and start failing every L1+ step
+// in section 6 with "plan exceeds daily budget".
+localStorage.removeItem('astrion-budget-day');
 
 const results = document.getElementById('results');
 let passCount = 0, failCount = 0;
@@ -1034,6 +1038,97 @@ await test('non-PONR cap has pointOfNoReturn=false',
   () => plainPreview && plainPreview.cap.pointOfNoReturn === false);
 await test('non-PONR cap has requiresTypedConfirmation=false',
   () => plainPreview && plainPreview.requiresTypedConfirmation === false);
+
+// ═══ 15. Red-team agent (M6.P1) ═══
+section('15. Red-team agent (M6.P1)');
+
+const redMod = await import('/js/kernel/red-team.js');
+
+// Stub askWithMeta so reviewAction returns a canned analysis
+const realAskForRed = aiService.askWithMeta.bind(aiService);
+const redMeta = { brain: 'offline', confidence: 0.3, provider: 'mock', capCategory: 'red-team', model: 'mock', escalated: false, responseTimeMs: 1 };
+aiService.askWithMeta = async (prompt) => {
+  if (prompt.includes('red-team agent')) {
+    if (prompt.includes('"summary":""')) {
+      // First clear-call test: empty risks
+      return { reply: JSON.stringify({ risks: [], recommendation: 'proceed', summary: 'no concerns' }), meta: redMeta };
+    }
+    if (prompt.includes('files.delete')) {
+      return { reply: JSON.stringify({
+        risks: [
+          { label: 'data loss', severity: 'high', reason: 'deleting a folder removes its contents permanently if not in trash' },
+          { label: 'no undo', severity: 'medium', reason: 'this action skipped the trash flow' },
+        ],
+        recommendation: 'review',
+        summary: 'destructive — verify path before confirming',
+      }), meta: redMeta };
+    }
+    return { reply: JSON.stringify({ risks: [], recommendation: 'proceed', summary: 'looks ok' }), meta: redMeta };
+  }
+  return realAskForRed(prompt);
+};
+
+const fakeReviewCap = { id: 'files.delete', verb: 'delete', target: 'file', level: 2, reversibility: 'permanent', blastRadius: 'directory', summary: 'Delete a folder' };
+const reviewResult = await redMod.reviewAction(fakeReviewCap, { path: '/Desktop/Old' });
+
+await test('reviewAction returns ok with structured review',
+  () => reviewResult.ok && reviewResult.review && Array.isArray(reviewResult.review.risks));
+await test('review has 2 risks for the destructive case',
+  () => reviewResult.review.risks.length === 2);
+await test('review recommendation is "review" not "proceed"',
+  () => reviewResult.review.recommendation === 'review');
+await test('review surfaces high-severity risk first',
+  () => reviewResult.review.risks[0].severity === 'high');
+
+// Auto-subscribe via initRedTeamAgent
+redMod.initRedTeamAgent();
+
+const enrichedEvents = [];
+eventBus.on('interception:enriched', (e) => enrichedEvents.push(e));
+
+const fakeL2Cap = { id: 'files.delete', verb: 'delete', target: 'file', level: 2, reversibility: 'permanent', blastRadius: 'directory', summary: 'Delete a folder' };
+
+// Emit a preview and wait for the enrichment
+eventBus.emit('interception:preview', {
+  id: 'icpt-rt-1',
+  cap: fakeL2Cap,
+  args: { path: '/Desktop/Old' },
+  timeoutMs: 60000,
+  requiresTypedConfirmation: false,
+});
+
+const enriched = await new Promise((resolve) => {
+  const t = setTimeout(() => resolve(null), 6000);
+  const handler = (e) => {
+    if (e.id !== 'icpt-rt-1') return;
+    clearTimeout(t);
+    eventBus.off('interception:enriched', handler);
+    resolve(e);
+  };
+  eventBus.on('interception:enriched', handler);
+});
+
+await test('interception:enriched fires after preview',
+  () => enriched && enriched.id === 'icpt-rt-1');
+await test('enriched event includes ok=true',
+  () => enriched && enriched.ok === true);
+await test('enriched event includes review with risks',
+  () => enriched && enriched.review && Array.isArray(enriched.review.risks) && enriched.review.risks.length === 2);
+
+// L0/L1 caps should NOT trigger red-team (subscriber filters by level)
+const enrichedBefore = enrichedEvents.length;
+eventBus.emit('interception:preview', {
+  id: 'icpt-rt-l1',
+  cap: { id: 'fake.l1', level: 1, reversibility: 'free', blastRadius: 'none' },
+  args: {},
+  timeoutMs: 60000,
+});
+await new Promise(r => setTimeout(r, 800));
+const enrichedAfter = enrichedEvents.filter(e => e.id === 'icpt-rt-l1').length;
+await test('L1 cap preview does NOT trigger red-team enrichment',
+  () => enrichedAfter === 0);
+
+aiService.askWithMeta = realAskForRed;
 
 // ═══ Summary ═══
 const total = passCount + failCount;
