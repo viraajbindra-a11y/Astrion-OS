@@ -135,10 +135,17 @@ export async function executeIntent(intent) {
   // ─── 4. Build args (inject _intent for providers that need context) ───
   const args = { ...intent.args, _intent: intent };
 
-  // ─── 5. Execute via the capability ───
+  // ─── 5. Execute via the capability (M5.P2: through interceptor) ───
+  // L0/L1 caps pass through directly. L2+ go through the preview gate.
+  // The intent path can opt out via intent.skipInterception (used by
+  // the planner's compound flow which runs its own L2+ gate at the
+  // plan level, not the per-step level).
   let result;
   try {
-    result = await cap.execute(args);
+    const { interceptedExecute } = await import('./operation-interceptor.js');
+    result = await interceptedExecute(cap, args, {
+      skipInterception: !!intent.skipInterception,
+    });
   } catch (err) {
     const error = err?.message || String(err);
     eventBus.emit('intent:completed', { intent, success: false, error });
