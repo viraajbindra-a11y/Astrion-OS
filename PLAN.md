@@ -477,10 +477,13 @@ Each milestone has: a 1-sentence success definition, **explicit phases** (the su
 - **M6.P3 — Planner-vs-Red-Team UI** *(Week 3)*
   - Side-by-side display: planner's plan in green, red-team's concerns in red
   - User can accept, revise, or abort
-- **M6.P4 — Rubber-Stamp Detection** *(Week 4)*
-  - Track how often the user approves without reading
-  - If > 80% rubber-stamp rate, inject a known-bad plan as a test (chaos engineering)
-  - If user catches it → trust up; if not → force a cooldown
+- **M6.P4 — Rubber-Stamp Detection** ✅ **2026-04-18** (chaos injection deferred to M6.P4.b)
+  - ✅ `js/kernel/rubber-stamp-tracker.js`: 7-day rolling window of `{kind, ts}` samples in localStorage. Sample kinds: `rapid` (< 1.5s confirm), `considered` (>= 1.5s), `aborted` (user-aborted), `timeout` (auto-abort).
+  - ✅ `getStats()` exposes total/rapid/considered/aborted/timedOut/rapidRate/lastWarnedAt for dashboards.
+  - ✅ `initRubberStampTracker()` subscribes to `interception:preview/confirm/abort`. When rate > 80% over 20+ samples, emits `socratic:rubberstamp-warning` at most once per day (24h cooldown).
+  - ✅ Wired in both boot blocks alongside M6.P1.
+  - **M6.P4.b** — chaos injection (insert a known-bad plan as a test, force cooldown if user rubber-stamps it). Requires capability-provider cooperation. Deferred.
+  - **M6.P4.c** — Spotlight UI banner that renders the warning. Event is emitted; visual treatment is the missing piece.
 
 **Demo script:** "delete all screenshots older than a week" → planner proposes list → red-team spots 3 linked to active notes → Socratic prompt → you decide.
 

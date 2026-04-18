@@ -1,10 +1,10 @@
-# Session Handoff: M0→M3 + Full M4 + Full M5
+# Session Handoff: M0→M3 + M4 + M5 + M6.P1/P4
 
 **Date:** 2026-04-17 → 2026-04-18
-**Branch:** main (26 new commits ahead of origin — not pushed)
+**Branch:** main (32 new commits ahead of origin — not pushed)
 **Starting point:** 80 apps, commit `f8a47fa` (timer.js leak fix)
-**Ending point:** commit `e2aa488` (M5.P4 point-of-no-return flag + typed-confirm)
-**Verification:** **153/153 tests** in `test/v03-verification.html` + M5.P2.c verified end-to-end via real Spotlight + simulated Enter/Escape events. **M5 is now fully shipped** (P1+P2+P2.b+P2.c+P3+P4).
+**Ending point:** commit `7e7e22a` (M6.P4 rubber-stamp tracker)
+**Verification:** **169/169 tests** in `test/v03-verification.html` + M5.P2.c verified end-to-end via real Spotlight + simulated Enter/Escape. **M5 fully shipped + M6.P1 (red-team agent) + M6.P4 (rubber-stamp tracker) shipped**.
 
 ---
 
@@ -20,9 +20,13 @@ The session did three substantively different chunks of work:
 
 ---
 
-## Commits Landed (26, not pushed)
+## Commits Landed (32, not pushed)
 
 ```
+7e7e22a M6.P4: rubber-stamp tracker (rapid-confirm rate + Socratic warning)
+2e8e53d Docs: M6.P1 marked complete; lessons 137-140
+5e98fba M6.P1: red-team agent + rewind-window + budget-reset fixes
+3948928 Docs: M5 fully complete; lessons 134-136; bump verification to 153
 e2aa488 M5.P4: point-of-no-return flag + Spotlight typed-confirm gate
 709005c Docs: M5.P3 marked complete; lessons 131-133; verification at 148/148
 3c8fb5f M5.P3: rewindBranch — undo every mutation a previous merge produced
@@ -143,6 +147,18 @@ b7de3ed M0.P3 + M3.P1 server: dynamic per-app CSS, Ollama pull, v0.3 offline sui
 - Spotlight subscriber: PONR caps render with a RED border + "POINT OF NO RETURN — this action cannot be undone" banner. Input is enabled (vs disabled for normal L2), placeholder hints at the cap id. handleSubmit refuses Enter unless the typed text === cap.id exactly; mismatch bounces back with "did not match" hint, does NOT abort
 - No current capability is marked PONR — every L2+ cap today is bounded-reversible. The flag ships end-to-end so future external-effect caps (git.push, deploy, send email) opt in with one line
 
+### M6.P1 — Red-Team Agent ✅ (new)
+- `js/kernel/red-team.js`: `reviewAction(cap, args) → {ok, review?{risks, recommendation, summary, brain, model}}`. Adversarial system prompt with structured JSON output. One retry, 600 maxTokens, 10s timeout, MAX_PARALLEL=4
+- `initRedTeamAgent()` auto-subscribes to `interception:preview` for L2+ caps only, emits `interception:enriched` on completion
+- Spotlight: appends a colored risks list (severity dots, recommendation header) under the args summary in the existing preview panel
+- Wired in both boot blocks. Bug caught + fixed during integration: rewindBranch's lower-bound off-by-one for same-ms mutations (lesson #137); v03-verification budget reset (lesson #138)
+
+### M6.P4 — Rubber-Stamp Tracker ✅ (new)
+- `js/kernel/rubber-stamp-tracker.js`: 7-day rolling window of confirm timing. < 1.5s = `rapid`, >= 1.5s = `considered`, plus `aborted` and `timeout` (distinguished by reason string)
+- When rapid-confirm rate exceeds 80% over 20+ samples, emits `socratic:rubberstamp-warning` at most once per 24h
+- `getStats()` for dashboards; `resetStats()` for tests + future Settings "I've adjusted my workflow" button
+- Wired in both boot blocks. The "did the user actually engage with the gate" telemetry that closes the M5/M6 safety story
+
 ### v0.3 Offline Verification Suite ✅
 `test/v03-verification.html` — 140 tests across 14 sections. Refresh to re-run. No API key needed (stubbed `aiService.askWithMeta`).
 
@@ -158,7 +174,11 @@ b7de3ed M0.P3 + M3.P1 server: dynamic per-app CSS, Ollama pull, v0.3 offline sui
 ### Bigger work (next)
 - **M4 dock surface**: bundle/promote write graph nodes, but there's no actual dock-icon plumbing that reads `'generated-app'` nodes with status='docked' and shows them in the dock UI. Spotlight already supports launching arbitrary capabilities; the missing piece is a passive scan + register-as-app on the renderer side.
 - **M5.P3.b** — Spotlight/Settings UI listing recent branches with a "Rewind" button. The `branch.rewind` capability + `rewindBranch` substrate ship; the UI is the missing piece. ~50 lines in spotlight.js or a new Settings panel.
-- **M6 (Socratic + Red-Team Agent)** — second AI critiques every L2+ plan. The L2+ gate substrate (M5.P2/P2.b/P2.c) is now in place; M6 plugs the red-team agent into `interception:preview` as another subscriber that emits `interception:abort` on red flags. Also retrofits `app.promote` to require red-team signoff in addition to user.
+- **M6.P2** — Socratic Prompter (confidence-threshold-based clarifying questions BEFORE the planner runs). The red-team flags risks AFTER a plan exists; the Socratic prompter would surface ambiguity before code/text is generated.
+- **M6.P3** — Planner-vs-Red-Team UI side-by-side. The red-team output already renders inline; M6.P3 is the more sophisticated diff view ("planner says X, red-team says Y, decide").
+- **M6.P4.b** — chaos injection (insert a known-bad plan as a test, cooldown if user rubber-stamps it).
+- **M6.P4.c** — Spotlight banner that renders `socratic:rubberstamp-warning` events.
+- **M7 (Declarative Intent Language + Skill Marketplace)** and **M8 (Alignment-Proven Self-Modification)** — big work, multi-week.
 - **M6 (Socratic Loop + Red-Team Agent)** — second AI critiques every L2+ plan. Also retrofits the M4.P4 `app.promote` gate to require red-team signoff.
 - More apps past 80, marketplace prep, ISO installer UX.
 

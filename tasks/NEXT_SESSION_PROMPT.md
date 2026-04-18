@@ -3,16 +3,16 @@
 ```
 Fresh session. Read in this order before touching anything:
 
-SESSION_HANDOFF.md — full recap (M0→M3 + M4 + ALL of M5)
-PLAN.md — milestones (M0.P3, M0.P4, M3, M4, M5 all done)
-tasks/lessons.md — read lessons 99-136 (this session's lessons)
+SESSION_HANDOFF.md — full recap (M0→M3 + M4 + M5 + M6.P1/P4)
+PLAN.md — milestones (M0.P3, M0.P4, M3, M4, M5, M6.P1, M6.P4 done)
+tasks/lessons.md — read lessons 99-143 (this session's lessons)
 
 Then run:
 - git status (working tree should be clean)
-- git log --oneline -28 (last 26 commits are this session)
+- git log --oneline -34 (last 32 commits are this session)
 - node server/index.js
 - open http://localhost:3000/test/v03-verification.html — should
-  render 153/153 tests green across 14 sections
+  render 169/169 tests green across 16 sections
 
 Persona: completely serious, no sugarcoating, zero hallucination
 tolerance. Memory file at ~/.claude/projects/-Users-parul-Nova-OS/
@@ -22,30 +22,31 @@ No narration. Verify every claim before stating it.
 
 State of the world (BIG):
 
-Architecturally finished through M5:
+Architecturally finished through M6.P1 + M6.P4:
   M1 — Intent Kernel
   M2 — Hypergraph Storage
   M3 — Dual-Process Runtime
   M4 — Verifiable Code Generation (full chain)
   M5 — Reversibility + Temporal Substrate (full):
-       P1 branching storage
-       P2 operation interceptor
-       P2.b executeIntent through interceptor
-       P2.c Spotlight UI for interception:preview
-       P3 rewindBranch
-       P4 point-of-no-return flag + typed-confirm
+       P1 branching storage + P2 interceptor + P2.b executeIntent
+       wired + P2.c Spotlight UI + P3 rewindBranch + P4 PONR flag
+  M6 — Socratic + Red-Team (partial):
+       P1 red-team agent (reviews L2+ previews)
+       P4 rubber-stamp tracker (warns when user confirms too fast)
+       P2 + P3 + P4.b/c still pending
 
 12 new capabilities this session: spec.generate, spec.freeze,
-tests.generate, tests.run, code.generate, app.bundle (L0),
-app.promote (L2), app.archive (L2), branch.create (L0),
-branch.merge (L2), branch.discard (L1), branch.rewind (L2).
+tests.generate, tests.run, code.generate, app.bundle, app.promote,
+app.archive, branch.create, branch.merge, branch.discard,
+branch.rewind. Plus 2 kernel-only modules with no capability
+surface: red-team and rubber-stamp-tracker.
 
 What's NOT done (in priority order):
 
 A) Real Anthropic API E2E with funded ANTHROPIC_API_KEY. Stubs
    prove wiring; real API proves Claude's prompt + JSON tolerance
-   for every M3/M4 phase. Run a spec→tests→code→bundle chain
-   with a real key.
+   for every M3/M4/M6 phase. Run a spec→tests→code→bundle chain
+   and watch the red-team's reviews come back.
 
 B) Real Ollama E2E. Settings > AI > Test Connection + Pull Model
    work; not soak-tested with `ollama serve` running.
@@ -61,21 +62,22 @@ D) M4 dock surface: bundle/promote write 'generated-app' graph
 E) M5.P3.b — Spotlight/Settings UI listing recent branches with
    a "Rewind" button. ~50 lines.
 
-F) M6 Socratic Loop + Red-Team Agent. The L2+ gate substrate
-   (M5.P2/P2.b/P2.c) is in place; M6 plugs the red-team agent
-   into interception:preview as another subscriber that emits
-   interception:abort on red flags. Also retrofits app.promote
-   to require red-team signoff in addition to user.
+F) M6.P2 Socratic Prompter — clarifying questions BEFORE the
+   planner runs (red-team flags risks AFTER plan exists).
 
-G) M7 (Declarative Intent Language + Skill Marketplace) and M8
+G) M6.P4.c — Spotlight banner for socratic:rubberstamp-warning
+   events. The event already fires; the visual is the missing
+   piece.
+
+H) M7 (Declarative Intent Language + Skill Marketplace) and M8
    (Alignment-Proven Self-Modification). Big work.
 
-H) safeMathEval doesn't handle scientific notation (1e6) or
+I) safeMathEval doesn't handle scientific notation (1e6) or
    unary +(.
 
 If the user has no specific direction, suggest A, B, D first
-(verify what shipped against real APIs, surface generated apps
-in the dock) before tackling M6 or M5.P3.b.
+(verify shipped against real APIs, surface generated apps in the
+dock) before tackling M6.P2/P3 or M7+.
 
 Architecture refresher:
 
@@ -83,8 +85,8 @@ Architecture refresher:
   → code.generate (with internal tests.run iteration) →
   app.bundle → user app.promote.
 
-- M5.P1 substrate: createBranch → record(...) multiple times →
-  diffBranch (preview) → mergeBranch (apply) | discardBranch.
+- M5.P1 substrate: createBranch → record(...) → diffBranch
+  (preview) → mergeBranch (apply) | discardBranch | rewindBranch.
 
 - M5.P2 gate: interceptedExecute(cap, args) — L0/L1 pass through,
   L2+ emit interception:preview {id, cap, args, requiresTypedConfirmation},
@@ -95,44 +97,42 @@ Architecture refresher:
   interceptedExecute. Spotlight subscribes to interception:preview,
   renders the panel, emits confirm/abort on Enter/Escape.
 
-- M5.P3: rewindBranch reverses every mutation a merge produced.
-  branch.rewind capability is L2 (gate fires). Branch transitions
-  to status='rewound' (idempotent).
+- M5.P3 rewind: rewindBranch undoes every mutation tagged with
+  this branch's capabilityId. CRITICAL: graph-store.updateNode
+  reads meta.capabilityId at the TOP LEVEL (not nested under
+  createdBy). Lower bound for getMutationsSince must be
+  createdAt - 1 not committedAt - 1 (lesson #137 — IDB exclusive).
 
 - M5.P4: cap.pointOfNoReturn=true → red banner, typed-confirm
-  required (type cap.id exactly). Mismatch bounces back, doesn't
-  abort. No existing cap is PONR; flag is plumbed for future
-  external-effect caps (git push, send email, etc.).
+  required.
+
+- M6.P1 red-team: subscribes to interception:preview, reviews
+  L2+ caps, emits interception:enriched. Spotlight appends
+  colored risks list.
+
+- M6.P4 rubber-stamp: tracks rapid (< 1.5s) vs considered
+  confirms. Emits socratic:rubberstamp-warning if rate > 80%
+  over 20+ samples (24h cooldown).
 
 - Sandbox isolation: test-runner uses sandbox="allow-scripts"
   iframe. Unique origin → no parent window/storage/network.
 
 - Brain tag flow: aiService.askWithMeta returns {reply, meta}.
-  Planner propagates meta. Executor reads plan.meta.brain
-  (race-safe per-call).
+  Planner propagates meta. Executor reads plan.meta.brain.
 
 - Three-layer defense for code generation: prompt rules,
   schema-validator forbidden tokens, sandbox unique-origin.
 
-- Provenance edges: every generated app has derives_from spec,
-  passed_tests suite, runs_code code edges.
+- Verification: /test/v03-verification.html — 169 tests, 16
+  sections, 0 API key. RESETS localStorage 'astrion-budget-day'
+  + 'nova-ai-provider' at page load (lesson #138). Re-run after
+  every kernel-layer change.
 
-- Per-call opaque ids for any kernel/UI boundary that can have
-  multiple in-flight async operations.
-
-- Mutation tagging: branch.merge stores meta.capabilityId =
-  'branch.merge:' + branchId so rewindBranch can find them.
-  graph-store reads meta.capabilityId at the TOP LEVEL (not
-  nested under createdBy) for both createNode and updateNode
-  (lesson #131 — easy to get wrong).
-
-- All 80 apps register in 3 boot.js blocks. Native shell C
-  registry at distro/nova-renderer/nova-shell.c (~line 156).
-
-- Verification: /test/v03-verification.html — 153 tests, 14
-  sections, 0 API key. Re-run after every kernel-layer change.
-
-Working tree is clean. The 26 commits this session (latest first):
+Working tree is clean. The 32 commits this session (latest first):
+  7e7e22a M6.P4 rubber-stamp tracker
+  2e8e53d docs M6.P1
+  5e98fba M6.P1 red-team + rewind/budget fixes
+  3948928 docs M5 fully complete
   e2aa488 M5.P4 PONR + typed-confirm
   709005c docs M5.P3
   3c8fb5f M5.P3 rewindBranch
@@ -159,7 +159,7 @@ Working tree is clean. The 26 commits this session (latest first):
   b7de3ed M0.P3 chrome strip + verification suite
 
 If you change anything that's testable, run the verification
-suite again before claiming done. For UI changes, drive the
-real Spotlight via preview_eval and dispatch keydown events
+suite again before claiming done. For UI changes, drive real
+Spotlight via preview_eval and dispatch keydown events
 (lesson #130).
 ```
