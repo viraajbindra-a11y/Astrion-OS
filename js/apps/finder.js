@@ -537,7 +537,9 @@ async function initFinder(container, instanceId, startPath) {
     const msg = toDelete.length === 1
       ? `Delete "${names[0]}"?`
       : `Delete ${toDelete.length} items?\n\n${names.slice(0, 5).join(', ')}${names.length > 5 ? '…' : ''}`;
-    if (!confirm(msg)) return;
+    const { showConfirm } = await import('../lib/dialog.js');
+    const ok = await showConfirm(msg.replace(/\n/g, '<br>'), null, true);
+    if (!ok) return;
     for (const f of toDelete) {
       try { await fileSystem.delete(f.path); } catch (err) { console.warn('[finder] delete failed', f.path, err); }
     }
@@ -602,7 +604,8 @@ async function initFinder(container, instanceId, startPath) {
       }},
       { separator: true },
       { label: 'Move to Trash', action: async () => {
-        if (confirm(`Delete "${name}"?`)) {
+        const { showConfirm } = await import('../lib/dialog.js');
+        if (await showConfirm(`Delete "${name}"?`, null, true)) {
           await fileSystem.delete(file.path);
           loadFiles();
         }

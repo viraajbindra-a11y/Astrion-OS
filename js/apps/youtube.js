@@ -298,9 +298,10 @@ function initYouTube(container) {
   }
 
   keyBtn.addEventListener('click', promptKey);
-  function promptKey() {
+  async function promptKey() {
     const current = getYTApiKey();
-    const key = prompt('Enter your YouTube Data API v3 key:\n(Get one free at console.cloud.google.com)', current);
+    const { showPrompt } = await import('../lib/dialog.js');
+    const key = await showPrompt('Enter your YouTube Data API v3 key:<br>(Get one free at console.cloud.google.com)', current);
     if (key !== null) setYTApiKey(key.trim());
   }
 

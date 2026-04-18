@@ -312,20 +312,22 @@ async function initTextEditor(container, instanceId, options = {}) {
     // Cmd+G / Ctrl+G to go to line
     if ((e.metaKey || e.ctrlKey) && e.key === 'g') {
       e.preventDefault();
-      const lineNum = prompt('Go to line:');
-      if (lineNum) {
-        const n = parseInt(lineNum);
-        if (n > 0) {
-          const lines = textarea.value.split('\n');
-          let pos = 0;
-          for (let i = 0; i < Math.min(n - 1, lines.length); i++) pos += lines[i].length + 1;
-          textarea.setSelectionRange(pos, pos);
-          textarea.focus();
-          // Scroll the line into view
-          const lineH = parseInt(getComputedStyle(textarea).lineHeight) || 18;
-          textarea.scrollTop = Math.max(0, (n - 5) * lineH);
+      (async () => {
+        const { showPrompt } = await import('../lib/dialog.js');
+        const lineNum = await showPrompt('Go to line:');
+        if (lineNum) {
+          const n = parseInt(lineNum);
+          if (n > 0) {
+            const lines = textarea.value.split('\n');
+            let pos = 0;
+            for (let i = 0; i < Math.min(n - 1, lines.length); i++) pos += lines[i].length + 1;
+            textarea.setSelectionRange(pos, pos);
+            textarea.focus();
+            const lineH = parseInt(getComputedStyle(textarea).lineHeight) || 18;
+            textarea.scrollTop = Math.max(0, (n - 5) * lineH);
+          }
         }
-      }
+      })();
     }
 
     // Cmd+S / Ctrl+S to save
@@ -423,21 +425,6 @@ async function initTextEditor(container, instanceId, options = {}) {
       case 'replace':
         toggleFindBar(true);
         break;
-      case '_old_replace':
-        // Legacy replace — kept for reference
-        const findStr = prompt('Find:');
-        if (findStr) {
-          const replaceStr = prompt('Replace with:');
-          if (replaceStr !== null) {
-            const idx = textarea.value.indexOf(findStr, textarea.selectionStart);
-            if (idx >= 0) {
-              textarea.value = textarea.value.substring(0, idx) + replaceStr + textarea.value.substring(idx + findStr.length);
-              textarea.selectionStart = textarea.selectionEnd = idx + replaceStr.length;
-              textarea.dispatchEvent(new Event('input'));
-            }
-          }
-        }
-        break;
     }
   });
 
@@ -473,7 +460,8 @@ async function initTextEditor(container, instanceId, options = {}) {
   }
 
   async function saveFileAs() {
-    const name = prompt('Save as:', filePath ? fileSystem.getFileName(filePath) : 'untitled.txt');
+    const { showPrompt } = await import('../lib/dialog.js');
+    const name = await showPrompt('Save as:', filePath ? fileSystem.getFileName(filePath) : 'untitled.txt');
     if (!name) return;
     const dir = filePath ? fileSystem.getParentPath(filePath) : '/Documents';
     filePath = `${dir}/${name}`;
