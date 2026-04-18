@@ -56,10 +56,17 @@ class AIService {
     delete this.context[key];
   }
 
-  async ask(prompt, options = {}) {
+  /**
+   * Same as ask() but returns the metadata the menubar/calibration code needs.
+   * Resolves to { reply, meta } where meta = { brain, confidence, provider,
+   * capCategory, model, escalated, responseTimeMs }.
+   *
+   * Use this instead of subscribing to `ai:response` when you need the brain
+   * tag for the SPECIFIC call you just made — the event bus is global and a
+   * concurrent call can clobber the value between your await and your read.
+   */
+  async askWithMeta(prompt, options = {}) {
     const systemContext = this._buildSystemContext();
-    // skipHistory: don't include prior turns and don't record this exchange.
-    // Used by the intent planner so planner prompts don't pollute chat history.
     const skip = !!options.skipHistory;
     const messages = [
       ...(skip ? [] : this.conversationHistory.slice(-6)),
@@ -69,65 +76,69 @@ class AIService {
     const provider = this.getProvider();
     const startMs = Date.now();
 
-    // Tell the brain indicator we're thinking (menubar pulses yellow)
     eventBus.emit('ai:thinking');
 
-    // M3 escalation: check if this capability category should skip S1
     const capCat = options.capCategory || 'general';
     let skipS1 = false;
     if (provider === 'auto') {
       try { skipS1 = await shouldEscalate(capCat); } catch {}
     }
 
-    // Auto: try Ollama first (unless escalated), then Anthropic, then mock
+    const emitMeta = (meta) => { eventBus.emit('ai:response', { ...meta, query: prompt.slice(0, 100) }); return meta; };
+
     if ((provider === 'auto' && !skipS1) || provider === 'ollama') {
       const reply = await this._tryOllama(systemContext, messages, options);
       if (reply) {
         if (!skip) this._addToHistory(prompt, reply);
-        const elapsed = Date.now() - startMs;
-        eventBus.emit('ai:response', { brain: 's1', confidence: 0.85, provider: 'ollama', responseTimeMs: elapsed, capCategory: capCat, model: options.model || this.getOllamaModel(), escalated: false, query: prompt.slice(0, 100) });
-        return reply;
+        const meta = emitMeta({ brain: 's1', confidence: 0.85, provider: 'ollama',
+          responseTimeMs: Date.now() - startMs, capCategory: capCat,
+          model: options.model || this.getOllamaModel(), escalated: false });
+        return { reply, meta };
       }
       if (provider === 'ollama') {
-        const mock = this._mockResponse(prompt);
-        eventBus.emit('ai:response', { brain: 'offline', confidence: 0.3, provider: 'mock', capCategory: capCat, model: 'mock', escalated: false, query: prompt.slice(0, 100) });
-        return mock;
+        const reply = this._mockResponse(prompt);
+        const meta = emitMeta({ brain: 'offline', confidence: 0.3, provider: 'mock',
+          capCategory: capCat, model: 'mock', escalated: false });
+        return { reply, meta };
       }
     }
 
     if (provider === 'auto' || provider === 'anthropic') {
-      // M3 budget gate: check spending limits before S2 call
       const model = options.model || 'claude-haiku-4-5-20251001';
       const inputEstimate = Math.max(500, Math.min(8000, Math.round(prompt.length * 1.3)));
       const budgetCheck = checkBudget({ inputTokens: inputEstimate, outputTokens: 500, model });
       if (!budgetCheck.allowed) {
         console.warn('[ai-service] S2 budget exceeded:', budgetCheck.reason);
-        // Fall through to mock with a budget warning
-        const mock = `I'd love to help, but today's cloud AI budget has been reached. ${budgetCheck.reason}. Try again tomorrow, or use Ollama (free, local) in Settings > AI.`;
-        eventBus.emit('ai:response', { brain: 'offline', confidence: 0.3, provider: 'budget-exceeded', capCategory: capCat, model, escalated: skipS1, query: prompt.slice(0, 100) });
-        return mock;
+        const reply = `I'd love to help, but today's cloud AI budget has been reached. ${budgetCheck.reason}. Try again tomorrow, or use Ollama (free, local) in Settings > AI.`;
+        const meta = emitMeta({ brain: 'offline', confidence: 0.3, provider: 'budget-exceeded',
+          capCategory: capCat, model, escalated: skipS1 });
+        return { reply, meta };
       }
 
       const result = await this._tryAnthropicWithUsage(systemContext, messages, options);
       if (result?.reply) {
         if (!skip) this._addToHistory(prompt, result.reply);
-        const elapsed = Date.now() - startMs;
-        // Record actual token usage for budget tracking
         recordS2Call({
           inputTokens: result.usage?.input_tokens || 0,
           outputTokens: result.usage?.output_tokens || 0,
-          model,
-          query: prompt.slice(0, 100),
-          ok: true,
+          model, query: prompt.slice(0, 100), ok: true,
         });
-        eventBus.emit('ai:response', { brain: 's2', confidence: 0.95, provider: 'anthropic', responseTimeMs: elapsed, capCategory: capCat, model, escalated: skipS1, query: prompt.slice(0, 100) });
-        return result.reply;
+        const meta = emitMeta({ brain: 's2', confidence: 0.95, provider: 'anthropic',
+          responseTimeMs: Date.now() - startMs, capCategory: capCat, model,
+          escalated: skipS1 });
+        return { reply: result.reply, meta };
       }
     }
 
-    const mock = this._mockResponse(prompt);
-    eventBus.emit('ai:response', { brain: 'offline', confidence: 0.3, provider: 'mock', capCategory: capCat, model: 'mock', escalated: false, query: prompt.slice(0, 100) });
-    return mock;
+    const reply = this._mockResponse(prompt);
+    const meta = emitMeta({ brain: 'offline', confidence: 0.3, provider: 'mock',
+      capCategory: capCat, model: 'mock', escalated: false });
+    return { reply, meta };
+  }
+
+  async ask(prompt, options = {}) {
+    const { reply } = await this.askWithMeta(prompt, options);
+    return reply;
   }
 
   async _tryOllama(system, messages, options) {
@@ -230,13 +241,15 @@ class AIService {
       return jokes[Math.floor(Math.random() * jokes.length)];
     }
 
-    // Math
-    const mathMatch = lower.match(/(?:what is |calculate |compute )?([\d\s+\-*/.()]+)/);
+    // Math — hand-rolled parser (no Function/eval). Input is gated by the
+    // regex to digits/whitespace/+ - * / ^ ( ) . so the worst a bad input
+    // can do is throw. Exponents accept both ** and ^.
+    const mathMatch = lower.match(/(?:what is |calculate |compute )?([\d\s+\-*/.()^]+)/);
     if (mathMatch) {
       try {
         const expr = mathMatch[1].trim();
-        if (/^[\d\s+\-*/.()]+$/.test(expr) && expr.length > 1 && expr.length < 100 && !/[a-zA-Z_$\\]/.test(expr)) {
-          const result = Function('"use strict"; return (' + expr + ')')();
+        if (/^[\d\s+\-*/.()^]+$/.test(expr) && expr.length > 1 && expr.length < 100) {
+          const result = safeMathEval(expr);
           if (typeof result === 'number' && isFinite(result)) return `${expr} = ${result}`;
         }
       } catch {}
@@ -251,3 +264,76 @@ class AIService {
 }
 
 export const aiService = new AIService();
+
+// ─── Safe math evaluator (replaces Function() in _mockResponse) ───
+// Tiny recursive-descent parser for + - * / and parentheses. Operates on
+// a tokenized stream so there is no path back to eval/Function. Throws
+// on malformed input; caller catches.
+function safeMathEval(expr) {
+  const tokens = [];
+  let i = 0;
+  while (i < expr.length) {
+    const ch = expr[i];
+    if (ch === ' ' || ch === '\t') { i++; continue; }
+    if ((ch >= '0' && ch <= '9') || ch === '.') {
+      let n = '';
+      while (i < expr.length && ((expr[i] >= '0' && expr[i] <= '9') || expr[i] === '.')) {
+        n += expr[i++];
+      }
+      tokens.push({ t: 'num', v: parseFloat(n) });
+    } else if (ch === '*' && expr[i + 1] === '*') {
+      tokens.push({ t: 'op', v: '^' });
+      i += 2;
+    } else if ('+-*/()^'.indexOf(ch) >= 0) {
+      tokens.push({ t: 'op', v: ch });
+      i++;
+    } else {
+      throw new Error('safeMathEval: bad char ' + ch);
+    }
+  }
+  let p = 0;
+  function expect(v) {
+    if (!tokens[p] || tokens[p].v !== v) throw new Error('safeMathEval: expected ' + v);
+    p++;
+  }
+  function parseExpr() {
+    let left = parseTerm();
+    while (tokens[p] && (tokens[p].v === '+' || tokens[p].v === '-')) {
+      const op = tokens[p++].v;
+      const right = parseTerm();
+      left = op === '+' ? left + right : left - right;
+    }
+    return left;
+  }
+  function parseTerm() {
+    let left = parsePower();
+    while (tokens[p] && (tokens[p].v === '*' || tokens[p].v === '/')) {
+      const op = tokens[p++].v;
+      const right = parsePower();
+      left = op === '*' ? left * right : left / right;
+    }
+    return left;
+  }
+  // Exponent — right-associative. 2^3^2 = 2^(3^2) = 512
+  function parsePower() {
+    const left = parseFactor();
+    if (tokens[p] && tokens[p].v === '^') {
+      p++;
+      const right = parsePower();
+      return Math.pow(left, right);
+    }
+    return left;
+  }
+  function parseFactor() {
+    const tok = tokens[p];
+    if (!tok) throw new Error('safeMathEval: unexpected end');
+    if (tok.v === '(') { p++; const v = parseExpr(); expect(')'); return v; }
+    if (tok.v === '-') { p++; return -parsePower(); }
+    if (tok.v === '+') { p++; return  parsePower(); }
+    if (tok.t === 'num') { p++; return tok.v; }
+    throw new Error('safeMathEval: bad token ' + JSON.stringify(tok));
+  }
+  const result = parseExpr();
+  if (p !== tokens.length) throw new Error('safeMathEval: trailing tokens');
+  return result;
+}

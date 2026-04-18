@@ -20,6 +20,23 @@ import { resolveCapability, getCapability, runCapability, LEVEL } from './capabi
 import { eventBus } from './event-bus.js';
 import { intentToNaturalLanguage } from './intent-parser.js';
 
+// M3 fix: track the actual brain (s1/s2/offline) from the most recent
+// ai:response so calibration samples reflect what really answered. The
+// previous implementation read localStorage('nova-ai-provider') which
+// returns 'auto' for the default config and was hard-coded to 's1', so
+// every Anthropic-served plan was mis-tagged as Ollama. The router only
+// matters per-plan and intent:plan handler is sequential, so a single
+// module-level variable is enough — no race window between planIntent()
+// resolving and recordSample() running in the same handler.
+let __lastBrain = 'offline';
+let __lastConfidence = 0;
+eventBus.on('ai:response', (meta) => {
+  if (meta && typeof meta.brain === 'string') {
+    __lastBrain = meta.brain;
+    __lastConfidence = typeof meta.confidence === 'number' ? meta.confidence : 0;
+  }
+});
+
 // ═══════════════════════════════════════════════════════════════
 // BUDGET TRACKING
 // ═══════════════════════════════════════════════════════════════
@@ -443,9 +460,10 @@ export function initIntentExecutor() {
       // the future M3 router uses to decide S1 vs S2 escalation.
       try {
         const { recordSample, capCategory } = await import('./calibration-tracker.js');
-        const brain = localStorage.getItem('nova-ai-provider') === 'ollama' ? 's1'
-          : localStorage.getItem('nova-ai-provider') === 'anthropic' ? 's2'
-          : 's1'; // 'auto' defaults to S1 since Ollama is tried first
+        // Use the brain returned by the planner for THIS plan. Falls back to
+        // the latest ai:response only if the planner didn't supply meta
+        // (older code paths). Per-call meta is race-safe for concurrent plans.
+        const brain = plan.meta?.brain || __lastBrain;
         for (const r of (result.results || [])) {
           await recordSample({
             brain,

@@ -205,12 +205,16 @@ export async function planIntent({ query, context, memory, parsedIntent }) {
   const prompt = buildPlannerPrompt({ query, context, memory, parsedIntent });
 
   // ─── First attempt ───
-  let raw;
+  let raw, meta;
   try {
-    // Agent Core soak test: 1500 was overkill — a 5-step plan is ~300 tokens.
-    // Local Ollama models (qwen2.5:7b) ramble past the JSON close-brace if given
-    // too much room. 500 is plenty and keeps response times under 10s on M2.
-    raw = await aiService.ask(prompt, { maxTokens: 500, skipHistory: true });
+    // Use askWithMeta so the brain (s1/s2/offline) flows back to the executor
+    // for accurate calibration. The global ai:response event is racy when
+    // multiple intents fire concurrently; per-call meta is not.
+    const r = await aiService.askWithMeta(prompt, {
+      maxTokens: 500, skipHistory: true, capCategory: 'planner',
+    });
+    raw = r.reply;
+    meta = r.meta;
   } catch (err) {
     return { status: 'failed', error: `planner ai call threw: ${err?.message || err}` };
   }
@@ -232,22 +236,22 @@ Try again. Respond with JSON only. No prose, no markdown.`;
 
     let retryRaw;
     try {
-      retryRaw = await aiService.ask(retryPrompt, { maxTokens: 500, skipHistory: true });
+      const r = await aiService.askWithMeta(retryPrompt, {
+        maxTokens: 500, skipHistory: true, capCategory: 'planner',
+      });
+      retryRaw = r.reply;
+      meta = r.meta;
     } catch (err) {
-      return { status: 'failed', error: `planner retry threw: ${err?.message || err}`, raw };
+      return { status: 'failed', error: `planner retry threw: ${err?.message || err}`, raw, meta };
     }
     const retryPlan = tryParseJSON(retryRaw);
     const retryValidation = retryPlan ? validatePlan(retryPlan) : { ok: false, error: 'retry also un-parseable' };
     if (!retryValidation.ok) {
-      // Agent Core Sprint follow-up: prior error label was always "JSON
-      // invalid" even when JSON parsed fine but the schema rejected an
-      // unknown capability or an empty steps array. Distinguish parse
-      // failures from schema failures so the Spotlight error reads cleanly.
       const kind = retryPlan ? 'invalid' : 'unparseable';
       return {
         status: 'failed',
         error: `planner output ${kind} twice: ${retryValidation.error}`,
-        raw: retryRaw || raw,
+        raw: retryRaw || raw, meta,
       };
     }
     plan = retryPlan;
@@ -258,7 +262,7 @@ Try again. Respond with JSON only. No prose, no markdown.`;
       status: 'clarify',
       question: plan.question,
       choices: Array.isArray(plan.choices) ? plan.choices : [],
-      raw,
+      raw, meta,
     };
   }
 
@@ -266,7 +270,7 @@ Try again. Respond with JSON only. No prose, no markdown.`;
     status: 'plan',
     steps: plan.steps,
     reasoning: typeof plan.reasoning === 'string' ? plan.reasoning : '',
-    raw,
+    raw, meta,
   };
 }
 
