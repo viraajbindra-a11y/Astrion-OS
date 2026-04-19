@@ -151,7 +151,7 @@ export async function generateTests(specId) {
   let raw, meta;
   try {
     const r = await aiService.askWithMeta(prompt, {
-      maxTokens: 1200, skipHistory: true, capCategory: 'tests',
+      maxTokens: 1200, skipHistory: true, capCategory: 'tests', format: 'json',
     });
     raw = r.reply;
     meta = r.meta;
@@ -175,7 +175,7 @@ Try again. Respond with JSON only.`;
     let retryRaw;
     try {
       const r = await aiService.askWithMeta(retryPrompt, {
-        maxTokens: 1200, skipHistory: true, capCategory: 'tests',
+        maxTokens: 1200, skipHistory: true, capCategory: 'tests', format: 'json',
       });
       retryRaw = r.reply;
       meta = r.meta;

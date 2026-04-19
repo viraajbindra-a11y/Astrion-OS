@@ -211,7 +211,7 @@ export async function planIntent({ query, context, memory, parsedIntent }) {
     // for accurate calibration. The global ai:response event is racy when
     // multiple intents fire concurrently; per-call meta is not.
     const r = await aiService.askWithMeta(prompt, {
-      maxTokens: 500, skipHistory: true, capCategory: 'planner',
+      maxTokens: 500, skipHistory: true, capCategory: 'planner', format: 'json',
     });
     raw = r.reply;
     meta = r.meta;
@@ -237,7 +237,7 @@ Try again. Respond with JSON only. No prose, no markdown.`;
     let retryRaw;
     try {
       const r = await aiService.askWithMeta(retryPrompt, {
-        maxTokens: 500, skipHistory: true, capCategory: 'planner',
+        maxTokens: 500, skipHistory: true, capCategory: 'planner', format: 'json',
       });
       retryRaw = r.reply;
       meta = r.meta;

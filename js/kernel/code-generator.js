@@ -182,7 +182,7 @@ export async function generateCode(suiteId, opts = {}) {
     let raw, meta;
     try {
       const r = await aiService.askWithMeta(prompt, {
-        maxTokens: 2000, skipHistory: true, capCategory: 'code',
+        maxTokens: 2000, skipHistory: true, capCategory: 'code', format: 'json',
       });
       raw = r.reply;
       meta = r.meta;

@@ -134,7 +134,7 @@ export async function reviewAction(cap, args) {
   let raw, meta;
   try {
     const r = await aiService.askWithMeta(prompt, {
-      maxTokens: 600, skipHistory: true, capCategory: 'red-team',
+      maxTokens: 600, skipHistory: true, capCategory: 'red-team', format: 'json',
     });
     raw = r.reply;
     meta = r.meta;
@@ -157,7 +157,7 @@ Try again. Respond with JSON only.`;
     let retryRaw;
     try {
       const r = await aiService.askWithMeta(retryPrompt, {
-        maxTokens: 600, skipHistory: true, capCategory: 'red-team',
+        maxTokens: 600, skipHistory: true, capCategory: 'red-team', format: 'json',
       });
       retryRaw = r.reply;
       meta = r.meta;
