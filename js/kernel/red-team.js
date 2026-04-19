@@ -37,7 +37,11 @@
 import { eventBus } from './event-bus.js';
 import { aiService } from './ai-service.js';
 
-const REVIEW_TIMEOUT_MS = 10000;
+// 60s, sized for local Ollama (qwen2.5:7b takes ~10s on a tight prompt
+// and up to 30-50s on a slower one). Anthropic Haiku is sub-second so
+// this is comfortable headroom; the cost of a slower review is much
+// less than the cost of "red-team unavailable" on every L2+ preview.
+const REVIEW_TIMEOUT_MS = 60000;
 const MAX_PARALLEL = 4; // hard cap on concurrent red-team calls
 const inFlight = new Map();
 
