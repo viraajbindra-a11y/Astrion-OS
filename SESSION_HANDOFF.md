@@ -1,10 +1,10 @@
-# Session Handoff: M0→M3 + M4 + M5 + M6.P1/P4 + M6.P4.c
+# Session Handoff: M0→M3 + M4 + M5 + M5.P3.b UI + M6.P1/P4/P4.c
 
 **Date:** 2026-04-17 → 2026-04-18
-**Branch:** main (34 new commits ahead of origin — not pushed)
+**Branch:** main (36 new commits ahead of origin — not pushed)
 **Starting point:** 80 apps, commit `f8a47fa` (timer.js leak fix)
-**Ending point:** commit `4de5eef` (M6.P4.c rubber-stamp warning → notification:show)
-**Verification:** **170/170 tests** in `test/v03-verification.html` + M5.P2.c verified end-to-end via real Spotlight + simulated Enter/Escape. **Full M5 + M6.P1 + M6.P4 + M6.P4.c shipped**.
+**Ending point:** commit `115b2c1` (M5.P3.b Spotlight branches command)
+**Verification:** **170/170 tests** in `test/v03-verification.html` + M5.P2.c verified end-to-end via real Spotlight + simulated Enter/Escape + M5.P3.b verified via Spotlight "branches" query rendering 20 branches. **Full M5 (incl. UI) + M6.P1 + M6.P4 + M6.P4.c shipped**.
 
 ---
 
@@ -20,9 +20,11 @@ The session did three substantively different chunks of work:
 
 ---
 
-## Commits Landed (34, not pushed)
+## Commits Landed (36, not pushed)
 
 ```
+115b2c1 M5.P3.b: Spotlight "branches" command + Rewind buttons
+6169edf Docs: M6.P4.c marked complete; verification at 170/170
 4de5eef M6.P4.c: rubber-stamp warning fires as notification:show too
 635c0c8 Docs: M6.P4 marked complete; lessons 141-143; bump verification to 169
 7e7e22a M6.P4: rubber-stamp tracker (rapid-confirm rate + Socratic warning)
@@ -158,8 +160,14 @@ b7de3ed M0.P3 + M3.P1 server: dynamic per-app CSS, Ollama pull, v0.3 offline sui
 ### M6.P4 — Rubber-Stamp Tracker ✅ (new)
 - `js/kernel/rubber-stamp-tracker.js`: 7-day rolling window of confirm timing. < 1.5s = `rapid`, >= 1.5s = `considered`, plus `aborted` and `timeout` (distinguished by reason string)
 - When rapid-confirm rate exceeds 80% over 20+ samples, emits `socratic:rubberstamp-warning` at most once per 24h
+- M6.P4.c: warning ALSO emits `notification:show` so the user sees it immediately
 - `getStats()` for dashboards; `resetStats()` for tests + future Settings "I've adjusted my workflow" button
 - Wired in both boot blocks. The "did the user actually engage with the gate" telemetry that closes the M5/M6 safety story
+
+### M5.P3.b — Spotlight "branches" command ✅ (new)
+- Type "branches" / "branch" / "rewind" / "undo" in Spotlight to list the 20 most recent branches with status (color-coded dot), mutation count, age, and intent
+- Each committed branch gets a "⏪ Rewind" pill that fires `branch.rewind` via the intent path — automatically goes through the M5.P2 gate (preview + red-team review + typed-confirm if PONR)
+- Surfaces the M5.P1/P3 substrate to the user; previously only callable via capability ids
 
 ### v0.3 Offline Verification Suite ✅
 `test/v03-verification.html` — 140 tests across 14 sections. Refresh to re-run. No API key needed (stubbed `aiService.askWithMeta`).

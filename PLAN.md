@@ -436,8 +436,8 @@ Each milestone has: a 1-sentence success definition, **explicit phases** (the su
   - ✅ `js/kernel/branch-manager.js:rewindBranch(branchId)`: refuses unless `status==='committed'`. Walks graph-store mutation log for entries tagged with this branch's `capabilityId` (`'branch.merge:' + branchId`), sorts by timestamp desc, calls `graphStore.rewindMutation` on each. Branch transitions to `'rewound'` status (idempotent — refuses re-rewind).
   - ✅ Per-mutation inverse logic reuses graph-store's existing rewind (lessons #60/#61): create_node → delete, update_node → revert to before.props, delete_node → restore, add_edge → removeEdge, remove_edge → addEdge.
   - ✅ Capability: `branch.rewind` (L2, BOUNDED, NONE blast). M5.P2 gate fires for it because it's L2.
-  - **M5.P3.b** — Spotlight/Settings UI for "list recent branches with a rewind button" still pending. The substrate ships rewindBranch + branch.rewind capability; calling them from a UI panel is the missing piece.
-  - Timeline view of past states (like a Git log but visual) — deferred
+  - **M5.P3.b** ✅ **2026-04-18**: Spotlight "branches" command (also "branch" / "rewind" / "undo") renders a panel listing the 20 most recent branches with status + mutation count + age + intent. Each committed branch has a "⏪ Rewind" pill that fires `branch.rewind` via the intent path — automatically routes through the M5.P2 gate (preview + red-team review + typed-confirm if PONR).
+  - Timeline view of past states (like a Git log but visual) — deferred to M5.P3.c
 - **M5.P4 — External-Effect Detection** ✅ **2026-04-18**
   - ✅ Capability declarations gained an optional `pointOfNoReturn: true` flag (default `false`).
   - ✅ `operation-interceptor.requestConfirmation`: preview event payload now carries `cap.pointOfNoReturn` and a top-level `requiresTypedConfirmation` mirror so subscribers know to enforce typed input.
