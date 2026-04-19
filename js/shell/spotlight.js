@@ -711,53 +711,108 @@ export function initSpotlight() {
     const lower = query.toLowerCase();
     let html = '';
 
-    // ─── M5.P3.b: "branches" command — list recent branches with rewind ───
-    // Typing "branches" (or "branch" / "rewind" / "undo") shows a panel of
-    // recent branches. Each committed branch has a "Rewind" pill that fires
-    // branch.rewind via the intent path — which goes through the M5.P2 gate
-    // with red-team review automatically.
-    if (/^(branches?|rewind|undo)$/.test(lower)) {
+    // ─── M5.P3.b + M5.P3.c: "branches" / "timeline" command ───
+    // Typing "branches" (or "branch"/"timeline"/"history"/"log"/"rewind"/"undo")
+    // shows a chronological timeline of recent branches with status,
+    // mutation count, age, and intent. Click a row to expand and see
+    // each mutation. Committed branches get a "Rewind" pill that fires
+    // branch.rewind via the intent path — automatic M5.P2 gate +
+    // red-team review.
+    if (/^(branches?|timeline|history|log|rewind|undo)$/.test(lower)) {
       try {
         const branchMod = await import('../kernel/branch-manager.js');
         const branches = await branchMod.listBranches('*', 20);
         if (!branches.length) {
           results.innerHTML = `<div class="spotlight-result-group">
-            <div class="spotlight-result-label">⏮ Branches</div>
+            <div class="spotlight-result-label">⏮ Timeline</div>
             <div class="spotlight-result-subtitle" style="padding:12px 16px;opacity:0.6;">No branches yet. Branches are created when L2+ ops stage their changes.</div>
           </div>`;
           return;
         }
+        const fmtTs = (ts) => {
+          if (!ts) return '—';
+          const d = new Date(ts);
+          const now = new Date();
+          const sameDay = d.toDateString() === now.toDateString();
+          const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+          if (sameDay) return time;
+          const date = d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+          return `${date} ${time}`;
+        };
         const fmtAge = (ts) => {
-          if (!ts) return '?';
+          if (!ts) return '';
           const ms = Date.now() - ts;
-          if (ms < 60000) return Math.round(ms/1000) + 's ago';
-          if (ms < 3600000) return Math.round(ms/60000) + 'm ago';
-          if (ms < 86400000) return Math.round(ms/3600000) + 'h ago';
-          return Math.round(ms/86400000) + 'd ago';
+          if (ms < 60000) return Math.round(ms/1000) + 's';
+          if (ms < 3600000) return Math.round(ms/60000) + 'm';
+          if (ms < 86400000) return Math.round(ms/3600000) + 'h';
+          return Math.round(ms/86400000) + 'd';
         };
         const statusColor = { open: '#fab387', committed: '#a6e3a1', discarded: 'rgba(255,255,255,0.4)', rewound: '#cba6f7' };
-        const rows = branches.map(b => {
+        const RAIL_LEFT = '14px';
+        const NODE_LEFT = '8px';
+        const rows = branches.map((b, idx) => {
           const color = statusColor[b.status] || '#fff';
           const mutCount = (b.pendingMutations || []).length;
+          const isLast = idx === branches.length - 1;
           const rewindBtn = b.status === 'committed'
             ? `<button class="spotlight-branch-rewind" data-branch-id="${b.id}" style="margin-left:8px;padding:3px 10px;border-radius:5px;border:1px solid #cba6f7;background:transparent;color:#cba6f7;font-size:11px;cursor:pointer;font-family:var(--font);">⏪ Rewind</button>`
             : '';
-          return `<div class="spotlight-result-item" style="padding:8px 14px;border-bottom:1px solid rgba(255,255,255,0.04);">
-            <div style="display:flex;align-items:center;justify-content:space-between;">
+          const pivot = b.committedAt || b.discardedAt || b.rewoundAt || b.createdAt;
+          const railSegment = isLast ? '' : `<div style="position:absolute;left:${RAIL_LEFT};top:24px;bottom:-8px;width:1.5px;background:rgba(255,255,255,0.12);"></div>`;
+          return `<div class="spotlight-branch-row" data-branch-id="${b.id}" style="position:relative;padding:8px 14px 8px 36px;border-bottom:1px solid rgba(255,255,255,0.04);cursor:pointer;">
+            ${railSegment}
+            <div style="position:absolute;left:${NODE_LEFT};top:12px;width:14px;height:14px;border-radius:50%;background:${color};box-shadow:0 0 0 2px #1a1a1f, 0 0 0 3px rgba(255,255,255,0.08);"></div>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
               <div style="flex:1;min-width:0;">
-                <div style="font-size:13px;color:#fff;">${escapeHtml(b.name || b.id.slice(-8))}</div>
+                <div style="display:flex;align-items:baseline;gap:8px;">
+                  <span style="font-size:13px;color:#fff;">${escapeHtml(b.name || b.id.slice(-8))}</span>
+                  <span style="font-size:10px;color:${color};text-transform:uppercase;letter-spacing:0.5px;">${escapeHtml(b.status)}</span>
+                </div>
                 <div style="font-size:11px;color:rgba(255,255,255,0.55);font-family:ui-monospace,monospace;margin-top:2px;">
-                  <span style="color:${color};">●</span> ${escapeHtml(b.status)} · ${mutCount} mut · ${fmtAge(b.committedAt || b.createdAt)}${b.intent ? ' · ' + escapeHtml(b.intent.slice(0, 40)) : ''}
+                  ${fmtTs(pivot)} · ${fmtAge(pivot)} ago · ${mutCount} mut${b.intent ? ' · ' + escapeHtml(b.intent.slice(0, 40)) : ''}
                 </div>
               </div>
               ${rewindBtn}
             </div>
+            <div class="spotlight-branch-detail" data-detail-for="${b.id}" style="display:none;margin-top:8px;padding:8px 10px;background:rgba(255,255,255,0.03);border-radius:6px;font-family:ui-monospace,monospace;font-size:11px;color:rgba(255,255,255,0.7);"></div>
           </div>`;
         }).join('');
         results.innerHTML = `<div class="spotlight-result-group">
-          <div class="spotlight-result-label">⏮ Recent Branches  ·  ${branches.length}</div>
+          <div class="spotlight-result-label">⏮ Timeline  ·  ${branches.length} branches  ·  click row to expand</div>
           ${rows}
         </div>`;
+        // Click row to toggle the diff detail pane
+        results.querySelectorAll('.spotlight-branch-row').forEach(row => {
+          row.addEventListener('click', async (e) => {
+            // Ignore clicks on the rewind button — it has its own handler
+            if (e.target.closest('.spotlight-branch-rewind')) return;
+            const id = row.dataset.branchId;
+            const detail = row.querySelector('.spotlight-branch-detail');
+            if (!detail) return;
+            if (detail.style.display === 'block') {
+              detail.style.display = 'none';
+              return;
+            }
+            detail.style.display = 'block';
+            detail.innerHTML = '<span style="opacity:0.5;">Loading diff…</span>';
+            try {
+              const diff = await branchMod.diffBranch(id);
+              if (!diff.lines.length) {
+                detail.innerHTML = '<span style="opacity:0.5;">No mutations recorded.</span>';
+                return;
+              }
+              const summary = Object.entries(diff.counts)
+                .filter(([, v]) => v > 0)
+                .map(([k, v]) => `${k}: ${v}`).join(' · ');
+              const items = diff.lines.map((m, i) =>
+                `<div style="margin:2px 0;"><span style="color:rgba(255,255,255,0.4);">${String(i+1).padStart(2,' ')}.</span> <span style="color:#a6e3a1;">${escapeHtml(m.kind)}</span> <span style="color:rgba(255,255,255,0.6);">${escapeHtml(m.describe || '')}</span></div>`
+              ).join('');
+              detail.innerHTML = `<div style="margin-bottom:6px;color:rgba(255,255,255,0.5);">${escapeHtml(summary)}</div>${items}`;
+            } catch (err) {
+              detail.innerHTML = `<span style="color:#ff5555;">diff failed: ${escapeHtml(err.message || String(err))}</span>`;
+            }
+          });
+        });
         // Wire rewind buttons — each fires branch.rewind via the intent path,
         // which goes through the M5.P2 interception gate (so user sees the
         // preview panel, gets red-team review, confirms with Enter).
@@ -773,7 +828,7 @@ export function initSpotlight() {
         });
         return;
       } catch (err) {
-        console.warn('[spotlight] branches command failed:', err);
+        console.warn('[spotlight] timeline command failed:', err);
       }
     }
 
