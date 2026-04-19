@@ -55,14 +55,15 @@ ${ngLines}
 UX NOTES (informational only; do NOT write tests for these):
 ${JSON.stringify(spec.ux_notes || '')}
 
-OUTPUT SHAPE:
+OUTPUT SHAPE (the values below are REAL CODE — DO NOT include "//" comment
+prefixes; write executable JavaScript statements):
 {
   "tests": [
     {
       "title": "short human-readable title for this test",
-      "setup":  "// JS code that prepares state — e.g. instantiate, seed data",
-      "act":    "// JS code that performs the action under test",
-      "assert": "// one or more expect(...).toBe(...) lines",
+      "setup":  "const app = new App();",
+      "act":    "app.add(2, 3);",
+      "assert": "expect(app.result).toBe(5);",
       "criterionIndex": 0
     }
   ]
@@ -72,16 +73,23 @@ RULES:
 1. EXACTLY one test per acceptance criterion. The order of "tests"
    must match the order of acceptance_criteria. criterionIndex must
    be the matching numeric index.
-2. setup, act, assert are JS code STRINGS — no imports, no requires.
-   Assume an "expect(value)" matcher with .toBe / .toEqual / .toBeTruthy
-   / .toBeFalsy / .toContain is in scope.
-3. Reference an unspecified app object — e.g. "const app = new App()".
-   The code generator (M4.P3) implements App; you only describe how it
-   behaves.
-4. Do NOT write tests for non_goals or ux_notes.
-5. Keep each block short. setup + act + assert combined < 400 chars
+2. setup, act, assert MUST be executable JavaScript — NOT JavaScript
+   wrapped in "//" comments. If you write "// const app = new App()",
+   nothing runs and the test is rejected. Write "const app = new App();"
+   instead.
+3. "assert" MUST contain at least one un-commented expect(...).toBe(...)
+   (or .toEqual / .toBeTruthy / .toBeFalsy / .toContain / .toBeGreaterThan
+   / .toBeLessThan) call. A commented expect does not count.
+4. No imports, no require, no fetch, no eval, no Function — these are
+   blocked by the validator. The matcher "expect(value)" is already in
+   scope.
+5. Reference an unspecified "App" class — e.g. "const app = new App()".
+   The code generator implements App next; you only describe its
+   externally-visible behavior.
+6. Do NOT write tests for non_goals or ux_notes.
+7. Keep each block short. setup + act + assert combined < 400 chars
    per test.
-6. Respond with JSON only, nothing else.`;
+8. Respond with JSON only, nothing else.`;
 }
 
 // ─── Tolerant JSON parse (same as planner / spec-gen) ───
