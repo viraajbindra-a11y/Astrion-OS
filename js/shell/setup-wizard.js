@@ -4,12 +4,12 @@
 import { hashPassword } from '../kernel/crypto.js';
 
 const wallpapers = [
-  { id: 'aurora',    name: 'Aurora',    colors: 'url("assets/wallpapers/aurora.svg")' },
-  { id: 'ocean',     name: 'Sunset',    colors: 'url("assets/wallpapers/ocean.svg")' },
-  { id: 'nebula',    name: 'Nebula',    colors: 'url("assets/wallpapers/nebula.svg")' },
-  { id: 'mountains', name: 'Mountains', colors: 'url("assets/wallpapers/mountains.svg")' },
-  { id: 'geometry',  name: 'Geometry',  colors: 'url("assets/wallpapers/geometry.svg")' },
-  { id: 'forest',    name: 'Forest',    colors: 'url("assets/wallpapers/forest.svg")' },
+  { id: 'aurora',    name: 'Aurora',    colors: "url('assets/wallpapers/aurora.svg')" },
+  { id: 'ocean',     name: 'Sunset',    colors: "url('assets/wallpapers/ocean.svg')" },
+  { id: 'nebula',    name: 'Nebula',    colors: "url('assets/wallpapers/nebula.svg')" },
+  { id: 'mountains', name: 'Mountains', colors: "url('assets/wallpapers/mountains.svg')" },
+  { id: 'geometry',  name: 'Geometry',  colors: "url('assets/wallpapers/geometry.svg')" },
+  { id: 'forest',    name: 'Forest',    colors: "url('assets/wallpapers/forest.svg')" },
 ];
 
 const accents = [
