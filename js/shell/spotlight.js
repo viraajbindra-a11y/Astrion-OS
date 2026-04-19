@@ -655,6 +655,72 @@ export function initSpotlight() {
     const lower = query.toLowerCase();
     let html = '';
 
+    // ─── M5.P3.b: "branches" command — list recent branches with rewind ───
+    // Typing "branches" (or "branch" / "rewind" / "undo") shows a panel of
+    // recent branches. Each committed branch has a "Rewind" pill that fires
+    // branch.rewind via the intent path — which goes through the M5.P2 gate
+    // with red-team review automatically.
+    if (/^(branches?|rewind|undo)$/.test(lower)) {
+      try {
+        const branchMod = await import('../kernel/branch-manager.js');
+        const branches = await branchMod.listBranches('*', 20);
+        if (!branches.length) {
+          results.innerHTML = `<div class="spotlight-result-group">
+            <div class="spotlight-result-label">⏮ Branches</div>
+            <div class="spotlight-result-subtitle" style="padding:12px 16px;opacity:0.6;">No branches yet. Branches are created when L2+ ops stage their changes.</div>
+          </div>`;
+          return;
+        }
+        const fmtAge = (ts) => {
+          if (!ts) return '?';
+          const ms = Date.now() - ts;
+          if (ms < 60000) return Math.round(ms/1000) + 's ago';
+          if (ms < 3600000) return Math.round(ms/60000) + 'm ago';
+          if (ms < 86400000) return Math.round(ms/3600000) + 'h ago';
+          return Math.round(ms/86400000) + 'd ago';
+        };
+        const statusColor = { open: '#fab387', committed: '#a6e3a1', discarded: 'rgba(255,255,255,0.4)', rewound: '#cba6f7' };
+        const rows = branches.map(b => {
+          const color = statusColor[b.status] || '#fff';
+          const mutCount = (b.pendingMutations || []).length;
+          const rewindBtn = b.status === 'committed'
+            ? `<button class="spotlight-branch-rewind" data-branch-id="${b.id}" style="margin-left:8px;padding:3px 10px;border-radius:5px;border:1px solid #cba6f7;background:transparent;color:#cba6f7;font-size:11px;cursor:pointer;font-family:var(--font);">⏪ Rewind</button>`
+            : '';
+          return `<div class="spotlight-result-item" style="padding:8px 14px;border-bottom:1px solid rgba(255,255,255,0.04);">
+            <div style="display:flex;align-items:center;justify-content:space-between;">
+              <div style="flex:1;min-width:0;">
+                <div style="font-size:13px;color:#fff;">${escapeHtml(b.name || b.id.slice(-8))}</div>
+                <div style="font-size:11px;color:rgba(255,255,255,0.55);font-family:ui-monospace,monospace;margin-top:2px;">
+                  <span style="color:${color};">●</span> ${escapeHtml(b.status)} · ${mutCount} mut · ${fmtAge(b.committedAt || b.createdAt)}${b.intent ? ' · ' + escapeHtml(b.intent.slice(0, 40)) : ''}
+                </div>
+              </div>
+              ${rewindBtn}
+            </div>
+          </div>`;
+        }).join('');
+        results.innerHTML = `<div class="spotlight-result-group">
+          <div class="spotlight-result-label">⏮ Recent Branches  ·  ${branches.length}</div>
+          ${rows}
+        </div>`;
+        // Wire rewind buttons — each fires branch.rewind via the intent path,
+        // which goes through the M5.P2 interception gate (so user sees the
+        // preview panel, gets red-team review, confirms with Enter).
+        results.querySelectorAll('.spotlight-branch-rewind').forEach(btn => {
+          btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const id = btn.dataset.branchId;
+            eventBus.emit('intent:execute', {
+              verb: 'rewind', target: 'branch',
+              args: { branchId: id }, confidence: 1.0,
+            });
+          });
+        });
+        return;
+      } catch (err) {
+        console.warn('[spotlight] branches command failed:', err);
+      }
+    }
+
     // ─── Intent card (M1.P1) — shown as #1 result when parse confidence ≥ 0.55 ───
     if (topIntent) {
       const naturalDescription = intentToNaturalLanguage(topIntent);
