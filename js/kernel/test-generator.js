@@ -313,13 +313,14 @@ if (typeof window !== 'undefined' && window.location?.hostname === 'localhost') 
     non_goals: [],
     ux_notes: '',
   };
-  const fakeTest = (i) => ({ title: 't'+i, setup: 's', act: 'a', assert: 'as', criterionIndex: i });
+  const fakeTest = (i) => ({ title: 't'+i, setup: 'const x=1;', act: 'x++;', assert: 'expect(x).toBe(2);', criterionIndex: i });
   const tests = [
     { suite: { tests: [0,1,2].map(fakeTest) }, expectOk: true },
     { suite: { tests: [0,1].map(fakeTest) }, expectOk: false }, // count mismatch
     { suite: { tests: [0,1,2].map(fakeTest).map(t => ({ ...t, criterionIndex: 99 })) }, expectOk: false }, // bad index
     { suite: { tests: [0,1,2].map(i => ({ ...fakeTest(i), setup: 'fetch("http://x")' })) }, expectOk: false }, // forbidden token
-    { suite: { tests: [0,1,2].map(i => ({ ...fakeTest(i), assert: 'x'.repeat(500) })) }, expectOk: false }, // too long
+    { suite: { tests: [0,1,2].map(i => ({ ...fakeTest(i), assert: 'expect(' + 'x'.repeat(500) + ').toBe(2);' })) }, expectOk: false }, // too long
+    { suite: { tests: [0,1,2].map(i => ({ ...fakeTest(i), assert: '// expect(x).toBe(2);' })) }, expectOk: false }, // comment-only assert (qwen bug)
     { suite: null, expectOk: false },
   ];
   let fail = 0;

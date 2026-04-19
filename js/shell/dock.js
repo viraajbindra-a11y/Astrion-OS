@@ -3,6 +3,7 @@
 import { processManager } from '../kernel/process-manager.js';
 import { windowManager } from '../kernel/window-manager.js';
 import { eventBus } from '../kernel/event-bus.js';
+import { loadGeneratedApps } from '../kernel/generated-app-loader.js';
 
 // Core apps in dock — rest accessible via App Grid (F4) or Search (Cmd+Space)
 const dockApps = [
@@ -24,53 +25,70 @@ const dockApps = [
   { id: 'trash', name: 'Trash' },
 ];
 
+function renderDockItem(container, app) {
+  const item = document.createElement('div');
+  item.className = 'dock-item';
+  if (app.generated) item.classList.add('dock-item-generated');
+  item.dataset.appId = app.id;
+  item.setAttribute('role', 'button');
+  item.setAttribute('aria-label', `Open ${app.name}`);
+  item.setAttribute('tabindex', '0');
+
+  const iconHtml = app.generated
+    ? `<div style="font-size:34px;line-height:1;display:flex;align-items:center;justify-content:center;width:100%;height:100%;">${app.iconText || '\u2728'}</div>`
+    : `<img src="assets/icons/${app.id === 'text-editor' ? 'text-editor' : app.id}.svg" alt="${app.name}" draggable="false">`;
+
+  item.innerHTML = `
+    <div class="dock-item-tooltip">${app.name}</div>
+    <div class="dock-item-icon">${iconHtml}</div>
+    <div class="dock-item-dot"></div>
+  `;
+
+  const launchApp = () => {
+    item.classList.add('bouncing');
+    setTimeout(() => item.classList.remove('bouncing'), 600);
+    processManager.launch(app.id);
+  };
+
+  item.addEventListener('click', launchApp);
+  item.addEventListener('auxclick', (e) => {
+    if (e.button === 1) {
+      e.preventDefault();
+      for (const [id, state] of windowManager.windows) {
+        if (state.app === app.id) windowManager.close(id);
+      }
+    }
+  });
+  item.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      launchApp();
+    }
+  });
+
+  container.appendChild(item);
+}
+
+async function appendGeneratedApps(container) {
+  let entries = [];
+  try { entries = await loadGeneratedApps(); } catch (err) { console.warn('[dock] loadGeneratedApps failed:', err?.message); return; }
+  // Remove any previously-rendered generated items so reload doesn't duplicate
+  container.querySelectorAll('.dock-item-generated').forEach(el => el.remove());
+  for (const entry of entries) {
+    renderDockItem(container, { id: entry.id, name: entry.name, generated: true });
+  }
+}
+
 export function initDock() {
   const container = document.getElementById('dock-container');
   container.innerHTML = '';
   container.setAttribute('role', 'toolbar');
   container.setAttribute('aria-label', 'App dock');
 
-  dockApps.forEach(app => {
-    const item = document.createElement('div');
-    item.className = 'dock-item';
-    item.dataset.appId = app.id;
-    item.setAttribute('role', 'button');
-    item.setAttribute('aria-label', `Open ${app.name}`);
-    item.setAttribute('tabindex', '0');
-    item.innerHTML = `
-      <div class="dock-item-tooltip">${app.name}</div>
-      <div class="dock-item-icon">
-        <img src="assets/icons/${app.id === 'text-editor' ? 'text-editor' : app.id}.svg" alt="${app.name}" draggable="false">
-      </div>
-      <div class="dock-item-dot"></div>
-    `;
+  dockApps.forEach(app => renderDockItem(container, app));
+  appendGeneratedApps(container);
 
-    const launchApp = () => {
-      item.classList.add('bouncing');
-      setTimeout(() => item.classList.remove('bouncing'), 600);
-      processManager.launch(app.id);
-    };
-
-    item.addEventListener('click', launchApp);
-    // Middle-click to close all windows of this app
-    item.addEventListener('auxclick', (e) => {
-      if (e.button === 1) { // middle click
-        e.preventDefault();
-        for (const [id, state] of windowManager.windows) {
-          if (state.app === app.id) windowManager.close(id);
-        }
-      }
-    });
-    item.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        launchApp();
-      }
-    });
-
-    container.appendChild(item);
-  });
-
+  eventBus.on('dock:reload', () => appendGeneratedApps(container));
   eventBus.on('app:launched', updateRunningDots);
   eventBus.on('app:terminated', updateRunningDots);
   eventBus.on('window:closed', () => setTimeout(updateRunningDots, 200));

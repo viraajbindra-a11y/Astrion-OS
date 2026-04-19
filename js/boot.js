@@ -245,6 +245,10 @@ import { initVolumeHud } from './shell/volume-hud.js';
     // M6.P4: track rubber-stamp rate (rapid confirms / total) and
     // emit a Socratic warning if it crosses 80% over 20+ samples.
     (await import('./kernel/rubber-stamp-tracker.js')).initRubberStampTracker();
+    // M4 dock surface: scan 'generated-app' nodes status='docked' and
+    // register them with processManager so the dock + spotlight can
+    // launch them. Re-runs on app:promoted / app:archived events.
+    (await import('./kernel/generated-app-loader.js')).initGeneratedAppLoader();
 
     // Phase 0: kill mock provider trap in native path too (lesson #72)
     if (localStorage.getItem('nova-ai-provider') === 'mock') {
@@ -493,6 +497,9 @@ import { initVolumeHud } from './shell/volume-hud.js';
   (await import('./kernel/red-team.js')).initRedTeamAgent();
   // M6.P4: rubber-stamp tracker.
   (await import('./kernel/rubber-stamp-tracker.js')).initRubberStampTracker();
+  // M4 dock surface: register docked 'generated-app' nodes as launchable
+  // icons. Subscribed to app:promoted / app:archived for live updates.
+  (await import('./kernel/generated-app-loader.js')).initGeneratedAppLoader();
 
   // Phase 0: kill mock provider trap permanently (lesson #72).
   // If a prior Settings test left provider='mock', every AI path silently
