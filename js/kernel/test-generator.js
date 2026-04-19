@@ -125,6 +125,22 @@ function validateSuite(suite, spec) {
     if (/\b(import|require|fetch|XMLHttpRequest|WebSocket|eval|Function)\s*\(?/i.test(blob)) {
       return { ok: false, error: `tests[${i}] contains forbidden token (no imports/eval/network in tests)` };
     }
+    // Reject tests whose `assert` is just a commented-out expect call.
+    // qwen2.5:7b sometimes returns "// expect(app.getResult()).toBe('5')"
+    // — every line a comment. The naive includes-"expect(" check passes
+    // because the literal substring is there, but at runtime nothing
+    // fires and the sandbox marks the test PASS by default. That breaks
+    // the M4 safety contract: code "passing tests" that don't test.
+    // Strip comments first, THEN check for expect( — synthetic fixtures
+    // (e.g. expect(true).toBeTruthy() with empty setup/act) still pass.
+    const stripComments = (s) => String(s).replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/[^\n]*/g, '').trim();
+    const assertNoComments = stripComments(t.assert);
+    if (!assertNoComments) {
+      return { ok: false, error: `tests[${i}].assert is empty after removing comments` };
+    }
+    if (!/expect\s*\(/.test(assertNoComments)) {
+      return { ok: false, error: `tests[${i}].assert must contain at least one un-commented expect(...) call` };
+    }
   }
   return { ok: true };
 }
