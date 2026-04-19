@@ -244,6 +244,51 @@ export function initSpotlight() {
     panel.insertAdjacentHTML('beforeend', html);
   });
 
+  // M4 Socratic spec UI: when an L2+ preview is for a cap that operates
+  // on a graph node id (spec.freeze, app.promote, app.archive,
+  // branch.merge, branch.rewind), the args summary is opaque — just an
+  // id like {specId: 'n-abc...'}. The user has no way to evaluate the
+  // approval. This helper async-fetches the underlying object and
+  // appends a readable rendering to the preview panel.
+  async function renderSocraticContext(cap, args) {
+    if (!cap || !args) return '';
+    try {
+      if (cap.id === 'spec.freeze' && args.specId) {
+        const { getSpec } = await import('../kernel/spec-generator.js');
+        const spec = await getSpec(args.specId);
+        if (!spec) return '';
+        const criteria = (spec.acceptance_criteria || []).map((c, i) =>
+          `<li style="margin:3px 0;">${escapeHtml(c)}</li>`).join('');
+        const nonGoals = (spec.non_goals || []).map(n =>
+          `<li style="margin:3px 0;color:rgba(255,255,255,0.55);">${escapeHtml(n)}</li>`).join('');
+        const openQs = (spec.open_questions || []).map(q =>
+          `<li style="margin:3px 0;color:#fab387;">${escapeHtml(q)}</li>`).join('');
+        return `
+          <div style="margin-top:10px;padding-top:10px;border-top:1px dashed rgba(255,255,255,0.15);">
+            <div style="font-size:11px;color:#a6e3a1;font-weight:600;margin-bottom:6px;">📋 Spec to freeze</div>
+            <div style="font-size:13px;color:#e0e0e0;margin-bottom:8px;font-weight:500;">${escapeHtml(spec.goal || '(no goal)')}</div>
+            ${criteria ? `<div style="font-size:11px;color:rgba(255,255,255,0.5);margin-bottom:2px;">Acceptance criteria (${spec.acceptance_criteria.length}):</div><ol style="margin:0 0 8px 18px;padding:0;font-size:11px;color:#e0e0e0;">${criteria}</ol>` : ''}
+            ${nonGoals ? `<div style="font-size:11px;color:rgba(255,255,255,0.5);margin-bottom:2px;">Non-goals:</div><ul style="margin:0 0 8px 18px;padding:0;font-size:11px;list-style:'– ';">${nonGoals}</ul>` : ''}
+            ${spec.ux_notes ? `<div style="font-size:11px;color:rgba(255,255,255,0.5);margin-bottom:2px;">UX notes:</div><div style="font-size:11px;color:rgba(255,255,255,0.7);margin-bottom:8px;">${escapeHtml(spec.ux_notes)}</div>` : ''}
+            ${openQs ? `<div style="font-size:11px;color:#fab387;margin-bottom:2px;">⚠ Open questions:</div><ul style="margin:0 0 4px 18px;padding:0;font-size:11px;list-style:'? ';">${openQs}</ul>` : ''}
+          </div>`;
+      }
+      if ((cap.id === 'app.promote' || cap.id === 'app.archive') && args.appId) {
+        const { getApp } = await import('../kernel/app-promoter.js');
+        const app = await getApp(args.appId);
+        if (!app) return '';
+        const phases = app.provenance || {};
+        return `
+          <div style="margin-top:10px;padding-top:10px;border-top:1px dashed rgba(255,255,255,0.15);">
+            <div style="font-size:11px;color:#a6e3a1;font-weight:600;margin-bottom:6px;">📦 Generated app · status: ${escapeHtml(app.status || 'unknown')}</div>
+            <div style="font-size:13px;color:#e0e0e0;margin-bottom:6px;">${escapeHtml(app.intent || '(no intent recorded)')}</div>
+            <div style="font-size:11px;color:rgba(255,255,255,0.6);">Tests passed ${phases.testsPassed ?? '?'}/${phases.testsTotal ?? '?'} · code attempts ${phases.codeAttempts ?? '?'} · model ${escapeHtml(phases.codeModel || '?')}</div>
+          </div>`;
+      }
+    } catch (err) { /* best-effort UI; never block on graph errors */ }
+    return '';
+  }
+
   eventBus.on('interception:preview', ({ id, cap, args, timeoutMs, requiresTypedConfirmation }) => {
     pendingInterceptionId = id;
     pendingInterceptionCap = cap;
@@ -284,6 +329,17 @@ export function initSpotlight() {
         <div style="font-size:11px;color:rgba(255,255,255,0.6);font-family:ui-monospace,monospace;margin-bottom:8px;word-break:break-all;">${escapeHtml(cap.id)} ${escapeHtml(argSummary)}</div>
         <div style="font-size:11px;color:rgba(255,255,255,0.7);">${confirmHint} · auto-aborts in ${Math.round((timeoutMs || 60000) / 1000)}s</div>
       </div>`;
+    // Async-fetch the underlying object (spec / app) and append a
+    // human-readable preview. Best-effort: the preview panel renders
+    // immediately; the Socratic block fades in when the graph fetch
+    // completes (~5ms). Only renders if this interception is still
+    // pending — guards against late arrivals after Enter/Escape.
+    renderSocraticContext(cap, args).then((extra) => {
+      if (!extra) return;
+      if (id !== pendingInterceptionId) return;
+      const panel = results.querySelector('.spotlight-result-group');
+      if (panel) panel.insertAdjacentHTML('beforeend', extra);
+    });
   });
 
   eventBus.on('plan:preview', ({ planId, plan, totalTokens, reasoning }) => {
