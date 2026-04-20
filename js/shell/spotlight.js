@@ -1112,6 +1112,27 @@ export function initSpotlight() {
         <div class="spotlight-result-label">🧠 Planning…</div>
         <div class="spotlight-result-subtitle" style="padding:8px 16px;opacity:0.7;">${escapeHtml(query)}</div>
       </div>`;
+      // M6.P2 Socratic prompter: cheap pre-planner ambiguity check.
+      // If the parser confidence is high (>0.85), askSocratic returns
+      // 'proceed' in 0ms with no AI call. Otherwise it asks the model
+      // for a clarifying question — if one comes back, render it via
+      // the existing planState.clarify UI (click on a choice resubmits
+      // with the chosen disambiguation as the new query) and skip the
+      // planner. The planner spends 500+ tokens; Socratic spends 200.
+      try {
+        const { askSocratic } = await import('../kernel/socratic-prompter.js');
+        const socratic = await askSocratic(query, intent);
+        if (socratic && socratic.type === 'ask') {
+          planState.clarify = { question: socratic.question, choices: socratic.choices || [] };
+          planState.query = query;
+          input.disabled = false;
+          activePlanId = null;
+          renderPlanPanel();
+          return;
+        }
+      } catch (err) {
+        console.warn('[spotlight] socratic prompter threw, proceeding with planner:', err?.message);
+      }
       eventBus.emit('intent:plan', { query, context, parsedIntent: intent });
       return; // NB: no close() — plan:completed handler will reset the panel
     }
