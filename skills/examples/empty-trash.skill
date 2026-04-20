@@ -1,0 +1,16 @@
+# astrion-skill v1
+goal: Permanently delete everything in Trash
+trigger:
+  - phrase: "empty trash"
+  - phrase: "clear trash"
+when:
+  - "There is at least one file in /Trash"
+do: |
+  List all files and folders in /Trash. For each, permanent-delete via
+  the underlying filesystem API (NOT the trash-move — these are
+  already in trash). Show a notification with the count of items
+  deleted and the total size freed.
+constraints:
+  level: L2
+  budget_tokens: 200
+  reversibility: NONE

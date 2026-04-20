@@ -1,0 +1,16 @@
+# astrion-skill v1
+goal: Jump back to the most recently used app
+trigger:
+  - phrase: "last app"
+  - phrase: "previous app"
+  - phrase: "jump back"
+do: |
+  Read the recent-apps list (getRecentApps()). Launch the second
+  entry — the first is the currently-active app, so the second is
+  the "most recently used BEFORE the current one." If there's only
+  one recent app or the list is empty, show a notification saying so
+  and do nothing.
+constraints:
+  level: L1
+  budget_tokens: 100
+  reversibility: FREE

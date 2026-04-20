@@ -1,0 +1,15 @@
+# astrion-skill v1
+goal: Show me today's schedule in Spotlight
+trigger:
+  - phrase: "today"
+  - phrase: "today's agenda"
+  - phrase: "what's today"
+do: |
+  Query the graph for 'event' nodes whose start is between midnight
+  today and midnight tomorrow, sorted ascending. For each, render a
+  Spotlight result row with the time + title + location (if any). Show
+  a "no events today" row if the result is empty.
+constraints:
+  level: L0
+  budget_tokens: 150
+  reversibility: FREE

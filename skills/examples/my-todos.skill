@@ -1,0 +1,15 @@
+# astrion-skill v1
+goal: Show my open todos
+trigger:
+  - phrase: "todos"
+  - phrase: "open todos"
+  - phrase: "what do I need to do"
+do: |
+  Query the graph for 'todo' nodes where status != 'done', ordered by
+  priority desc then createdAt asc, limit 10. Render each as a
+  Spotlight result row showing title + priority badge. Clicking a row
+  opens it in the Todo app. Show a friendly empty state if none open.
+constraints:
+  level: L0
+  budget_tokens: 120
+  reversibility: FREE

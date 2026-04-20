@@ -1,0 +1,15 @@
+# astrion-skill v1
+goal: Toggle Astrion between light and dark appearance
+trigger:
+  - phrase: "dark mode"
+  - phrase: "light mode"
+  - phrase: "toggle theme"
+do: |
+  Read the current theme from nova-theme localStorage. If 'dark' or
+  missing, switch to 'light'; if 'light', switch to 'dark'. Apply the
+  CSS change immediately (menubar, dock, windows). Show a brief
+  notification confirming the new theme.
+constraints:
+  level: L2
+  budget_tokens: 120
+  reversibility: BOUNDED

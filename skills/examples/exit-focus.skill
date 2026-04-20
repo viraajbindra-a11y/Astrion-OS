@@ -1,0 +1,16 @@
+# astrion-skill v1
+goal: Exit focus mode — restore notifications and close the focus timer
+trigger:
+  - phrase: "exit focus"
+  - phrase: "end focus"
+  - phrase: "stop focus mode"
+do: |
+  Disable Do Not Disturb. Restore the original accent color saved when
+  focus mode started. Close the Timer app window if it's open. Update
+  the most recent 'focus-session' graph node with endedAt and an
+  elapsedMs field so Settings > About can show session history.
+  Show a notification summarizing the session length.
+constraints:
+  level: L2
+  budget_tokens: 250
+  reversibility: BOUNDED

@@ -1,0 +1,15 @@
+# astrion-skill v1
+goal: Create a reminder from natural-language text
+trigger:
+  - phrase: "remind me"
+  - phrase: "reminder"
+do: |
+  Take whatever the user said after the trigger phrase as the reminder
+  text. If the text contains "at <time>" or "in <duration>", parse the
+  target timestamp; otherwise use 1 hour from now. Create a 'reminder'
+  graph node with { body, dueAt, createdAt, status: 'pending' } and
+  show a confirmation notification with the parsed dueAt.
+constraints:
+  level: L2
+  budget_tokens: 250
+  reversibility: BOUNDED

@@ -10,6 +10,16 @@
     "focus-mode",
     "weekly-activity-digest",
     "battery-warn",
-    "search-recent-notes"
+    "search-recent-notes",
+    "exit-focus",
+    "today-agenda",
+    "toggle-dark-mode",
+    "lock-screen",
+    "new-reminder",
+    "my-todos",
+    "quick-timer",
+    "empty-trash",
+    "dictionary",
+    "jump-to-app"
   ]
 }

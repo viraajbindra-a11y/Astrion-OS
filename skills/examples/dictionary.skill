@@ -1,0 +1,16 @@
+# astrion-skill v1
+goal: Look up a word's definition
+trigger:
+  - phrase: "define"
+  - phrase: "definition of"
+  - phrase: "what does"
+do: |
+  Extract the target word from the user's text (strip the trigger
+  phrase + articles like 'a'/'the'/'mean'). Open the Dictionary app
+  focused on that word, or if the Dictionary app isn't available,
+  query the local thesaurus graph nodes (type='definition') and
+  render top 3 hits as Spotlight result rows.
+constraints:
+  level: L1
+  budget_tokens: 150
+  reversibility: FREE

@@ -1,0 +1,15 @@
+# astrion-skill v1
+goal: Start a timer from a natural-language duration
+trigger:
+  - phrase: "timer"
+  - phrase: "set a timer"
+  - phrase: "start timer"
+do: |
+  Parse the user's text after the trigger for a duration (e.g., "10
+  minutes", "1 hour", "25 min"). Default to 10 minutes if no duration
+  parseable. Launch the Timer app pre-seeded with that duration and
+  auto-started. Show a notification confirming the timer started.
+constraints:
+  level: L2
+  budget_tokens: 200
+  reversibility: FREE

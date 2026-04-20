@@ -1,0 +1,15 @@
+# astrion-skill v1
+goal: Lock the screen immediately
+trigger:
+  - phrase: "lock"
+  - phrase: "lock screen"
+  - phrase: "lock the computer"
+do: |
+  Show the lock-screen overlay via the existing lock-screen.js module
+  (emit 'screen:lock' on the event bus). The session state persists —
+  reopening requires the account password. Skip if lock-screen is
+  already visible.
+constraints:
+  level: L1
+  budget_tokens: 80
+  reversibility: FREE
