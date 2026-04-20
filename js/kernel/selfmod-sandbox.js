@@ -82,26 +82,111 @@ export async function getProposal(id) {
 }
 
 /**
- * Apply a proposal. REFUSES today — the gates check list returns
- * non-empty so the apply path always errors out with a clear list of
- * missing pieces. M8.P3 will replace each placeholder check with a
- * real one.
+ * Apply a proposal. Walks all 5 required gates in order; ANY failure
+ * aborts and the proposal stays pending so the user can review +
+ * decide. Today still refuses to actually mutate source — the
+ * "approved" path just records the proposal as gated-ok and emits an
+ * event. M8.P4 adds the actual write + rollback automation.
  *
- * @returns {Promise<{ok, error?, missingChecks?}>}
+ * @param {string} id — proposal id
+ * @param {object} [opts]
+ * @param {string} [opts.typedConfirm] — must equal the proposal id for
+ *                                       the user-typed-confirm gate
+ * @returns {Promise<{ok, error?, gatesPassed?, gatesFailed?}>}
  */
-export async function applyProposal(id /* , opts */) {
+export async function applyProposal(id, opts = {}) {
   const proposal = await getProposal(id);
   if (!proposal) return { ok: false, error: 'proposal not found' };
   if (proposal.status !== 'pending') return { ok: false, error: 'proposal status is ' + proposal.status };
 
-  // Today: every required check is "not implemented." The error string
-  // names them all so reviewers see exactly what's missing.
-  const missingChecks = [...REQUIRED_CHECKS]; // M8.P3 will narrow this list
-  return {
-    ok: false,
-    error: 'self-mod apply gated: ' + missingChecks.length + ' required checks not yet wired',
-    missingChecks,
-  };
+  const passed = [];
+  const failed = [];
+
+  // 1. Golden-integrity: every locked file matches its blessed hash.
+  try {
+    const { verifyGolden } = await import('./golden-check.js');
+    const r = await verifyGolden();
+    if (r.ok) passed.push('golden-integrity');
+    else failed.push({ check: 'golden-integrity', reason: r.mismatched.length + ' file(s) drifted' });
+  } catch (err) { failed.push({ check: 'golden-integrity', reason: err?.message || 'check threw' }); }
+
+  // 2. Value-lock: live LOCKED_VALUES match the recorded baseline.
+  try {
+    const { verifyValueLock } = await import('./value-lock.js');
+    const baseline = (() => { try { return localStorage.getItem('astrion-value-lock-baseline'); } catch { return null; } })();
+    const r = await verifyValueLock(baseline);
+    if (r.ok) passed.push('value-lock');
+    else failed.push({ check: 'value-lock', reason: 'value drift detected' });
+  } catch (err) { failed.push({ check: 'value-lock', reason: err?.message || 'check threw' }); }
+
+  // 3. Red-team signoff: adversarial review of the proposal itself.
+  // Today uses the same model as the planner with the existing red-team
+  // adversarial prompt. M8.P3.b will route this to a DIFFERENT model
+  // for true diversity; the current gate is enough to refuse a wildly
+  // unsafe proposal AND keeps the same model from rubber-stamping
+  // its own output (the system prompt is adversarial enough).
+  try {
+    const { reviewAction } = await import('./red-team.js');
+    const syntheticCap = {
+      id: 'selfmod.apply',
+      summary: 'Apply self-mod to ' + proposal.target,
+      level: 3, reversibility: 'permanent', blastRadius: 'external',
+      pointOfNoReturn: true,
+    };
+    const review = await reviewAction(syntheticCap, {
+      proposer: proposal.proposer, reason: proposal.reason,
+      diff_preview: proposal.diff.slice(0, 800),
+    });
+    if (review.ok && review.review?.recommendation === 'proceed') {
+      passed.push('red-team-signoff');
+    } else if (review.ok) {
+      failed.push({ check: 'red-team-signoff', reason: 'recommendation: ' + review.review?.recommendation + ' — ' + (review.review?.summary || '') });
+    } else {
+      failed.push({ check: 'red-team-signoff', reason: 'red-team unavailable: ' + (review.error || 'unknown') });
+    }
+  } catch (err) { failed.push({ check: 'red-team-signoff', reason: err?.message || 'check threw' }); }
+
+  // 4. User-typed-confirm: caller MUST pass opts.typedConfirm equal to
+  // the proposal id. Reuses the M5.P4 PONR pattern — typing the id is
+  // friction tax; rubber-stamping a self-mod is exactly the case the
+  // tracker can't catch in retrospect.
+  if (opts.typedConfirm === id) {
+    passed.push('user-typed-confirm');
+  } else {
+    failed.push({ check: 'user-typed-confirm', reason: 'opts.typedConfirm must equal proposal id "' + id + '"' });
+  }
+
+  // 5. Rollback-plan: proposal must include a rollback diff so M8.P4
+  // can revert if golden-check trips after apply. Today we only verify
+  // the field is present; the actual rollback execution is M8.P4.
+  if (typeof proposal.rollbackDiff === 'string' && proposal.rollbackDiff.length > 0) {
+    passed.push('rollback-plan');
+  } else {
+    failed.push({ check: 'rollback-plan', reason: 'proposal.rollbackDiff missing (required: inverse-diff string for M8.P4 rollback)' });
+  }
+
+  // ─── Decision ───
+  if (failed.length > 0) {
+    return {
+      ok: false,
+      error: 'self-mod apply blocked: ' + failed.length + ' gate(s) failed',
+      gatesPassed: passed,
+      gatesFailed: failed,
+    };
+  }
+
+  // All 5 gates passed. We do NOT actually write to disk yet — that's
+  // M8.P4's job (real rollback-protected source mutation). Today we
+  // mark the proposal 'approved' so the audit trail is complete and
+  // emit selfmod:approved.
+  await graphStore.updateNode(id, {
+    ...proposal,
+    status: 'approved',
+    appliedAt: Date.now(),
+    checksPassed: passed,
+  });
+  eventBus.emit('selfmod:approved', { id, gatesPassed: passed });
+  return { ok: true, id, gatesPassed: passed, note: 'gates passed; actual source mutation deferred to M8.P4' };
 }
 
 export async function discardProposal(id, reason = '') {
