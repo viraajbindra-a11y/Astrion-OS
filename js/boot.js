@@ -263,6 +263,7 @@ import { initVolumeHud } from './shell/volume-hud.js';
     // gates on a clean check.
     (await import('./kernel/golden-check.js')).initGoldenCheck();
     (await import('./kernel/value-lock.js')).initValueLock();
+    (await import('./kernel/drift-detector.js')).initDriftDetector();
 
     // Phase 0: kill mock provider trap in native path too (lesson #72)
     if (localStorage.getItem('nova-ai-provider') === 'mock') {

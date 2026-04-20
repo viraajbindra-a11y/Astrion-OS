@@ -40,6 +40,7 @@ const GOLDEN = [
   'js/kernel/golden-check.js',
   'js/kernel/value-lock.js',
   'js/kernel/selfmod-sandbox.js',
+  'js/kernel/drift-detector.js',
   'test/v03-verification.html',
 ];
 
