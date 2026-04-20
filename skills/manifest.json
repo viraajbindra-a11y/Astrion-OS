@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "examples": [
+    "organize-downloads",
+    "morning-summary",
+    "photo-of-the-day-backup",
+    "quick-note",
+    "clipboard-to-note",
+    "screenshot-to-trash-on-friday",
+    "focus-mode",
+    "weekly-activity-digest",
+    "battery-warn",
+    "search-recent-notes"
+  ]
+}

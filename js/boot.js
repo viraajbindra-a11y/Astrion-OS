@@ -254,6 +254,10 @@ import { initVolumeHud } from './shell/volume-hud.js';
     // who rubber-stamp every preview by handing them a fake plan they
     // should refuse to confirm.
     (await import('./kernel/chaos-injector.js')).initChaosInjector();
+    // M7.P2 skill registry: load .skill files, index phrase triggers,
+    // so Spotlight can translate "organize downloads" → a skill
+    // dispatch instead of a raw planner call.
+    (await import('./kernel/skill-registry.js')).loadSkillRegistry();
 
     // Phase 0: kill mock provider trap in native path too (lesson #72)
     if (localStorage.getItem('nova-ai-provider') === 'mock') {
@@ -508,6 +512,8 @@ import { initVolumeHud } from './shell/volume-hud.js';
   // M6.P4.b chaos injection: 5% chance after each real L2+ resolution,
   // 24h cooldown. Fake destructive preview the user must abort.
   (await import('./kernel/chaos-injector.js')).initChaosInjector();
+  // M7.P2 skill registry: load .skill files so phrase triggers dispatch.
+  (await import('./kernel/skill-registry.js')).loadSkillRegistry();
 
   // Phase 0: kill mock provider trap permanently (lesson #72).
   // If a prior Settings test left provider='mock', every AI path silently

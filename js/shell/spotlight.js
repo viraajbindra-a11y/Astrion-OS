@@ -1138,6 +1138,28 @@ export function initSpotlight() {
       return;
     }
 
+    // M7.P2 skill dispatch — if the trimmed query matches a registered
+    // skill's phrase trigger, fire the skill instead of parsing the query
+    // as free text. The skill's `do` prompt is usually better-calibrated
+    // than what a user would type fresh. Exact case-insensitive match
+    // only; fuzzy matching can come later.
+    try {
+      const { matchPhrase, runSkill } = await import('../kernel/skill-registry.js');
+      const hit = matchPhrase(query);
+      if (hit) {
+        const context = getContextBundle();
+        input.disabled = true;
+        results.innerHTML = `<div class="spotlight-result-group">
+          <div class="spotlight-result-label">🧩 Skill · ${escapeHtml(hit.skill.goal)}</div>
+          <div class="spotlight-result-subtitle" style="padding:8px 16px;opacity:0.7;">${escapeHtml(hit.name)} · L${escapeHtml(hit.skill.constraints.level || 'L1')} · budget ${hit.skill.constraints.budget_tokens || '?'} tokens</div>
+        </div>`;
+        runSkill(hit.name, { context });
+        return;
+      }
+    } catch (err) {
+      console.warn('[spotlight] skill dispatch failed, falling back:', err?.message);
+    }
+
     // Agent Core Sprint — heuristic router: decide whether this query goes
     // through the fast single-capability path or the multi-step planner.
     const intent = parseIntent(query);
