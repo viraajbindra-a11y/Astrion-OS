@@ -16,7 +16,7 @@
 //     → intent:completed                { intent, result, success }
 //   OR intent:rejected                  { intent, reason }
 
-import { resolveCapability, getCapability, runCapability, LEVEL } from './capability-api.js';
+import { resolveCapability, getCapability, runCapability, LEVEL, REVERSIBILITY } from './capability-api.js';
 import { eventBus } from './event-bus.js';
 import { intentToNaturalLanguage } from './intent-parser.js';
 
@@ -190,6 +190,55 @@ export async function executeIntent(intent) {
 
 const PLAN_CONFIRM_TIMEOUT_MS = 60_000;
 
+// ─── Skill constraint enforcement (M7.P2c) ───
+
+const LEVEL_CODES = { L0: 0, L1: 1, L2: 2, L3: 3, OBSERVE: 0, SANDBOX: 1, REAL: 2, SELF_MOD: 3 };
+
+function levelCode(val) {
+  if (typeof val === 'number') return val;
+  if (typeof val === 'string') {
+    const key = val.trim().toUpperCase();
+    if (key in LEVEL_CODES) return LEVEL_CODES[key];
+  }
+  return null;
+}
+
+// Reversibility "floor" the skill declares vs the cap's reversibility.
+// Lower rank = more reversible. A skill with floor=BOUNDED accepts FREE
+// and BOUNDED but rejects PERMANENT. 'NONE' in the skill file is a
+// sugar alias for PERMANENT ("no restriction on reversibility").
+const REVERS_RANK = { free: 0, bounded: 1, permanent: 2, none: 2 };
+
+function reversRank(val) {
+  if (!val) return null;
+  return REVERS_RANK[String(val).trim().toLowerCase()] ?? null;
+}
+
+/**
+ * Check every resolved step against the skill's declared caps. Returns
+ * null if OK, or a short human-readable violation string. Skill
+ * constraints that are missing or unrecognised are treated as
+ * unrestricted (don't block).
+ */
+export function checkSkillConstraints(resolved, constraints) {
+  if (!constraints) return null;
+  const maxLevel = levelCode(constraints.level);
+  const maxRevers = reversRank(constraints.reversibility);
+  for (let i = 0; i < resolved.length; i++) {
+    const { cap, step } = resolved[i];
+    if (maxLevel !== null && cap.level > maxLevel) {
+      return `step ${i + 1} uses L${cap.level} ${step?.cap || cap.id || ''} but skill is capped at L${maxLevel}`;
+    }
+    if (maxRevers !== null) {
+      const r = reversRank(cap.reversibility);
+      if (r !== null && r > maxRevers) {
+        return `step ${i + 1} reversibility ${String(cap.reversibility).toLowerCase()} is looser than skill floor ${String(constraints.reversibility).toLowerCase()} (cap: ${step?.cap || cap.id || ''})`;
+      }
+    }
+  }
+  return null;
+}
+
 /**
  * Walk an args object and replace every `${binds.NAME}` string with the
  * corresponding value from the bindings map. Returns a fresh object; never
@@ -319,6 +368,22 @@ export async function executePlan(plan, opts = {}) {
     resolved.push({ cap, step });
   }
 
+  // ─── M7.P2c: skill constraint enforcement ───
+  // If the plan came from a skill (opts.skill present), refuse any step
+  // whose cap.level or cap.reversibility exceeds the skill's declared
+  // caps. The skill language ships with conservative defaults (L1,
+  // BOUNDED) — a skill that wants L2 has to say so explicitly. This
+  // closes the audit hole where a malicious/buggy skill could claim
+  // L0 and still produce L2 steps.
+  if (opts.skill && opts.skill.constraints) {
+    const violation = checkSkillConstraints(resolved, opts.skill.constraints);
+    if (violation) {
+      const error = `skill "${opts.skill.name || '?'}" constraint: ${violation}`;
+      eventBus.emit('plan:failed', { planId, error, atStep: -1, skillViolation: true });
+      return { ok: false, planId, bindings: {}, results: [], error };
+    }
+  }
+
   // Atomic budget reservation — prevents concurrent plans from both passing
   // the check before either records usage (audit bug #3)
   const budgetCheck = reserveBudget(totalTokens);
@@ -420,7 +485,7 @@ export function initIntentExecutor() {
   // (see js/kernel/intent-planner.js routeQuery). The handler calls the
   // planner then kicks off executePlan(). Also: session management + turn
   // recording via conversation-memory.
-  eventBus.on('intent:plan', async ({ query, context, parsedIntent }) => {
+  eventBus.on('intent:plan', async ({ query, context, parsedIntent, skill }) => {
     try {
       const { planIntent } = await import('./intent-planner.js');
       const memoryMod = await import('./conversation-memory.js');
@@ -451,7 +516,7 @@ export function initIntentExecutor() {
         return;
       }
 
-      const result = await executePlan(plan, { query, sessionId });
+      const result = await executePlan(plan, { query, sessionId, skill });
       await memoryMod.recordTurn({
         sessionId,
         query,
