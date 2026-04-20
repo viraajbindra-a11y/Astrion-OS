@@ -204,44 +204,44 @@ export function initSpotlight() {
     if (!isOpen) open(); // force Spotlight open if planner fired from elsewhere
   });
 
-  // M5.P2.c — generalised L2+ preview gate UI. Subscribes to the
-  // operation-interceptor's interception:preview event, renders a small
-  // panel with cap details + args + "↵ Confirm / Esc Abort" header, and
-  // emits interception:confirm or interception:abort on user input.
-  // M6.P1: red-team agent emits interception:enriched once it has
-  // analysed the pending interception. Append the risks list to the
-  // panel below the args summary.
-  eventBus.on('interception:enriched', ({ id, ok, review, error }) => {
-    if (id !== pendingInterceptionId) return;
-    const panel = results.querySelector('.spotlight-result-group');
-    if (!panel) return;
-    let html = '';
+  // M5.P2.c + M6.P3 — generalised L2+ preview gate UI. Subscribes to the
+  // operation-interceptor's interception:preview event, renders a 2-column
+  // panel with PLANNER side (cap + args) and RED-TEAM side (review or
+  // "reviewing…" placeholder), and emits interception:confirm or
+  // interception:abort on user input. M6.P1: red-team agent emits
+  // interception:enriched once it has analysed the pending interception
+  // — that updates the right column in-place.
+  function renderRedTeamColumn(ok, review, error) {
     if (!ok) {
-      html = `<div style="margin-top:8px;padding-top:8px;border-top:1px dashed rgba(255,255,255,0.1);font-size:11px;color:rgba(255,255,255,0.4);">
+      return `<div style="font-size:11px;color:rgba(255,255,255,0.4);">
         🤖 red-team unavailable: ${escapeHtml(error || 'unknown')}
       </div>`;
-    } else if (!review.risks.length) {
-      html = `<div style="margin-top:8px;padding-top:8px;border-top:1px dashed rgba(255,255,255,0.1);font-size:11px;color:#a6e3a1;">
+    }
+    if (!review.risks.length) {
+      return `<div style="font-size:11px;color:#a6e3a1;">
         🤖 red-team: ${escapeHtml(review.summary || 'no concerns')}
       </div>`;
-    } else {
-      const sevColor = { high: '#ff5555', medium: '#fab387', low: '#f1fa8c' };
-      const recColor = { abort: '#ff5555', review: '#fab387', proceed: '#a6e3a1' };
-      const riskRows = review.risks.map(r =>
-        `<div style="font-size:11px;margin:4px 0;padding-left:14px;position:relative;">
-          <span style="position:absolute;left:0;color:${sevColor[r.severity] || '#fff'};">●</span>
-          <strong>${escapeHtml(r.label)}</strong>
-          <span style="color:rgba(255,255,255,0.5);font-size:10px;"> [${escapeHtml(r.severity)}]</span>
-          <div style="color:rgba(255,255,255,0.65);">${escapeHtml(r.reason)}</div>
-        </div>`).join('');
-      html = `<div style="margin-top:8px;padding-top:8px;border-top:1px dashed rgba(255,255,255,0.1);">
-        <div style="font-size:11px;color:${recColor[review.recommendation] || '#fff'};font-weight:600;margin-bottom:4px;">
-          🤖 red-team: ${escapeHtml(review.recommendation)} — ${escapeHtml(review.summary || '')}
-        </div>
-        ${riskRows}
-      </div>`;
     }
-    panel.insertAdjacentHTML('beforeend', html);
+    const sevColor = { high: '#ff5555', medium: '#fab387', low: '#f1fa8c' };
+    const recColor = { abort: '#ff5555', review: '#fab387', proceed: '#a6e3a1' };
+    const riskRows = review.risks.map(r =>
+      `<div style="font-size:11px;margin:4px 0;padding-left:14px;position:relative;">
+        <span style="position:absolute;left:0;color:${sevColor[r.severity] || '#fff'};">●</span>
+        <strong>${escapeHtml(r.label)}</strong>
+        <span style="color:rgba(255,255,255,0.5);font-size:10px;"> [${escapeHtml(r.severity)}]</span>
+        <div style="color:rgba(255,255,255,0.65);">${escapeHtml(r.reason)}</div>
+      </div>`).join('');
+    return `<div style="font-size:11px;color:${recColor[review.recommendation] || '#fff'};font-weight:600;margin-bottom:4px;">
+        🤖 red-team: ${escapeHtml(review.recommendation)} — ${escapeHtml(review.summary || '')}
+      </div>
+      ${riskRows}`;
+  }
+
+  eventBus.on('interception:enriched', ({ id, ok, review, error }) => {
+    if (id !== pendingInterceptionId) return;
+    const col = results.querySelector('.icpt-redteam-col');
+    if (!col) return;
+    col.innerHTML = renderRedTeamColumn(ok, review, error);
   });
 
   // M4 Socratic spec UI: when an L2+ preview is for a cap that operates
@@ -319,26 +319,39 @@ export function initSpotlight() {
     const confirmHint = pendingInterceptionPONR
       ? `Type <code>${escapeHtml(cap.id)}</code> exactly + Enter to confirm · Esc to abort`
       : '↵ Press Enter to confirm · Esc to abort';
+    // M6.P3: 2-column layout. Left = planner-proposed action (cap, args,
+    // optional Socratic spec/app preview). Right = red-team review (placeholder
+    // until interception:enriched arrives). Confirm hint + PONR banner span
+    // both columns. For L0/L1 caps the right column is hidden — there's no
+    // red-team review for sub-L2 caps.
+    const showRedTeam = cap.level >= 2;
     results.innerHTML = `
       <div class="spotlight-result-group" style="border:2px solid ${borderColor};border-radius:8px;padding:12px 16px;background:${bgTint};">
         ${ponrBanner}
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
           <div style="font-size:12px;font-weight:600;color:${headerColor};">⚠ ${escapeHtml(cap.summary || cap.id)}</div>
           <div style="font-size:11px;color:rgba(255,255,255,0.5);">L${cap.level} · ${escapeHtml(cap.reversibility || 'bounded')} · ${escapeHtml(cap.blastRadius || 'file')}</div>
         </div>
-        <div style="font-size:11px;color:rgba(255,255,255,0.6);font-family:ui-monospace,monospace;margin-bottom:8px;word-break:break-all;">${escapeHtml(cap.id)} ${escapeHtml(argSummary)}</div>
+        <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:8px;">
+          <div class="icpt-planner-col" style="flex:1;min-width:240px;padding-right:14px;${showRedTeam ? 'border-right:1px dashed rgba(255,255,255,0.12);' : ''}">
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.5px;color:rgba(255,255,255,0.4);margin-bottom:4px;">📋 Proposed action</div>
+            <div style="font-size:11px;color:rgba(255,255,255,0.7);font-family:ui-monospace,monospace;word-break:break-all;">${escapeHtml(cap.id)} ${escapeHtml(argSummary)}</div>
+          </div>
+          ${showRedTeam ? `<div class="icpt-redteam-col" style="flex:1;min-width:240px;">
+            <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.5px;color:rgba(255,255,255,0.4);margin-bottom:4px;">🤖 Red-team review</div>
+            <div style="font-size:11px;color:rgba(255,255,255,0.45);font-style:italic;">reviewing…</div>
+          </div>` : ''}
+        </div>
         <div style="font-size:11px;color:rgba(255,255,255,0.7);">${confirmHint} · auto-aborts in ${Math.round((timeoutMs || 60000) / 1000)}s</div>
       </div>`;
-    // Async-fetch the underlying object (spec / app) and append a
-    // human-readable preview. Best-effort: the preview panel renders
-    // immediately; the Socratic block fades in when the graph fetch
-    // completes (~5ms). Only renders if this interception is still
-    // pending — guards against late arrivals after Enter/Escape.
+    // Async-fetch the underlying object (spec/app) and append a readable
+    // preview INTO THE PLANNER COLUMN. Best-effort; only renders if this
+    // interception is still pending.
     renderSocraticContext(cap, args).then((extra) => {
       if (!extra) return;
       if (id !== pendingInterceptionId) return;
-      const panel = results.querySelector('.spotlight-result-group');
-      if (panel) panel.insertAdjacentHTML('beforeend', extra);
+      const col = results.querySelector('.icpt-planner-col');
+      if (col) col.insertAdjacentHTML('beforeend', extra);
     });
   });
 
