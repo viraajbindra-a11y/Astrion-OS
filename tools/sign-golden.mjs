@@ -38,6 +38,8 @@ const GOLDEN = [
   'js/kernel/skill-parser.js',
   'js/kernel/skill-registry.js',
   'js/kernel/golden-check.js',
+  'js/kernel/value-lock.js',
+  'js/kernel/selfmod-sandbox.js',
   'test/v03-verification.html',
 ];
 

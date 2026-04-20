@@ -262,6 +262,7 @@ import { initVolumeHud } from './shell/volume-hud.js';
     // boot, emit golden:tampered if any drift. Self-mod (future M8.P2+)
     // gates on a clean check.
     (await import('./kernel/golden-check.js')).initGoldenCheck();
+    (await import('./kernel/value-lock.js')).initValueLock();
 
     // Phase 0: kill mock provider trap in native path too (lesson #72)
     if (localStorage.getItem('nova-ai-provider') === 'mock') {

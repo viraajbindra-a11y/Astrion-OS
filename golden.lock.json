@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-04-20T02:13:49.383Z",
+  "generated_at": "2026-04-20T02:17:09.250Z",
   "files": {
     "js/kernel/capability-api.js": "d4124838b9f66a68c620281ded34cc323c122fe9ae2c18c02471b83f8ae9e046",
     "js/kernel/operation-interceptor.js": "8cb583c547779556b1d8aacab1cc50d9e8156de1cf4cf25040570ffbf5222d6b",
@@ -14,6 +14,8 @@
     "js/kernel/skill-parser.js": "3de006018186a320b26bfcaef78004108f0ee888d0285ba89982bff0888deddf",
     "js/kernel/skill-registry.js": "21a0f43b4296d9b3e51221cbe881f4ddc3f0932726dd256f216eb9d1ca161fe1",
     "js/kernel/golden-check.js": "145e1ddce707232b08b53312884c5761c58eb354d213a98b5e23cc9fa53e1b78",
+    "js/kernel/value-lock.js": "4458349bae7102220f4ef3d120bf2a5c2f47c0466bfd619bf08a8c8edddb2c00",
+    "js/kernel/selfmod-sandbox.js": "d6e0bf1ea3c7d2868c954a29d0d8dc71b77e21396a5a5593e68cbd398c643168",
     "test/v03-verification.html": "6927612bb051de44b5ebc05fe0e9d2f5be3c5f0b770bfe28aafd8eec138e45d1"
   }
 }
