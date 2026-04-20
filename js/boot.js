@@ -258,6 +258,10 @@ import { initVolumeHud } from './shell/volume-hud.js';
     // so Spotlight can translate "organize downloads" → a skill
     // dispatch instead of a raw planner call.
     (await import('./kernel/skill-registry.js')).loadSkillRegistry();
+    // M8.P1 golden file integrity check: hash safety-critical files at
+    // boot, emit golden:tampered if any drift. Self-mod (future M8.P2+)
+    // gates on a clean check.
+    (await import('./kernel/golden-check.js')).initGoldenCheck();
 
     // Phase 0: kill mock provider trap in native path too (lesson #72)
     if (localStorage.getItem('nova-ai-provider') === 'mock') {
@@ -514,6 +518,8 @@ import { initVolumeHud } from './shell/volume-hud.js';
   (await import('./kernel/chaos-injector.js')).initChaosInjector();
   // M7.P2 skill registry: load .skill files so phrase triggers dispatch.
   (await import('./kernel/skill-registry.js')).loadSkillRegistry();
+  // M8.P1 golden file integrity check.
+  (await import('./kernel/golden-check.js')).initGoldenCheck();
 
   // Phase 0: kill mock provider trap permanently (lesson #72).
   // If a prior Settings test left provider='mock', every AI path silently

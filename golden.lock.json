@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "generated_at": "2026-04-20T02:13:49.383Z",
+  "files": {
+    "js/kernel/capability-api.js": "d4124838b9f66a68c620281ded34cc323c122fe9ae2c18c02471b83f8ae9e046",
+    "js/kernel/operation-interceptor.js": "8cb583c547779556b1d8aacab1cc50d9e8156de1cf4cf25040570ffbf5222d6b",
+    "js/kernel/red-team.js": "122b26b151f82afa3fde905de65e44a16f836ae320bb1132349182757f46fc9a",
+    "js/kernel/rubber-stamp-tracker.js": "0867195d3be0ec520e24d980051ea9bbdd366eb619049c152193b990ef2e241e",
+    "js/kernel/chaos-injector.js": "77616f1284a7551406e0d4da56da91252427102deeaf24824cdba0c03f7122f5",
+    "js/kernel/branch-manager.js": "21ffb46cea5b984045e88a47b31182d31d84cd8aac5f684bba47428eae32b519",
+    "js/kernel/intent-executor.js": "b22b465647ad448c520231c5191ebc921ff732824224c9fdadea39684b3eae23",
+    "js/kernel/budget-manager.js": "bd8b48b8f4377c03cf818e57015e577623b26662098a7bf2ea114331dd404bca",
+    "js/kernel/socratic-prompter.js": "f2a183a6a2c65ef044cd989d1741faafa516275fb4e00f1dc23ec804c1f237d8",
+    "js/kernel/skill-parser.js": "3de006018186a320b26bfcaef78004108f0ee888d0285ba89982bff0888deddf",
+    "js/kernel/skill-registry.js": "21a0f43b4296d9b3e51221cbe881f4ddc3f0932726dd256f216eb9d1ca161fe1",
+    "js/kernel/golden-check.js": "145e1ddce707232b08b53312884c5761c58eb354d213a98b5e23cc9fa53e1b78",
+    "test/v03-verification.html": "6927612bb051de44b5ebc05fe0e9d2f5be3c5f0b770bfe28aafd8eec138e45d1"
+  }
+}
