@@ -243,13 +243,14 @@ class AIService {
     }
 
     // Math — hand-rolled parser (no Function/eval). Input is gated by the
-    // regex to digits/whitespace/+ - * / ^ ( ) . so the worst a bad input
-    // can do is throw. Exponents accept both ** and ^.
-    const mathMatch = lower.match(/(?:what is |calculate |compute )?([\d\s+\-*/.()^]+)/);
+    // regex to digits/whitespace/+ - * / ^ ( ) . e E so the worst a bad
+    // input can do is throw. Exponents accept both ** and ^. Scientific
+    // notation (1e6, 1.5e-3) handled by the tokenizer.
+    const mathMatch = lower.match(/(?:what is |calculate |compute )?([\deE\s+\-*/.()^]+)/);
     if (mathMatch) {
       try {
         const expr = mathMatch[1].trim();
-        if (/^[\d\s+\-*/.()^]+$/.test(expr) && expr.length > 1 && expr.length < 100) {
+        if (/^[\deE\s+\-*/.()^]+$/.test(expr) && expr.length > 1 && expr.length < 100) {
           const result = safeMathEval(expr);
           if (typeof result === 'number' && isFinite(result)) return `${expr} = ${result}`;
         }
@@ -281,7 +282,22 @@ function safeMathEval(expr) {
       while (i < expr.length && ((expr[i] >= '0' && expr[i] <= '9') || expr[i] === '.')) {
         n += expr[i++];
       }
-      tokens.push({ t: 'num', v: parseFloat(n) });
+      // Scientific notation: 1e6, 1.5e-3, 2E+10. Only consume the e/E
+      // suffix if it's followed by [optional + or -] then at least one
+      // digit — otherwise leave the e/E for the operator parser to
+      // reject (which will throw 'bad char').
+      if (i < expr.length && (expr[i] === 'e' || expr[i] === 'E')) {
+        let look = i + 1;
+        if (look < expr.length && (expr[look] === '+' || expr[look] === '-')) look++;
+        if (look < expr.length && expr[look] >= '0' && expr[look] <= '9') {
+          n += expr[i++];
+          if (expr[i] === '+' || expr[i] === '-') n += expr[i++];
+          while (i < expr.length && expr[i] >= '0' && expr[i] <= '9') n += expr[i++];
+        }
+      }
+      const v = parseFloat(n);
+      if (!isFinite(v)) throw new Error('safeMathEval: bad number ' + n);
+      tokens.push({ t: 'num', v });
     } else if (ch === '*' && expr[i + 1] === '*') {
       tokens.push({ t: 'op', v: '^' });
       i += 2;
@@ -337,4 +353,43 @@ function safeMathEval(expr) {
   const result = parseExpr();
   if (p !== tokens.length) throw new Error('safeMathEval: trailing tokens');
   return result;
+}
+
+// ─── Sanity tests (localhost only) ───
+if (typeof window !== 'undefined' && window.location?.hostname === 'localhost') {
+  const cases = [
+    ['1 + 2', 3],
+    ['2 * 3', 6],
+    ['10 - 4', 6],
+    ['8 / 2', 4],
+    ['2 ^ 3', 8],
+    ['2 ** 10', 1024],
+    ['(1 + 2) * 3', 9],
+    ['-5', -5],
+    ['+5', 5],
+    ['5 + +3', 8],
+    ['5 - -3', 8],
+    ['1e6', 1000000],
+    ['1.5e3', 1500],
+    ['2.5e-2', 0.025],
+    ['1E+2', 100],
+    ['1e6 + 1', 1000001],
+  ];
+  let f = 0;
+  for (const [expr, want] of cases) {
+    try {
+      const got = safeMathEval(expr);
+      if (Math.abs(got - want) > 1e-9) { console.warn('[ai-service] math FAIL:', expr, 'got', got, 'want', want); f++; }
+    } catch (e) {
+      console.warn('[ai-service] math THREW:', expr, '→', e.message);
+      f++;
+    }
+  }
+  // Negative cases — must throw
+  const bad = ['1e', '2 ++', '* 3', '(1 + 2'];
+  for (const expr of bad) {
+    try { safeMathEval(expr); console.warn('[ai-service] math should have thrown:', expr); f++; } catch {}
+  }
+  if (f === 0) console.log('[ai-service] all', cases.length + bad.length, 'safeMathEval sanity tests pass');
+  else console.warn('[ai-service]', f, 'safeMathEval sanity tests failed');
 }
