@@ -50,6 +50,7 @@ function initSettings(container) {
     keyboard: { icon: '\u2328\uFE0F', name: 'Keyboard' },
     sound: { icon: '\uD83D\uDD0A', name: 'Sound' },
     ai: { icon: '\u2728', name: 'AI Assistant' },
+    safety: { icon: '\uD83D\uDEE1\uFE0F', name: 'Safety' },
     system: { icon: '\uD83D\uDCE6', name: 'System Config' },
     security: { icon: '\uD83D\uDD12', name: 'Security & Privacy' },
     about: { icon: '\u2139\uFE0F', name: 'About Astrion OS' },
@@ -89,6 +90,7 @@ function initSettings(container) {
       case 'keyboard': renderKeyboard(); break;
       case 'sound': renderSound(); break;
       case 'ai': renderAI(); break;
+      case 'safety': renderSafety(); break;
       case 'system': renderSystemConfig(); break;
       case 'security': renderSecurity(); break;
       case 'about': renderAbout(); break;
@@ -691,6 +693,111 @@ function initSettings(container) {
 
     main.querySelector('#toggle-notif-sound')?.addEventListener('click', function() {
       this.classList.toggle('on');
+    });
+  }
+
+  // ─── Safety dashboard: rubber-stamp tracker stats + chaos cooldown ───
+  async function renderSafety() {
+    const main = container.querySelector('#settings-main');
+    main.innerHTML = `<div style="padding:24px;color:rgba(255,255,255,0.4);">Loading safety stats…</div>`;
+    let stats, chaos;
+    try {
+      stats = (await import('../kernel/rubber-stamp-tracker.js')).getStats();
+      chaos = (await import('../kernel/chaos-injector.js')).getChaosState();
+    } catch (err) {
+      main.innerHTML = `<div style="padding:24px;color:#ff5f57;">Failed to load safety stats: ${err.message}</div>`;
+      return;
+    }
+    const ratePct = Math.round((stats.rapidRate || 0) * 100);
+    const rateColor = ratePct >= 80 ? '#ff5f57' : ratePct >= 50 ? '#fab387' : '#a6e3a1';
+    const fmtAge = (ts) => {
+      if (!ts) return 'never';
+      const ms = Date.now() - ts;
+      if (ms < 60000) return Math.round(ms/1000) + 's ago';
+      if (ms < 3600000) return Math.round(ms/60000) + 'm ago';
+      if (ms < 86400000) return Math.round(ms/3600000) + 'h ago';
+      return Math.round(ms/86400000) + 'd ago';
+    };
+    const fmtDuration = (ms) => {
+      if (ms <= 0) return 'now';
+      if (ms < 3600000) return Math.round(ms/60000) + 'm';
+      if (ms < 86400000) return Math.round(ms/3600000) + 'h';
+      return Math.round(ms/86400000) + 'd';
+    };
+
+    main.innerHTML = `
+      <div style="padding:24px;max-width:680px;">
+        <h2 style="font-size:20px;font-weight:600;margin:0 0 4px;">Safety</h2>
+        <p style="font-size:12px;color:rgba(255,255,255,0.4);margin:0 0 24px;">How carefully you read L2+ approval previews. (M6.P4 + M6.P4.b)</p>
+
+        <div style="background:rgba(255,255,255,0.04);border-radius:10px;padding:18px;margin-bottom:18px;">
+          <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:14px;">
+            <div style="font-size:14px;font-weight:600;">Rubber-stamp tracker</div>
+            <div style="font-size:11px;color:rgba(255,255,255,0.4);">7-day rolling window · last warning ${fmtAge(stats.lastWarnedAt)}</div>
+          </div>
+
+          <div style="display:flex;align-items:baseline;gap:16px;margin-bottom:18px;">
+            <div style="font-size:42px;font-weight:600;color:${rateColor};line-height:1;">${ratePct}%</div>
+            <div style="flex:1;">
+              <div style="font-size:13px;color:rgba(255,255,255,0.85);">rapid-confirm rate</div>
+              <div style="font-size:11px;color:rgba(255,255,255,0.45);">confirms under 1.5s as a fraction of considered+rapid. Warning fires above 80% over 20+ samples.</div>
+            </div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;text-align:center;font-family:ui-monospace,monospace;">
+            ${[
+              ['rapid', stats.rapid, '#fab387'],
+              ['considered', stats.considered, '#a6e3a1'],
+              ['aborted', stats.aborted, '#cba6f7'],
+              ['timed out', stats.timedOut, 'rgba(255,255,255,0.4)'],
+              ['total', stats.total, '#fff'],
+            ].map(([l, n, c]) => `
+              <div style="background:rgba(0,0,0,0.2);border-radius:6px;padding:10px 6px;">
+                <div style="font-size:18px;font-weight:600;color:${c};line-height:1;">${n ?? 0}</div>
+                <div style="font-size:10px;color:rgba(255,255,255,0.5);margin-top:4px;text-transform:uppercase;letter-spacing:0.4px;">${l}</div>
+              </div>
+            `).join('')}
+          </div>
+
+          <button id="reset-rubber" style="margin-top:16px;padding:8px 14px;background:transparent;color:rgba(255,255,255,0.6);border:1px solid rgba(255,255,255,0.18);border-radius:6px;font-family:var(--font);font-size:12px;cursor:pointer;">I've adjusted my workflow — reset stats</button>
+        </div>
+
+        <div style="background:rgba(255,255,255,0.04);border-radius:10px;padding:18px;">
+          <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:10px;">
+            <div style="font-size:14px;font-weight:600;">Chaos test injection</div>
+            <div style="font-size:11px;color:rgba(255,255,255,0.4);">5% trigger after each L2+ resolution · 24h cooldown</div>
+          </div>
+          <div style="font-size:12px;color:rgba(255,255,255,0.7);margin-bottom:12px;">
+            Occasionally fires a fake destructive preview. If you confirm in under 1.5 seconds the system flags it — nothing actually runs (the chaos cap is synthetic).
+          </div>
+          <div style="display:flex;align-items:center;gap:12px;font-size:12px;">
+            <span style="color:rgba(255,255,255,0.5);">Status:</span>
+            <span style="color:${chaos.inCooldown ? '#a6e3a1' : '#fab387'};font-weight:600;">
+              ${chaos.inCooldown ? `cooling down — next chaos in ${fmtDuration(chaos.msUntilNext)}` : 'armed (no current cooldown)'}
+            </span>
+          </div>
+          <div style="margin-top:14px;display:flex;gap:8px;">
+            <button id="clear-chaos" style="padding:8px 14px;background:transparent;color:rgba(255,255,255,0.6);border:1px solid rgba(255,255,255,0.18);border-radius:6px;font-family:var(--font);font-size:12px;cursor:pointer;">Clear cooldown</button>
+            <button id="fire-chaos" style="padding:8px 14px;background:rgba(255,159,64,0.2);color:#fab387;border:1px solid #fab387;border-radius:6px;font-family:var(--font);font-size:12px;cursor:pointer;">🧪 Test myself now</button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    main.querySelector('#reset-rubber').addEventListener('click', async () => {
+      const { resetStats } = await import('../kernel/rubber-stamp-tracker.js');
+      resetStats();
+      renderSafety();
+    });
+    main.querySelector('#clear-chaos').addEventListener('click', async () => {
+      const { clearChaosCooldown } = await import('../kernel/chaos-injector.js');
+      clearChaosCooldown();
+      renderSafety();
+    });
+    main.querySelector('#fire-chaos').addEventListener('click', async () => {
+      const { fireChaosNow, clearChaosCooldown } = await import('../kernel/chaos-injector.js');
+      clearChaosCooldown();
+      fireChaosNow();
     });
   }
 
