@@ -50,6 +50,7 @@ function initSettings(container) {
     keyboard: { icon: '\u2328\uFE0F', name: 'Keyboard' },
     sound: { icon: '\uD83D\uDD0A', name: 'Sound' },
     ai: { icon: '\u2728', name: 'AI Assistant' },
+    skills: { icon: '\uD83E\uDDE9', name: 'Skills' },
     safety: { icon: '\uD83D\uDEE1\uFE0F', name: 'Safety' },
     system: { icon: '\uD83D\uDCE6', name: 'System Config' },
     security: { icon: '\uD83D\uDD12', name: 'Security & Privacy' },
@@ -90,6 +91,7 @@ function initSettings(container) {
       case 'keyboard': renderKeyboard(); break;
       case 'sound': renderSound(); break;
       case 'ai': renderAI(); break;
+      case 'skills': renderSkills(); break;
       case 'safety': renderSafety(); break;
       case 'system': renderSystemConfig(); break;
       case 'security': renderSecurity(); break;
@@ -694,6 +696,56 @@ function initSettings(container) {
     main.querySelector('#toggle-notif-sound')?.addEventListener('click', function() {
       this.classList.toggle('on');
     });
+  }
+
+  // ─── Skills (M7.P4 first cut): list installed skills + per-skill enable/disable ───
+  async function renderSkills() {
+    const main = container.querySelector('#settings-main');
+    main.innerHTML = `<div style="padding:24px;color:rgba(255,255,255,0.4);">Loading skills…</div>`;
+    let mod;
+    try { mod = await import('../kernel/skill-registry.js'); }
+    catch (err) { main.innerHTML = `<div style="padding:24px;color:#ff5f57;">Skill registry failed: ${err.message}</div>`; return; }
+    await mod.loadSkillRegistry();
+    const skills = mod.listSkills();
+    const enabledCount = skills.filter(s => s.enabled).length;
+    const levelColor = { L0: '#a6e3a1', L1: '#8be9fd', L2: '#fab387', L3: '#ff5555' };
+
+    main.innerHTML = `
+      <div style="padding:24px;max-width:780px;">
+        <h2 style="font-size:20px;font-weight:600;margin:0 0 4px;">Skills</h2>
+        <p style="font-size:12px;color:rgba(255,255,255,0.4);margin:0 0 24px;">${enabledCount} of ${skills.length} skills enabled. Disabled skills won't dispatch from Spotlight phrase triggers; they fall through to the normal planner.</p>
+
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          ${skills.map(s => `
+            <div class="skill-row" data-name="${escapeHtml(s.name)}" style="background:rgba(255,255,255,0.04);border-radius:8px;padding:12px 14px;display:flex;align-items:center;gap:12px;">
+              <div style="flex:1;min-width:0;">
+                <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;">
+                  <span style="font-size:13px;font-weight:600;">${escapeHtml(s.goal)}</span>
+                  <span style="font-size:10px;color:${levelColor[s.level] || '#fff'};text-transform:uppercase;letter-spacing:0.5px;">${escapeHtml(s.level || 'L?')}</span>
+                </div>
+                <div style="font-size:11px;color:rgba(255,255,255,0.5);margin-top:3px;font-family:ui-monospace,monospace;">${escapeHtml(s.name)} · triggers: ${s.phrases.map(p => '"' + escapeHtml(p) + '"').join(', ') || '(no phrases)'}</div>
+              </div>
+              <label style="position:relative;display:inline-block;width:42px;height:24px;cursor:pointer;">
+                <input type="checkbox" class="skill-toggle" data-name="${escapeHtml(s.name)}" ${s.enabled ? 'checked' : ''} style="opacity:0;width:0;height:0;">
+                <span style="position:absolute;inset:0;background:${s.enabled ? 'var(--accent)' : 'rgba(255,255,255,0.15)'};border-radius:24px;transition:background 0.2s;"></span>
+                <span style="position:absolute;top:2px;left:${s.enabled ? '20px' : '2px'};width:20px;height:20px;background:white;border-radius:50%;transition:left 0.2s;box-shadow:0 1px 3px rgba(0,0,0,0.3);"></span>
+              </label>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `;
+
+    main.querySelectorAll('.skill-toggle').forEach(input => {
+      input.addEventListener('change', (e) => {
+        mod.setSkillEnabled(e.target.dataset.name, e.target.checked);
+        renderSkills();
+      });
+    });
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
 
   // ─── Safety dashboard: rubber-stamp tracker stats + chaos cooldown ───

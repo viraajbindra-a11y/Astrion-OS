@@ -19,6 +19,7 @@ import { parseSkill } from './skill-parser.js';
 
 const MANIFEST_URL = '/skills/manifest.json';
 const SKILL_URL = (name) => '/skills/examples/' + name + '.skill';
+const DISABLED_KEY = 'astrion-skills-disabled';
 
 const byName = new Map();       // name → { name, skill (parsed), source (raw text) }
 const byPhrase = new Map();     // lowercased phrase → name
@@ -28,13 +29,42 @@ function norm(s) {
   return String(s || '').trim().toLowerCase();
 }
 
+function readDisabled() {
+  try {
+    const raw = localStorage.getItem(DISABLED_KEY);
+    if (!raw) return new Set();
+    const arr = JSON.parse(raw);
+    return new Set(Array.isArray(arr) ? arr : []);
+  } catch { return new Set(); }
+}
+
+function writeDisabled(set) {
+  try { localStorage.setItem(DISABLED_KEY, JSON.stringify([...set])); } catch {}
+}
+
+export function isSkillEnabled(name) {
+  return !readDisabled().has(name);
+}
+
+export function setSkillEnabled(name, enabled) {
+  const s = readDisabled();
+  if (enabled) s.delete(name); else s.add(name);
+  writeDisabled(s);
+}
+
+export function getDisabledSkills() {
+  return [...readDisabled()];
+}
+
 export function listSkills() {
+  const disabled = readDisabled();
   return [...byName.values()].map(({ name, skill }) => ({
     name,
     goal: skill.goal,
     phrases: skill.trigger.filter(t => t.phrase).map(t => t.phrase),
     level: skill.constraints.level,
     budget: skill.constraints.budget_tokens,
+    enabled: !disabled.has(name),
   }));
 }
 
@@ -48,6 +78,9 @@ export function matchPhrase(query) {
   // exact match first — phrases are expected to be short, so exact > fuzzy
   if (byPhrase.has(q)) {
     const name = byPhrase.get(q);
+    // M7.P4: silently skip disabled skills — fall through to the
+    // normal planner path so the user can still type the phrase.
+    if (readDisabled().has(name)) return null;
     return { name, skill: byName.get(name).skill };
   }
   return null;
