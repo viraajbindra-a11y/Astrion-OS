@@ -285,6 +285,31 @@ export function initSpotlight() {
             <div style="font-size:11px;color:rgba(255,255,255,0.6);">Tests passed ${phases.testsPassed ?? '?'}/${phases.testsTotal ?? '?'} · code attempts ${phases.codeAttempts ?? '?'} · model ${escapeHtml(phases.codeModel || '?')}</div>
           </div>`;
       }
+      if ((cap.id === 'branch.merge' || cap.id === 'branch.rewind' || cap.id === 'branch.discard') && args.branchId) {
+        const branchMod = await import('../kernel/branch-manager.js');
+        const branch = await branchMod.getBranch(args.branchId);
+        if (!branch) return '';
+        let diffSummary = '';
+        let topMutations = '';
+        try {
+          const diff = await branchMod.diffBranch(args.branchId);
+          if (diff?.lines?.length) {
+            diffSummary = Object.entries(diff.counts).filter(([, v]) => v > 0).map(([k, v]) => `${k}: ${v}`).join(' · ');
+            topMutations = diff.lines.slice(0, 6).map((m, i) =>
+              `<li style="margin:2px 0;font-family:ui-monospace,monospace;font-size:11px;color:rgba(255,255,255,0.7);"><span style="color:#a6e3a1;">${escapeHtml(m.kind)}</span> ${escapeHtml(m.describe || '')}</li>`).join('');
+            if (diff.lines.length > 6) topMutations += `<li style="font-size:10px;color:rgba(255,255,255,0.4);list-style:none;">…and ${diff.lines.length - 6} more</li>`;
+          }
+        } catch {}
+        const verb = cap.id === 'branch.merge' ? 'Merge' : cap.id === 'branch.rewind' ? 'Rewind' : 'Discard';
+        const verbColor = cap.id === 'branch.merge' ? '#a6e3a1' : cap.id === 'branch.rewind' ? '#cba6f7' : 'rgba(255,255,255,0.5)';
+        return `
+          <div style="margin-top:10px;padding-top:10px;border-top:1px dashed rgba(255,255,255,0.15);">
+            <div style="font-size:11px;color:${verbColor};font-weight:600;margin-bottom:6px;">⏮ ${verb} branch · status ${escapeHtml(branch.status || 'unknown')}</div>
+            <div style="font-size:13px;color:#e0e0e0;margin-bottom:6px;">${escapeHtml(branch.name || '(unnamed)')}${branch.intent ? ' — ' + escapeHtml(branch.intent) : ''}</div>
+            ${diffSummary ? `<div style="font-size:11px;color:rgba(255,255,255,0.55);margin-bottom:4px;">${escapeHtml(diffSummary)}</div>` : ''}
+            ${topMutations ? `<ul style="margin:4px 0 4px 18px;padding:0;list-style:'• ';">${topMutations}</ul>` : '<div style="font-size:11px;color:rgba(255,255,255,0.4);">No mutations recorded.</div>'}
+          </div>`;
+      }
     } catch (err) { /* best-effort UI; never block on graph errors */ }
     return '';
   }
