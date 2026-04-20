@@ -249,6 +249,11 @@ import { initVolumeHud } from './shell/volume-hud.js';
     // register them with processManager so the dock + spotlight can
     // launch them. Re-runs on app:promoted / app:archived events.
     (await import('./kernel/generated-app-loader.js')).initGeneratedAppLoader();
+    // M6.P4.b chaos injection: occasionally fire a synthetic L2+ preview
+    // for a clearly-destructive action (24h cooldown). Catches users
+    // who rubber-stamp every preview by handing them a fake plan they
+    // should refuse to confirm.
+    (await import('./kernel/chaos-injector.js')).initChaosInjector();
 
     // Phase 0: kill mock provider trap in native path too (lesson #72)
     if (localStorage.getItem('nova-ai-provider') === 'mock') {
@@ -500,6 +505,9 @@ import { initVolumeHud } from './shell/volume-hud.js';
   // M4 dock surface: register docked 'generated-app' nodes as launchable
   // icons. Subscribed to app:promoted / app:archived for live updates.
   (await import('./kernel/generated-app-loader.js')).initGeneratedAppLoader();
+  // M6.P4.b chaos injection: 5% chance after each real L2+ resolution,
+  // 24h cooldown. Fake destructive preview the user must abort.
+  (await import('./kernel/chaos-injector.js')).initChaosInjector();
 
   // Phase 0: kill mock provider trap permanently (lesson #72).
   // If a prior Settings test left provider='mock', every AI path silently
