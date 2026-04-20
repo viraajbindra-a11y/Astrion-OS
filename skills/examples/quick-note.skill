@@ -1,0 +1,16 @@
+# astrion-skill v1
+goal: Capture a one-line note instantly without opening an app
+trigger:
+  - phrase: "note"
+  - phrase: "quick note"
+  - phrase: "remember"
+do: |
+  Take whatever the user said after the trigger phrase as the note
+  body. Create a 'note' graph node with that body, the current
+  timestamp, and tag 'quick'. If the body is empty, prompt the user
+  for content via Spotlight (one-line input). Do not open the Notes
+  app — this is meant to be invisible capture.
+constraints:
+  level: L2
+  budget_tokens: 150
+  reversibility: BOUNDED

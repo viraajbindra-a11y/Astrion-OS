@@ -1,0 +1,17 @@
+# astrion-skill v1
+goal: Enter focus mode — silence notifications, dim wallpaper, show timer
+trigger:
+  - phrase: "focus"
+  - phrase: "do not disturb"
+  - phrase: "focus mode"
+do: |
+  Enable Do Not Disturb (silence notifications). Apply a darker accent
+  to the wallpaper (50% dim). Open the Timer app preset to 25 minutes
+  (Pomodoro work session). Show a notification: "Focus mode — 25 min
+  timer running. Say 'exit focus' to end." Record a 'focus-session'
+  graph node with start time so the user can see their focus history
+  in Settings > About.
+constraints:
+  level: L2
+  budget_tokens: 300
+  reversibility: BOUNDED

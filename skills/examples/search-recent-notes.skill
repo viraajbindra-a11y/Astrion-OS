@@ -1,0 +1,14 @@
+# astrion-skill v1
+goal: Show my 5 most recent notes in Spotlight
+trigger:
+  - phrase: "recent notes"
+  - phrase: "my notes"
+do: |
+  Query the graph for 'note' nodes, ordered by updatedAt descending,
+  limit 5. Render each as a Spotlight result row with the note's name
+  as title, first 80 characters of the body as subtitle, and a click
+  action that opens the note in the Notes app.
+constraints:
+  level: L0
+  budget_tokens: 100
+  reversibility: FREE

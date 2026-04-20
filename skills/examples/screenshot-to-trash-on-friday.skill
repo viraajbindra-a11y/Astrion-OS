@@ -1,0 +1,16 @@
+# astrion-skill v1
+goal: Move week-old screenshots to Trash every Friday
+trigger:
+  - cron: "0 17 * * 5"
+  - phrase: "clean old screenshots"
+when:
+  - "There is at least one image in /Pictures with name starting with 'Screenshot' older than 7 days"
+do: |
+  List screenshots in /Pictures matching 'Screenshot*' with mtime older
+  than 7 days. Move each to /Trash/ via the Trash app's standard delete
+  flow (so the user can still rescue them). Notify with how many were
+  moved. Do NOT permanent-delete — that's not what the user asked for.
+constraints:
+  level: L2
+  budget_tokens: 350
+  reversibility: BOUNDED

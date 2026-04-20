@@ -1,0 +1,17 @@
+# astrion-skill v1
+goal: Warn me when the battery drops below 15% and no charger is connected
+trigger:
+  - event: "battery:changed"
+    where: "level < 15 and charging == false"
+when:
+  - "No battery-warn notification has been shown in the last 30 minutes"
+do: |
+  Show a notification with title "🔋 Low battery" and a message giving
+  the current percentage + estimated remaining time (if available from
+  the battery sensor). Use duration 0 (persistent until dismissed).
+  Record a 'battery-warn' graph node with timestamp so the cooldown
+  predicate above can check it.
+constraints:
+  level: L1
+  budget_tokens: 100
+  reversibility: FREE

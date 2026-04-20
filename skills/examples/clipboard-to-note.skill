@@ -1,0 +1,16 @@
+# astrion-skill v1
+goal: Save what's currently on the clipboard as a note
+trigger:
+  - phrase: "save clipboard"
+  - phrase: "clip to note"
+when:
+  - "The clipboard contains at least one printable character"
+do: |
+  Read the current clipboard text from the context bundle. Create a
+  'note' graph node with the clipboard contents as body, the current
+  timestamp, and tag 'clipboard'. Show a brief notification confirming
+  it was saved (with the first 60 characters of the saved content).
+constraints:
+  level: L2
+  budget_tokens: 150
+  reversibility: BOUNDED

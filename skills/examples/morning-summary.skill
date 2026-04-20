@@ -1,0 +1,19 @@
+# astrion-skill v1
+goal: Show me a brief morning summary at 9 AM
+trigger:
+  - cron: "0 9 * * *"
+  - phrase: "morning summary"
+when:
+  - "The current weekday is Monday through Friday"
+do: |
+  Build a single notification that contains:
+  - today's weather for the user's location
+  - the next calendar event in the next 8 hours, if any
+  - the count of unread notifications since last morning summary
+  - one motivating short line based on the day of week
+  Show it via notification:show with a 30-second duration. No app
+  windows opened.
+constraints:
+  level: L1
+  budget_tokens: 250
+  reversibility: FREE

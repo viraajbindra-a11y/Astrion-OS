@@ -1,0 +1,17 @@
+# astrion-skill v1
+goal: Organize my Downloads folder by file type
+trigger:
+  - phrase: "organize downloads"
+  - phrase: "clean up downloads"
+when:
+  - "There are more than 5 files directly in /Downloads"
+do: |
+  Walk /Downloads. For each file directly in /Downloads (not in a
+  subfolder), move it to /Downloads/<extension>/<name> preserving the
+  original filename. Create the extension subfolders if they don't
+  exist. Skip files already inside a subfolder. When done, notify the
+  user with a count of moved files.
+constraints:
+  level: L2
+  budget_tokens: 400
+  reversibility: BOUNDED

@@ -1,0 +1,20 @@
+# astrion-skill v1
+goal: Summarize what I worked on this week every Friday afternoon
+trigger:
+  - cron: "0 16 * * 5"
+  - phrase: "weekly digest"
+when:
+  - "There are at least 3 graph nodes created since last Friday"
+do: |
+  Query the graph for nodes created in the last 7 days, grouped by
+  type. Generate a markdown document with:
+  - one paragraph summarizing each type (how many, notable titles)
+  - a "top 3 files edited" list
+  - a "focus-session count + total minutes" line if any focus-session
+    nodes exist (M5.P4 substrate)
+  Save to /Documents/Weekly Digests/<YYYY-MM-DD>.md. Open the file in
+  Text Editor after save.
+constraints:
+  level: L2
+  budget_tokens: 700
+  reversibility: BOUNDED

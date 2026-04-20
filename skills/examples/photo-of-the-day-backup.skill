@@ -1,0 +1,16 @@
+# astrion-skill v1
+goal: Back up the day's photos to a date-stamped folder
+trigger:
+  - cron: "30 23 * * *"
+  - phrase: "back up today's photos"
+when:
+  - "There is at least one new image in /Pictures since midnight"
+do: |
+  List images in /Pictures with a modification time after midnight
+  today. Copy each into /Documents/Photo Backups/<YYYY-MM-DD>/ keeping
+  the original filename. If the date folder doesn't exist, create it.
+  Notify with the copied count when done. Do NOT delete originals.
+constraints:
+  level: L2
+  budget_tokens: 300
+  reversibility: BOUNDED
