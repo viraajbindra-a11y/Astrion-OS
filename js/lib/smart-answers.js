@@ -618,10 +618,16 @@ function tryFun(query) {
   }
 
   // Emoji meaning — "emoji 🔥"
-  const emojiMatch = q.match(/^emoji\s+(.+)/i);
-  if (emojiMatch) {
+  // (Renamed from emojiMatch to emojiMeaningMatch — line 360 already
+  // declares emojiMatch in this same function scope for emoji-by-name
+  // lookup, which crashed module load with "Identifier 'emojiMatch'
+  // has already been declared." Both branches happen to share the
+  // ^emoji <X>$ regex; the line-360 branch runs first so this branch
+  // only fires for cases that didn't match a name there.)
+  const emojiMeaningMatch = q.match(/^emoji\s+(.+)/i);
+  if (emojiMeaningMatch) {
     const MEANINGS = {'🔥':'fire/hot/lit','❤️':'love/heart','😂':'laughing/crying','💀':'dead/skull','✨':'sparkles/magic','🎉':'party/celebration','👑':'crown/king/queen','🤔':'thinking','😭':'crying','🥺':'pleading','💪':'strong/flex','🙏':'pray/thanks','👀':'eyes/looking','🫠':'melting','🤡':'clown','💅':'sassy/nails','🧠':'brain/smart','⚡':'lightning/fast','🌊':'wave/ocean','🎯':'target/bullseye'};
-    const emoji = emojiMatch[1].trim();
+    const emoji = emojiMeaningMatch[1].trim();
     const meaning = MEANINGS[emoji];
     if (meaning) return { icon: emoji, title: meaning, subtitle: `Meaning of ${emoji}` };
   }
