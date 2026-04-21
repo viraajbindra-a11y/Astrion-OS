@@ -242,15 +242,18 @@ class AIService {
       return jokes[Math.floor(Math.random() * jokes.length)];
     }
 
-    // Math — hand-rolled parser (no Function/eval). Input is gated by the
-    // regex to digits/whitespace/+ - * / ^ ( ) . e E so the worst a bad
-    // input can do is throw. Exponents accept both ** and ^. Scientific
-    // notation (1e6, 1.5e-3) handled by the tokenizer.
-    const mathMatch = lower.match(/(?:what is |calculate |compute )?([\deE\s+\-*/.()^]+)/);
+    // Math — hand-rolled parser (no Function/eval). Input is gated by
+    // the regex to digits/whitespace/+ - * / ^ ( ) . plus a limited
+    // identifier alphabet (a-z/A-Z for the 'pi'/'e' constants) so the
+    // worst a bad input can do is throw. Unknown identifiers hit
+    // safeMathEval's "bad identifier" branch and the try/catch below
+    // swallows it. Exponents accept both ** and ^. Scientific notation
+    // (1e6, 1.5e-3) handled by the tokenizer.
+    const mathMatch = lower.match(/(?:what is |calculate |compute )?([a-zA-Z\d\s+\-*/.()^]+)/);
     if (mathMatch) {
       try {
         const expr = mathMatch[1].trim();
-        if (/^[\deE\s+\-*/.()^]+$/.test(expr) && expr.length > 1 && expr.length < 100) {
+        if (/^[a-zA-Z\d\s+\-*/.()^]+$/.test(expr) && expr.length > 1 && expr.length < 100 && /[\d+\-*/^()]/.test(expr)) {
           const result = safeMathEval(expr);
           if (typeof result === 'number' && isFinite(result)) return `${expr} = ${result}`;
         }
@@ -304,6 +307,25 @@ function safeMathEval(expr) {
     } else if ('+-*/()^'.indexOf(ch) >= 0) {
       tokens.push({ t: 'op', v: ch });
       i++;
+    } else if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z')) {
+      // Named constant: pi / e / PI / E. Kept deliberately small — if
+      // someone types 'sin(…)' we'd rather throw than pretend to
+      // support it. Only accept full-word matches (not embedded in an
+      // identifier) by lookahead — the next char must end the ident.
+      let name = '';
+      while (i < expr.length && ((expr[i] >= 'a' && expr[i] <= 'z') || (expr[i] >= 'A' && expr[i] <= 'Z'))) {
+        name += expr[i++];
+      }
+      const low = name.toLowerCase();
+      if (low === 'pi') tokens.push({ t: 'num', v: Math.PI });
+      else if (low === 'e' && i < expr.length && expr[i] !== '+' && expr[i] !== '-') {
+        // lone 'e' — only a constant when NOT followed by exponent sign
+        // (which is handled above in the number-path). But we reach
+        // this branch because the number-path was never entered.
+        tokens.push({ t: 'num', v: Math.E });
+      }
+      else if (low === 'e') tokens.push({ t: 'num', v: Math.E });
+      else throw new Error('safeMathEval: bad identifier ' + name);
     } else {
       throw new Error('safeMathEval: bad char ' + ch);
     }
@@ -374,6 +396,13 @@ if (typeof window !== 'undefined' && window.location?.hostname === 'localhost') 
     ['2.5e-2', 0.025],
     ['1E+2', 100],
     ['1e6 + 1', 1000001],
+    // Named constants (approximate match since floats are floats)
+    ['pi', Math.PI],
+    ['PI', Math.PI],
+    ['2 * pi', 2 * Math.PI],
+    ['pi / 2', Math.PI / 2],
+    ['e', Math.E],
+    ['e + 1', Math.E + 1],
   ];
   let f = 0;
   for (const [expr, want] of cases) {
@@ -386,7 +415,7 @@ if (typeof window !== 'undefined' && window.location?.hostname === 'localhost') 
     }
   }
   // Negative cases — must throw
-  const bad = ['1e', '2 ++', '* 3', '(1 + 2'];
+  const bad = ['1e', '2 ++', '* 3', '(1 + 2', 'sin(pi)', 'xyz'];
   for (const expr of bad) {
     try { safeMathEval(expr); console.warn('[ai-service] math should have thrown:', expr); f++; } catch {}
   }
