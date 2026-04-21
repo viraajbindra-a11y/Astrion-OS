@@ -249,13 +249,19 @@ function initAiWriter(container) {
     }
   });
 
-  container.querySelector('#aiw-clear').addEventListener('click', () => {
-    if (editor.value) {
-      history.push(editor.value);
-      editor.value = '';
-      editor.dispatchEvent(new Event('input'));
-      statusEl.textContent = 'Cleared';
+  container.querySelector('#aiw-clear').addEventListener('click', async () => {
+    if (!editor.value) return;
+    // Require confirmation when clearing non-trivial content. Uses the
+    // custom dialog (native confirm() is blocked in WebKitGTK).
+    if (editor.value.length > 30) {
+      const { showConfirm } = await import('../lib/dialog.js');
+      const ok = await showConfirm('Clear all text? Your draft will be lost.', container, true);
+      if (!ok) return;
     }
+    history.push(editor.value);
+    editor.value = '';
+    editor.dispatchEvent(new Event('input'));
+    statusEl.textContent = 'Cleared';
   });
 
   container.querySelector('#aiw-copy').addEventListener('click', async () => {
