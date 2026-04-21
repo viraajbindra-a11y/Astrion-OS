@@ -132,14 +132,35 @@ function validateReview(review) {
  * { ok, review?, error? } where review is { risks, recommendation,
  * summary, brain, model }. Never throws.
  */
+// M8.P3.b: route red-team to a DIFFERENT model than the planner when
+// one is configured. The user sets nova-ai-redteam-model in Settings
+// (or directly in localStorage). Empty = use the default model.
+//
+// Why this matters: the red-team's adversarial prompt already pushes
+// against sycophancy, but a truly independent second opinion requires
+// a different model. Same-model review still catches obvious
+// mistakes; different-model review catches model-specific blind
+// spots too.
+function redteamModelOverride() {
+  try {
+    const v = localStorage.getItem('nova-ai-redteam-model');
+    return v && v.trim() ? v.trim() : null;
+  } catch { return null; }
+}
+
+function baseOpts() {
+  const opts = { maxTokens: 600, skipHistory: true, capCategory: 'red-team', format: 'json' };
+  const override = redteamModelOverride();
+  if (override) opts.model = override;
+  return opts;
+}
+
 export async function reviewAction(cap, args) {
   if (!cap) return { ok: false, error: 'cap required' };
   const prompt = buildReviewPrompt(cap, args);
   let raw, meta;
   try {
-    const r = await aiService.askWithMeta(prompt, {
-      maxTokens: 600, skipHistory: true, capCategory: 'red-team', format: 'json',
-    });
+    const r = await aiService.askWithMeta(prompt, baseOpts());
     raw = r.reply;
     meta = r.meta;
   } catch (err) {
@@ -160,9 +181,7 @@ REJECTION: ${validation.error}
 Try again. Respond with JSON only.`;
     let retryRaw;
     try {
-      const r = await aiService.askWithMeta(retryPrompt, {
-        maxTokens: 600, skipHistory: true, capCategory: 'red-team', format: 'json',
-      });
+      const r = await aiService.askWithMeta(retryPrompt, baseOpts());
       retryRaw = r.reply;
       meta = r.meta;
     } catch (err) {

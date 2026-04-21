@@ -1,10 +1,10 @@
 {
   "version": 1,
-  "generated_at": "2026-04-21T00:03:44.517Z",
+  "generated_at": "2026-04-21T00:07:10.218Z",
   "files": {
     "js/kernel/capability-api.js": "d4124838b9f66a68c620281ded34cc323c122fe9ae2c18c02471b83f8ae9e046",
     "js/kernel/operation-interceptor.js": "8cb583c547779556b1d8aacab1cc50d9e8156de1cf4cf25040570ffbf5222d6b",
-    "js/kernel/red-team.js": "122b26b151f82afa3fde905de65e44a16f836ae320bb1132349182757f46fc9a",
+    "js/kernel/red-team.js": "a3b00498d22759fd460b0cd0fddd7b2350020634f961551c9fa08083c9f78ace",
     "js/kernel/rubber-stamp-tracker.js": "0867195d3be0ec520e24d980051ea9bbdd366eb619049c152193b990ef2e241e",
     "js/kernel/chaos-injector.js": "77616f1284a7551406e0d4da56da91252427102deeaf24824cdba0c03f7122f5",
     "js/kernel/branch-manager.js": "21ffb46cea5b984045e88a47b31182d31d84cd8aac5f684bba47428eae32b519",

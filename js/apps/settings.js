@@ -352,6 +352,13 @@ function initSettings(container) {
         </div>
         <div class="settings-row">
           <div>
+            <div class="settings-row-label">Red-team model <span style="font-size:10px; color:rgba(255,255,255,0.4); font-weight:normal;">(M8.P3.b)</span></div>
+            <div class="settings-row-desc">A DIFFERENT model from above reviews every L2+ action. Blank = use primary. True second-opinion safety — pull a different family (e.g. llama3.2) for real diversity.</div>
+          </div>
+          <input type="text" id="ai-redteam-model" class="settings-select" value="${localStorage.getItem('nova-ai-redteam-model') || ''}" placeholder="e.g. llama3.2" style="width:180px; font-family:var(--mono,monospace); font-size:12px;">
+        </div>
+        <div class="settings-row">
+          <div>
             <div class="settings-row-label">Test Connection</div>
             <div class="settings-row-desc" id="ai-test-status">Click to verify Ollama is reachable</div>
           </div>
@@ -400,6 +407,13 @@ function initSettings(container) {
     // Save model on change
     main.querySelector('#ai-ollama-model').addEventListener('change', (e) => {
       localStorage.setItem('nova-ai-ollama-model', e.target.value.trim());
+    });
+
+    // M8.P3.b — save red-team model override
+    main.querySelector('#ai-redteam-model').addEventListener('change', (e) => {
+      const v = e.target.value.trim();
+      if (v) localStorage.setItem('nova-ai-redteam-model', v);
+      else localStorage.removeItem('nova-ai-redteam-model');
     });
 
     // Test connection
