@@ -200,45 +200,130 @@ function initAppStore(container) {
     `).join('')}</div></div>`;
   }
 
-  function renderSkills() {
+  // ─── Real Skills tab — wired to skill-registry + paste install ───
+  // Mirrors Settings > Skills (lesson 155: bundled cannot be replaced
+  // by user-installed). Both surfaces share the same registry so a
+  // skill installed here shows up there immediately.
+  async function renderSkills() {
+    content.innerHTML = `<div style="padding:30px;color:rgba(255,255,255,0.55);font-size:13px;">Loading skills\u2026</div>`;
+    let mod;
+    try { mod = await import('../kernel/skill-registry.js'); }
+    catch (err) {
+      content.innerHTML = `<div style="padding:30px;color:#ff5f57;font-size:13px;">Skill registry failed: ${err.message}</div>`;
+      return;
+    }
+    await mod.loadSkillRegistry();
+    const skills = mod.listSkills();
+
+    const bundled = skills.filter(s => !s.userInstalled);
+    const installed = skills.filter(s => s.userInstalled);
+    const enabledCount = skills.filter(s => s.enabled).length;
+
+    const levelTone = {
+      L0: { bg: '#0e6b3c', label: 'L0 read-only' },
+      L1: { bg: '#1a4f8a', label: 'L1 sandbox' },
+      L2: { bg: '#a36a00', label: 'L2 user data' },
+      L3: { bg: '#8a1d1d', label: 'L3 self-mod' },
+    };
+
+    const skillCard = (s) => {
+      const tone = levelTone[s.level] || levelTone.L1;
+      const phraseStr = s.phrases.length
+        ? s.phrases.map(p => '"' + p + '"').join(' \u00B7 ')
+        : '(no phrases)';
+      const isUser = s.userInstalled;
+      const togglePill = `
+        <label class="store-skill-toggle" style="position:relative;display:inline-block;width:38px;height:22px;cursor:pointer;flex-shrink:0;">
+          <input type="checkbox" data-skill-toggle="${s.name}" ${s.enabled ? 'checked' : ''} style="opacity:0;width:0;height:0;">
+          <span style="position:absolute;inset:0;background:${s.enabled ? 'var(--accent)' : 'rgba(255,255,255,0.18)'};border-radius:22px;transition:background 0.2s;"></span>
+          <span style="position:absolute;top:2px;left:${s.enabled ? '18px' : '2px'};width:18px;height:18px;background:white;border-radius:50%;transition:left 0.2s;box-shadow:0 1px 3px rgba(0,0,0,0.3);"></span>
+        </label>`;
+      return `
+        <div class="appstore-card" style="cursor:default;background:rgba(255,255,255,0.04);${isUser ? 'border-left:3px solid #cba6f7;' : ''}">
+          <div class="appstore-card-icon" style="background:${tone.bg};font-size:24px;">\u{2728}</div>
+          <div class="appstore-card-name" title="${s.name}">${s.goal || s.name}</div>
+          <div class="appstore-card-category" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+            <span style="font-size:9px;color:rgba(255,255,255,0.65);text-transform:uppercase;letter-spacing:0.06em;">${tone.label}</span>
+            ${isUser ? '<span style="font-size:9px;color:#cba6f7;text-transform:uppercase;letter-spacing:0.06em;">user</span>' : '<span style="font-size:9px;color:rgba(255,255,255,0.45);text-transform:uppercase;letter-spacing:0.06em;">bundled</span>'}
+          </div>
+          <div style="font-size:10px;color:rgba(255,255,255,0.4);font-family:ui-monospace,monospace;margin-top:4px;line-height:1.4;height:28px;overflow:hidden;">${phraseStr}</div>
+          <div class="appstore-card-footer" style="margin-top:8px;">
+            ${isUser
+              ? `<button class="appstore-get-btn" data-skill-uninstall="${s.name}" style="background:rgba(255,85,85,0.15);color:#ff8888;">Uninstall</button>`
+              : `<span style="font-size:10px;color:rgba(255,255,255,0.45);">Built-in</span>`}
+            ${togglePill}
+          </div>
+        </div>`;
+    };
+
     content.innerHTML = `
       <div class="appstore-section">
         <div class="appstore-featured" style="grid-template-columns:1fr">
           <div class="appstore-featured-card" style="background:linear-gradient(135deg, #4a148c, #7b1fa2, #ce93d8)">
             <div class="appstore-featured-label">\u2728 AI Skills</div>
-            <div class="appstore-featured-title">Extend NOVA with AI Superpowers</div>
-            <div class="appstore-featured-desc">Skills are AI capabilities that plug directly into NOVA OS. They can summarize documents, generate code, translate languages, and more — all from Search or any app.</div>
+            <div class="appstore-featured-title">${enabledCount} of ${skills.length} skills enabled</div>
+            <div class="appstore-featured-desc">Skills are tiny .skill files Astrion can dispatch from a Spotlight phrase. ${installed.length} user-installed \u00B7 ${bundled.length} bundled. Disabled skills fall through to the planner instead of dispatching.</div>
           </div>
         </div>
-        <div class="appstore-section-title" style="margin-top:20px">Available Skills</div>
-        <div class="appstore-grid">
-          <div class="appstore-card">
-            <div class="appstore-card-icon" style="background:linear-gradient(135deg,#ff6d00,#ff3d00)">\uD83D\uDCDD</div>
-            <div class="appstore-card-name">Smart Summarizer</div>
-            <div class="appstore-card-category">AI Skill \u2022 Free</div>
-            <div class="appstore-card-footer"><span class="appstore-card-rating">\u2B50 4.9</span><button class="appstore-get-btn">GET</button></div>
-          </div>
-          <div class="appstore-card">
-            <div class="appstore-card-icon" style="background:linear-gradient(135deg,#1e88e5,#0d47a1)">\uD83D\uDCBB</div>
-            <div class="appstore-card-name">Code Generator</div>
-            <div class="appstore-card-category">AI Skill \u2022 $1.99</div>
-            <div class="appstore-card-footer"><span class="appstore-card-rating">\u2B50 4.8</span><button class="appstore-get-btn">$1.99</button></div>
-          </div>
-          <div class="appstore-card">
-            <div class="appstore-card-icon" style="background:linear-gradient(135deg,#43a047,#1b5e20)">\uD83C\uDF0D</div>
-            <div class="appstore-card-name">Auto Translator</div>
-            <div class="appstore-card-category">AI Skill \u2022 Free</div>
-            <div class="appstore-card-footer"><span class="appstore-card-rating">\u2B50 4.7</span><button class="appstore-get-btn">GET</button></div>
-          </div>
-          <div class="appstore-card">
-            <div class="appstore-card-icon" style="background:linear-gradient(135deg,#ab47bc,#6a1b9a)">\uD83C\uDFA8</div>
-            <div class="appstore-card-name">Image Describer</div>
-            <div class="appstore-card-category">AI Skill \u2022 Free</div>
-            <div class="appstore-card-footer"><span class="appstore-card-rating">\u2B50 4.6</span><button class="appstore-get-btn">GET</button></div>
+
+        ${installed.length ? `
+          <div class="appstore-section-title" style="margin-top:24px;">Your installed skills (${installed.length})</div>
+          <div class="appstore-grid" id="store-installed-skills">${installed.map(skillCard).join('')}</div>
+        ` : ''}
+
+        <div class="appstore-section-title" style="margin-top:24px;">Bundled skills (${bundled.length})</div>
+        <div class="appstore-grid" id="store-bundled-skills">${bundled.map(skillCard).join('')}</div>
+
+        <div style="margin-top:28px;padding:18px;background:rgba(255,255,255,0.04);border-radius:10px;">
+          <div style="font-size:14px;font-weight:600;margin-bottom:6px;">\u{1F9E9} Install a custom skill</div>
+          <p style="font-size:12px;color:rgba(255,255,255,0.55);margin:0 0 12px;">
+            Paste any <code>.skill</code> file. See <code>docs/skill-language.md</code> for the format.
+            User-installed skills can't shadow a bundled skill of the same name (lesson 155).
+          </p>
+          <textarea id="store-install-skill-source" placeholder="goal: Show me the time\ntrigger:\n  - phrase: &quot;what time&quot;\ndo: |\n  Open the Clock app focused on the current time." rows="8" style="width:100%;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.1);border-radius:6px;color:#e0e0e0;padding:10px 12px;font-family:ui-monospace,monospace;font-size:12px;resize:vertical;box-sizing:border-box;"></textarea>
+          <div style="display:flex;gap:10px;align-items:center;margin-top:10px;">
+            <button id="store-install-skill-btn" class="appstore-get-btn" style="background:var(--accent);color:white;padding:8px 18px;font-weight:600;">Install</button>
+            <span id="store-install-skill-status" style="font-size:11px;color:rgba(255,255,255,0.55);"></span>
           </div>
         </div>
       </div>
     `;
+
+    content.querySelectorAll('[data-skill-toggle]').forEach(input => {
+      input.addEventListener('change', () => {
+        mod.setSkillEnabled(input.dataset.skillToggle, input.checked);
+        renderSkills();
+      });
+    });
+    content.querySelectorAll('[data-skill-uninstall]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const r = mod.uninstallUserSkill(btn.dataset.skillUninstall);
+        if (r.ok) renderSkills();
+      });
+    });
+    const installBtn = content.querySelector('#store-install-skill-btn');
+    const installSrc = content.querySelector('#store-install-skill-source');
+    const installStatus = content.querySelector('#store-install-skill-status');
+    installBtn?.addEventListener('click', async () => {
+      const txt = installSrc.value;
+      if (!txt.trim()) {
+        installStatus.textContent = '✗ Paste a .skill file first';
+        installStatus.style.color = '#ff5555';
+        return;
+      }
+      installStatus.textContent = 'Installing\u2026';
+      installStatus.style.color = 'rgba(255,255,255,0.55)';
+      const r = await mod.installUserSkill(txt);
+      if (r.ok) {
+        installStatus.textContent = '\u2713 Installed as ' + r.name;
+        installStatus.style.color = '#a6e3a1';
+        installSrc.value = '';
+        setTimeout(() => renderSkills(), 800);
+      } else {
+        installStatus.textContent = '\u2717 ' + r.error;
+        installStatus.style.color = '#ff5555';
+      }
+    });
   }
 
   function renderDetail(app) {
