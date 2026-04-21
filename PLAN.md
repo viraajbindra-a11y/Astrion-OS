@@ -499,7 +499,9 @@ Each milestone has: a 1-sentence success definition, **explicit phases** (the su
 
 ---
 
-### M7 — Declarative Intent Language + Skill Marketplace *(~6 weeks after M6)*
+### M7 — Declarative Intent Language + Skill Marketplace *(SUBSTANTIALLY SHIPPED 2026-04-19/20)*
+
+**Status:** P1 + P2 (a/b/c) + P3 + P4 (first cut + scheduler + user-installed skills) all shipped. Cloud marketplace backend deferred (needs external infra: auth, payments, hosted catalog, moderation queue). Commits: `f4a8653` `091793d` `7344fe9` `e453b58` `f6e4b22` `d3357bf` `2f4a587` `1c525b3` `39887f3`.
 
 **Kid version:** Invent a tiny language for saying "I want X." People share their intents as skills. Friends can write skills without coding.
 
@@ -535,7 +537,9 @@ Each milestone has: a 1-sentence success definition, **explicit phases** (the su
 
 ---
 
-### M8 — Alignment-Proven Self-Modification *(the real AGI milestone — ~8 weeks after M7)*
+### M8 — Alignment-Proven Self-Modification *(SUBSTRATE SHIPPED 2026-04-19/20)*
+
+**Status:** P1 (golden integrity check), P2 (value-lock + selfmod-sandbox stubs), P3 (5-gate apply with red-team signoff via M8.P3.b model diversity), P4 (drift detector) all shipped. The actual disk-write side of self-mod (M8.P5) is deliberately deferred — applyProposal validates all gates and marks proposal `'approved'` but does NOT mutate source. That step needs a server-side write API + signed request flow, which is a separate safety conversation. Commits: `f316f23` `8a36a82` `498656d` `20e2e55` `1c525b3`.
 
 **Kid version:** Astrion can carefully modify itself. Strict rules: can't touch safety code, can't touch tests, every fix passes red-team, every fix is reversible.
 

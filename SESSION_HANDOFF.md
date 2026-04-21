@@ -1,4 +1,19 @@
-# Session Handoff: M0→M3 + M4 + M5 + M5.P3.b UI + M6.P1/P4/P4.c
+# Session Handoff: M4 dock + Ollama JSON-mode + M7 Skill Marketplace + M8 Self-Mod Substrate
+
+**Date:** 2026-04-18 → 2026-04-20
+**Branch:** main (30 new commits this session, all pushed via launchd auto-push)
+**Starting point:** commit `af99a04` (M5.P3.b shipped doc bump)
+**Ending point:** commit `b6e89d4` (lessons 144-155)
+**Verification:** **170/170** at every commit. Full M4 chain spec→tests verified live on Ollama (qwen2.5:7b). M6.P1 red-team verified live (9.95s on files.delete). M7 scheduler wires 4 cron + 1 event triggers across 20 skills. M8.P1-P4 all wired; selfmod.apply walks 5 gates and refuses absent any.
+
+## Status
+- **M0–M6:** fully shipped + tested
+- **M7:** Skill marketplace shipped through user-installed skills (cloud catalog deferred)
+- **M8:** Substrate shipped — golden integrity, value-lock, selfmod-sandbox with 5-gate apply, drift detector, model diversity. Disk-write side (M8.P5) intentionally deferred.
+
+---
+
+## Older history (M0→M3 + M4 + M5 + M5.P3.b UI + M6.P1/P4/P4.c — 2026-04-17/18)
 
 **Date:** 2026-04-17 → 2026-04-18
 **Branch:** main (36 new commits ahead of origin — not pushed)
