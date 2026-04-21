@@ -749,6 +749,36 @@ export function initSpotlight() {
     const lower = query.toLowerCase();
     let html = '';
 
+    // ─── "help" / "?" / "commands" — list every Spotlight command ───
+    // Discoverability: users shouldn't need to read source to find
+    // branches/timeline/skills/etc. One canonical index.
+    if (/^(help|\?|commands|what can (i|you) (type|do|say))$/.test(lower)) {
+      const commands = [
+        { cmd: 'branches · timeline · history', desc: 'See recent L2+ operations with rewind buttons' },
+        { cmd: '<skill phrase>', desc: 'Run a skill by its phrase (see Settings > Skills)' },
+        { cmd: '<math expression>', desc: 'Calculate: 2+2, sqrt(16), 5!, 15% of 200' },
+        { cmd: '<N> <unit> to <unit>', desc: 'Convert: 5 lbs to kg, 100 cm to inches, 72 f to c' },
+        { cmd: '<N> <currency> to <currency>', desc: '50 usd to eur, 100 gbp in yen' },
+        { cmd: 'time in <city>', desc: 'Tokyo, London, NYC, Sydney, Dubai, etc.' },
+        { cmd: 'age <yyyy-mm-dd>', desc: 'Age in years + days since birth' },
+        { cmd: 'roman <num> · <num> in binary', desc: 'Numeral base conversions' },
+        { cmd: 'morse <text> · rot13 <text>', desc: 'Encoding conversions' },
+        { cmd: 'tip <amount> · emoji <char>', desc: 'Tip calculator, emoji meaning' },
+        { cmd: 'random color · coin flip · roll dice', desc: 'Random generators' },
+        { cmd: '<app name>', desc: 'Open an app — also aliases: calc, term, note, msg' },
+      ];
+      results.innerHTML = `<div class="spotlight-result-group">
+        <div class="spotlight-result-label">? Spotlight Commands</div>
+        ${commands.map(c => `
+          <div class="spotlight-result-item" style="padding:8px 16px;">
+            <div style="font-family:var(--font-mono,monospace);font-size:12px;color:var(--accent,#007aff);">${c.cmd}</div>
+            <div style="font-size:11px;opacity:0.7;margin-top:2px;">${c.desc}</div>
+          </div>
+        `).join('')}
+      </div>`;
+      return;
+    }
+
     // ─── M5.P3.b + M5.P3.c: "branches" / "timeline" command ───
     // Typing "branches" (or "branch"/"timeline"/"history"/"log"/"rewind"/"undo")
     // shows a chronological timeline of recent branches with status,
