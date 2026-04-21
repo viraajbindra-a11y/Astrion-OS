@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-04-20T02:21:18.000Z",
+  "generated_at": "2026-04-21T00:03:44.517Z",
   "files": {
     "js/kernel/capability-api.js": "d4124838b9f66a68c620281ded34cc323c122fe9ae2c18c02471b83f8ae9e046",
     "js/kernel/operation-interceptor.js": "8cb583c547779556b1d8aacab1cc50d9e8156de1cf4cf25040570ffbf5222d6b",
@@ -17,6 +17,7 @@
     "js/kernel/value-lock.js": "4458349bae7102220f4ef3d120bf2a5c2f47c0466bfd619bf08a8c8edddb2c00",
     "js/kernel/selfmod-sandbox.js": "3f75aef28386b8ef38c3180fa3d7b3dcee0415cf0390c8520b792579a28225ba",
     "js/kernel/drift-detector.js": "7852aa3708f01ede4873e30e6fa55a08528d9d437a6d4db66a4d3e7bdd71cefb",
+    "js/kernel/skill-scheduler.js": "fda6cc337dbbb62ded16d0b6bd5b795ac796e10dc90bada7cf0182cb28c506d6",
     "test/v03-verification.html": "6927612bb051de44b5ebc05fe0e9d2f5be3c5f0b770bfe28aafd8eec138e45d1"
   }
 }

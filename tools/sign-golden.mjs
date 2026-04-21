@@ -41,6 +41,7 @@ const GOLDEN = [
   'js/kernel/value-lock.js',
   'js/kernel/selfmod-sandbox.js',
   'js/kernel/drift-detector.js',
+  'js/kernel/skill-scheduler.js',
   'test/v03-verification.html',
 ];
 
