@@ -356,6 +356,26 @@ function tryFun(query) {
     return { icon: '\uD83C\uDFB5', title: 'Now Playing', subtitle: 'Open Music app', action: 'launch', appId: 'music' };
   }
 
+  // Emoji lookup — "emoji fire" or "emoji heart"
+  const emojiMatch = q.match(/^emoji\s+(.+)/i);
+  if (emojiMatch) {
+    const term = emojiMatch[1].trim().toLowerCase();
+    const EMOJI_MAP = {
+      fire:'\uD83D\uDD25',heart:'\u2764\uFE0F',laugh:'\uD83D\uDE02',cry:'\uD83D\uDE22',thumbs:'\uD83D\uDC4D',
+      star:'\u2B50',sun:'\u2600\uFE0F',moon:'\uD83C\uDF19',rain:'\uD83C\uDF27\uFE0F',snow:'\u2744\uFE0F',
+      rocket:'\uD83D\uDE80',music:'\uD83C\uDFB5',love:'\uD83D\uDE0D',cool:'\uD83D\uDE0E',angry:'\uD83D\uDE21',
+      sad:'\uD83D\uDE1E',happy:'\uD83D\uDE04',wave:'\uD83D\uDC4B',clap:'\uD83D\uDC4F',brain:'\uD83E\uDDE0',
+      skull:'\uD83D\uDC80',ghost:'\uD83D\uDC7B',alien:'\uD83D\uDC7D',robot:'\uD83E\uDD16',cat:'\uD83D\uDC31',
+      dog:'\uD83D\uDC36',tree:'\uD83C\uDF33',flower:'\uD83C\uDF38',pizza:'\uD83C\uDF55',coffee:'\u2615',
+      cake:'\uD83C\uDF82',party:'\uD83C\uDF89',gift:'\uD83C\uDF81',crown:'\uD83D\uDC51',gem:'\uD83D\uDC8E',
+      lightning:'\u26A1',bomb:'\uD83D\uDCA3',100:'\uD83D\uDCAF',check:'\u2705',cross:'\u274C',
+      warning:'\u26A0\uFE0F',question:'\u2753',bulb:'\uD83D\uDCA1',key:'\uD83D\uDD11',lock:'\uD83D\uDD12',
+      eye:'\uD83D\uDC40',ear:'\uD83D\uDC42',nose:'\uD83D\uDC43',tongue:'\uD83D\uDC45',hand:'\u270B',
+    };
+    const emoji = EMOJI_MAP[term];
+    if (emoji) return { icon: emoji, title: emoji, subtitle: `"${term}" · Click to copy`, copyValue: emoji };
+  }
+
   // Shutdown / restart
   if (q === 'shutdown' || q === 'shut down' || q === 'power off' || q === 'turn off') {
     return { icon: '\u23FB', title: 'Shut Down', subtitle: 'Power off Astrion OS', action: 'event', event: 'system:shutdown' };
