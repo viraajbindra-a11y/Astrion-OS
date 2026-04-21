@@ -71,6 +71,11 @@ export const VERB_SYNONYMS = {
   decrease:  ['decrease', 'lower', 'down', 'quieter', 'dimmer'],
   mute:      ['mute', 'silence'],
   unmute:    ['unmute'],
+  lock:      ['lock'],
+  shutdown:  ['shutdown', 'poweroff', 'halt', 'shut'],
+  restart:   ['restart', 'reboot'],
+  sleep:     ['sleep', 'suspend'],
+  set:       ['set', 'change', 'adjust'],
 };
 
 // Flat lookup: word → canonical verb
@@ -123,11 +128,14 @@ export const TARGET_SYNONYMS = {
   finder:      ['finder', 'files'],
   draw:        ['draw', 'drawing', 'paint'],
   volume:      ['volume', 'sound', 'audio'],
-  brightness:  ['brightness', 'screen'],
+  brightness:  ['brightness'],
   wifi:        ['wifi', 'wi-fi', 'network'],
   bluetooth:   ['bluetooth', 'bt'],
   notification:['notification', 'notifications', 'notifs'],
-  screenshot:  ['screenshot', 'screen', 'capture'],
+  screenshot:  ['screenshot', 'capture'],
+  screen:      ['screen', 'display', 'monitor'],
+  system:      ['system', 'computer', 'pc', 'machine'],
+  command:     ['command', 'cmd'],
   word:        ['word', 'definition', 'meaning'],
   url:         ['url', 'link', 'site', 'website', 'page'],
   chess:       ['chess'],

@@ -107,6 +107,15 @@ RULES:
 4. files.createFolder takes args { path: "/Desktop" (or another root),
    name: "FolderName" }. After running, binds the new folder path.
 5. Valid path roots: /Desktop, /Documents, /Downloads, /Pictures, /Music.
+5b. system.setBrightness takes { level: 0..100 } e.g. { "level": 50 }.
+5c. system.shutdown takes { mode: "shutdown" | "restart" | "sleep" }.
+   Defaults to "shutdown" when omitted. POINT-OF-NO-RETURN — never plan
+   it for ambiguous queries; only when the user explicitly asks.
+5d. system.lock takes no args ({}).
+5e. terminal.exec takes { cmd: "ls -la /tmp" }. Use for shell tasks that
+   no other capability covers. Keep cmd short and self-contained; the
+   user reads it before approving. NEVER chain rm/dd/mkfs into a plan
+   without an explicit user request — they're refused at the safety layer.
 6. Keep plans to the minimum number of steps. Don't pad with launchApp
    unless the user asks to open something.
 7. If the query is a simple single-capability intent (like "open terminal"

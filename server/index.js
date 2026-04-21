@@ -1434,6 +1434,63 @@ app.post('/api/system/sleep', async (req, res) => {
   setTimeout(() => runShell('sudo', ['-n', 'systemctl', 'suspend']), 500);
 });
 
+// ─── One-shot terminal exec (capability surface) ───
+// POST /api/terminal/exec { cmd, cwd?, timeout? } — runs cmd via bash -c
+// and returns { stdout, stderr, code }. Used by the terminal.exec
+// capability so the planner can dispatch shell commands behind the L2
+// preview gate. Capped at 30 KB output + 10s default timeout.
+app.post('/api/terminal/exec', async (req, res) => {
+  const { cmd, cwd, timeout } = req.body || {};
+  if (!cmd || typeof cmd !== 'string') {
+    return res.status(400).json({ ok: false, error: 'cmd required' });
+  }
+  if (cmd.length > 4000) {
+    return res.status(400).json({ ok: false, error: 'cmd too long' });
+  }
+  const limitMs = Math.min(Math.max(parseInt(timeout) || 10000, 500), 60000);
+  const MAX_OUT = 30 * 1024;
+  try {
+    const proc = spawn('/bin/bash', ['-c', cmd], {
+      cwd: cwd && typeof cwd === 'string' ? cwd : process.env.HOME || '/tmp',
+      env: { ...process.env, PATH: process.env.PATH || '/usr/bin:/bin' },
+    });
+    let stdout = '', stderr = '';
+    let killed = false;
+    const timer = setTimeout(() => {
+      killed = true;
+      try { proc.kill('SIGKILL'); } catch {}
+    }, limitMs);
+    proc.stdout.on('data', (d) => {
+      stdout += d.toString();
+      if (stdout.length > MAX_OUT) {
+        stdout = stdout.slice(0, MAX_OUT) + '\n[output truncated]';
+        try { proc.kill('SIGKILL'); } catch {}
+      }
+    });
+    proc.stderr.on('data', (d) => {
+      stderr += d.toString();
+      if (stderr.length > MAX_OUT) {
+        stderr = stderr.slice(0, MAX_OUT) + '\n[output truncated]';
+      }
+    });
+    proc.on('close', (code) => {
+      clearTimeout(timer);
+      res.json({
+        ok: !killed && code === 0,
+        stdout, stderr, code,
+        killed,
+        timedOut: killed,
+      });
+    });
+    proc.on('error', (err) => {
+      clearTimeout(timer);
+      res.status(500).json({ ok: false, error: err.message });
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
+});
+
 // ─── Real Terminal via WebSocket ───
 // Spawns a real bash shell and pipes stdin/stdout over WebSocket.
 // The Terminal app connects via ws://localhost:3001

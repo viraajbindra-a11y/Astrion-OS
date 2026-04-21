@@ -790,6 +790,176 @@ const volumeUnmute = {
 registerCapability(volumeUnmute);
 
 // ═══════════════════════════════════════════════════════════════
+// PROVIDER 8.b: system.setBrightness / lock / shutdown
+// ═══════════════════════════════════════════════════════════════
+//
+// The system.* cluster — screen brightness, lock screen, machine
+// shutdown. All L2 because they touch real hardware/state. shutdown
+// is point-of-no-return (typed-confirm gate fires).
+
+const systemSetBrightness = {
+  id: 'system.setBrightness',
+  verb: 'set',
+  target: 'brightness',
+  level: LEVEL.REAL,
+  reversibility: REVERSIBILITY.FREE,
+  blastRadius: BLAST_RADIUS.ACCOUNT,
+  summary: 'Set screen brightness',
+  estimateCost: () => ({ timeMs: 200, irreversibilityTokens: 0 }),
+  execute: async function(args) {
+    return runCapability(this, args, async () => {
+      let level = parseInt(args.level ?? args.value ?? args.percent ?? 75);
+      if (isNaN(level)) throw new Error('level required (0-100)');
+      level = Math.max(0, Math.min(100, level));
+      // Best-effort POST to the server endpoint that writes
+      // /sys/class/backlight/*/brightness on Linux. Falls back
+      // to a CSS filter so the change is at least visible in the
+      // web shell when the hardware path isn't writable.
+      try {
+        await fetch('/api/brightness', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ level }),
+        });
+      } catch {}
+      // Live preview fallback (also what the control-center slider does)
+      const desktop = document.getElementById('desktop');
+      if (desktop) desktop.style.filter = `brightness(${Math.max(0.3, level / 100)})`;
+      safeNotify({ title: '☀️ Brightness', body: `Set to ${level}%` });
+      return { level };
+    });
+  },
+};
+registerCapability(systemSetBrightness);
+
+const systemLock = {
+  id: 'system.lock',
+  verb: 'lock',
+  target: 'screen',
+  level: LEVEL.REAL,
+  reversibility: REVERSIBILITY.FREE,
+  blastRadius: BLAST_RADIUS.ACCOUNT,
+  summary: 'Lock the screen',
+  estimateCost: () => ({ timeMs: 100, irreversibilityTokens: 0 }),
+  execute: async function(args) {
+    return runCapability(this, args, async () => {
+      // lockScreen() is exported by js/shell/lock-screen.js — dynamic import
+      // so the kernel layer doesn't take a hard dep on the shell.
+      try {
+        const m = await import('../shell/lock-screen.js');
+        if (typeof m.lockScreen === 'function') m.lockScreen();
+        else if (typeof m.default === 'function') m.default();
+      } catch (err) {
+        // Native shell path: emit an event the C layer can pick up
+        eventBus.emit('system:lock');
+      }
+      return { locked: true };
+    });
+  },
+};
+registerCapability(systemLock);
+
+const systemShutdown = {
+  id: 'system.shutdown',
+  verb: 'shutdown',
+  target: 'system',
+  level: LEVEL.REAL,
+  reversibility: REVERSIBILITY.PERMANENT,
+  blastRadius: BLAST_RADIUS.ACCOUNT,
+  pointOfNoReturn: true, // M5.P4: typed-confirm gate fires
+  summary: 'Shut down the machine',
+  estimateCost: () => ({ timeMs: 500, irreversibilityTokens: 5 }),
+  execute: async function(args) {
+    return runCapability(this, args, async () => {
+      const mode = (args.mode || 'shutdown').toLowerCase();
+      const path = mode === 'restart' || mode === 'reboot'
+        ? '/api/system/restart'
+        : mode === 'sleep' || mode === 'suspend'
+        ? '/api/system/sleep'
+        : '/api/system/shutdown';
+      safeNotify({
+        title: mode === 'restart' ? '🔄 Restarting…' : mode === 'sleep' ? '😴 Sleeping…' : '⏻ Shutting down…',
+        body: 'Action requested',
+      });
+      try {
+        await fetch(path, { method: 'POST' });
+      } catch (err) {
+        return { mode, ok: false, error: err.message };
+      }
+      return { mode, ok: true };
+    });
+  },
+};
+registerCapability(systemShutdown);
+
+// ═══════════════════════════════════════════════════════════════
+// PROVIDER 8.c: terminal.exec — run a shell command (L2)
+// ═══════════════════════════════════════════════════════════════
+//
+// Runs `cmd` via /api/terminal/exec (bash -c). The L2 preview gate
+// shows the command to the user before it runs, so the user reads
+// it. Output is capped at 30KB per stream and 10s default timeout
+// at the server side.
+//
+// NOT marked pointOfNoReturn — the command itself decides
+// reversibility. The user is responsible for reading the preview.
+// Skills that want extra safety should use the M7.P2c constraint
+// system to cap their level.
+
+const terminalExec = {
+  id: 'terminal.exec',
+  verb: 'run',
+  target: 'command',
+  level: LEVEL.REAL,
+  reversibility: REVERSIBILITY.BOUNDED,
+  blastRadius: BLAST_RADIUS.ACCOUNT,
+  summary: 'Run a shell command in a terminal',
+  estimateCost: (args) => ({
+    timeMs: Math.min(parseInt(args?.timeout) || 5000, 30000),
+    irreversibilityTokens: 2,
+  }),
+  execute: async function(args) {
+    return runCapability(this, args, async () => {
+      const cmd = (args.cmd || args.command || args._rawArgs || '').trim();
+      if (!cmd) throw new Error('cmd required');
+      // Soft-block a few patterns that the L2 preview can't reasonably
+      // protect against — the user should not be able to be tricked into
+      // approving these via Spotlight one-liners. Skills can still run them
+      // by paste-into-terminal.
+      const FORBIDDEN = [
+        /:\(\)\{:\|:&\};:/,           // fork bomb
+        /\bdd\s+if=\/dev\/(zero|random|urandom).*of=\/dev\/(sd|nvme|hd)/, // disk wipe
+      ];
+      for (const re of FORBIDDEN) {
+        if (re.test(cmd)) throw new Error('refused: command matches forbidden pattern');
+      }
+      const r = await fetch('/api/terminal/exec', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          cmd,
+          cwd: args.cwd,
+          timeout: args.timeout,
+        }),
+      });
+      if (!r.ok) {
+        const err = await r.text().catch(() => 'unknown');
+        throw new Error(`terminal.exec http ${r.status}: ${err}`);
+      }
+      const data = await r.json();
+      // Show a brief notification with first line of output
+      const preview = (data.stdout || data.stderr || '').split('\n')[0].slice(0, 80);
+      safeNotify({
+        title: data.ok ? '⌨️ Command done' : '⌨️ Command failed',
+        body: preview || `exit ${data.code}`,
+      });
+      return data;
+    });
+  },
+};
+registerCapability(terminalExec);
+
+// ═══════════════════════════════════════════════════════════════
 // PROVIDER 9: translate.text — translate via AI
 // ═══════════════════════════════════════════════════════════════
 
@@ -1374,6 +1544,10 @@ export const CORE_CAPABILITIES = [
   'game.getState',
   'game.makeMove',
   'game.autoplay',
+  'system.lock',
+  'system.shutdown',
+  'system.restart',
+  'system.sleep',
 ];
 
 // Path-resolution sanity check — runs only on localhost, at import time.
