@@ -693,6 +693,8 @@ function initAppStore(container) {
 }
 
 const popularLinuxApps = [
+  { id: 'org.libreoffice.LibreOffice', name: 'LibreOffice', desc: 'Office suite — Writer, Calc, Impress (~600 MB)', icon: '\uD83D\uDCC4' },
+  { id: 'org.chromium.Chromium', name: 'Chromium', desc: 'Open-source web browser (~250 MB)', icon: '\uD83C\uDF10' },
   { id: 'org.mozilla.firefox', name: 'Firefox', desc: 'Fast, private web browser', icon: '\uD83E\uDD8A' },
   { id: 'com.google.Chrome', name: 'Google Chrome', desc: 'Web browser by Google', icon: '\uD83C\uDF10' },
   { id: 'com.visualstudio.code', name: 'VS Code', desc: 'Code editor by Microsoft', icon: '\uD83D\uDCDD' },

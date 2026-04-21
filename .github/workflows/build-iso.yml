@@ -2,6 +2,12 @@ name: Build Astrion OS Bootable ISO
 
 on:
   workflow_dispatch:
+    inputs:
+      slim:
+        description: 'Slim build (skip LibreOffice/Chromium/VLC/Ollama; lazy-install via App Store). Default off.'
+        required: false
+        default: 'true'
+        type: boolean
   push:
     branches: [main]
     paths:
@@ -27,9 +33,14 @@ jobs:
             mtools dosfstools debian-archive-keyring
 
       - name: Build Astrion OS ISO
+        env:
+          # workflow_dispatch input wins; push events default to slim=true
+          # (the demo path is the high-traffic one for now). Flip in the
+          # UI when triggering manually if you want a fat build.
+          ASTRION_SLIM: ${{ github.event.inputs.slim == 'false' && '0' || '1' }}
         run: |
           cd distro
-          sudo bash build.sh
+          sudo --preserve-env=ASTRION_SLIM bash build.sh
 
       - name: Upload ISO (artifact — 30d retention, safety net)
         uses: actions/upload-artifact@v4

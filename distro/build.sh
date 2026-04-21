@@ -15,6 +15,17 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 BUILD_DIR="$SCRIPT_DIR/build"
 OUTPUT_DIR="$SCRIPT_DIR/output"
 
+# ─── ASTRION_SLIM=1 → skip apps Astrion either replaces with native UI
+# or expects the user to install on demand from the App Store > Linux Apps
+# tab (flatpak). Saves ~1.5-2 GB on the squashfs. Default off so general
+# distribution still ships a "full" Linux desktop out of the box. Set in
+# the workflow for the demo build.
+ASTRION_SLIM="${ASTRION_SLIM:-0}"
+if [ "$ASTRION_SLIM" = "1" ]; then
+  echo "  >>> ASTRION_SLIM=1: skipping LibreOffice, Chromium, VLC, Ollama, etc."
+  echo "  >>> Heavy GUI apps install on demand from App Store > Linux Apps."
+fi
+
 rm -rf "$BUILD_DIR"
 mkdir -p "$BUILD_DIR" "$OUTPUT_DIR"
 cd "$BUILD_DIR"
@@ -90,13 +101,29 @@ apt-get install -y -qq dunst feh
 apt-get install -y -qq network-manager wpasupplicant wireless-tools || true
 
 # Chromium browser — the real browser for Astrion OS
-apt-get install -y -qq chromium || apt-get install -y -qq chromium-browser || true
+# (slim build: lazy-install via App Store > Linux Apps > Chrome flatpak)
+if [ "$ASTRION_SLIM" != "1" ]; then
+  apt-get install -y -qq chromium || apt-get install -y -qq chromium-browser || true
+fi
 
-# Terminal + file manager + text editor
-apt-get install -y -qq xfce4-terminal thunar thunar-archive-plugin tumbler mousepad geany
+# Terminal + file manager backends (xfce4-terminal is the backend for
+# the Astrion Terminal app; thunar provides VFS for finder.js).
+# Editors are NOT bundled in slim builds — Astrion ships its own
+# Notes + Text Editor + Markdown apps that cover the same ground.
+apt-get install -y -qq xfce4-terminal thunar thunar-archive-plugin tumbler
+if [ "$ASTRION_SLIM" != "1" ]; then
+  apt-get install -y -qq mousepad geany
+fi
 
 # Real apps
-apt-get install -y -qq xfce4-screenshooter galculator eog vlc evince xarchiver shotwell
+# (slim: VLC, evince, shotwell are replaced by Astrion music/video-player/
+# pdf-viewer/photos. galculator + xfce4-screenshooter are duplicates of
+# Astrion calculator + screenshot capability.)
+if [ "$ASTRION_SLIM" = "1" ]; then
+  apt-get install -y -qq xarchiver eog || true
+else
+  apt-get install -y -qq xfce4-screenshooter galculator eog vlc evince xarchiver shotwell
+fi
 
 # Disk installer dependencies (for nova-install)
 apt-get install -y -qq parted rsync dosfstools e2fsprogs util-linux 2>/dev/null || true
@@ -104,8 +131,10 @@ apt-get install -y -qq parted rsync dosfstools e2fsprogs util-linux 2>/dev/null 
 # First-boot install prompt dialog (nova-first-boot.sh uses zenity)
 apt-get install -y -qq zenity xterm 2>/dev/null || true
 
-# LibreOffice (big but essential for a real OS)
-apt-get install -y -qq libreoffice-writer libreoffice-calc libreoffice-impress || true
+# LibreOffice (~600 MB — slim builds skip; available via App Store flatpak)
+if [ "$ASTRION_SLIM" != "1" ]; then
+  apt-get install -y -qq libreoffice-writer libreoffice-calc libreoffice-impress || true
+fi
 
 # System tools
 apt-get install -y -qq xfce4-power-manager gvfs gvfs-backends gvfs-fuse udisks2 \
@@ -191,9 +220,13 @@ apt-get install -y -qq cage weston 2>/dev/null || true
 # from Settings > AI on first launch when network is up.
 # https://ollama.com
 # ═══════════════════════════════════════════════════
-echo "Installing Ollama (S1 local LLM runtime)..."
-curl -fsSL https://ollama.com/install.sh | sh 2>/dev/null || \
-  echo "  Ollama install failed (no network in chroot?) — continuing without S1 runtime"
+if [ "$ASTRION_SLIM" = "1" ]; then
+  echo "Skipping Ollama bundle (slim build) — install on first boot via Settings > AI > Install local AI runtime."
+else
+  echo "Installing Ollama (S1 local LLM runtime)..."
+  curl -fsSL https://ollama.com/install.sh | sh 2>/dev/null || \
+    echo "  Ollama install failed (no network in chroot?) — continuing without S1 runtime"
+fi
 
 # Make sure the systemd unit is enabled so ollama starts on boot.
 # The official installer creates /etc/systemd/system/ollama.service
@@ -878,6 +911,25 @@ umount "$CHROOT/sys" 2>/dev/null || true
 # Clean up temp files
 rm -f "$CHROOT/tmp/install-packages.sh" "$CHROOT/tmp/setup-system.sh"
 rm -f "$CHROOT/etc/resolv.conf"
+
+# ─── Squashfs slim-down (always on, no feature impact) ───────────
+# Removes everything that adds bytes but provides zero runtime value
+# on a desktop OS: man pages, info pages, /usr/share/doc, package
+# caches, locale data for languages we don't ship UI for. Saves
+# 200-500 MB even on a regular build.
+echo "  Stripping docs / man / info / locale data..."
+rm -rf "$CHROOT/usr/share/doc"/* 2>/dev/null || true
+rm -rf "$CHROOT/usr/share/man"/* 2>/dev/null || true
+rm -rf "$CHROOT/usr/share/info"/* 2>/dev/null || true
+rm -rf "$CHROOT/var/cache/apt/archives"/*.deb 2>/dev/null || true
+rm -rf "$CHROOT/var/lib/apt/lists"/* 2>/dev/null || true
+rm -rf "$CHROOT/tmp"/* "$CHROOT/var/tmp"/* 2>/dev/null || true
+# Keep en/en_US locales only
+find "$CHROOT/usr/share/locale" -mindepth 1 -maxdepth 1 -type d \
+  ! -name 'en' ! -name 'en_US' ! -name 'en_GB' \
+  -exec rm -rf {} + 2>/dev/null || true
+# Drop debug symbols if any
+find "$CHROOT/usr/lib/debug" -type f -delete 2>/dev/null || true
 
 # Create the binary directory structure
 BINARY="$BUILD_DIR/binary"
