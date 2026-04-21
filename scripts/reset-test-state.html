@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Astrion — Reset Test State</title>
+<style>
+  body {
+    margin: 0; padding: 40px; min-height: 100vh; box-sizing: border-box;
+    background: #0d0d12; color: #fff;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+  }
+  h1 { font-size: 24px; font-weight: 600; margin: 0 0 4px; }
+  .sub { color: rgba(255,255,255,0.5); font-size: 13px; margin-bottom: 28px; }
+  .panel {
+    background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 14px; padding: 24px; max-width: 560px; width: 100%;
+  }
+  button {
+    background: #ff3b30; border: none; color: white;
+    padding: 12px 28px; border-radius: 10px; font-size: 14px; font-weight: 600;
+    cursor: pointer; font-family: inherit; margin-top: 8px;
+  }
+  button:hover { filter: brightness(1.1); }
+  button.secondary { background: rgba(255,255,255,0.1); margin-left: 8px; }
+  ul { color: rgba(255,255,255,0.7); font-size: 13px; line-height: 1.6; }
+  code {
+    background: rgba(255,255,255,0.08); padding: 1px 6px; border-radius: 4px;
+    font-family: 'SF Mono', Monaco, monospace; font-size: 12px;
+  }
+  .ok { color: #34c759; }
+  .log {
+    margin-top: 16px; padding: 12px; background: rgba(0,0,0,0.3);
+    border-radius: 8px; font-family: 'SF Mono', monospace; font-size: 11px;
+    max-height: 200px; overflow-y: auto; white-space: pre-wrap;
+  }
+</style>
+</head>
+<body>
+  <h1>🧹 Reset Test State</h1>
+  <div class="sub">Clears localStorage poison from v0.3 verification + Phase 0 prep</div>
+
+  <div class="panel">
+    <strong>What this clears:</strong>
+    <ul>
+      <li><code>nova-ai-provider</code> — verification page sets this to <code>'mock'</code> which silently neuters every Claude call</li>
+      <li><code>astrion-budget-day</code> — daily budget tracker that exhausts after ~50 test runs</li>
+      <li><code>astrion-budget-intent</code> — per-intent budget</li>
+      <li><code>astrion-rubber-stamp-samples</code> — wipes the rubber-stamp tracker so Phase 0 starts clean</li>
+      <li><code>astrion-calibration-*</code> — wipes per-category calibration so Phase 0's brain choices aren't biased by stub-era data</li>
+    </ul>
+    <strong>Sets for Phase 0 soak:</strong>
+    <ul>
+      <li><code>nova-ai-provider</code> = <code>'anthropic'</code> (real Claude, not Ollama, not mock)</li>
+    </ul>
+
+    <div style="margin-top:20px;">
+      <button id="reset-anthropic">Reset for Anthropic soak (Phase 0)</button>
+      <button id="reset-ollama" class="secondary">Reset for Ollama soak</button>
+    </div>
+    <div id="log" class="log" style="display:none;"></div>
+  </div>
+
+<script>
+const logEl = document.getElementById('log');
+function log(line, ok = false) {
+  logEl.style.display = 'block';
+  const span = document.createElement('div');
+  if (ok) span.className = 'ok';
+  span.textContent = line;
+  logEl.appendChild(span);
+}
+
+function clearKeys() {
+  const keysToWipe = [
+    'astrion-budget-day',
+    'astrion-budget-intent',
+    'astrion-rubber-stamp-samples',
+    'nova-ai-redteam-model',
+  ];
+  // Wipe by exact name
+  keysToWipe.forEach(k => {
+    if (localStorage.getItem(k) !== null) {
+      localStorage.removeItem(k);
+      log('  cleared ' + k, true);
+    }
+  });
+  // Wipe by prefix
+  const prefixes = ['astrion-calibration-', 'astrion-budget-log-'];
+  for (let i = localStorage.length - 1; i >= 0; i--) {
+    const k = localStorage.key(i);
+    if (prefixes.some(p => k && k.startsWith(p))) {
+      localStorage.removeItem(k);
+      log('  cleared ' + k, true);
+    }
+  }
+}
+
+document.getElementById('reset-anthropic').addEventListener('click', () => {
+  logEl.innerHTML = '';
+  log('Resetting for Anthropic soak…');
+  clearKeys();
+  localStorage.setItem('nova-ai-provider', 'anthropic');
+  log('  set nova-ai-provider = anthropic', true);
+  log('');
+  log('Done. Open http://localhost:3000/ and try Spotlight.', true);
+});
+
+document.getElementById('reset-ollama').addEventListener('click', () => {
+  logEl.innerHTML = '';
+  log('Resetting for Ollama soak…');
+  clearKeys();
+  localStorage.setItem('nova-ai-provider', 'ollama');
+  log('  set nova-ai-provider = ollama', true);
+  log('');
+  log('Done. Make sure `ollama serve` is running with qwen2.5:7b pulled.', true);
+});
+</script>
+</body>
+</html>

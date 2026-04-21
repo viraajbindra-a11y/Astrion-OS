@@ -2,10 +2,12 @@
   "name": "astrion-os",
   "version": "0.2.0",
   "type": "module",
-  "description": "Astrion OS — AI-native operating system with 50 apps",
+  "description": "Astrion OS — AI-native operating system with 80 apps",
   "scripts": {
     "start": "node server/index.js",
-    "dev": "node server/index.js"
+    "dev": "node server/index.js",
+    "dev:keyed": "bash scripts/dev-keyed.sh",
+    "reset:teststate": "open http://localhost:3000/scripts/reset-test-state.html"
   },
   "dependencies": {
     "express": "^4.21.0",
