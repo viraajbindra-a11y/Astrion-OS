@@ -16,6 +16,27 @@ import { resolveBindings, findUnresolvedBindings, pickBindValue } from '../kerne
 import { eventBus } from '../kernel/event-bus.js';
 
 const CONVERSATIONS_KEY = 'nova-messages-conversations';
+const PERSONALITY_KEY = 'nova-ai-personality';
+
+// AI Personalities — each wraps the user's message with a system-style instruction
+const AI_PERSONALITIES = {
+  default: { name: 'Default', icon: '\uD83E\uDD16', prompt: '' },
+  friendly: { name: 'Friendly', icon: '\uD83D\uDE0A', prompt: 'Respond in an extremely friendly, warm, and encouraging way. Use casual language and occasional emojis. Be supportive and positive. ' },
+  pirate: { name: 'Pirate', icon: '\u2620\uFE0F', prompt: 'Respond as a pirate. Use pirate slang, say "arr", "matey", "ye", "aye", talk about the sea and treasure. Stay in character completely. ' },
+  shakespeare: { name: 'Shakespeare', icon: '\uD83C\uDFAD', prompt: 'Respond in Shakespearean English. Use "thou", "thee", "doth", "forsooth", "prithee", and dramatic iambic language. Be theatrical and poetic. ' },
+  sarcastic: { name: 'Sarcastic', icon: '\uD83D\uDE0F', prompt: 'Respond with dry, witty sarcasm. Be clever and funny but still helpful. Use irony and deadpan humor. ' },
+  eli5: { name: 'ELI5', icon: '\uD83D\uDC76', prompt: 'Explain everything as if talking to a 5-year-old. Use very simple words, fun analogies, and short sentences. Make complex things sound easy and fun. ' },
+  coder: { name: 'Coder', icon: '\uD83D\uDC68\u200D\uD83D\uDCBB', prompt: 'Respond as a senior software engineer. Be concise and technical. Use code examples when relevant. Prefer precision over friendliness. ' },
+  zen: { name: 'Zen', icon: '\uD83E\uDDD8', prompt: 'Respond like a calm zen master. Be peaceful, philosophical, and use metaphors from nature. Keep answers brief and thoughtful. Occasionally use koans. ' },
+};
+
+function getCurrentPersonality() {
+  return localStorage.getItem(PERSONALITY_KEY) || 'default';
+}
+
+function setPersonality(id) {
+  localStorage.setItem(PERSONALITY_KEY, id);
+}
 
 // Capability IDs whose output IS the reply — don't double-call AI for these
 const DIRECT_REPLY_CAPS = new Set(['ai.ask', 'ai.explain', 'ai.summarize', 'compute.calculate']);
@@ -265,14 +286,30 @@ function initMessages(container) {
     if (!convo) return;
 
     const header = container.querySelector('#msg-header');
+    const currentP = AI_PERSONALITIES[getCurrentPersonality()];
     header.innerHTML = `
       <div style="width:32px; height:32px; border-radius:50%; background:${convo.isAI ? 'linear-gradient(135deg, #007aff, #5856d6)' : stringColor(convo.name)};
         display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:600;">${convo.avatar}</div>
-      <div>
+      <div style="flex:1;">
         <div style="font-size:13px; font-weight:600;">${esc(convo.name)}</div>
-        <div style="font-size:10px; color:rgba(255,255,255,0.4);">${convo.isAI ? 'AI Assistant \u2022 Always online' : 'Contact'}</div>
+        <div style="font-size:10px; color:rgba(255,255,255,0.4);">${convo.isAI ? `AI Assistant \u2022 ${currentP?.name || 'Default'} mode` : 'Contact'}</div>
       </div>
+      ${convo.isAI ? `<select id="msg-personality" style="
+        padding:4px 8px; border-radius:8px; background:rgba(255,255,255,0.06);
+        border:1px solid rgba(255,255,255,0.1); color:white; font-size:11px;
+        font-family:var(--font); cursor:pointer; outline:none;
+      ">${Object.entries(AI_PERSONALITIES).map(([id, p]) =>
+        `<option value="${id}" ${id === getCurrentPersonality() ? 'selected' : ''}>${p.icon} ${p.name}</option>`
+      ).join('')}</select>` : ''}
     `;
+    // Wire personality selector
+    const pSel = header.querySelector('#msg-personality');
+    if (pSel) {
+      pSel.addEventListener('change', () => {
+        setPersonality(pSel.value);
+        renderChat(); // re-render to update subtitle
+      });
+    }
 
     const chat = container.querySelector('#msg-chat');
     chat.innerHTML = convo.messages.map(m => {
@@ -444,7 +481,9 @@ function initMessages(container) {
         reply = await handleFastPath(text, intent, convo);
       } else {
         // ─── PURE CHAT FALLBACK ───
-        reply = await aiService.ask(text);
+        const personality = AI_PERSONALITIES[getCurrentPersonality()];
+        const prompt = personality?.prompt ? personality.prompt + '\n\nUser: ' + text : text;
+        reply = await aiService.ask(prompt);
       }
 
       // Null guard — aiService.ask can return null if all providers fail (audit bug #14)
