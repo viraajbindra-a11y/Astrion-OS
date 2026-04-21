@@ -274,6 +274,18 @@ cp -r "$PROJECT_ROOT/js" "$CHROOT/opt/nova-os/" 2>/dev/null || true
 cp -r "$PROJECT_ROOT/server" "$CHROOT/opt/nova-os/" 2>/dev/null || true
 cp "$PROJECT_ROOT/package.json" "$CHROOT/opt/nova-os/" 2>/dev/null || true
 cp -r "$PROJECT_ROOT/assets" "$CHROOT/opt/nova-os/" 2>/dev/null || true
+# M7 skill library — manifest + examples. Without these the skill
+# registry loads 0/20 inside the ISO and phrase triggers don't fire.
+cp -r "$PROJECT_ROOT/skills" "$CHROOT/opt/nova-os/" 2>/dev/null || true
+# M8 golden integrity — lockfile must be served by the in-ISO server or
+# the boot-time check emits golden:lockfile-missing and the self-mod
+# gate can never pass. Copy the v03 verification HTML for in-OS
+# verification + because it's in the golden lock.
+cp "$PROJECT_ROOT/golden.lock.json" "$CHROOT/opt/nova-os/" 2>/dev/null || true
+cp -r "$PROJECT_ROOT/test" "$CHROOT/opt/nova-os/" 2>/dev/null || true
+# Skill language spec + any other user-facing docs. Not required at
+# runtime but nice to have inside the ISO for offline reference.
+cp -r "$PROJECT_ROOT/docs" "$CHROOT/opt/nova-os/" 2>/dev/null || true
 
 # ── NOVA Native Renderer (our own rendering engine, NOT Chromium) ──
 echo "  Compiling NOVA native renderer..."
