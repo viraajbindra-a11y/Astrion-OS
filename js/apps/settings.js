@@ -724,21 +724,24 @@ function initSettings(container) {
     const enabledCount = skills.filter(s => s.enabled).length;
     const levelColor = { L0: '#a6e3a1', L1: '#8be9fd', L2: '#fab387', L3: '#ff5555' };
 
+    const userCount = skills.filter(s => s.userInstalled).length;
     main.innerHTML = `
       <div style="padding:24px;max-width:780px;">
         <h2 style="font-size:20px;font-weight:600;margin:0 0 4px;">Skills</h2>
-        <p style="font-size:12px;color:rgba(255,255,255,0.4);margin:0 0 24px;">${enabledCount} of ${skills.length} skills enabled. Disabled skills won't dispatch from Spotlight phrase triggers; they fall through to the normal planner.</p>
+        <p style="font-size:12px;color:rgba(255,255,255,0.4);margin:0 0 24px;">${enabledCount} of ${skills.length} skills enabled (${userCount} user-installed). Disabled skills won't dispatch from Spotlight phrase triggers; they fall through to the normal planner.</p>
 
-        <div style="display:flex;flex-direction:column;gap:8px;">
+        <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:24px;">
           ${skills.map(s => `
-            <div class="skill-row" data-name="${escapeHtml(s.name)}" style="background:rgba(255,255,255,0.04);border-radius:8px;padding:12px 14px;display:flex;align-items:center;gap:12px;">
+            <div class="skill-row" data-name="${escapeHtml(s.name)}" style="background:rgba(255,255,255,0.04);border-radius:8px;padding:12px 14px;display:flex;align-items:center;gap:12px;${s.userInstalled ? 'border-left:3px solid #cba6f7;' : ''}">
               <div style="flex:1;min-width:0;">
                 <div style="display:flex;align-items:baseline;gap:8px;flex-wrap:wrap;">
                   <span style="font-size:13px;font-weight:600;">${escapeHtml(s.goal)}</span>
                   <span style="font-size:10px;color:${levelColor[s.level] || '#fff'};text-transform:uppercase;letter-spacing:0.5px;">${escapeHtml(s.level || 'L?')}</span>
+                  ${s.userInstalled ? '<span style="font-size:10px;color:#cba6f7;text-transform:uppercase;letter-spacing:0.5px;">user</span>' : ''}
                 </div>
                 <div style="font-size:11px;color:rgba(255,255,255,0.5);margin-top:3px;font-family:ui-monospace,monospace;">${escapeHtml(s.name)} · triggers: ${s.phrases.map(p => '"' + escapeHtml(p) + '"').join(', ') || '(no phrases)'}</div>
               </div>
+              ${s.userInstalled ? `<button class="skill-uninstall" data-name="${escapeHtml(s.name)}" style="padding:6px 12px;font-size:11px;border-radius:6px;border:1px solid rgba(255,85,85,0.3);background:transparent;color:#ff8888;font-family:var(--font);cursor:pointer;">Uninstall</button>` : ''}
               <label style="position:relative;display:inline-block;width:42px;height:24px;cursor:pointer;">
                 <input type="checkbox" class="skill-toggle" data-name="${escapeHtml(s.name)}" ${s.enabled ? 'checked' : ''} style="opacity:0;width:0;height:0;">
                 <span style="position:absolute;inset:0;background:${s.enabled ? 'var(--accent)' : 'rgba(255,255,255,0.15)'};border-radius:24px;transition:background 0.2s;"></span>
@@ -746,6 +749,16 @@ function initSettings(container) {
               </label>
             </div>
           `).join('')}
+        </div>
+
+        <div style="background:rgba(255,255,255,0.04);border-radius:10px;padding:18px;">
+          <div style="font-size:14px;font-weight:600;margin-bottom:6px;">🧩 Install custom skill</div>
+          <p style="font-size:12px;color:rgba(255,255,255,0.55);margin:0 0 12px;">Paste a <code>.skill</code> file. See <code>docs/skill-language.md</code> for the format. User-installed skills go in localStorage and survive reload.</p>
+          <textarea id="install-skill-source" placeholder="goal: Show me the time\ntrigger:\n  - phrase: &quot;what time&quot;\ndo: |\n  Open the Clock app focused on the current time." rows="9" style="width:100%;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.1);border-radius:6px;color:#e0e0e0;padding:10px 12px;font-family:ui-monospace,monospace;font-size:12px;resize:vertical;box-sizing:border-box;"></textarea>
+          <div style="display:flex;gap:10px;align-items:center;margin-top:10px;">
+            <button id="install-skill-btn" style="padding:8px 18px;background:var(--accent);color:white;border:none;border-radius:6px;font-family:var(--font);font-size:12px;cursor:pointer;font-weight:600;">Install</button>
+            <span id="install-skill-status" style="font-size:11px;color:rgba(255,255,255,0.55);"></span>
+          </div>
         </div>
       </div>
     `;
@@ -755,6 +768,26 @@ function initSettings(container) {
         mod.setSkillEnabled(e.target.dataset.name, e.target.checked);
         renderSkills();
       });
+    });
+    main.querySelectorAll('.skill-uninstall').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const r = mod.uninstallUserSkill(btn.dataset.name);
+        if (r.ok) renderSkills();
+      });
+    });
+    main.querySelector('#install-skill-btn').addEventListener('click', async () => {
+      const txt = main.querySelector('#install-skill-source').value;
+      const status = main.querySelector('#install-skill-status');
+      const r = await mod.installUserSkill(txt);
+      if (r.ok) {
+        status.textContent = '✓ Installed as ' + r.name;
+        status.style.color = '#a6e3a1';
+        main.querySelector('#install-skill-source').value = '';
+        setTimeout(() => renderSkills(), 800);
+      } else {
+        status.textContent = '✗ ' + r.error;
+        status.style.color = '#ff5555';
+      }
     });
   }
 

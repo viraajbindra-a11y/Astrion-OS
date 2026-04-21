@@ -20,6 +20,7 @@ import { parseSkill } from './skill-parser.js';
 const MANIFEST_URL = '/skills/manifest.json';
 const SKILL_URL = (name) => '/skills/examples/' + name + '.skill';
 const DISABLED_KEY = 'astrion-skills-disabled';
+const USER_SKILLS_KEY = 'astrion-user-skills'; // M7.P4 — array of { name, source }
 
 const byName = new Map();       // name → { name, skill (parsed), source (raw text) }
 const byPhrase = new Map();     // lowercased phrase → name
@@ -56,15 +57,85 @@ export function getDisabledSkills() {
   return [...readDisabled()];
 }
 
+// ─── User-installed skills (M7.P4) ───
+
+function readUserSkills() {
+  try {
+    const raw = localStorage.getItem(USER_SKILLS_KEY);
+    if (!raw) return [];
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr : [];
+  } catch { return []; }
+}
+
+function writeUserSkills(arr) {
+  try { localStorage.setItem(USER_SKILLS_KEY, JSON.stringify(arr)); } catch {}
+}
+
+/**
+ * Install a user-authored skill from raw .skill source. Parses + validates;
+ * if the parser throws, returns { ok: false, error }. On success the skill
+ * is persisted in localStorage and merged into the live registry.
+ *
+ * Name collisions with bundled (default) skills are rejected — user skills
+ * cannot shadow defaults. (User can disable a default first if they want
+ * to replace it.)
+ */
+export async function installUserSkill(source) {
+  if (typeof source !== 'string' || !source.trim()) return { ok: false, error: 'source required' };
+  let parsed;
+  try { parsed = parseSkill(source); }
+  catch (err) { return { ok: false, error: 'parse failed: ' + (err?.message || err) }; }
+
+  // Derive a stable name. Prefer goal slug, fall back to a 'user-' uuid.
+  const slug = parsed.goal.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40)
+    || ('user-' + Date.now().toString(36));
+  let name = slug;
+  let suffix = 1;
+  while (byName.has(name)) {
+    if (byName.get(name)?.userInstalled) { name = slug + '-' + (++suffix); continue; }
+    return { ok: false, error: 'name collides with bundled skill: ' + name };
+  }
+
+  // Persist
+  const list = readUserSkills();
+  list.push({ name, source });
+  writeUserSkills(list);
+
+  // Merge into live registry
+  byName.set(name, { name, skill: parsed, source, userInstalled: true });
+  for (const t of parsed.trigger) {
+    if (t.phrase) {
+      const key = norm(t.phrase);
+      if (!byPhrase.has(key)) byPhrase.set(key, name);
+    }
+  }
+  return { ok: true, name };
+}
+
+export function uninstallUserSkill(name) {
+  const entry = byName.get(name);
+  if (!entry || !entry.userInstalled) return { ok: false, error: 'not a user-installed skill' };
+  const list = readUserSkills().filter(s => s.name !== name);
+  writeUserSkills(list);
+  byName.delete(name);
+  // Drop phrase entries that pointed at this name
+  for (const [phrase, owner] of [...byPhrase.entries()]) {
+    if (owner === name) byPhrase.delete(phrase);
+  }
+  return { ok: true };
+}
+
 export function listSkills() {
   const disabled = readDisabled();
-  return [...byName.values()].map(({ name, skill }) => ({
+  return [...byName.values()].map(({ name, skill, userInstalled }) => ({
     name,
     goal: skill.goal,
     phrases: skill.trigger.filter(t => t.phrase).map(t => t.phrase),
     level: skill.constraints.level,
     budget: skill.constraints.budget_tokens,
     enabled: !disabled.has(name),
+    userInstalled: !!userInstalled,
   }));
 }
 
@@ -148,7 +219,27 @@ export async function loadSkillRegistry() {
   if (failed.length) {
     for (const f of failed) console.warn('[skill-registry] load failed:', f.reason?.message || f.reason);
   }
-  console.log('[skill-registry] loaded ' + byName.size + '/' + names.length + ' skills, ' + byPhrase.size + ' phrase triggers indexed');
+
+  // M7.P4: merge in user-installed skills from localStorage
+  let userCount = 0;
+  for (const u of readUserSkills()) {
+    try {
+      const skill = parseSkill(u.source);
+      if (byName.has(u.name)) continue; // skip on name collision (bundled wins)
+      byName.set(u.name, { name: u.name, skill, source: u.source, userInstalled: true });
+      for (const t of skill.trigger) {
+        if (t.phrase) {
+          const key = norm(t.phrase);
+          if (!byPhrase.has(key)) byPhrase.set(key, u.name);
+        }
+      }
+      userCount++;
+    } catch (err) {
+      console.warn('[skill-registry] user skill failed to parse:', u.name, err?.message);
+    }
+  }
+
+  console.log('[skill-registry] loaded ' + byName.size + ' skills (' + names.length + ' bundled, ' + userCount + ' user), ' + byPhrase.size + ' phrase triggers indexed');
   return byName.size;
 }
 

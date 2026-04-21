@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-04-21T00:07:10.218Z",
+  "generated_at": "2026-04-21T00:10:12.322Z",
   "files": {
     "js/kernel/capability-api.js": "d4124838b9f66a68c620281ded34cc323c122fe9ae2c18c02471b83f8ae9e046",
     "js/kernel/operation-interceptor.js": "8cb583c547779556b1d8aacab1cc50d9e8156de1cf4cf25040570ffbf5222d6b",
@@ -12,7 +12,7 @@
     "js/kernel/budget-manager.js": "bd8b48b8f4377c03cf818e57015e577623b26662098a7bf2ea114331dd404bca",
     "js/kernel/socratic-prompter.js": "f2a183a6a2c65ef044cd989d1741faafa516275fb4e00f1dc23ec804c1f237d8",
     "js/kernel/skill-parser.js": "3de006018186a320b26bfcaef78004108f0ee888d0285ba89982bff0888deddf",
-    "js/kernel/skill-registry.js": "21a0f43b4296d9b3e51221cbe881f4ddc3f0932726dd256f216eb9d1ca161fe1",
+    "js/kernel/skill-registry.js": "9d467052ce0fe506906d7ee7a9a6f6c6bb92190294f52f5e6e2fe17bc44052e3",
     "js/kernel/golden-check.js": "145e1ddce707232b08b53312884c5761c58eb354d213a98b5e23cc9fa53e1b78",
     "js/kernel/value-lock.js": "4458349bae7102220f4ef3d120bf2a5c2f47c0466bfd619bf08a8c8edddb2c00",
     "js/kernel/selfmod-sandbox.js": "3f75aef28386b8ef38c3180fa3d7b3dcee0415cf0390c8520b792579a28225ba",
