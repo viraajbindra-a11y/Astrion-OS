@@ -1,8 +1,20 @@
 # Sunday Demo — 2026-04-26
 
 **Device:** Surface Pro 6, booted from Astrion OS live ISO
+**ISO:** [astrion-os-0.2.240-amd64.iso](https://github.com/viraajbindra-a11y/Astrion-OS/releases/download/v0.2.240/astrion-os-0.2.240-amd64.iso) (1.4 GB, slim build)
+**SHA256:** `e1027f8ad95fdec570a200d258470caff67e12054692ae67c78b1faf79c89be6`
+**Build commit:** `d4d8baa` — has every feature from this sprint
 **Brain:** Ollama `gpt-oss:16b` on remote PC (9800X3D + RTX 5080)
-**Connection:** Surface → remote Ollama over LAN (ollama host env var)
+**Connection:** Surface → remote Ollama over LAN (Settings > AI > Ollama URL)
+
+This is the SLIM build — Ollama, LibreOffice, Chromium, VLC are NOT
+bundled. For this demo we don't need any of them on-device:
+- Brain runs on the remote PC
+- Astrion's own Browser, Music, Photos, PDF Viewer, Video Player
+  cover the rest
+
+If a non-demo viewer wants any of those after the demo, they install
+on demand from App Store > Linux Apps (one-click flatpak).
 
 ## Pre-flight checklist (morning-of)
 
