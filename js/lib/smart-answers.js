@@ -351,6 +351,16 @@ function tryFun(query) {
     return { icon: '🔑', title: uuid, subtitle: 'Click to copy', copyValue: uuid };
   }
 
+  // Now playing / what song
+  if (q === 'now playing' || q === 'whats playing' || q === "what's playing" || q === 'current song') {
+    return { icon: '\uD83C\uDFB5', title: 'Now Playing', subtitle: 'Open Music app', action: 'launch', appId: 'music' };
+  }
+
+  // Wifi / network
+  if (q === 'wifi' || q === 'network' || q === 'internet' || q === 'connected') {
+    return { icon: '\uD83D\uDCF6', title: 'Wi-Fi Settings', subtitle: 'Open network settings', action: 'launch', appId: 'settings' };
+  }
+
   // Screenshot
   if (q === 'screenshot' || q === 'take screenshot' || q === 'screen capture' || q === 'print screen') {
     return { icon: '\uD83D\uDCF8', title: 'Take Screenshot', subtitle: 'Capture the current screen', action: 'launch', appId: 'screen-recorder' };
