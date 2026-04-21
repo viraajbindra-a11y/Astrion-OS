@@ -1280,6 +1280,77 @@ const sched = await import('/js/kernel/skill-scheduler.js');
 await test('skill-scheduler module still exports startSkillScheduler',
   () => typeof sched.startSkillScheduler === 'function');
 
+// ═══ 18. Plan rehearser (M5.P3.c — preview-by-rehearsal) ═══
+section('18. Plan rehearser (M5.P3.c — preview-by-rehearsal)');
+
+const rh = await import('/js/kernel/plan-rehearser.js');
+
+await test('isRehearsable returns true for files.createFolder',
+  () => rh.isRehearsable('files.createFolder') === true);
+await test('isRehearsable returns true for notes.create',
+  () => rh.isRehearsable('notes.create') === true);
+await test('isRehearsable returns false for app.open (not a graph writer)',
+  () => rh.isRehearsable('app.open') === false);
+await test('isRehearsable returns false for terminal.exec',
+  () => rh.isRehearsable('terminal.exec') === false);
+
+await test('rehearsePlan rejects empty plan', async () => {
+  const r = await rh.rehearsePlan({ steps: [] });
+  return r.ok === false && /empty plan/.test(r.error);
+});
+await test('rehearsePlan rejects non-plan input', async () => {
+  const r = await rh.rehearsePlan(null);
+  return r.ok === false;
+});
+
+const rhPlan1 = { steps: [
+  { cap: 'notes.create', args: { name: 'Rehearsed Note', topic: 'preview-only' } },
+]};
+const r1 = await rh.rehearsePlan(rhPlan1, { query: 'rehearse note' });
+await test('rehearsePlan single graph-writer returns ok+branchId',
+  () => r1.ok === true && typeof r1.branchId === 'string');
+await test('rehearsePlan single step produces diff with 1 createNode',
+  () => r1.diff?.counts?.createNode === 1);
+await test('rehearsePlan summarizeDiff renders "+1 node"',
+  () => rh.summarizeDiff(r1.diff) === '+1 node');
+
+const rhPlan2 = { steps: [
+  { cap: 'files.createFolder', args: { path: '/Desktop', name: 'V03Rehearse' } },
+  { cap: 'app.open', args: { appId: 'terminal' } },
+  { cap: 'files.createFile', args: { parent: '/Desktop/V03Rehearse', name: 'foo.txt', content: 'x' } },
+]};
+const r2 = await rh.rehearsePlan(rhPlan2);
+await test('rehearsePlan mixed plan: 2 graph writes recorded',
+  () => r2.diff?.counts?.createNode === 2);
+await test('rehearsePlan mixed plan: 1 unrehearsable cap surfaced',
+  () => r2.unrehearsable?.length === 1 && r2.unrehearsable[0].cap === 'app.open');
+await test('rehearsePlan unrehearsable entry includes index + reason',
+  () => r2.unrehearsable[0].index === 1 && typeof r2.unrehearsable[0].reason === 'string');
+
+await test('summarizeDiff with 0 mutations returns "0 mutations"',
+  () => rh.summarizeDiff({ counts: {} }) === '0 mutations');
+await test('summarizeDiff handles +N nodes pluralization',
+  () => rh.summarizeDiff({ counts: { createNode: 3 } }) === '+3 nodes');
+await test('summarizeDiff handles null/undefined diff',
+  () => rh.summarizeDiff(null) === '(no diff)');
+
+const branchModRH = await import('/js/kernel/branch-manager.js');
+const branchBeforeAccept = await branchModRH.getBranch(r1.branchId);
+const acceptResult = await rh.acceptRehearsal(r1.branchId);
+const branchAfterAccept = await branchModRH.getBranch(r1.branchId);
+await test('acceptRehearsal returns ok=true', () => acceptResult.ok === true);
+await test('acceptRehearsal transitions branch to discarded',
+  () => branchBeforeAccept.status === 'open' && branchAfterAccept.status === 'discarded');
+
+const rejectResult = await rh.rejectRehearsal(r2.branchId, 'test-reject');
+const branchAfterReject = await branchModRH.getBranch(r2.branchId);
+await test('rejectRehearsal returns ok=true', () => rejectResult.ok === true);
+await test('rejectRehearsal records the reason on the branch',
+  () => branchAfterReject.status === 'discarded' && branchAfterReject.discardReason === 'test-reject');
+
+await test('acceptRehearsal refuses when branchId missing',
+  async () => (await rh.acceptRehearsal(null)).ok === false);
+
 // ═══ Summary ═══
 const total = passCount + failCount;
 const summary = document.getElementById('summary');
