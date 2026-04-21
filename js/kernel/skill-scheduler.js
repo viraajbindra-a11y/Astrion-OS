@@ -162,9 +162,12 @@ function wireEvent(name, eventName, where) {
     eventBus.emit('skill:event-fire', { skill: name, eventName, payload });
     safeRunSkill(name, { source: 'event', eventName, payload });
   };
-  eventBus.on(eventName, handler);
+  // eventBus.on returns an unsubscribe closure — store it so stopSkillScheduler
+  // can tear down cleanly without leaking handlers (lesson: track subscriptions
+  // at wire time, not teardown time).
+  const unsub = eventBus.on(eventName, handler);
   const list = wiredEvent.get(name) || [];
-  list.push({ eventName, handler });
+  list.push({ eventName, handler, unsub });
   wiredEvent.set(name, list);
 }
 
@@ -189,8 +192,14 @@ export async function startSkillScheduler() {
 export function stopSkillScheduler() {
   for (const id of wiredCron.values()) clearInterval(id);
   wiredCron.clear();
-  // eventBus doesn't have a universal off; leak the handlers for now.
-  // TODO: track subscriptions for clean teardown when unload matters.
+  // Call each subscription's unsub closure so listeners don't leak.
+  // Previously this was a TODO; eventBus.on already returns an unsub,
+  // so wireEvent now stores it and we just drain the map here.
+  for (const list of wiredEvent.values()) {
+    for (const sub of list) {
+      try { sub.unsub?.(); } catch {}
+    }
+  }
   wiredEvent.clear();
 }
 
