@@ -244,6 +244,7 @@ static void nova_maximize_window(NovaWindow *nwin);
 static void nova_show_launcher(void);
 static void nova_hide_launcher(void);
 static void nova_toggle_launcher(void);
+static gboolean on_launcher_result_clicked(GtkWidget *widget, GdkEventButton *event, gpointer data);
 static void nova_show_notification(const char *title, const char *body);
 static void update_clock(void);
 static void update_dock(void);
