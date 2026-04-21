@@ -24,6 +24,7 @@
 // reversibility caps.
 
 import { eventBus } from './event-bus.js';
+import { compile as compilePredicate } from './predicate-parser.js';
 
 const CRON_TICK_MS = 60_000; // 1 minute
 const wiredCron = new Map();   // skill name → interval id
@@ -100,46 +101,26 @@ export function parseCron(expr) {
   };
 }
 
-// ─── Event where-clause matching ───
-// For "where: level < 15 and charging == false" style predicates, we
-// do the simplest-possible: string-contains each key=value chunk
-// against JSON.stringify(payload). Good enough for M7 v1. Proper
-// predicate parsing lives in M7.P2.d.
+// ─── Event where-clause matching (M7.P2.d) ───
+// Compile via the dedicated predicate-parser. Compilation is cached
+// per-source-string in a tiny WeakMap-equivalent (Map keyed by string).
+// Bad predicates compile to "always false" and emit a console.warn so
+// skill authors find them.
+
+const _predicateCache = new Map();
 
 function matchesWhere(where, payload) {
   if (!where) return true;
-  try {
-    const hay = JSON.stringify(payload || {});
-    // Extract `ident (op) value` triples
-    const triples = where.split(/\s+and\s+/i);
-    for (const t of triples) {
-      const m = t.match(/([a-z_][a-z0-9_]*)\s*(==|<=|>=|<|>|!=)\s*(.+)/i);
-      if (!m) {
-        // fallback: plain substring
-        if (!hay.toLowerCase().includes(t.trim().toLowerCase())) return false;
-        continue;
-      }
-      const [, key, op, rawVal] = m;
-      const v = rawVal.trim().replace(/^["']|["']$/g, '');
-      const actualMatch = hay.match(new RegExp('"' + key + '"\\s*:\\s*([^,}\\s]+)'));
-      if (!actualMatch) return false;
-      const actual = actualMatch[1].replace(/^["']|["']$/g, '');
-      const na = parseFloat(actual), nv = parseFloat(v);
-      const numeric = isFinite(na) && isFinite(nv);
-      let pass;
-      switch (op) {
-        case '==': pass = actual === v || (numeric && na === nv); break;
-        case '!=': pass = actual !== v && !(numeric && na === nv); break;
-        case '<':  pass = numeric && na < nv; break;
-        case '<=': pass = numeric && na <= nv; break;
-        case '>':  pass = numeric && na > nv; break;
-        case '>=': pass = numeric && na >= nv; break;
-        default: pass = false;
-      }
-      if (!pass) return false;
+  let cached = _predicateCache.get(where);
+  if (!cached) {
+    cached = compilePredicate(where);
+    if (!cached.ok) {
+      console.warn('[skill-scheduler] bad predicate', JSON.stringify(where), '→', cached.error);
+      cached = { ok: true, predicate: () => false };
     }
-    return true;
-  } catch { return false; }
+    _predicateCache.set(where, cached);
+  }
+  return cached.predicate(payload);
 }
 
 // ─── Wire / unwire ───
