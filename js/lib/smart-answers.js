@@ -351,6 +351,16 @@ function tryFun(query) {
     return { icon: '🔑', title: uuid, subtitle: 'Click to copy', copyValue: uuid };
   }
 
+  // Screenshot
+  if (q === 'screenshot' || q === 'take screenshot' || q === 'screen capture' || q === 'print screen') {
+    return { icon: '\uD83D\uDCF8', title: 'Take Screenshot', subtitle: 'Capture the current screen', action: 'launch', appId: 'screen-recorder' };
+  }
+
+  // Lock screen
+  if (q === 'lock' || q === 'lock screen' || q === 'lock computer') {
+    return { icon: '\uD83D\uDD12', title: 'Lock Screen', subtitle: 'Lock Astrion OS', action: 'event', event: 'system:lock' };
+  }
+
   // System info shortcuts
   if (q === 'battery' || q === 'battery level') {
     if (navigator.getBattery) {

@@ -930,8 +930,8 @@ export function initSpotlight() {
     const smart = getSmartAnswer(query);
     if (smart) {
       const iconHtml = smart.iconIsHtml ? smart.icon : `<div class="spotlight-result-icon" style="font-size:20px;">${smart.icon}</div>`;
-      const smartAction = smart.action === 'launch' ? 'launch' : smart.copyValue ? 'copy' : 'none';
-      const smartData = smart.action === 'launch' ? `data-app="${smart.appId}"` : smart.copyValue ? `data-copy="${escapeHtml(smart.copyValue)}"` : '';
+      const smartAction = smart.action === 'launch' ? 'launch' : smart.action === 'event' ? 'event' : smart.copyValue ? 'copy' : 'none';
+      const smartData = smart.action === 'launch' ? `data-app="${smart.appId}"` : smart.action === 'event' ? `data-event="${smart.event}"` : smart.copyValue ? `data-copy="${escapeHtml(smart.copyValue)}"` : '';
       html += `<div class="spotlight-result-group">
         <div class="spotlight-result-label">Instant Answer</div>
         <div class="spotlight-result-item" data-action="${smartAction}" ${smartData} style="cursor:${smartAction !== 'none' ? 'pointer' : 'default'};">
@@ -1409,6 +1409,10 @@ export function initSpotlight() {
       } else if (nodeType === 'reminder') {
         processManager.launch('reminders', { openNodeId: nodeId });
       }
+      close();
+    } else if (action === 'event') {
+      const evt = item.dataset.event;
+      if (evt) eventBus.emit(evt);
       close();
     } else if (action === 'web-search') {
       const q = item.dataset.query;
