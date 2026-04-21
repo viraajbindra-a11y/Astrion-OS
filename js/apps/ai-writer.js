@@ -139,7 +139,22 @@ function initAiWriter(container) {
   const saveDraft = () => {
     clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
-      try { localStorage.setItem(DRAFT_KEY, editor.value); } catch {}
+      try {
+        localStorage.setItem(DRAFT_KEY, editor.value);
+        // Subtle status flash so users know their work is safe
+        if (statusEl) {
+          const prev = statusEl.textContent;
+          statusEl.textContent = 'Draft saved';
+          statusEl.style.opacity = '0.5';
+          setTimeout(() => {
+            statusEl.style.opacity = '';
+            // Only revert if we haven't been overwritten by an action result
+            if (statusEl.textContent === 'Draft saved') {
+              statusEl.textContent = prev.startsWith('Draft saved') ? 'Ready — select text or write, then use an AI action' : prev;
+            }
+          }, 1200);
+        }
+      } catch {}
     }, 500);
   };
 
