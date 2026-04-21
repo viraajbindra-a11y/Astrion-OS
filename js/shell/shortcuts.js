@@ -149,10 +149,10 @@ export function initShortcuts() {
       cycleWindows();
     }
 
-    // Cmd+` — Cycle between windows of same app
+    // Cmd+` — Cycle between windows of SAME app
     if (meta && e.key === '`') {
       e.preventDefault();
-      cycleWindows();
+      cycleSameAppWindows();
     }
 
     // Ctrl+Shift+G — Grid tile all open windows
@@ -311,6 +311,18 @@ function cascadeWindows() {
   });
   // Focus the last (topmost) window
   if (windows.length > 0) windowManager.focus(windows[windows.length - 1][0]);
+}
+
+function cycleSameAppWindows() {
+  const active = windowManager.windows.get(windowManager.activeWindowId);
+  if (!active) return;
+  const sameApp = Array.from(windowManager.windows.entries())
+    .filter(([id, s]) => !s.minimized && s.app === active.app)
+    .map(([id]) => id);
+  if (sameApp.length < 2) return;
+  const currentIdx = sameApp.indexOf(windowManager.activeWindowId);
+  const nextIdx = (currentIdx + 1) % sameApp.length;
+  windowManager.focus(sameApp[nextIdx]);
 }
 
 function cycleWindows() {
