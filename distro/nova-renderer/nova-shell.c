@@ -1467,7 +1467,7 @@ static void create_desktop(void)
 
     /* Desktop icons — scan ~/Desktop and show files */
     GtkWidget *icon_grid = gtk_flow_box_new();
-    gtk_flow_box_set_orientation(GTK_FLOW_BOX(icon_grid), GTK_ORIENTATION_VERTICAL);
+    gtk_orientable_set_orientation(GTK_ORIENTABLE(icon_grid), GTK_ORIENTATION_VERTICAL);
     gtk_flow_box_set_max_children_per_line(GTK_FLOW_BOX(icon_grid), 20);
     gtk_flow_box_set_selection_mode(GTK_FLOW_BOX(icon_grid), GTK_SELECTION_NONE);
     gtk_flow_box_set_column_spacing(GTK_FLOW_BOX(icon_grid), 8);
