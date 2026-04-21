@@ -28,6 +28,28 @@ import { eventBus } from './event-bus.js';
 const CRON_TICK_MS = 60_000; // 1 minute
 const wiredCron = new Map();   // skill name → interval id
 const wiredEvent = new Map();  // skill name → array of { eventName, off }
+const FIRE_HISTORY_KEY = 'astrion-skill-fires'; // { [skillName]: [{ts, source}...] }
+const FIRE_HISTORY_MAX = 10;   // per-skill ring buffer
+
+function readFireHistory() {
+  try { return JSON.parse(localStorage.getItem(FIRE_HISTORY_KEY) || '{}'); } catch { return {}; }
+}
+
+function recordFire(name, source) {
+  try {
+    const all = readFireHistory();
+    if (!Array.isArray(all[name])) all[name] = [];
+    all[name].push({ ts: Date.now(), source });
+    while (all[name].length > FIRE_HISTORY_MAX) all[name].shift();
+    localStorage.setItem(FIRE_HISTORY_KEY, JSON.stringify(all));
+  } catch {}
+}
+
+export function getFireHistory(name) {
+  const all = readFireHistory();
+  if (!name) return all;
+  return all[name] || [];
+}
 
 // ─── Cron parsing ───
 // Standard 5-field: minute hour dom mon dow. Each field is '*',
@@ -126,6 +148,7 @@ async function safeRunSkill(name, opts) {
   try {
     const reg = await import('./skill-registry.js');
     if (!reg.isSkillEnabled(name)) return;
+    recordFire(name, opts?.source || 'unknown');
     reg.runSkill(name, opts);
   } catch (err) {
     console.warn('[skill-scheduler] runSkill failed:', name, err?.message);

@@ -788,6 +788,20 @@ function initSettings(container) {
     const skills = mod.listSkills();
     const enabledCount = skills.filter(s => s.enabled).length;
     const levelColor = { L0: '#a6e3a1', L1: '#8be9fd', L2: '#fab387', L3: '#ff5555' };
+    // M7 scheduler fire history — per-skill lastFired + count
+    let fireHistory = {};
+    try {
+      const sched = await import('../kernel/skill-scheduler.js');
+      fireHistory = sched.getFireHistory();
+    } catch {}
+    const fmtAge = (ts) => {
+      if (!ts) return null;
+      const ms = Date.now() - ts;
+      if (ms < 60_000) return Math.round(ms/1000) + 's ago';
+      if (ms < 3_600_000) return Math.round(ms/60_000) + 'm ago';
+      if (ms < 86_400_000) return Math.round(ms/3_600_000) + 'h ago';
+      return Math.round(ms/86_400_000) + 'd ago';
+    };
 
     const userCount = skills.filter(s => s.userInstalled).length;
     main.innerHTML = `
@@ -805,6 +819,12 @@ function initSettings(container) {
                   ${s.userInstalled ? '<span style="font-size:10px;color:#cba6f7;text-transform:uppercase;letter-spacing:0.5px;">user</span>' : ''}
                 </div>
                 <div style="font-size:11px;color:rgba(255,255,255,0.5);margin-top:3px;font-family:ui-monospace,monospace;">${escapeHtml(s.name)} · triggers: ${s.phrases.map(p => '"' + escapeHtml(p) + '"').join(', ') || '(no phrases)'}</div>
+                ${(() => {
+                  const hist = fireHistory[s.name] || [];
+                  if (!hist.length) return '';
+                  const last = hist[hist.length - 1];
+                  return `<div style="font-size:10px;color:rgba(255,255,255,0.4);margin-top:3px;">🔔 fired ${hist.length}× · last ${fmtAge(last.ts)} (${escapeHtml(last.source)})</div>`;
+                })()}
               </div>
               ${s.userInstalled ? `<button class="skill-uninstall" data-name="${escapeHtml(s.name)}" style="padding:6px 12px;font-size:11px;border-radius:6px;border:1px solid rgba(255,85,85,0.3);background:transparent;color:#ff8888;font-family:var(--font);cursor:pointer;">Uninstall</button>` : ''}
               <label style="position:relative;display:inline-block;width:42px;height:24px;cursor:pointer;">
