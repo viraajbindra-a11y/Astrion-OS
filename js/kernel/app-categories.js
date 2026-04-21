@@ -25,7 +25,7 @@ const PRIMITIVES = new Set([
 // All known Astrion apps. When a new app ships, add it here as 'template' (default).
 // Adding a new 'primitive' requires explicit justification and a plan review.
 const ALL_APPS = [
-  '2048', 'activity-monitor', 'ai-art', 'animate', 'appstore', 'beat-studio',
+  '2048', 'activity-monitor', 'ai-art', 'ai-writer', 'animate', 'appstore', 'beat-studio',
   'bmi-calc', 'browser', 'budget', 'calculator', 'calendar', 'chess', 'clock',
   'color-palette', 'color-picker', 'contacts', 'countdown', 'dictionary', 'draw',
   'emoji-kitchen', 'finder', 'flashcards', 'habit-tracker', 'installer', 'journal',

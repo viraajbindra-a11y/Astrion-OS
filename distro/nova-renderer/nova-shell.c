@@ -216,6 +216,7 @@ static NovaApp app_registry[] = {
     { "animate",        "Animate Studio",   "\xF0\x9F\x8E\xAC", "/app/animate",          FALSE, TRUE  },
     { "video-editor",   "Video Editor",     "\xF0\x9F\x8E\xAC", "/app/video-editor",     FALSE, FALSE },
     { "ai-art",         "AI Art",           "\xF0\x9F\x8E\xA8", "/app/ai-art",           FALSE, TRUE  },
+    { "ai-writer",      "AI Writer",        "\xE2\x9C\x8D\xEF\xB8\x8F",  "/app/ai-writer",  FALSE, TRUE  },
     { "sudoku",         "Sudoku",           "\xF0\x9F\x94\xA2", "/app/sudoku",           FALSE, TRUE  },
     { "speed-test",     "Speed Test",       "\xE2\x9A\xA1",     "/app/speed-test",       FALSE, TRUE  },
     { "recipe-book",    "Recipe Book",      "\xF0\x9F\x8D\xB3", "/app/recipe-book",      FALSE, TRUE  },

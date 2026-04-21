@@ -96,7 +96,7 @@ export function initMenubar() {
       sudoku: 'Sudoku', 'speed-test': 'Speed Test',
       'recipe-book': 'Recipe Book', 'emoji-kitchen': 'Emoji Kitchen',
       animate: 'Animate Studio', 'video-editor': 'Video Editor',
-      'ai-art': 'AI Art Generator', wordle: 'Wordle',
+      'ai-art': 'AI Art Generator', 'ai-writer': 'AI Writer', wordle: 'Wordle',
       meditation: 'Meditation', soundboard: 'Soundboard',
       countdown: 'Countdown', 'reaction-test': 'Reaction Test',
       'color-palette': 'Color Palette', 'rock-paper-scissors': 'RPS',
