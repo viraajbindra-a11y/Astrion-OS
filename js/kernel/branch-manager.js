@@ -275,14 +275,12 @@ export async function rewindBranch(branchId) {
     throw new Error('only committed branches can be rewound (status=' + branch.status + ')');
   }
   const tag = branchTag(branchId);
-  // graph-store's getMutationsSince uses lowerBound(timestamp, EXCLUSIVE),
-  // so mutations at exactly committedAt would be missed. Use createdAt
-  // (which is always strictly before any mutation this branch produced)
-  // and rely on the capabilityId filter to scope the result. This handles
-  // the rapid-fire case where merge mutations land in the same millisecond
-  // as committedAt.
-  const since = (branch.createdAt || 0) - 1;
-  const all = await graphStore.getMutationsSince(since);
+  // Pass inclusive:true so mutations at exactly createdAt are included.
+  // (Lesson #137: same-millisecond merges were being silently skipped
+  // when the cursor was EXCLUSIVE. Previously we used createdAt-1 as a
+  // workaround; the inclusive flag makes the intent explicit.)
+  const since = branch.createdAt || 0;
+  const all = await graphStore.getMutationsSince(since, { inclusive: true });
   const ours = all.filter(m => m.capabilityId === tag);
   // Reverse chronological order so cascading effects undo correctly
   ours.sort((a, b) => b.timestamp - a.timestamp);

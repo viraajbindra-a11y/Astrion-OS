@@ -577,13 +577,17 @@ class GraphStore {
     return result ? _cloneDeep(result) : null;
   }
 
-  async getMutationsSince(timestamp) {
+  async getMutationsSince(timestamp, opts = {}) {
     this._assertReady();
+    // By default `since` is EXCLUSIVE — mutations AT `timestamp` are skipped.
+    // Callers filtering by a tag that could collide on same-millisecond
+    // (e.g. branch merges) should pass { inclusive: true }. Lesson #137.
+    const exclusive = opts.inclusive !== true;
     return new Promise((resolve, reject) => {
       const out = [];
       const tx = this.db.transaction(STORES.MUTATIONS, 'readonly');
       const idx = tx.objectStore(STORES.MUTATIONS).index('timestamp');
-      const req = idx.openCursor(IDBKeyRange.lowerBound(timestamp, true));
+      const req = idx.openCursor(IDBKeyRange.lowerBound(timestamp, exclusive));
       req.onsuccess = (e) => {
         const cur = e.target.result;
         if (cur) {
