@@ -710,8 +710,32 @@ export function initSpotlight() {
             </div>
           </div>`).join('')}
       </div>`;
+
+    // Show recent searches
+    const searchHistory = getSearchHistory();
+    if (searchHistory.length > 0) {
+      results.innerHTML += `
+        <div class="spotlight-result-group">
+          <div class="spotlight-result-label">Recent Searches</div>
+          ${searchHistory.slice(0, 5).map(q => `<div class="spotlight-result-item spotlight-history-item" data-query="${escapeHtml(q)}" style="cursor:pointer;">
+              <div class="spotlight-result-icon" style="font-size:14px; opacity:0.4;">\uD83D\uDD52</div>
+              <div class="spotlight-result-text">
+                <div class="spotlight-result-title" style="font-weight:400;">${escapeHtml(q)}</div>
+              </div>
+            </div>`).join('')}
+        </div>`;
+    }
+
     results.querySelectorAll('.spotlight-result-item').forEach(item => {
-      item.addEventListener('click', () => handleResultClick(item, ''));
+      item.addEventListener('click', () => {
+        // If it's a history item, put the query in the input and search
+        if (item.classList.contains('spotlight-history-item')) {
+          input.value = item.dataset.query;
+          input.dispatchEvent(new Event('input'));
+          return;
+        }
+        handleResultClick(item, '');
+      });
     });
     input.focus();
     isOpen = true;
