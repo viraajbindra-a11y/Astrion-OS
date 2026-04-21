@@ -353,9 +353,12 @@ function initSettings(container) {
         <div class="settings-row">
           <div>
             <div class="settings-row-label">Red-team model <span style="font-size:10px; color:rgba(255,255,255,0.4); font-weight:normal;">(M8.P3.b)</span></div>
-            <div class="settings-row-desc">A DIFFERENT model from above reviews every L2+ action. Blank = use primary. True second-opinion safety — pull a different family (e.g. llama3.2) for real diversity.</div>
+            <div class="settings-row-desc" id="ai-redteam-pull-status">A DIFFERENT model from above reviews every L2+ action. Blank = use primary. True second-opinion safety — pull a different family (e.g. llama3.2) for real diversity.</div>
           </div>
-          <input type="text" id="ai-redteam-model" class="settings-select" value="${localStorage.getItem('nova-ai-redteam-model') || ''}" placeholder="e.g. llama3.2" style="width:180px; font-family:var(--mono,monospace); font-size:12px;">
+          <div style="display:flex; gap:6px;">
+            <input type="text" id="ai-redteam-model" class="settings-select" value="${localStorage.getItem('nova-ai-redteam-model') || ''}" placeholder="e.g. llama3.2" style="width:140px; font-family:var(--mono,monospace); font-size:12px;">
+            <button id="ai-redteam-pull-btn" style="padding:6px 10px; border-radius:6px; border:none; background:#8b5cf6; color:white; font-size:11px; cursor:pointer; font-family:var(--font);">Pull</button>
+          </div>
         </div>
         <div class="settings-row">
           <div>
@@ -414,6 +417,68 @@ function initSettings(container) {
       const v = e.target.value.trim();
       if (v) localStorage.setItem('nova-ai-redteam-model', v);
       else localStorage.removeItem('nova-ai-redteam-model');
+    });
+
+    // M8.P3.b — pull the red-team model into Ollama. Streams ndjson
+    // progress from /api/ai/ollama-pull just like the primary-model
+    // pull button above.
+    main.querySelector('#ai-redteam-pull-btn').addEventListener('click', async () => {
+      const url = main.querySelector('#ai-ollama-url').value.trim();
+      const model = main.querySelector('#ai-redteam-model').value.trim();
+      const status = main.querySelector('#ai-redteam-pull-status');
+      const btn = main.querySelector('#ai-redteam-pull-btn');
+      if (!model) {
+        status.textContent = '✗ Type a model name first (e.g. llama3.2).';
+        status.style.color = '#ff3b30';
+        return;
+      }
+      btn.disabled = true; btn.textContent = 'Pulling…';
+      status.style.color = 'rgba(255,255,255,0.65)';
+      status.textContent = `Starting pull for ${model}…`;
+      try {
+        const res = await fetch('/api/ai/ollama-pull', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ url, model }),
+        });
+        if (!res.ok || !res.body) {
+          const errText = await res.text().catch(() => '');
+          status.textContent = '✗ Pull rejected: ' + (errText || res.statusText);
+          status.style.color = '#ff3b30';
+          btn.disabled = false; btn.textContent = 'Pull';
+          return;
+        }
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = '';
+        let lastStatus = '';
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const lines = buf.split('\n');
+          buf = lines.pop() || '';
+          for (const line of lines) {
+            if (!line.trim()) continue;
+            try {
+              const obj = JSON.parse(line);
+              if (obj.error) { lastStatus = '✗ ' + obj.error; }
+              else if (obj.status) {
+                let pct = '';
+                if (obj.completed && obj.total) pct = ' ' + Math.round((obj.completed / obj.total) * 100) + '%';
+                lastStatus = obj.status + pct;
+              }
+              status.textContent = lastStatus;
+            } catch {}
+          }
+        }
+        status.textContent = '✓ Done. Red-team model ' + model + ' is ready. Saved.';
+        status.style.color = '#34c759';
+        localStorage.setItem('nova-ai-redteam-model', model);
+      } catch (err) {
+        status.textContent = '✗ ' + err.message;
+        status.style.color = '#ff3b30';
+      }
+      btn.disabled = false; btn.textContent = 'Pull';
     });
 
     // Test connection
