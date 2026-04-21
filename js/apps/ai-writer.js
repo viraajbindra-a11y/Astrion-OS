@@ -127,11 +127,30 @@ function initAiWriter(container) {
   const loadingEl = container.querySelector('#aiw-loading');
   const wordcountEl = container.querySelector('#aiw-wordcount');
 
-  // Word count
+  // Draft auto-save — restore on open, debounced save on every keystroke
+  const DRAFT_KEY = 'astrion-aiwriter-draft';
+  try {
+    const draft = localStorage.getItem(DRAFT_KEY);
+    if (draft) {
+      editor.value = draft;
+    }
+  } catch {}
+  let saveTimer = null;
+  const saveDraft = () => {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      try { localStorage.setItem(DRAFT_KEY, editor.value); } catch {}
+    }, 500);
+  };
+
+  // Word count + auto-save on every input
   editor.addEventListener('input', () => {
     const words = editor.value.trim() ? editor.value.trim().split(/\s+/).length : 0;
     wordcountEl.textContent = `${words} word${words !== 1 ? 's' : ''}`;
+    saveDraft();
   });
+  // Fire one initial word count for restored drafts
+  if (editor.value) editor.dispatchEvent(new Event('input'));
 
   // Check AI status
   checkAiStatus();
@@ -230,4 +249,18 @@ function initAiWriter(container) {
       statusEl.textContent = 'Copied to clipboard';
     }
   });
+
+  // Flush pending draft save + clean up timer on window close.
+  // The input-handler debounces writes by 500ms; without this flush the
+  // last keystrokes in that window would be lost.
+  const _obs = new MutationObserver(() => {
+    if (!container.isConnected) {
+      if (saveTimer) {
+        clearTimeout(saveTimer);
+        try { localStorage.setItem(DRAFT_KEY, editor.value); } catch {}
+      }
+      _obs.disconnect();
+    }
+  });
+  if (container.parentElement) _obs.observe(container.parentElement, { childList: true, subtree: true });
 }

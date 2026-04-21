@@ -67,6 +67,11 @@ function newMsgId() {
 // ═══════════════════════════════════════════════════════════════
 
 export function initChatPanel() {
+  // Idempotent — boot.js calls this in both spotlight-popup and normal
+  // paths, and tests sometimes call it again. Without the guard, every
+  // call appended a fresh panel + toggle to <body>, leaving the module
+  // state pointing at the latest copy and old DOM nodes orphaned.
+  if (panelEl && document.body.contains(panelEl)) return;
   loadMode();
   injectStyles();
   buildToggleButton();
