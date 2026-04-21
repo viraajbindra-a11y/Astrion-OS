@@ -1205,6 +1205,71 @@ await test('warning respects 24h cooldown', () => warned === null);
 
 rsMod.resetStats();
 
+// ═══ 17. Predicate parser (M7.P2.d) ═══
+section('17. Predicate parser (M7.P2.d)');
+
+const pp = await import('/js/kernel/predicate-parser.js');
+
+// Empty / whitespace passes (matches the prior shim behavior)
+await test('empty predicate compiles to always-true',
+  () => pp.matches('', { x: 1 }) === true && pp.matches('   ', { x: 1 }) === true);
+
+// Simple comparisons
+await test('numeric < works', () => pp.matches('level < 15', { level: 10 }) === true);
+await test('numeric < fails when over', () => pp.matches('level < 15', { level: 20 }) === false);
+await test('string == matches', () => pp.matches('role == "admin"', { role: 'admin' }) === true);
+await test('string == single quotes', () => pp.matches("role == 'admin'", { role: 'admin' }) === true);
+await test('string != works', () => pp.matches('role != "admin"', { role: 'guest' }) === true);
+await test('numeric >= works', () => pp.matches('p >= 3', { p: 3 }) === true);
+
+// and / or / not
+await test('and joins two clauses', () => pp.matches('a == 1 and b == 2', { a: 1, b: 2 }) === true);
+await test('and short-circuits to false', () => pp.matches('a == 1 and b == 2', { a: 1, b: 9 }) === false);
+await test('or works', () => pp.matches('a == 1 or b == 2', { a: 9, b: 2 }) === true);
+await test('or-fail when both miss', () => pp.matches('a == 1 or b == 2', { a: 9, b: 9 }) === false);
+await test('not negates', () => pp.matches('not (a == 1)', { a: 2 }) === true);
+
+// Parens for precedence
+await test('parens override default precedence',
+  () => pp.matches('(a == 1 or b == 2) and c == 3', { a: 1, b: 0, c: 3 }) === true);
+await test('parens still fail when outer && fails',
+  () => pp.matches('(a == 1 or b == 2) and c == 3', { a: 1, b: 0, c: 4 }) === false);
+
+// in / contains
+await test('in matches array literal',
+  () => pp.matches('role in ["admin","root"]', { role: 'admin' }) === true);
+await test('in array negative',
+  () => pp.matches('role in ["admin","root"]', { role: 'guest' }) === false);
+await test('contains on array',
+  () => pp.matches('tags contains "work"', { tags: ['work', 'home'] }) === true);
+await test('contains on string',
+  () => pp.matches('msg contains "hello"', { msg: 'say hello' }) === true);
+
+// Nested path
+await test('nested path traversal',
+  () => pp.matches('user.role == "admin"', { user: { role: 'admin' } }) === true);
+
+// Truthy bare ident
+await test('bare ident truthy', () => pp.matches('flag', { flag: true }) === true);
+await test('bare ident on 0 is falsy', () => pp.matches('flag', { flag: 0 }) === false);
+
+// compile API exposes errors for skill authors
+const bad = pp.compile('a < <');
+await test('compile() reports parse error', () => bad.ok === false && typeof bad.error === 'string');
+
+const good = pp.compile('level < 15');
+await test('compile() returns predicate fn', () => good.ok && typeof good.predicate === 'function');
+await test('compiled predicate is reusable', () => good.predicate({ level: 5 }) === true && good.predicate({ level: 50 }) === false);
+
+// The original use case
+await test('battery low + not charging', () =>
+  pp.matches('level < 15 and charging == false', { level: 10, charging: false }) === true);
+
+// Scheduler still works after the swap (smoke check)
+const sched = await import('/js/kernel/skill-scheduler.js');
+await test('skill-scheduler module still exports startSkillScheduler',
+  () => typeof sched.startSkillScheduler === 'function');
+
 // ═══ Summary ═══
 const total = passCount + failCount;
 const summary = document.getElementById('summary');
