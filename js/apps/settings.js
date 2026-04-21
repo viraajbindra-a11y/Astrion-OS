@@ -1147,7 +1147,7 @@ function initSettings(container) {
           </svg>
         </div>
         <div class="settings-about-name">Astrion OS</div>
-        <div class="settings-about-version">Version 0.2.0</div>
+        <div class="settings-about-version">Version 0.9.0 — M0-M8 Complete</div>
         <div class="settings-about-info">
           An AI-native operating system designed for the future.
           <br>
