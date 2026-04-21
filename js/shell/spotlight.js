@@ -1002,15 +1002,34 @@ export function initSpotlight() {
       a.name.toLowerCase().includes(lower) || a.id.includes(lower) || a.id === aliasMatch
     );
 
+    // App descriptions for richer search results
+    const APP_DESC = {
+      finder:'File manager',browser:'Web browser',notes:'Write and organize notes',
+      terminal:'Command line',messages:'AI chat assistant',music:'Music player',
+      photos:'Image viewer',calculator:'Math calculator',weather:'Forecast',
+      calendar:'Date planner',settings:'System preferences',clock:'World clock & timer',
+      'text-editor':'Code editor',draw:'Drawing canvas',youtube:'Video player',
+      chess:'Strategy game','2048':'Number puzzle',snake:'Classic game',
+      tetris:'Block puzzle',minesweeper:'Logic game',todo:'Task list',
+      reminders:'Scheduled alerts','activity-monitor':'System monitor',
+      'video-editor':'Edit videos','ai-art':'Generate art from text',
+      'ai-writer':'AI writing assistant',animate:'Character animation',
+      'beat-studio':'Music maker','pixel-art':'Pixel drawing',
+      kanban:'Project board',journal:'Daily writing',budget:'Money tracker',
+      'typing-test':'WPM test',wordle:'Word guessing game',
+      sudoku:'Number puzzle',meditation:'Breathing exercises',
+    };
+
     if (matchedApps.length > 0) {
       html += `<div class="spotlight-result-group">
         <div class="spotlight-result-label">Applications</div>`;
       matchedApps.forEach(app => {
+        const desc = APP_DESC[app.id] || 'Application';
         html += `<div class="spotlight-result-item" data-action="launch" data-app="${app.id}">
           <div class="spotlight-result-icon">${app.icon}</div>
           <div class="spotlight-result-text">
             <div class="spotlight-result-title">${app.name}</div>
-            <div class="spotlight-result-subtitle">Application</div>
+            <div class="spotlight-result-subtitle">${desc}</div>
           </div>
         </div>`;
       });
