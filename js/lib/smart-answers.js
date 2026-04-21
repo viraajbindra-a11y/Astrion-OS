@@ -356,6 +356,14 @@ function tryFun(query) {
     return { icon: '\uD83C\uDFB5', title: 'Now Playing', subtitle: 'Open Music app', action: 'launch', appId: 'music' };
   }
 
+  // Shutdown / restart
+  if (q === 'shutdown' || q === 'shut down' || q === 'power off' || q === 'turn off') {
+    return { icon: '\u23FB', title: 'Shut Down', subtitle: 'Power off Astrion OS', action: 'event', event: 'system:shutdown' };
+  }
+  if (q === 'restart' || q === 'reboot') {
+    return { icon: '\uD83D\uDD04', title: 'Restart', subtitle: 'Reboot Astrion OS', action: 'event', event: 'system:restart' };
+  }
+
   // Wifi / network
   if (q === 'wifi' || q === 'network' || q === 'internet' || q === 'connected') {
     return { icon: '\uD83D\uDCF6', title: 'Wi-Fi Settings', subtitle: 'Open network settings', action: 'launch', appId: 'settings' };
