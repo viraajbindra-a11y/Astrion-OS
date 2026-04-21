@@ -998,9 +998,22 @@ export function initSpotlight() {
     };
     const aliasMatch = APP_ALIASES[lower];
     const apps = processManager.getAllApps();
-    const matchedApps = apps.filter(a =>
+    // Exact + substring match first, then fuzzy fallback for typos
+    let matchedApps = apps.filter(a =>
       a.name.toLowerCase().includes(lower) || a.id.includes(lower) || a.id === aliasMatch
     );
+    // Fuzzy match if no exact results and query is 3+ chars
+    if (matchedApps.length === 0 && lower.length >= 3) {
+      matchedApps = apps.filter(a => {
+        const name = a.name.toLowerCase();
+        // Simple Levenshtein-ish: count matching chars in order
+        let j = 0;
+        for (let i = 0; i < name.length && j < lower.length; i++) {
+          if (name[i] === lower[j]) j++;
+        }
+        return j >= lower.length * 0.7; // 70%+ chars match in order
+      }).slice(0, 3);
+    }
 
     // App descriptions for richer search results
     const APP_DESC = {
