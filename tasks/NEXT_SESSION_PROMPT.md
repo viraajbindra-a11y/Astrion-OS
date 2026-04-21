@@ -164,7 +164,11 @@ astrion-budget-day at page load. Re-run after every kernel-
 layer change. Real-Ollama tests need provider explicitly set
 to 'ollama' after visiting v03.
 
-Working tree is clean. The 30 commits this session (latest first):
+Working tree is clean. The 34 commits this session (latest first):
+  986d179 scheduler fire history (Settings > Skills)
+  96cdab2 safeMathEval pi/e constants
+  5279edc Settings > AI red-team model Pull button
+  24eb6b5 docs: PLAN + handoff + next-session prompt
   b6e89d4 docs: lessons 144-155
   39887f3 M7.P4 step 2: user-installed skills
   1c525b3 M8.P3.b red-team model diversity
