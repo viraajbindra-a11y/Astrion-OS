@@ -991,6 +991,7 @@ echo "  Checking boot files..."
 ls -la "$BINARY/boot/grub/bios.img" "$BINARY/boot/grub/efi.img" "$BINARY/EFI/BOOT/BOOTx64.EFI" "$BINARY/live/vmlinuz" "$BINARY/live/initrd.img"
 
 xorriso -as mkisofs \
+  -iso-level 3 \
   -o "$OUTPUT_DIR/nova-os.iso" \
   -V "Astrion-OS-1.0" \
   -A "Astrion OS" \
@@ -1005,7 +1006,7 @@ xorriso -as mkisofs \
   -e boot/grub/efi.img \
     -no-emul-boot \
     -isohybrid-gpt-basdat \
-  -r -J \
+  -r -J -joliet-long \
   "$BINARY" 2>&1 | tail -5
 
 # Verify output
