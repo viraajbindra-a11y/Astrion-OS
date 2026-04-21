@@ -18,6 +18,6 @@
     "js/kernel/selfmod-sandbox.js": "3f75aef28386b8ef38c3180fa3d7b3dcee0415cf0390c8520b792579a28225ba",
     "js/kernel/drift-detector.js": "7852aa3708f01ede4873e30e6fa55a08528d9d437a6d4db66a4d3e7bdd71cefb",
     "js/kernel/skill-scheduler.js": "935e40f8722cca8e5ccd78f89e4ed20d6276e67952f22ae20f7d388d5b3a8656",
-    "test/v03-verification.html": "b8237a208c42575da3f64d2bb2678c86338bd82ef35b308756c07c98baa285cf"
+    "test/v03-verification.html": "d592bda1051e00d21220d155fd562967374e859dd53419381dc156ddaec97af7"
   }
 }

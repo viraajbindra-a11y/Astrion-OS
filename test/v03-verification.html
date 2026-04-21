@@ -323,6 +323,16 @@ await test('s2-tagged calibration sample landed (brain came from plan.meta)',
 aiService.ask = realAsk;
 aiService.askWithMeta = realAskWithMetaSec5;
 
+// Cleanup: delete test folders created by sections 6 + 7
+try {
+  const desktopItems = await fs.readDir('/Desktop');
+  for (const item of desktopItems) {
+    if (item.path.includes('V03Verify') || item.path.includes('BrainTest')) {
+      await fs.delete(item.path);
+    }
+  }
+} catch {}
+
 // ═══ 8. Spec generator (M4.P1) ═══
 section('8. Spec generator (M4.P1)');
 
