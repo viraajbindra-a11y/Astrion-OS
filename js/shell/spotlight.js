@@ -779,6 +779,7 @@ export function initSpotlight() {
     if (/^(help|\?|commands|what can (i|you) (type|do|say))$/.test(lower)) {
       const commands = [
         { cmd: 'branches · timeline · history', desc: 'See recent L2+ operations with rewind buttons' },
+        { cmd: 'rehearse <query> · preview <query>', desc: 'Dry-run a plan in a branch, see the diff, then Apply or Discard' },
         { cmd: '<skill phrase>', desc: 'Run a skill by its phrase (see Settings > Skills)' },
         { cmd: '<math expression>', desc: 'Calculate: 2+2, sqrt(16), 5!, 15% of 200' },
         { cmd: '<N> <unit> to <unit>', desc: 'Convert: 5 lbs to kg, 100 cm to inches, 72 f to c' },
@@ -800,6 +801,105 @@ export function initSpotlight() {
           </div>
         `).join('')}
       </div>`;
+      return;
+    }
+
+    // ─── Clone-preview wrapper: "rehearse X" / "preview X" / "dry-run X" ───
+    // Runs X through the planner, then records graph-writing steps into
+    // a branch WITHOUT calling their real execute(). Shows the diff + any
+    // non-graph-writer steps that would run for real on approval. User
+    // approves → runs the real plan; user discards → throws away the
+    // rehearsal branch cleanly (soft-deleted for audit).
+    const rehearseMatch = lower.match(/^(?:rehearse|preview|dry[- ]run|what would happen if i)\s+(.+)/i);
+    if (rehearseMatch) {
+      const target = rehearseMatch[1].trim();
+      results.innerHTML = `<div class="spotlight-result-group">
+        <div class="spotlight-result-label">\u{1F50D} Rehearsing\u2026</div>
+        <div class="spotlight-result-subtitle" style="padding:8px 16px;opacity:0.7;">${escapeHtml(target)}</div>
+      </div>`;
+      try {
+        const [{ planIntent }, rehearser] = await Promise.all([
+          import('../kernel/intent-planner.js'),
+          import('../kernel/plan-rehearser.js'),
+        ]);
+        const plan = await planIntent({ query: target, parsedIntent: parseIntent(target) });
+        if (plan.status === 'clarify') {
+          results.innerHTML = `<div class="spotlight-result-group">
+            <div class="spotlight-result-label">? Need clarification</div>
+            <div class="spotlight-result-subtitle" style="padding:8px 16px;">${escapeHtml(plan.question || '')}</div>
+          </div>`;
+          return;
+        }
+        if (plan.status !== 'plan') {
+          results.innerHTML = `<div class="spotlight-result-group">
+            <div class="spotlight-result-label">\u2717 Could not plan</div>
+            <div class="spotlight-result-subtitle" style="padding:8px 16px;color:#ff5555;">${escapeHtml(plan.error || 'unknown error')}</div>
+          </div>`;
+          return;
+        }
+        const r = await rehearser.rehearsePlan(plan, { query: target });
+        if (!r.ok) {
+          results.innerHTML = `<div class="spotlight-result-group">
+            <div class="spotlight-result-label">\u2717 Rehearsal failed</div>
+            <div class="spotlight-result-subtitle" style="padding:8px 16px;color:#ff5555;">${escapeHtml(r.error || '')}</div>
+          </div>`;
+          return;
+        }
+        const summary = rehearser.summarizeDiff(r.diff);
+        const lines = (r.diff?.lines || []).slice(0, 10);
+        const unreh = r.unrehearsable || [];
+        results.innerHTML = `
+          <div class="spotlight-result-group">
+            <div class="spotlight-result-label">\u{1F50D} Rehearsal preview</div>
+            <div style="padding:10px 16px;">
+              <div style="font-size:12px;margin-bottom:6px;"><strong>${plan.steps.length} step${plan.steps.length > 1 ? 's' : ''}</strong> \u00B7 ${escapeHtml(summary)}</div>
+              ${plan.reasoning ? `<div style="font-size:11px;color:rgba(255,255,255,0.55);margin-bottom:10px;">${escapeHtml(plan.reasoning)}</div>` : ''}
+
+              ${lines.length ? `
+                <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.06em;color:rgba(255,255,255,0.45);margin-top:8px;margin-bottom:4px;">Graph changes (previewed in branch)</div>
+                <ul style="font-size:11px;font-family:ui-monospace,monospace;color:#a6e3a1;margin:0 0 10px;padding-left:18px;line-height:1.6;">
+                  ${lines.map(l => `<li>${escapeHtml(l.describe || l.kind)}</li>`).join('')}
+                </ul>
+              ` : ''}
+
+              ${unreh.length ? `
+                <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.06em;color:rgba(255,255,255,0.45);margin-top:8px;margin-bottom:4px;">Will run for real on Apply (can't rehearse)</div>
+                <ul style="font-size:11px;font-family:ui-monospace,monospace;color:#fab387;margin:0 0 10px;padding-left:18px;line-height:1.6;">
+                  ${unreh.map(u => `<li>${escapeHtml(u.cap)}(${escapeHtml(JSON.stringify(u.args || {}).slice(0, 60))})</li>`).join('')}
+                </ul>
+              ` : ''}
+
+              <div style="display:flex;gap:8px;margin-top:12px;">
+                <button id="spotlight-rehearse-apply" data-branch-id="${r.branchId}" style="padding:6px 14px;border-radius:6px;border:none;background:#34c759;color:white;font-size:12px;cursor:pointer;font-family:var(--font);font-weight:600;">\u2713 Apply</button>
+                <button id="spotlight-rehearse-discard" data-branch-id="${r.branchId}" style="padding:6px 14px;border-radius:6px;border:1px solid rgba(255,255,255,0.15);background:transparent;color:rgba(255,255,255,0.75);font-size:12px;cursor:pointer;font-family:var(--font);">\u2715 Discard</button>
+              </div>
+            </div>
+          </div>`;
+        results.querySelector('#spotlight-rehearse-apply')?.addEventListener('click', async () => {
+          const bId = r.branchId;
+          await rehearser.acceptRehearsal(bId);
+          results.innerHTML = `<div class="spotlight-result-group">
+            <div class="spotlight-result-label">\u25D4 Running for real\u2026</div>
+            <div class="spotlight-result-subtitle" style="padding:8px 16px;opacity:0.7;">${escapeHtml(target)}</div>
+          </div>`;
+          // Fire the normal plan execution path; L2+ gates still fire.
+          eventBus.emit('intent:plan', { query: target, parsedIntent: parseIntent(target) });
+        });
+        results.querySelector('#spotlight-rehearse-discard')?.addEventListener('click', async () => {
+          const bId = r.branchId;
+          await rehearser.rejectRehearsal(bId, 'user-discarded-from-spotlight');
+          results.innerHTML = `<div class="spotlight-result-group">
+            <div class="spotlight-result-label">\u2715 Discarded</div>
+            <div class="spotlight-result-subtitle" style="padding:8px 16px;opacity:0.6;">Nothing was changed.</div>
+          </div>`;
+        });
+      } catch (err) {
+        console.warn('[spotlight] rehearse failed:', err);
+        results.innerHTML = `<div class="spotlight-result-group">
+          <div class="spotlight-result-label">\u2717 Rehearsal error</div>
+          <div class="spotlight-result-subtitle" style="padding:8px 16px;color:#ff5555;">${escapeHtml(err?.message || String(err))}</div>
+        </div>`;
+      }
       return;
     }
 
