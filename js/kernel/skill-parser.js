@@ -63,6 +63,58 @@ function indentOf(line) {
   return i;
 }
 
+const VALID_LEVELS = new Set(['L0', 'L1', 'L2', 'L3', 'OBSERVE', 'SANDBOX', 'REAL', 'SELF_MOD']);
+const VALID_REVERSIBILITY = new Set(['FREE', 'BOUNDED', 'PERMANENT', 'NONE']);
+
+/**
+ * Semantic validation of a parsed skill. Catches bad level/reversibility
+ * values, negative budgets, empty do-clause, trigger entries without a
+ * phrase/cron/event, and malformed 5-field cron expressions.
+ *
+ * Returns { ok: true } or { ok: false, errors: [...] }. Called by
+ * skill-registry.installUserSkill so user-pasted skills can't smuggle
+ * in garbage constraints that silently disable the M7.P2c enforcement.
+ */
+export function validateSkill(parsed) {
+  const errors = [];
+  if (!parsed || typeof parsed !== 'object') return { ok: false, errors: ['not an object'] };
+
+  if (typeof parsed.goal !== 'string' || !parsed.goal.trim()) {
+    errors.push('goal must be a non-empty string');
+  }
+  if (typeof parsed.do !== 'string' || !parsed.do.trim()) {
+    errors.push('do must be a non-empty string');
+  }
+  if (!Array.isArray(parsed.trigger) || parsed.trigger.length === 0) {
+    errors.push('trigger must have at least one entry');
+  } else {
+    parsed.trigger.forEach((t, i) => {
+      const hasAny = t.phrase || t.cron || t.event;
+      if (!hasAny) errors.push('trigger[' + i + '] needs phrase, cron, or event');
+      if (t.cron) {
+        const parts = String(t.cron).trim().split(/\s+/);
+        if (parts.length !== 5) errors.push('trigger[' + i + '] cron must be 5 fields: "' + t.cron + '"');
+      }
+    });
+  }
+
+  const c = parsed.constraints || {};
+  if (c.level) {
+    const L = String(c.level).trim().toUpperCase();
+    if (!VALID_LEVELS.has(L)) errors.push('constraints.level "' + c.level + '" not in ' + [...VALID_LEVELS].join('/'));
+  }
+  if (c.reversibility) {
+    const R = String(c.reversibility).trim().toUpperCase();
+    if (!VALID_REVERSIBILITY.has(R)) errors.push('constraints.reversibility "' + c.reversibility + '" not in ' + [...VALID_REVERSIBILITY].join('/'));
+  }
+  if (c.budget_tokens != null) {
+    const b = Number(c.budget_tokens);
+    if (!Number.isFinite(b) || b < 0) errors.push('constraints.budget_tokens must be a non-negative number');
+  }
+
+  return errors.length === 0 ? { ok: true } : { ok: false, errors };
+}
+
 export function parseSkill(text) {
   if (typeof text !== 'string') throw new Error('parseSkill: expected string input');
   const rawLines = text.split(/\r?\n/);
@@ -285,4 +337,30 @@ do: x`,
   }
   if (f === 0) console.log('[skill-parser] all', cases.length, 'sanity tests pass');
   else console.warn('[skill-parser]', f, 'sanity tests failed');
+
+  // validateSkill sanity tests
+  let vf = 0;
+  const good = parseSkill('# astrion-skill v1\ngoal: "do thing"\ntrigger:\n  - phrase: "x"\ndo: |\n  Do it.\nconstraints:\n  level: L1\n  budget_tokens: 100\n  reversibility: BOUNDED\n');
+  if (!validateSkill(good).ok) { console.warn('[validateSkill] good skill failed'); vf++; }
+
+  const badLevel = { goal: 'x', do: 'y', trigger: [{ phrase: 'x' }], constraints: { level: 'L99' } };
+  if (validateSkill(badLevel).ok) { console.warn('[validateSkill] bad level should fail'); vf++; }
+
+  const badRev = { goal: 'x', do: 'y', trigger: [{ phrase: 'x' }], constraints: { reversibility: 'sometimes' } };
+  if (validateSkill(badRev).ok) { console.warn('[validateSkill] bad reversibility should fail'); vf++; }
+
+  const badCron = { goal: 'x', do: 'y', trigger: [{ cron: '0 9' }], constraints: {} };
+  if (validateSkill(badCron).ok) { console.warn('[validateSkill] 2-field cron should fail'); vf++; }
+
+  const emptyTrigger = { goal: 'x', do: 'y', trigger: [], constraints: {} };
+  if (validateSkill(emptyTrigger).ok) { console.warn('[validateSkill] empty trigger should fail'); vf++; }
+
+  const triggerNoType = { goal: 'x', do: 'y', trigger: [{ where: 'foo' }], constraints: {} };
+  if (validateSkill(triggerNoType).ok) { console.warn('[validateSkill] trigger w/o phrase/cron/event should fail'); vf++; }
+
+  const emptyDo = { goal: 'x', do: '', trigger: [{ phrase: 'x' }], constraints: {} };
+  if (validateSkill(emptyDo).ok) { console.warn('[validateSkill] empty do should fail'); vf++; }
+
+  if (vf === 0) console.log('[validateSkill] all 7 sanity tests pass');
+  else console.warn('[validateSkill]', vf, 'sanity tests failed');
 }

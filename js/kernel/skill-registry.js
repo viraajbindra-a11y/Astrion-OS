@@ -15,7 +15,7 @@
 //     (interceptor, red-team) can read them.
 
 import { eventBus } from './event-bus.js';
-import { parseSkill } from './skill-parser.js';
+import { parseSkill, validateSkill } from './skill-parser.js';
 
 const MANIFEST_URL = '/skills/manifest.json';
 const SKILL_URL = (name) => '/skills/examples/' + name + '.skill';
@@ -86,6 +86,11 @@ export async function installUserSkill(source) {
   let parsed;
   try { parsed = parseSkill(source); }
   catch (err) { return { ok: false, error: 'parse failed: ' + (err?.message || err) }; }
+
+  // Semantic validation — catches bad level/reversibility/cron that the
+  // parser accepts syntactically but registry + scheduler would choke on.
+  const v = validateSkill(parsed);
+  if (!v.ok) return { ok: false, error: 'invalid skill: ' + v.errors.join('; ') };
 
   // Derive a stable name. Prefer goal slug, fall back to a 'user-' uuid.
   const slug = parsed.goal.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40)
