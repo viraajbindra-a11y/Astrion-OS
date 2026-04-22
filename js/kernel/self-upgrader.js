@@ -459,3 +459,133 @@ export async function applyUpgrade(proposalId, opts = {}) {
     return { ok: false, error: 'disk write failed AFTER gates passed: ' + err.message, gatesPassed: gateResult.gatesPassed };
   }
 }
+
+// ═══════════════════════════════════════════════════════════════
+// ROLLBACK + HISTORY
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * Roll back a previously-applied self-upgrade. Writes the proposal's
+ * saved oldContent back to disk and marks the proposal 'rolled-back'.
+ *
+ * This is the "oh shit" button. No gate re-walk — by design, the user
+ * already accepted the original 5-gate check and now needs to escape
+ * from a broken change. Restoring the PRIOR content (which had been
+ * running before the upgrade) is strictly safer than staying on the
+ * new one.
+ *
+ * Refuses to restore an already-rolled-back proposal (idempotency).
+ *
+ * @param {string} proposalId
+ * @returns {Promise<{ok, target?, bytes?, error?}>}
+ */
+export async function rollbackUpgrade(proposalId) {
+  const proposal = await getProposal(proposalId);
+  if (!proposal) return { ok: false, error: 'proposal not found' };
+  if (proposal.status === 'rolled-back') return { ok: false, error: 'already rolled back' };
+  if (proposal.status !== 'approved') return { ok: false, error: 'can only roll back approved proposals (status=' + proposal.status + ')' };
+
+  const target = proposal.target;
+  const oldContent = proposal.oldContent;
+  if (typeof oldContent !== 'string') {
+    return { ok: false, error: 'proposal has no stored oldContent — cannot rollback' };
+  }
+  if (!isPathUpgradable(target)) {
+    return { ok: false, error: 'target path not in allow-list: ' + target };
+  }
+
+  try {
+    const res = await fetch('/api/files/write', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ path: target, content: oldContent }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: res.statusText }));
+      throw new Error(err.error || `rollback write failed: ${res.status}`);
+    }
+    const data = await res.json();
+
+    // Mark the proposal rolled-back for audit
+    const graphMod = await import('./graph-store.js');
+    await graphMod.graphStore.updateNode(proposalId, (prev) => ({
+      ...prev.props,
+      status: 'rolled-back',
+      rolledBackAt: Date.now(),
+    }), { kind: 'system', capabilityId: 'self-upgrader.rollback' });
+
+    eventBus.emit('self-upgrade:rolled-back', { id: proposalId, target, bytes: data.bytes });
+    return {
+      ok: true,
+      proposalId,
+      target,
+      bytes: data.bytes,
+      note: 'Restored previous content. Reload (Cmd+R) to see the pre-upgrade state.',
+    };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
+/**
+ * Find the most recently applied (status=approved, not yet rolled-back)
+ * self-upgrade proposal. Used by the "undo last upgrade" Spotlight
+ * command + the inline Undo button post-apply.
+ */
+export async function getLastApplied() {
+  try {
+    const graphMod = await import('./graph-store.js');
+    const { query } = await import('./graph-query.js');
+    const results = await query(graphMod.graphStore, {
+      type: 'select',
+      from: 'selfmod-proposal',
+      where: { 'props.status': 'approved' },
+      orderBy: 'appliedAt',
+      orderDir: 'desc',
+      limit: 1,
+    });
+    if (!results.length) return null;
+    const n = results[0];
+    return { id: n.id, ...n.props };
+  } catch (err) {
+    console.warn('[self-upgrader] getLastApplied failed:', err?.message);
+    return null;
+  }
+}
+
+/**
+ * List the full self-upgrade history — applied + rolled-back + discarded
+ * + pending. Used by Settings > Safety for the audit surface.
+ */
+export async function listUpgradeHistory(limit = 50) {
+  try {
+    const graphMod = await import('./graph-store.js');
+    const { query } = await import('./graph-query.js');
+    const results = await query(graphMod.graphStore, {
+      type: 'select',
+      from: 'selfmod-proposal',
+      where: {},
+      orderBy: 'createdAt',
+      orderDir: 'desc',
+      limit,
+    });
+    return results
+      .filter(n => n.props?.proposer === 'self-upgrader')
+      .map(n => ({
+        id: n.id,
+        target: n.props.target,
+        reason: n.props.reason,
+        status: n.props.status,
+        createdAt: n.props.createdAt,
+        appliedAt: n.props.appliedAt,
+        rolledBackAt: n.props.rolledBackAt,
+        discardedAt: n.props.discardedAt,
+        model: n.props.model,
+        brain: n.props.brain,
+        rollback_description: n.props.rollback_description,
+      }));
+  } catch (err) {
+    console.warn('[self-upgrader] listUpgradeHistory failed:', err?.message);
+    return [];
+  }
+}

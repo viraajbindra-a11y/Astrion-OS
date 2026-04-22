@@ -965,6 +965,14 @@ function initSettings(container) {
             <button id="fire-chaos" style="padding:8px 14px;background:rgba(255,159,64,0.2);color:#fab387;border:1px solid #fab387;border-radius:6px;font-family:var(--font);font-size:12px;cursor:pointer;">🧪 Test myself now</button>
           </div>
         </div>
+
+        <div id="self-upgrade-history-panel" style="background:rgba(255,255,255,0.04);border-radius:10px;padding:18px;margin-top:16px;">
+          <div style="font-size:14px;font-weight:600;margin-bottom:6px;">🤖 Self-upgrade audit trail</div>
+          <p style="font-size:12px;color:rgba(255,255,255,0.55);margin:0 0 12px;">
+            Every self-upgrade proposal Astrion has generated — pending, applied, rolled-back, and discarded. M8.P5 writes to disk, so this list is the truth of what the AI has actually changed. Use "Undo" on any applied entry to restore the pre-upgrade content.
+          </p>
+          <div id="self-upgrade-history-list" style="display:flex;flex-direction:column;gap:6px;">Loading…</div>
+        </div>
       </div>
     `;
 
@@ -982,6 +990,72 @@ function initSettings(container) {
       const { fireChaosNow, clearChaosCooldown } = await import('../kernel/chaos-injector.js');
       clearChaosCooldown();
       fireChaosNow();
+    });
+
+    // ─── Self-upgrade history (M8.P5 audit surface) ───
+    renderSelfUpgradeHistory();
+  }
+
+  async function renderSelfUpgradeHistory() {
+    const list = container.querySelector('#self-upgrade-history-list');
+    if (!list) return;
+    let entries = [];
+    try {
+      const upg = await import('../kernel/self-upgrader.js');
+      entries = await upg.listUpgradeHistory(30);
+    } catch (err) {
+      list.innerHTML = `<div style="font-size:11px;color:#ff5555;">Load failed: ${escapeHtml(err.message)}</div>`;
+      return;
+    }
+    if (entries.length === 0) {
+      list.innerHTML = `<div style="font-size:11px;color:rgba(255,255,255,0.45);font-style:italic;padding:10px 0;">No self-upgrade proposals yet. Type "upgrade yourself" in Spotlight.</div>`;
+      return;
+    }
+    const statusColor = {
+      pending: '#fab387',
+      approved: '#a6e3a1',
+      'rolled-back': '#cba6f7',
+      discarded: 'rgba(255,255,255,0.5)',
+    };
+    const fmtTime = (ts) => {
+      if (!ts) return '';
+      const d = Date.now() - ts;
+      if (d < 60_000) return Math.round(d/1000) + 's ago';
+      if (d < 3_600_000) return Math.round(d/60_000) + 'm ago';
+      if (d < 86_400_000) return Math.round(d/3_600_000) + 'h ago';
+      return Math.round(d/86_400_000) + 'd ago';
+    };
+    list.innerHTML = entries.map(e => {
+      const color = statusColor[e.status] || '#fff';
+      const whenTs = e.rolledBackAt || e.appliedAt || e.discardedAt || e.createdAt;
+      return `
+        <div class="self-upgrade-row" data-id="${escapeHtml(e.id)}" style="background:rgba(255,255,255,0.03);border-radius:6px;padding:10px 12px;display:flex;align-items:center;gap:10px;">
+          <span style="font-size:10px;color:${color};text-transform:uppercase;letter-spacing:0.06em;font-weight:600;min-width:74px;">${escapeHtml(e.status || '?')}</span>
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:12px;font-weight:500;"><code style="background:rgba(255,255,255,0.07);padding:1px 5px;border-radius:3px;font-size:11px;">${escapeHtml(e.target || '?')}</code></div>
+            <div style="font-size:11px;color:rgba(255,255,255,0.6);margin-top:2px;line-height:1.4;">${escapeHtml(e.reason || '')}</div>
+            <div style="font-size:10px;color:rgba(255,255,255,0.4);margin-top:2px;">${escapeHtml(e.model || 'unknown model')} \u00B7 ${escapeHtml(fmtTime(whenTs))}</div>
+          </div>
+          ${e.status === 'approved'
+            ? `<button class="self-upgrade-undo" data-id="${escapeHtml(e.id)}" style="padding:5px 10px;border-radius:5px;border:1px solid rgba(203,166,247,0.5);background:transparent;color:#cba6f7;font-size:10px;cursor:pointer;font-family:var(--font);white-space:nowrap;">\u21A9 Undo</button>`
+            : ''}
+        </div>`;
+    }).join('');
+
+    list.querySelectorAll('.self-upgrade-undo').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const id = btn.dataset.id;
+        btn.textContent = 'Restoring…';
+        btn.disabled = true;
+        const upg = await import('../kernel/self-upgrader.js');
+        const r = await upg.rollbackUpgrade(id);
+        if (r.ok) {
+          renderSelfUpgradeHistory();
+        } else {
+          btn.textContent = 'Failed';
+          alert('Rollback failed: ' + (r.error || 'unknown'));
+        }
+      });
     });
   }
 

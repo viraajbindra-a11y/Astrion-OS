@@ -781,6 +781,7 @@ export function initSpotlight() {
         { cmd: 'branches · timeline · history', desc: 'See recent L2+ operations with rewind buttons' },
         { cmd: 'rehearse <query> · preview <query>', desc: 'Dry-run a plan in a branch, see the diff, then Apply or Discard' },
         { cmd: 'upgrade yourself · improve yourself [js/apps/<file>]', desc: 'AI reads screen + source, proposes a fix, walks 5 M8 gates, writes to disk' },
+        { cmd: 'undo upgrade · rollback upgrade', desc: 'Revert the most recent self-upgrade — restores the pre-upgrade file content' },
         { cmd: '<skill phrase>', desc: 'Run a skill by its phrase (see Settings > Skills)' },
         { cmd: '<math expression>', desc: 'Calculate: 2+2, sqrt(16), 5!, 15% of 200' },
         { cmd: '<N> <unit> to <unit>', desc: 'Convert: 5 lbs to kg, 100 cm to inches, 72 f to c' },
@@ -802,6 +803,61 @@ export function initSpotlight() {
           </div>
         `).join('')}
       </div>`;
+      return;
+    }
+
+    // ─── M8.P5 Self-Upgrade rollback: "undo upgrade" / "rollback upgrade" / "undo last upgrade" ───
+    // Finds the most recent self-upgrade whose status is 'approved' (meaning
+    // it was written to disk and isn't already rolled back), previews it,
+    // and rolls back on click. Writes oldContent back to the file.
+    if (/^(?:undo|rollback|revert)\s+(?:last\s+)?(?:self[- ]?)?(?:upgrade|improvement|change)$/i.test(lower)) {
+      try {
+        const upgMod = await import('../kernel/self-upgrader.js');
+        const last = await upgMod.getLastApplied();
+        if (!last) {
+          results.innerHTML = `<div class="spotlight-result-group">
+            <div class="spotlight-result-label">\u{1F4ED} No recent self-upgrade to undo</div>
+            <div class="spotlight-result-subtitle" style="padding:10px 16px;opacity:0.6;">Try <code>upgrade yourself</code> first.</div>
+          </div>`;
+          return;
+        }
+        const ageMs = Date.now() - (last.appliedAt || last.createdAt || Date.now());
+        const ageStr = ageMs < 60000 ? Math.round(ageMs/1000) + 's' : ageMs < 3600000 ? Math.round(ageMs/60000) + 'm' : Math.round(ageMs/3600000) + 'h';
+        results.innerHTML = `
+          <div class="spotlight-result-group">
+            <div class="spotlight-result-label">\u21A9 Undo last self-upgrade?</div>
+            <div style="padding:12px 16px;">
+              <div style="font-size:13px;margin-bottom:4px;"><strong>Target:</strong> <code>${escapeHtml(last.target)}</code></div>
+              <div style="font-size:12px;margin-bottom:4px;color:rgba(255,255,255,0.75);"><strong>What it did:</strong> ${escapeHtml(last.reason || '')}</div>
+              <div style="font-size:11px;margin-bottom:10px;color:rgba(255,255,255,0.55);">Applied ${ageStr} ago \u00B7 ${escapeHtml(last.model || 'unknown model')}</div>
+              <button id="spotlight-undo-confirm" data-id="${escapeHtml(last.id)}" style="padding:7px 14px;border-radius:6px;border:none;background:#cba6f7;color:#1e1e2e;font-size:12px;cursor:pointer;font-family:var(--font);font-weight:600;">\u21A9 Restore previous content</button>
+              <div id="spotlight-undo-status" style="font-size:11px;color:rgba(255,255,255,0.55);margin-top:10px;"></div>
+            </div>
+          </div>`;
+        results.querySelector('#spotlight-undo-confirm').addEventListener('click', async () => {
+          const status = results.querySelector('#spotlight-undo-status');
+          status.textContent = 'Restoring\u2026';
+          status.style.color = 'rgba(255,255,255,0.6)';
+          const r = await upgMod.rollbackUpgrade(last.id);
+          if (r.ok) {
+            results.innerHTML = `<div class="spotlight-result-group">
+              <div class="spotlight-result-label">\u2713 Rolled back</div>
+              <div style="padding:12px 16px;">
+                <div style="font-size:12px;margin-bottom:6px;"><code>${escapeHtml(r.target)}</code> restored (${r.bytes} bytes)</div>
+                <div style="font-size:11px;color:rgba(255,255,255,0.55);">${escapeHtml(r.note || '')}</div>
+              </div>
+            </div>`;
+          } else {
+            status.textContent = '\u2717 ' + (r.error || 'failed');
+            status.style.color = '#ff5555';
+          }
+        });
+      } catch (err) {
+        results.innerHTML = `<div class="spotlight-result-group">
+          <div class="spotlight-result-label">\u2717 Undo failed</div>
+          <div class="spotlight-result-subtitle" style="padding:8px 16px;color:#ff5555;">${escapeHtml(err?.message || String(err))}</div>
+        </div>`;
+      }
       return;
     }
 
@@ -894,9 +950,25 @@ export function initSpotlight() {
               <div style="padding:12px 16px;">
                 <div style="font-size:12px;margin-bottom:6px;"><strong>File:</strong> <code>${escapeHtml(applyRes.target)}</code> (${applyRes.bytes} bytes)</div>
                 <div style="font-size:11px;color:rgba(255,255,255,0.7);margin-bottom:8px;">Gates passed: ${applyRes.gatesPassed?.join(', ')}</div>
-                <div style="font-size:11px;color:rgba(255,255,255,0.55);">${escapeHtml(applyRes.note || '')}</div>
+                <div style="font-size:11px;color:rgba(255,255,255,0.55);margin-bottom:10px;">${escapeHtml(applyRes.note || '')}</div>
+                <button id="spotlight-upgrade-undo" data-id="${escapeHtml(applyRes.proposalId)}" style="padding:6px 12px;border-radius:6px;border:1px solid rgba(203,166,247,0.5);background:transparent;color:#cba6f7;font-size:11px;cursor:pointer;font-family:var(--font);">\u21A9 Undo this upgrade</button>
+                <div id="spotlight-undo-inline-status" style="font-size:10.5px;color:rgba(255,255,255,0.55);margin-top:8px;"></div>
               </div>
             </div>`;
+            results.querySelector('#spotlight-upgrade-undo')?.addEventListener('click', async () => {
+              const statusEl = results.querySelector('#spotlight-undo-inline-status');
+              statusEl.textContent = 'Restoring\u2026';
+              const r = await upgMod.rollbackUpgrade(applyRes.proposalId);
+              if (r.ok) {
+                statusEl.textContent = '\u2713 Restored. Reload to see the pre-upgrade state.';
+                statusEl.style.color = '#a6e3a1';
+                const btn = results.querySelector('#spotlight-upgrade-undo');
+                if (btn) btn.disabled = true;
+              } else {
+                statusEl.textContent = '\u2717 ' + (r.error || 'failed');
+                statusEl.style.color = '#ff5555';
+              }
+            });
           } else {
             status.innerHTML = '✗ ' + escapeHtml(applyRes.error || 'failed');
             status.style.color = '#ff5555';

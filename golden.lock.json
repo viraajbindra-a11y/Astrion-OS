@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-04-22T05:15:19.885Z",
+  "generated_at": "2026-04-22T22:41:01.837Z",
   "files": {
     "js/kernel/capability-api.js": "d4124838b9f66a68c620281ded34cc323c122fe9ae2c18c02471b83f8ae9e046",
     "js/kernel/operation-interceptor.js": "8cb583c547779556b1d8aacab1cc50d9e8156de1cf4cf25040570ffbf5222d6b",
@@ -18,7 +18,7 @@
     "js/kernel/selfmod-sandbox.js": "3f75aef28386b8ef38c3180fa3d7b3dcee0415cf0390c8520b792579a28225ba",
     "js/kernel/drift-detector.js": "7852aa3708f01ede4873e30e6fa55a08528d9d437a6d4db66a4d3e7bdd71cefb",
     "js/kernel/skill-scheduler.js": "935e40f8722cca8e5ccd78f89e4ed20d6276e67952f22ae20f7d388d5b3a8656",
-    "js/kernel/self-upgrader.js": "d8f3662a9202c34be67bcacce663fcd60e1b69342a3984e07ad182ba95141331",
+    "js/kernel/self-upgrader.js": "253d0e64d5ee476a05ba76b4560a28aa3c4870422ce4334ea667341bd2d9c128",
     "test/v03-verification.html": "8bc0f2d454cbe3950e8d8192888bd2525f73b6c1377b0338ba017c9e14e6b40b"
   }
 }
