@@ -780,6 +780,7 @@ export function initSpotlight() {
       const commands = [
         { cmd: 'branches · timeline · history', desc: 'See recent L2+ operations with rewind buttons' },
         { cmd: 'rehearse <query> · preview <query>', desc: 'Dry-run a plan in a branch, see the diff, then Apply or Discard' },
+        { cmd: 'upgrade yourself · improve yourself [js/apps/<file>]', desc: 'AI reads screen + source, proposes a fix, walks 5 M8 gates, writes to disk' },
         { cmd: '<skill phrase>', desc: 'Run a skill by its phrase (see Settings > Skills)' },
         { cmd: '<math expression>', desc: 'Calculate: 2+2, sqrt(16), 5!, 15% of 200' },
         { cmd: '<N> <unit> to <unit>', desc: 'Convert: 5 lbs to kg, 100 cm to inches, 72 f to c' },
@@ -801,6 +802,128 @@ export function initSpotlight() {
           </div>
         `).join('')}
       </div>`;
+      return;
+    }
+
+    // ─── M8.P5 Self-Upgrade: "upgrade yourself" / "improve yourself" / "self-improve" ───
+    // The AI reads screen state + a source file, proposes ONE improvement,
+    // walks the existing M8 5-gate sandbox, and (if all gates pass) writes
+    // the change to disk via /api/files/write. Allow-list restricts the
+    // AI to js/apps + js/shell + css/apps — kernel + safety rails are
+    // never reachable from this path.
+    const upgradeMatch = lower.match(/^(?:upgrade|improve|self[- ]?improve|self[- ]?upgrade)\s*(?:yourself|astrion|os)?(?:\s+(.+))?$/i);
+    if (upgradeMatch && /upgrade|improve/.test(lower)) {
+      const focusHint = (upgradeMatch[1] || '').trim() || null;
+      results.innerHTML = `<div class="spotlight-result-group">
+        <div class="spotlight-result-label">\u{1F916} Self-upgrade: looking at screen + source\u2026</div>
+        <div class="spotlight-result-subtitle" style="padding:8px 16px;opacity:0.7;">
+          ${focusHint ? 'Focus: ' + escapeHtml(focusHint) : 'Scanning allow-listed source files'}
+        </div>
+      </div>`;
+      try {
+        const upgMod = await import('../kernel/self-upgrader.js');
+        const focusPath = focusHint && /^js\/(apps|shell)\//.test(focusHint) ? focusHint : null;
+        const r = await upgMod.proposeUpgrade({ focus: focusPath });
+        if (!r.ok) {
+          results.innerHTML = `<div class="spotlight-result-group">
+            <div class="spotlight-result-label">\u2717 Self-upgrade failed</div>
+            <div class="spotlight-result-subtitle" style="padding:10px 16px;color:#ff5555;">${escapeHtml(r.error || 'unknown')}</div>
+          </div>`;
+          return;
+        }
+        if (r.status === 'pass') {
+          results.innerHTML = `<div class="spotlight-result-group">
+            <div class="spotlight-result-label">\u{1F4AD} Nothing to improve right now</div>
+            <div class="spotlight-result-subtitle" style="padding:10px 16px;">${escapeHtml(r.reason || '')}</div>
+          </div>`;
+          return;
+        }
+        // r.status === 'propose' — render the diff + gate preview + Apply button
+        const diffLines = (r.diff || '').split('\n').slice(0, 40);
+        const moreLines = (r.diff || '').split('\n').length - diffLines.length;
+        const diffHtml = diffLines.map(l => {
+          if (l.startsWith('+')) return `<div style="background:rgba(52,199,89,0.12);color:#a6e3a1;">${escapeHtml(l)}</div>`;
+          if (l.startsWith('-')) return `<div style="background:rgba(255,69,58,0.12);color:#f38ba8;">${escapeHtml(l)}</div>`;
+          if (l.startsWith('@@') || l.startsWith('+++') || l.startsWith('---')) return `<div style="color:rgba(255,255,255,0.45);">${escapeHtml(l)}</div>`;
+          return `<div>${escapeHtml(l)}</div>`;
+        }).join('');
+
+        results.innerHTML = `
+          <div class="spotlight-result-group">
+            <div class="spotlight-result-label">\u{1F916} Self-upgrade proposal</div>
+            <div style="padding:12px 16px;">
+              <div style="font-size:13px;margin-bottom:4px;"><strong>Target:</strong> <code>${escapeHtml(r.target)}</code></div>
+              <div style="font-size:12px;margin-bottom:8px;color:rgba(255,255,255,0.75);"><strong>Why:</strong> ${escapeHtml(r.reason)}</div>
+              ${r.rollback_description ? `<div style="font-size:11px;margin-bottom:8px;color:rgba(255,255,255,0.55);"><strong>Rollback:</strong> ${escapeHtml(r.rollback_description)}</div>` : ''}
+
+              <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.06em;color:rgba(255,255,255,0.45);margin:10px 0 4px;">Diff preview (first ${diffLines.length} lines)</div>
+              <div style="max-height:240px;overflow-y:auto;font-family:ui-monospace,monospace;font-size:11px;line-height:1.5;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:8px;">${diffHtml}</div>
+              ${moreLines > 0 ? `<div style="font-size:10px;color:rgba(255,255,255,0.45);margin-top:4px;">(+${moreLines} more lines)</div>` : ''}
+
+              <div style="margin-top:14px;padding:10px 12px;background:rgba(255,69,58,0.08);border:1px solid rgba(255,69,58,0.3);border-radius:6px;">
+                <div style="font-size:11px;font-weight:600;color:#ff6b5e;margin-bottom:4px;">\u26A0 5 gates + typed confirm required</div>
+                <div style="font-size:10.5px;color:rgba(255,255,255,0.7);margin-bottom:8px;">
+                  To apply: type the proposal id exactly, then hit Apply. Golden-integrity, value-lock, red-team, and rollback-plan gates fire automatically.
+                </div>
+                <div style="font-family:ui-monospace,monospace;font-size:11px;background:rgba(0,0,0,0.3);padding:6px 10px;border-radius:4px;color:#a6e3a1;margin-bottom:6px;user-select:all;">${escapeHtml(r.proposalId)}</div>
+                <input type="text" id="spotlight-upgrade-confirm" placeholder="Type the id above" style="width:100%;padding:7px 10px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.15);border-radius:6px;color:white;font-family:ui-monospace,monospace;font-size:11px;box-sizing:border-box;outline:none;">
+                <div id="spotlight-upgrade-status" style="font-size:10.5px;color:rgba(255,255,255,0.55);margin-top:6px;"></div>
+              </div>
+              <div style="display:flex;gap:8px;margin-top:10px;">
+                <button id="spotlight-upgrade-apply" data-id="${escapeHtml(r.proposalId)}" style="padding:7px 14px;border-radius:6px;border:none;background:#ff453a;color:white;font-size:12px;cursor:pointer;font-family:var(--font);font-weight:600;">\u{1F50C} Apply to disk</button>
+                <button id="spotlight-upgrade-discard" data-id="${escapeHtml(r.proposalId)}" style="padding:7px 14px;border-radius:6px;border:1px solid rgba(255,255,255,0.15);background:transparent;color:rgba(255,255,255,0.75);font-size:12px;cursor:pointer;font-family:var(--font);">Discard</button>
+              </div>
+            </div>
+          </div>`;
+
+        results.querySelector('#spotlight-upgrade-apply').addEventListener('click', async () => {
+          const proposalId = r.proposalId;
+          const typed = results.querySelector('#spotlight-upgrade-confirm')?.value || '';
+          const status = results.querySelector('#spotlight-upgrade-status');
+          if (typed !== proposalId) {
+            status.textContent = '✗ Typed text must match the id exactly.';
+            status.style.color = '#ff5555';
+            return;
+          }
+          status.textContent = 'Running gates\u2026';
+          status.style.color = 'rgba(255,255,255,0.6)';
+          const applyRes = await upgMod.applyUpgrade(proposalId, { typedConfirm: typed });
+          if (applyRes.ok) {
+            results.innerHTML = `<div class="spotlight-result-group">
+              <div class="spotlight-result-label">\u2713 Self-upgrade applied to disk</div>
+              <div style="padding:12px 16px;">
+                <div style="font-size:12px;margin-bottom:6px;"><strong>File:</strong> <code>${escapeHtml(applyRes.target)}</code> (${applyRes.bytes} bytes)</div>
+                <div style="font-size:11px;color:rgba(255,255,255,0.7);margin-bottom:8px;">Gates passed: ${applyRes.gatesPassed?.join(', ')}</div>
+                <div style="font-size:11px;color:rgba(255,255,255,0.55);">${escapeHtml(applyRes.note || '')}</div>
+              </div>
+            </div>`;
+          } else {
+            status.innerHTML = '✗ ' + escapeHtml(applyRes.error || 'failed');
+            status.style.color = '#ff5555';
+            if (applyRes.gatesFailed) {
+              status.innerHTML += '<ul style="margin:6px 0 0;padding-left:18px;">' +
+                applyRes.gatesFailed.map(g => `<li>${escapeHtml(g.check)}: ${escapeHtml(g.reason)}</li>`).join('') +
+                '</ul>';
+            }
+          }
+        });
+        results.querySelector('#spotlight-upgrade-discard').addEventListener('click', async () => {
+          const proposalId = r.proposalId;
+          try {
+            const sm = await import('../kernel/selfmod-sandbox.js');
+            await sm.discardProposal(proposalId, 'user-discarded');
+          } catch {}
+          results.innerHTML = `<div class="spotlight-result-group">
+            <div class="spotlight-result-label">\u2715 Proposal discarded</div>
+            <div class="spotlight-result-subtitle" style="padding:10px 16px;opacity:0.6;">No changes made.</div>
+          </div>`;
+        });
+      } catch (err) {
+        results.innerHTML = `<div class="spotlight-result-group">
+          <div class="spotlight-result-label">\u2717 Self-upgrade error</div>
+          <div class="spotlight-result-subtitle" style="padding:8px 16px;color:#ff5555;">${escapeHtml(err?.message || String(err))}</div>
+        </div>`;
+      }
       return;
     }
 

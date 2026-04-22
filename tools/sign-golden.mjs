@@ -42,6 +42,11 @@ const GOLDEN = [
   'js/kernel/selfmod-sandbox.js',
   'js/kernel/drift-detector.js',
   'js/kernel/skill-scheduler.js',
+  // M8.P5: the self-upgrader IS the loaded gun. Lock itself so the
+  // AI can't improve its own allow-list / blocklist / content scanner
+  // across runs. Any change to this file MUST go through a human
+  // bumping the golden lock manually.
+  'js/kernel/self-upgrader.js',
   'test/v03-verification.html',
 ];
 
