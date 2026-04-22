@@ -99,6 +99,51 @@ function checkContentSafe(content) {
   return { ok: true };
 }
 
+/**
+ * Validate that proposed JS/CSS content is at least parseable. This is
+ * NOT a runtime safety check — a syntactically valid file can still
+ * crash at import time — but it catches "model dropped a closing
+ * brace" / "returned prose pretending to be code" failures before
+ * they hit disk.
+ *
+ * For .js: strips ES imports (new Function can't parse them) then
+ * tries to parse the remaining body. Any SyntaxError fails the check.
+ * For .css: very loose check — balanced braces + no JS-ism markers.
+ * Other extensions pass through.
+ */
+export function validateSyntax(path, content) {
+  if (!content) return { ok: false, reason: 'empty content' };
+  if (path.endsWith('.js')) {
+    try {
+      // Strip top-level ES imports/exports — Function() constructor
+      // doesn't accept them. We're only checking that the body parses.
+      const stripped = content
+        .replace(/^import[\s\S]*?from[^\n]+;\s*/gm, '')
+        .replace(/^import\s+['"][^'"]+['"]\s*;\s*/gm, '')
+        .replace(/^export\s+(default\s+)?/gm, '');
+      new Function(stripped);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, reason: 'JS syntax: ' + (err?.message || 'parse failed').slice(0, 200) };
+    }
+  }
+  if (path.endsWith('.css')) {
+    // Balanced-brace check — CSS parsers aren't in the browser directly
+    let depth = 0;
+    for (const c of content) {
+      if (c === '{') depth++;
+      else if (c === '}') { depth--; if (depth < 0) return { ok: false, reason: 'CSS: unmatched }' }; }
+    }
+    if (depth !== 0) return { ok: false, reason: `CSS: unclosed { (depth=${depth})` };
+    // Cheap JS-ism sniff
+    if (/\beval\s*\(|\bfunction\s*\(/.test(content)) {
+      return { ok: false, reason: 'CSS file contains JS tokens (eval/function)' };
+    }
+    return { ok: true };
+  }
+  return { ok: true };
+}
+
 // ═══════════════════════════════════════════════════════════════
 // SCREEN STATE: text-safe context for the AI prompt
 // ═══════════════════════════════════════════════════════════════
@@ -336,6 +381,10 @@ export async function proposeUpgrade(opts = {}) {
   if (!safety.ok) {
     return { ok: false, error: 'proposed content failed safety scan: ' + safety.reason };
   }
+  const syntax = validateSyntax(target, newContent);
+  if (!syntax.ok) {
+    return { ok: false, error: 'proposed content failed syntax check: ' + syntax.reason };
+  }
 
   // Fetch current file for diff generation
   let oldContent = '';
@@ -431,6 +480,10 @@ export async function applyUpgrade(proposalId, opts = {}) {
   const safety = checkContentSafe(newContent);
   if (!safety.ok) {
     return { ok: false, error: 'content safety re-check failed: ' + safety.reason };
+  }
+  const syntax = validateSyntax(target, newContent);
+  if (!syntax.ok) {
+    return { ok: false, error: 'syntax re-check failed (defense in depth): ' + syntax.reason };
   }
 
   try {
