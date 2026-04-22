@@ -1,9 +1,9 @@
 # Sunday Demo — 2026-04-26
 
 **Device:** Surface Pro 6, booted from Astrion OS live ISO
-**ISO:** [astrion-os-0.2.241-amd64.iso](https://github.com/viraajbindra-a11y/Astrion-OS/releases/download/v0.2.241/astrion-os-0.2.241-amd64.iso) (1.4 GB, slim build)
-**SHA256:** `184a2765910746e1d675cb56e727fb4e5f14261d59addee029ec214f6e73a6ec`
-**Build commit:** `8286dda` — includes every feature from this sprint + M8.P5 self-upgrader
+**ISO:** [astrion-os-0.2.243-amd64.iso](https://github.com/viraajbindra-a11y/Astrion-OS/releases/download/v0.2.243/astrion-os-0.2.243-amd64.iso) (1.4 GB, slim build)
+**SHA256:** `a2da7796eb030fa0ab1514f3be2e4cee66d2b3a1a013a0c0d5367cebdb075146`
+**Build commit:** `cc45fcf` — everything from this sprint + M8.P5 self-upgrader + rollback + syntax validation + history audit
 **Brain:** Ollama `gpt-oss:16b` on remote PC (9800X3D + RTX 5080)
 **Connection:** Surface → remote Ollama over LAN (Settings > AI > Ollama URL)
 
@@ -203,6 +203,21 @@ is now in "Your installed skills (1)".
 **What if a gate fails?** The card lists which gate and why. File on
 disk is untouched. The user re-words the intent or picks a different
 target.
+
+**What if it lands but breaks something?** Two undo paths:
+- Spotlight → `undo upgrade` → click "Restore previous content"
+- Settings → Safety → Self-upgrade audit trail → click "Undo" on the applied row
+
+The rolled-back row shows up in the audit trail as status=`rolled-back`
+with the pre-upgrade content restored bytewise. There's also an inline
+"Undo this upgrade" button on the apply-success card for the ~1 minute
+after you've applied — the fastest path back.
+
+**Syntax check before write**: the AI's proposed content is JS-parsed
+(with `new Function()` after stripping imports) + CSS-brace-balanced
+before it ever hits /api/files/write. Missing braces, broken parens,
+JS tokens in CSS files all fail the pre-write check and the disk is
+never touched.
 
 **Important demo framing:**
 - Narrate that the AI CANNOT touch js/kernel, js/boot.js, golden.lock.json,
