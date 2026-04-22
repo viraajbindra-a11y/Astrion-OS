@@ -18,17 +18,33 @@ on demand from App Store > Linux Apps (one-click flatpak).
 
 ## Pre-flight checklist (morning-of)
 
-1. Boot the Surface from the USB. Verify network connects
-   automatically — Marvell Wi-Fi firmware is bundled (lesson 13).
-2. Open Settings → AI → point Ollama URL at the remote PC's LAN IP
+1. Boot the Surface from the USB. GRUB menu appears for 3s → auto-boots.
+2. **First-boot dialog**: Astrion shows a "Welcome — Install to Disk? /
+   Try it first / Never ask again" zenity prompt BEFORE the desktop
+   renders. Pick **"Try it first"** for the demo (avoids the 5-min
+   install). Verified in ISO inspection — this dialog is always shown
+   on live boots.
+3. Verify network connects automatically — Marvell Wi-Fi firmware is
+   bundled (lesson 13).
+4. Open Settings → AI → point Ollama URL at the remote PC's LAN IP
    (`http://<pc-ip>:11434`). Test with "Pull Model" — should stream.
-3. Open Settings → AI → pick `gpt-oss:16b` as default.
-4. Open `http://localhost:3000/test/v03-verification.html` in the
+5. Open Settings → AI → pick `gpt-oss:16b` as default.
+6. Open `http://localhost:3000/test/v03-verification.html` in the
    web shell (Ctrl+Alt+T → `firefox localhost:3000/test/…` if needed)
-   — should hit **196/196 green**.
-5. `localStorage.removeItem('astrion-budget-day')` (console) — reset
+   — should hit **216/216 green**.
+7. `localStorage.removeItem('astrion-budget-day')` (console) — reset
    daily token cap (lesson 138).
-6. Close all windows. Hero-mode desktop.
+8. Close all windows. Hero-mode desktop.
+
+**Pre-demo sanity (done on Mac 2026-04-22):**
+- ✅ ISO SHA256 matches release
+- ✅ 216/216 verification suite green
+- ✅ 76 apps register with launch handlers
+- ✅ squashfs contains: nova-shell (113 KB C binary), nova-renderer,
+     node, server/index.js, all sprint code (self-upgrader 25 KB,
+     chat-panel 37 KB, plan-rehearser, updated capability-providers 65 KB)
+- ✅ UEFI boot path works (QEMU emulated hand-off OK)
+- ⚠ First-boot "Install to Disk?" dialog appears — see step 2
 
 ## Demo beats + exact queries
 
