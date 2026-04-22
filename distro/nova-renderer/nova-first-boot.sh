@@ -39,11 +39,19 @@ if ! command -v zenity >/dev/null 2>&1; then
     exit 0
 fi
 
-# Show the welcome dialog. Using a question dialog with custom buttons
-# via --extra-button to get three choices.
+# Show the welcome dialog with an 8-second auto-dismiss to "Try it first".
+# Reasoning: demos + casual USB boots shouldn't block on a modal.
+# The "Install to Disk" option is still there for users who want it;
+# they just have to click within 8 seconds. Anyone who ignores the
+# prompt gets the "try it first" path by default (no install, no
+# never-ask flag, dialog returns on next live boot).
+#
+# --timeout=8 causes zenity to auto-close with exit code 5 (treated
+# same as Cancel/"Try it first" below — no action taken).
 CHOICE=$(zenity --question \
     --title="Welcome to Astrion OS" \
     --width=520 \
+    --timeout=8 \
     --ok-label="Install to Disk" \
     --cancel-label="Try it first" \
     --extra-button="Never ask again" \
@@ -58,10 +66,17 @@ and requires an empty disk (or one you can wipe).
 
 <i>You can also try Astrion first without installing — changes
 just won't persist. Or pick 'Never ask again' to skip this
-prompt on future live boots.</i>" \
+prompt on future live boots.</i>
+
+<small>This dialog auto-dismisses in 8 seconds with 'Try it first'.</small>" \
     2>&1)
 
 RETCODE=$?
+# Exit code 5 = timeout (zenity auto-closed). Treat same as "Try it first".
+if [ "$RETCODE" -eq 5 ]; then
+    RETCODE=1
+    CHOICE=""
+fi
 
 # Zenity exit codes:
 #   0 — OK button (Install to Disk)

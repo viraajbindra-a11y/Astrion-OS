@@ -965,7 +965,6 @@ set timeout=3
 
 insmod all_video
 insmod gfxterm
-insmod png
 set gfxmode=1920x1080,1280x720,auto
 terminal_output gfxterm
 
