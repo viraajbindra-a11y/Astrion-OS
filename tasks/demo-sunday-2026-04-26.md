@@ -1,9 +1,9 @@
 # Sunday Demo — 2026-04-26
 
 **Device:** Surface Pro 6, booted from Astrion OS live ISO
-**ISO:** [astrion-os-0.2.240-amd64.iso](https://github.com/viraajbindra-a11y/Astrion-OS/releases/download/v0.2.240/astrion-os-0.2.240-amd64.iso) (1.4 GB, slim build)
-**SHA256:** `e1027f8ad95fdec570a200d258470caff67e12054692ae67c78b1faf79c89be6`
-**Build commit:** `d4d8baa` — has every feature from this sprint
+**ISO:** [astrion-os-0.2.241-amd64.iso](https://github.com/viraajbindra-a11y/Astrion-OS/releases/download/v0.2.241/astrion-os-0.2.241-amd64.iso) (1.4 GB, slim build)
+**SHA256:** `184a2765910746e1d675cb56e727fb4e5f14261d59addee029ec214f6e73a6ec`
+**Build commit:** `8286dda` — includes every feature from this sprint + M8.P5 self-upgrader
 **Brain:** Ollama `gpt-oss:16b` on remote PC (9800X3D + RTX 5080)
 **Connection:** Surface → remote Ollama over LAN (Settings > AI > Ollama URL)
 
@@ -175,7 +175,49 @@ Click Install. Close App Store. Cmd+Space → `hi crowd` — the skill
 fires. Open App Store → Skills tab again — "Greet the demo crowd"
 is now in "Your installed skills (1)".
 
-### Beat 11 — Shutdown PONR (M5.P4)
+### Beat 11 — Self-Upgrade (M8.P5) 🔥 headline
+
+> *"The AI looks at my screen, reads its own source, proposes a fix,
+> walks five safety gates, and if they all pass it writes the change
+> to disk. Astrion upgrading Astrion."*
+
+**Action:** Cmd+Space → `upgrade yourself js/apps/notes.js`
+
+**What lands:**
+1. Spotlight shows "Looking at screen + source…" while gpt-oss thinks.
+2. A proposal card appears: target file, one-sentence reason, rollback
+   description, a compact unified diff (color-coded +/- lines), AND a
+   red panel listing the 5 required gates.
+3. The proposal id is shown literally (user-select-all). You copy it.
+4. Paste into the "Type the id above" input. Click Apply to disk.
+5. Five gates fire in order:
+   - ✓ golden-integrity (hash of 18 safety-critical files unchanged)
+   - ✓ value-lock (LOCKED_VALUES match baseline)
+   - ✓ red-team-signoff (second AI call reviews the diff adversarially)
+   - ✓ user-typed-confirm (you typed the id)
+   - ✓ rollback-plan (inverse diff present)
+6. If all 5 pass, POST /api/files/write fires. Success card shows
+   "Astrion modified its own source — reload to see changes."
+7. Hit Cmd+R. The change is live.
+
+**What if a gate fails?** The card lists which gate and why. File on
+disk is untouched. The user re-words the intent or picks a different
+target.
+
+**Important demo framing:**
+- Narrate that the AI CANNOT touch js/kernel, js/boot.js, golden.lock.json,
+  the sandbox itself, or anything in server/ or distro/ — allow-list
+  enforced before the AI even sees the prompt, deny-list enforced
+  second, content blocklist (no `eval`, `Function(`, `import fs`)
+  enforced third. Five gates AFTER all that.
+- The red-team gate is another model (M8.P3.b) looking for failure
+  modes in the proposed diff. If it recommends anything other than
+  'proceed', apply blocks.
+- This IS self-modification — the capability we deferred for months.
+  Pointing the user to Settings > Safety > "Recent self-mods" shows
+  the audit trail.
+
+### Beat 12 — Shutdown PONR (M5.P4)
 
 > *"Point-of-no-return actions require typed confirmation. Not a
 > checkbox — you literally type the capability id before it runs."*
