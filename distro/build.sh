@@ -838,8 +838,15 @@ fi
 # fullscreen in WebKitGTK — the Astrion web shell handles its OWN dock,
 # menubar, widgets, wallpaper, Chat Panel, Spotlight, self-upgrade.
 #
-# Users who prefer native windows can set ASTRION_USE_NATIVE_SHELL=1
-# via kernel cmdline or a shell profile; default keeps the web path.
+# Users who prefer native windows can opt in three ways:
+#   - Kernel cmdline: add `astrion-native-shell` on the GRUB linux line
+#     (works for live ISO testing without modifying the squashfs)
+#   - Env var: ASTRION_USE_NATIVE_SHELL=1 in a shell profile
+#   - Settings: future "Use native shell on next boot" toggle (TODO)
+if grep -q -E "(^| )astrion-native-shell( |\$)" /proc/cmdline 2>/dev/null; then
+  echo "Honoring kernel cmdline: astrion-native-shell"
+  ASTRION_USE_NATIVE_SHELL=1
+fi
 if [ "$ASTRION_USE_NATIVE_SHELL" = "1" ] && command -v nova-shell >/dev/null 2>&1; then
   echo "Launching Astrion OS (native shell — ASTRION_USE_NATIVE_SHELL=1)..."
   exec nova-shell
