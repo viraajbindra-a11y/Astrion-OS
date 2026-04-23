@@ -1,0 +1,19 @@
+<svg width="120" height="120" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="120" height="120" rx="26" fill="url(#lp1)"/>
+  <!-- 4x3 grid of app-style dots to evoke "all apps" -->
+  <rect x="28" y="28" width="16" height="16" rx="4" fill="white" opacity="0.95"/>
+  <rect x="52" y="28" width="16" height="16" rx="4" fill="white" opacity="0.95"/>
+  <rect x="76" y="28" width="16" height="16" rx="4" fill="white" opacity="0.95"/>
+  <rect x="28" y="52" width="16" height="16" rx="4" fill="white" opacity="0.95"/>
+  <rect x="52" y="52" width="16" height="16" rx="4" fill="white" opacity="0.95"/>
+  <rect x="76" y="52" width="16" height="16" rx="4" fill="white" opacity="0.95"/>
+  <rect x="28" y="76" width="16" height="16" rx="4" fill="white" opacity="0.95"/>
+  <rect x="52" y="76" width="16" height="16" rx="4" fill="white" opacity="0.95"/>
+  <rect x="76" y="76" width="16" height="16" rx="4" fill="white" opacity="0.95"/>
+  <defs>
+    <linearGradient id="lp1" x1="0" y1="0" x2="120" y2="120">
+      <stop stop-color="#4a4a5a"/>
+      <stop offset="1" stop-color="#2a2a3a"/>
+    </linearGradient>
+  </defs>
+</svg>
