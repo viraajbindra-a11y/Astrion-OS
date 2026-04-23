@@ -1362,12 +1362,56 @@ static void apply_css_theme(void)
  * Desktop Background
  * ═══════════════════════════════════════════════ */
 
+/* Wallpaper cache — load once, scale-on-demand. Paths tried in order;
+ * first existing one wins. Matches the .xinitrc feh order so web and
+ * native shells pick the same image. */
+static GdkPixbuf *desktop_wallpaper_pixbuf = NULL;
+static int desktop_wallpaper_w = 0, desktop_wallpaper_h = 0;
+
+static void load_desktop_wallpaper_if_needed(int target_w, int target_h)
+{
+    if (desktop_wallpaper_pixbuf &&
+        desktop_wallpaper_w == target_w && desktop_wallpaper_h == target_h) {
+        return; /* already sized for this screen */
+    }
+    if (desktop_wallpaper_pixbuf) {
+        g_object_unref(desktop_wallpaper_pixbuf);
+        desktop_wallpaper_pixbuf = NULL;
+    }
+    const char *paths[] = {
+        "/usr/share/nova-os/wallpapers/astrion-brain.png",
+        "/usr/share/nova-os/wallpapers/default.png",
+        "/usr/share/nova-os/wallpapers/nebula.svg",
+        "/usr/share/backgrounds/astrion.png",
+        NULL
+    };
+    for (int i = 0; paths[i] != NULL; i++) {
+        GdkPixbuf *p = gdk_pixbuf_new_from_file_at_scale(
+            paths[i], target_w, target_h, FALSE /* don't preserve aspect — fill */, NULL);
+        if (p) {
+            desktop_wallpaper_pixbuf = p;
+            desktop_wallpaper_w = target_w;
+            desktop_wallpaper_h = target_h;
+            break;
+        }
+    }
+}
+
 static gboolean on_desktop_draw(GtkWidget *widget, cairo_t *cr, gpointer data)
 {
     int w = gtk_widget_get_allocated_width(widget);
     int h = gtk_widget_get_allocated_height(widget);
 
-    /* Dark gradient background */
+    /* Prefer a real wallpaper image (matches the web version). Fall back
+     * to the gradient if no image is on disk. */
+    load_desktop_wallpaper_if_needed(w, h);
+    if (desktop_wallpaper_pixbuf) {
+        gdk_cairo_set_source_pixbuf(cr, desktop_wallpaper_pixbuf, 0, 0);
+        cairo_paint(cr);
+        return FALSE;
+    }
+
+    /* Dark gradient background (fallback when no wallpaper found) */
     cairo_pattern_t *grad = cairo_pattern_create_linear(0, 0, 0, h);
     cairo_pattern_add_color_stop_rgb(grad, 0.0, 0.04, 0.04, 0.10);
     cairo_pattern_add_color_stop_rgb(grad, 0.5, 0.06, 0.06, 0.16);
