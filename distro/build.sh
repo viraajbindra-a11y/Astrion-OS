@@ -800,15 +800,28 @@ if command -v nova-first-boot >/dev/null 2>&1; then
 fi
 
 # Launch Astrion OS
-# nova-shell = native C/GTK3 desktop shell (primary — the real OS substrate)
-# nova-renderer = polished web UI (fallback if nova-shell is missing or broken)
-# See PLAN.md M0.P1 Surgery 4: flipping preference to nova-shell as default.
-if command -v nova-shell >/dev/null 2>&1; then
-  echo "Launching Astrion OS (native shell)..."
+# nova-renderer = polished web UI (matches the browser experience 1:1)
+# nova-shell = native C/GTK3 desktop shell (substrate — separate native
+#              window per app, system-default dock)
+#
+# Flipped to nova-renderer as default for the 2026-04-26 demo.
+# The native-shell path is a different UX (GTK windows per app) and its
+# own dock renderer hasn't reached parity with the web dock (rounded pill
+# + wallpaper + colored icon pills). nova-renderer loads localhost:3000
+# fullscreen in WebKitGTK — the Astrion web shell handles its OWN dock,
+# menubar, widgets, wallpaper, Chat Panel, Spotlight, self-upgrade.
+#
+# Users who prefer native windows can set ASTRION_USE_NATIVE_SHELL=1
+# via kernel cmdline or a shell profile; default keeps the web path.
+if [ "$ASTRION_USE_NATIVE_SHELL" = "1" ] && command -v nova-shell >/dev/null 2>&1; then
+  echo "Launching Astrion OS (native shell — ASTRION_USE_NATIVE_SHELL=1)..."
   exec nova-shell
 elif command -v nova-renderer >/dev/null 2>&1; then
-  echo "Falling back to web renderer..."
+  echo "Launching Astrion OS (web renderer — polished demo UI)..."
   exec nova-renderer
+elif command -v nova-shell >/dev/null 2>&1; then
+  echo "Falling back to native shell (no renderer found)..."
+  exec nova-shell
 else
   echo "ERROR: no renderer found!"
   sleep 5
