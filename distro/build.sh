@@ -413,6 +413,17 @@ WALLPAPER_SCRIPT
 chmod +x "$CHROOT/tmp/gen-wallpaper.sh"
 chroot "$CHROOT" /tmp/gen-wallpaper.sh
 
+# Copy the real Astrion wallpaper set from the web tree into the chroot.
+# feh in .xinitrc prefers astrion-brain.png (matches the web default) and
+# falls back to the generated gradient above if the png fails to copy.
+if [ -d "$PROJECT_ROOT/assets/wallpapers" ]; then
+  cp -f "$PROJECT_ROOT/assets/wallpapers/"*.png \
+        "$CHROOT/usr/share/nova-os/wallpapers/" 2>/dev/null || true
+  cp -f "$PROJECT_ROOT/assets/wallpapers/"*.svg \
+        "$CHROOT/usr/share/nova-os/wallpapers/" 2>/dev/null || true
+  echo "  copied wallpaper set → /usr/share/nova-os/wallpapers/"
+fi
+
 # Plymouth boot splash theme (Astrion OS branded)
 mkdir -p "$CHROOT/usr/share/plymouth/themes/nova-os"
 
@@ -730,7 +741,23 @@ xrandr --auto 2>/dev/null
 sleep 0.5
 
 # Set NOVA dark background while loading
-xsetroot -solid "#0a0a1a"
+# Wallpaper: prefer the nice astrion-brain image, fall back to the
+# generated gradient, final fall back to a solid color if both fail.
+# `feh --bg-fill` survives reboots (writes to ~/.fehbg), scales to the
+# screen, no compositor needed.
+if command -v feh >/dev/null 2>&1; then
+  if [ -f /usr/share/nova-os/wallpapers/astrion-brain.png ]; then
+    feh --bg-fill /usr/share/nova-os/wallpapers/astrion-brain.png 2>/dev/null || \
+      xsetroot -solid "#0a0a1a"
+  elif [ -f /usr/share/nova-os/wallpapers/default.png ]; then
+    feh --bg-fill /usr/share/nova-os/wallpapers/default.png 2>/dev/null || \
+      xsetroot -solid "#0a0a1a"
+  else
+    xsetroot -solid "#0a0a1a"
+  fi
+else
+  xsetroot -solid "#0a0a1a"
+fi
 
 # Disable screen blanking
 xset s off

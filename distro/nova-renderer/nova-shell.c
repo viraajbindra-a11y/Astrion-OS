@@ -47,9 +47,11 @@
 #define COLOR_PANEL_G      0.08
 #define COLOR_PANEL_B      0.12
 
-#define COLOR_DOCK_R       0.10
-#define COLOR_DOCK_G       0.10
-#define COLOR_DOCK_B       0.14
+/* Match the `.nova-dock` CSS exactly so the window background doesn't
+ * show a visible rim outside the rounded pill. #141420 = these values. */
+#define COLOR_DOCK_R       0.0784
+#define COLOR_DOCK_G       0.0784
+#define COLOR_DOCK_B       0.1255
 
 #define COLOR_ACCENT_R     0.0
 #define COLOR_ACCENT_G     0.478
@@ -235,6 +237,45 @@ static NovaApp app_registry[] = {
 };
 
 static int app_count = 0;
+
+/* ─── Curated dock default ─────────────────────────────────────────
+ * Which apps show in the bottom dock. Anything NOT in this list is
+ * still registered + reachable via Launchpad (F4 or the Launchpad
+ * icon at the end of the dock), but doesn't clutter the dock.
+ *
+ * ~12 icons keeps dock width <= screen width on anything from a
+ * cramped 1280 VM to a 2736 Surface native. The old behavior —
+ * rendering every app_registry entry with pinned=TRUE — produced a
+ * 65-icon, 5232px dock that overflowed every display (see
+ * user feedback, 2026-04-22).
+ *
+ * Order here = order on screen (left-to-right). Trash + Launchpad
+ * get appended automatically by create_dock().
+ */
+static const char *dock_default[] = {
+    "finder",
+    "notes",
+    "text-editor",
+    "calculator",
+    "terminal",
+    "browser",
+    "music",
+    "photos",
+    "calendar",
+    "messages",
+    "settings",
+    "appstore",
+    NULL
+};
+
+static gboolean dock_contains(const char *id)
+{
+    if (!id) return FALSE;
+    for (int i = 0; dock_default[i] != NULL; i++) {
+        if (strcmp(dock_default[i], id) == 0) return TRUE;
+    }
+    return FALSE;
+}
 
 /* Forward declarations */
 static void nova_launch_app(NovaApp *app);
@@ -1156,27 +1197,31 @@ static void apply_css_theme(void)
         "  color: #c0c0c0;\n"
         "}\n"
         "\n"
+        /* Solid colors only — lesson 1: rgba() without a compositor\n"
+         * renders WHITE on X11. Visually this is close enough to the\n"
+         * web dock's semi-transparent pill. */
         ".nova-dock {\n"
-        "  background: #1e1e2e;\n"
-        "  border: 1px solid #3a3a4a;\n"
-        "  border-radius: 16px;\n"
-        "  padding: 4px 12px;\n"
+        "  background: #141420;\n"
+        "  border: 1px solid #2a2a3a;\n"
+        "  border-radius: 22px;\n"
+        "  padding: 6px 14px;\n"
         "}\n"
         "\n"
         ".nova-dock-icon {\n"
         "  font-size: 42px;\n"
         "  padding: 6px 8px;\n"
         "  border-radius: 14px;\n"
-        "  transition: 200ms ease;\n"
+        "  transition: 180ms ease;\n"
         "}\n"
         "\n"
         ".nova-dock-icon:hover {\n"
-        "  background: #3a3a4a;\n"
+        "  background: #26263a;\n"
         "}\n"
         "\n"
         ".nova-dock-dot {\n"
         "  font-size: 6px;\n"
-        "  color: #808080;\n"
+        "  color: #a0a0c0;\n"
+        "  margin-top: -4px;\n"
         "}\n"
         "\n"
         ".nova-launcher {\n"
@@ -2143,6 +2188,15 @@ static void create_panel(void)
  * Dock — Bottom of Screen
  * ═══════════════════════════════════════════════ */
 
+/* Click handler for the dock's Launchpad overflow button. Toggles the
+ * full-screen launcher so every app (not just the curated dock ones)
+ * is one click away. */
+static void on_launchpad_clicked(GtkWidget *widget, gpointer data)
+{
+    (void)widget; (void)data;
+    nova_toggle_launcher();
+}
+
 static void on_dock_icon_clicked(GtkWidget *widget, gpointer data)
 {
     NovaApp *app = (NovaApp *)data;
@@ -2190,59 +2244,83 @@ static void create_dock(void)
     gtk_style_context_add_class(dock_ctx, "nova-dock");
     gtk_box_pack_start(GTK_BOX(outer_box), dock_box, FALSE, FALSE, 0);
 
-    /* Add pinned apps to dock */
+    /* Helper: add ONE app entry to the dock box */
+    #define ADD_DOCK_ENTRY(app_ptr, is_launchpad) do {                           \
+        NovaApp *__app = (app_ptr);                                              \
+        GtkWidget *icon_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);          \
+        GtkWidget *btn = gtk_button_new();                                       \
+        gtk_button_set_relief(GTK_BUTTON(btn), GTK_RELIEF_NONE);                 \
+        char icon_path[512];                                                     \
+        snprintf(icon_path, sizeof(icon_path),                                   \
+                 "/opt/nova-os/assets/icons/%s.svg",                             \
+                 (is_launchpad) ? "launchpad" : __app->id);                      \
+        GdkPixbuf *pixbuf = gdk_pixbuf_new_from_file_at_size(                    \
+            icon_path, DOCK_ICON_SIZE, DOCK_ICON_SIZE, NULL);                    \
+        if (pixbuf) {                                                            \
+            GtkWidget *icon_img = gtk_image_new_from_pixbuf(pixbuf);             \
+            g_object_unref(pixbuf);                                              \
+            gtk_container_add(GTK_CONTAINER(btn), icon_img);                     \
+        } else {                                                                 \
+            const char *glyph = (is_launchpad) ? "\xE2\x9A\xA1" : __app->icon;   \
+            GtkWidget *icon_label = gtk_label_new(glyph);                        \
+            PangoAttrList *attrs = pango_attr_list_new();                        \
+            pango_attr_list_insert(attrs, pango_attr_size_new(42 * PANGO_SCALE));\
+            gtk_label_set_attributes(GTK_LABEL(icon_label), attrs);              \
+            pango_attr_list_unref(attrs);                                        \
+            gtk_container_add(GTK_CONTAINER(btn), icon_label);                   \
+        }                                                                        \
+        GtkStyleContext *btn_ctx = gtk_widget_get_style_context(btn);            \
+        gtk_style_context_add_class(btn_ctx, "nova-dock-icon");                  \
+        gtk_widget_set_tooltip_text(btn,                                         \
+            (is_launchpad) ? "Launchpad (all apps)" : __app->name);              \
+        if (is_launchpad) {                                                      \
+            g_signal_connect(btn, "clicked",                                     \
+                G_CALLBACK(on_launchpad_clicked), NULL);                         \
+        } else {                                                                 \
+            g_signal_connect(btn, "clicked",                                     \
+                G_CALLBACK(on_dock_icon_clicked), __app);                        \
+        }                                                                        \
+        gtk_box_pack_start(GTK_BOX(icon_box), btn, FALSE, FALSE, 0);             \
+        GtkWidget *dot = gtk_label_new("\xC2\xB7");                              \
+        GtkStyleContext *dot_ctx = gtk_widget_get_style_context(dot);            \
+        gtk_style_context_add_class(dot_ctx, "nova-dock-dot");                   \
+        gtk_widget_set_opacity(dot, 0.0);                                        \
+        gtk_box_pack_start(GTK_BOX(icon_box), dot, FALSE, FALSE, 0);             \
+        dock_dots[dock_pinned_count] = dot;                                      \
+        dock_apps[dock_pinned_count] = __app;                                    \
+        dock_pinned_count++;                                                     \
+        gtk_box_pack_start(GTK_BOX(dock_box), icon_box, FALSE, FALSE, 0);        \
+    } while (0)
+
     dock_pinned_count = 0;
-    for (int i = 0; app_registry[i].id != NULL; i++) {
-        if (!app_registry[i].pinned) continue;
 
-        GtkWidget *icon_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 0);
-
-        GtkWidget *btn = gtk_button_new();
-        gtk_button_set_relief(GTK_BUTTON(btn), GTK_RELIEF_NONE);
-
-        /* Try to load SVG icon from /opt/nova-os/assets/icons/<id>.svg */
-        char icon_path[512];
-        snprintf(icon_path, sizeof(icon_path), "/opt/nova-os/assets/icons/%s.svg", app_registry[i].id);
-        GdkPixbuf *pixbuf = gdk_pixbuf_new_from_file_at_size(icon_path, DOCK_ICON_SIZE, DOCK_ICON_SIZE, NULL);
-        if (pixbuf) {
-            GtkWidget *icon_img = gtk_image_new_from_pixbuf(pixbuf);
-            g_object_unref(pixbuf);
-            gtk_container_add(GTK_CONTAINER(btn), icon_img);
-        } else {
-            /* Fallback to emoji if SVG not found */
-            GtkWidget *icon_label = gtk_label_new(app_registry[i].icon);
-            PangoAttrList *attrs = pango_attr_list_new();
-            pango_attr_list_insert(attrs, pango_attr_size_new(42 * PANGO_SCALE));
-            gtk_label_set_attributes(GTK_LABEL(icon_label), attrs);
-            pango_attr_list_unref(attrs);
-            gtk_container_add(GTK_CONTAINER(btn), icon_label);
-        }
-
-        GtkStyleContext *btn_ctx = gtk_widget_get_style_context(btn);
-        gtk_style_context_add_class(btn_ctx, "nova-dock-icon");
-
-        gtk_widget_set_tooltip_text(btn, app_registry[i].name);
-        g_signal_connect(btn, "clicked", G_CALLBACK(on_dock_icon_clicked), &app_registry[i]);
-
-        gtk_box_pack_start(GTK_BOX(icon_box), btn, FALSE, FALSE, 0);
-
-        /* Running indicator dot */
-        GtkWidget *dot = gtk_label_new("\xC2\xB7");
-        GtkStyleContext *dot_ctx = gtk_widget_get_style_context(dot);
-        gtk_style_context_add_class(dot_ctx, "nova-dock-dot");
-        gtk_widget_set_opacity(dot, 0.0); /* Hidden by default */
-        gtk_box_pack_start(GTK_BOX(icon_box), dot, FALSE, FALSE, 0);
-
-        /* Store references for update_dock() */
-        dock_dots[dock_pinned_count] = dot;
-        dock_apps[dock_pinned_count] = &app_registry[i];
-        dock_pinned_count++;
-
-        gtk_box_pack_start(GTK_BOX(dock_box), icon_box, FALSE, FALSE, 0);
+    /* Pass 1: add curated dock apps in dock_default[] order */
+    for (int d = 0; dock_default[d] != NULL && dock_pinned_count < MAX_APPS - 2; d++) {
+        NovaApp *app = find_app_by_id(dock_default[d]);
+        if (!app) continue;
+        ADD_DOCK_ENTRY(app, FALSE);
     }
+
+    /* Pass 2: append Trash (macOS convention — always at the right) */
+    NovaApp *trash = find_app_by_id("trash");
+    if (trash && dock_pinned_count < MAX_APPS - 1) {
+        ADD_DOCK_ENTRY(trash, FALSE);
+    }
+
+    /* Pass 3: append Launchpad overflow button — opens nova-launcher
+     * so all the apps NOT on the curated dock are one click away. */
+    if (dock_pinned_count < MAX_APPS) {
+        ADD_DOCK_ENTRY(NULL, TRUE);
+    }
+
+    #undef ADD_DOCK_ENTRY
 
     /* Calculate dock size */
     int dock_width = dock_pinned_count * (DOCK_ICON_SIZE + 16) + 32;
+    /* Defensive clamp — if something goes wrong and the dock somehow
+     * exceeds screen width, center it anyway (negative dock_x would
+     * otherwise clip the left edge). */
+    if (dock_width > screen_width - 40) dock_width = screen_width - 40;
     int dock_x = (screen_width - dock_width) / 2;
     int dock_y = screen_height - DOCK_HEIGHT - 8;
 
