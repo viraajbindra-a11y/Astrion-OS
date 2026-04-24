@@ -1347,7 +1347,17 @@ static void apply_css_theme(void)
         "  background: #1a3a6e;\n"
         "}\n"
         "\n"
-        /* Launchpad grid tiles — icon + name, rounded hover */
+        /* Launchpad grid tiles — icon + name, rounded hover.
+         * Parent flowbox + scrolledwindow default to the theme's
+         * "view" background, which is near-black on dark themes and
+         * covers our launcher_bg. Explicitly set those transparent
+         * so the launcher's dark-blue body shows through. */
+        ".nova-launcher scrolledwindow, .nova-launcher scrolledwindow viewport,\n"
+        ".nova-launcher flowbox, .nova-launcher flowboxchild {\n"
+        "  background: transparent;\n"
+        "  background-color: transparent;\n"
+        "}\n"
+        "\n"
         ".nova-launcher-tile {\n"
         "  border-radius: 14px;\n"
         "  padding: 2px;\n"
