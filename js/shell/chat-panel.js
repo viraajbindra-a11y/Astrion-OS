@@ -155,6 +155,7 @@ function buildPanel() {
     </div>
 
     <div class="cp-banner" id="cp-banner"></div>
+    <div class="cp-phase" id="cp-phase" role="status" aria-live="polite"></div>
 
     <div class="cp-messages" id="cp-messages" role="log" aria-live="polite"></div>
 
@@ -663,6 +664,34 @@ function subscribeEvents() {
   eventBus.on('plan:failed', onPlanFailed);
   eventBus.on('plan:clarify', onPlanClarify);
   eventBus.on('interception:preview', onInterceptionPreview);
+
+  // ─── Thought-phase indicator ──────────────────────────────────
+  // Small breadcrumb under the header that narrates what the AI is
+  // currently doing: planning → red-team reviewing → executing step N
+  // → done. Gives the panel a "live agent" feel during Normal/Plan
+  // mode. Cleared when plan:completed / plan:failed fires.
+  eventBus.on('ai:thinking', () => setPhase('\u{1F9E0} Thinking\u2026'));
+  eventBus.on('plan:started', ({ plan }) => setPhase(`\u{1F9E0} Planned ${plan?.steps?.length || 0} step${plan?.steps?.length === 1 ? '' : 's'}`));
+  eventBus.on('interception:preview', ({ cap }) => setPhase(`\u{1F50E} Red-team reviewing: ${cap?.id || 'action'}`));
+  eventBus.on('plan:step:start', ({ index, step }) => setPhase(`\u2699 Running step ${index + 1}: ${step?.cap || '?'}`));
+  eventBus.on('plan:completed', () => setPhase('\u2713 Done', 3000));
+  eventBus.on('plan:failed', ({ error }) => setPhase(`\u2717 ${error || 'failed'}`, 4000));
+}
+
+let phaseTimeout = null;
+function setPhase(text, clearAfterMs) {
+  if (!panelEl) return;
+  const el = panelEl.querySelector('#cp-phase');
+  if (!el) return;
+  el.textContent = text;
+  el.classList.add('visible');
+  if (phaseTimeout) { clearTimeout(phaseTimeout); phaseTimeout = null; }
+  if (clearAfterMs) {
+    phaseTimeout = setTimeout(() => {
+      el.textContent = '';
+      el.classList.remove('visible');
+    }, clearAfterMs);
+  }
 }
 
 function onPlanStarted({ planId, plan, totalTokens, query, reasoning }) {
@@ -939,6 +968,22 @@ function injectStyles() {
     .cp-banner.danger {
       color: #ff6b5e;
       background: rgba(255,69,58,0.08);
+    }
+
+    .cp-phase {
+      max-height: 0;
+      overflow: hidden;
+      padding: 0 14px;
+      font-size: 11px;
+      color: rgba(255,255,255,0.55);
+      font-family: ui-monospace, Menlo, monospace;
+      transition: max-height 0.2s ease;
+      border-bottom: 1px solid transparent;
+    }
+    .cp-phase.visible {
+      max-height: 32px;
+      padding: 5px 14px;
+      border-bottom-color: rgba(255,255,255,0.04);
     }
 
     .cp-messages {
