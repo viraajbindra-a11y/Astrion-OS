@@ -1224,6 +1224,44 @@ static void apply_css_theme(void)
         "  margin-top: -4px;\n"
         "}\n"
         "\n"
+        /* Desktop widgets — dark rounded cards, match web widgets.js */
+        ".nova-widget-card {\n"
+        "  background: #1a1a24;\n"
+        "  border: 1px solid #2a2a3a;\n"
+        "  border-radius: 14px;\n"
+        "  padding: 16px 18px;\n"
+        "  color: #e0e0e0;\n"
+        "}\n"
+        "\n"
+        ".nova-widget-card label {\n"
+        "  font-size: 13px;\n"
+        "  color: #bbbbcc;\n"
+        "  padding: 0;\n"
+        "}\n"
+        "\n"
+        ".nova-widget-value {\n"
+        "  font-size: 13px;\n"
+        "  font-weight: 600;\n"
+        "  color: #ffffff;\n"
+        "}\n"
+        "\n"
+        ".nova-widget-sub {\n"
+        "  font-size: 12px;\n"
+        "  color: #8899aa;\n"
+        "}\n"
+        "\n"
+        ".nova-widget-card progressbar > trough {\n"
+        "  background: #2a2a3a;\n"
+        "  border-radius: 3px;\n"
+        "  min-height: 6px;\n"
+        "}\n"
+        "\n"
+        ".nova-widget-card progressbar > trough > progress {\n"
+        "  background: linear-gradient(90deg, #5ac8fa, #007aff);\n"
+        "  border-radius: 3px;\n"
+        "  min-height: 6px;\n"
+        "}\n"
+        "\n"
         ".nova-launcher {\n"
         "  background: #1e1e2e;\n"
         "  border: 1px solid #3a3a4a;\n"
@@ -1537,6 +1575,175 @@ static gboolean on_desktop_icon_clicked(GtkWidget *w, GdkEventButton *ev, gpoint
     return FALSE;
 }
 
+/* ─── Desktop widgets: CPU / Memory / Clock ─────────────────────
+ * GTK labels + progress bars overlaid on the wallpaper. Refreshed
+ * every 2 seconds from /proc/stat, /proc/meminfo, and wall clock.
+ * Matches the web widgets.js cards visually (rounded, dark, dim
+ * labels + bold values). */
+
+static GtkWidget *widget_cpu_bar = NULL;
+static GtkWidget *widget_cpu_label = NULL;
+static GtkWidget *widget_mem_bar = NULL;
+static GtkWidget *widget_mem_label = NULL;
+static GtkWidget *widget_clock_time = NULL;
+static GtkWidget *widget_clock_date = NULL;
+
+/* Prior-tick CPU readings for delta math (CPU % requires two samples) */
+static unsigned long long cpu_prev_total = 0, cpu_prev_idle = 0;
+
+static gboolean update_desktop_widgets(gpointer data)
+{
+    (void)data;
+
+    /* ─ CPU: read /proc/stat, compute delta, render ── */
+    FILE *f = fopen("/proc/stat", "r");
+    if (f) {
+        unsigned long long user = 0, nice = 0, system = 0, idle = 0,
+                          iowait = 0, irq = 0, softirq = 0;
+        if (fscanf(f, "cpu %llu %llu %llu %llu %llu %llu %llu",
+                   &user, &nice, &system, &idle, &iowait, &irq, &softirq) >= 4) {
+            unsigned long long total = user + nice + system + idle + iowait + irq + softirq;
+            unsigned long long d_total = total - cpu_prev_total;
+            unsigned long long d_idle = idle - cpu_prev_idle;
+            cpu_prev_total = total;
+            cpu_prev_idle = idle;
+            if (d_total > 0 && widget_cpu_bar && widget_cpu_label) {
+                double frac = 1.0 - ((double)d_idle / (double)d_total);
+                if (frac < 0) frac = 0;
+                if (frac > 1) frac = 1;
+                gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(widget_cpu_bar), frac);
+                char buf[32];
+                snprintf(buf, sizeof(buf), "%d%%", (int)(frac * 100));
+                gtk_label_set_text(GTK_LABEL(widget_cpu_label), buf);
+            }
+        }
+        fclose(f);
+    }
+
+    /* ─ Memory: /proc/meminfo, MemTotal - MemAvailable ── */
+    f = fopen("/proc/meminfo", "r");
+    if (f) {
+        char line[256];
+        unsigned long mem_total = 0, mem_avail = 0;
+        while (fgets(line, sizeof(line), f)) {
+            if (sscanf(line, "MemTotal: %lu kB", &mem_total) == 1) continue;
+            if (sscanf(line, "MemAvailable: %lu kB", &mem_avail) == 1) continue;
+            if (mem_total && mem_avail) break;
+        }
+        fclose(f);
+        if (mem_total > 0 && widget_mem_bar && widget_mem_label) {
+            double frac = (double)(mem_total - mem_avail) / (double)mem_total;
+            if (frac < 0) frac = 0;
+            if (frac > 1) frac = 1;
+            gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(widget_mem_bar), frac);
+            char buf[32];
+            snprintf(buf, sizeof(buf), "%d%%", (int)(frac * 100));
+            gtk_label_set_text(GTK_LABEL(widget_mem_label), buf);
+        }
+    }
+
+    /* ─ Clock: big time + date below ── */
+    if (widget_clock_time && widget_clock_date) {
+        time_t now = time(NULL);
+        struct tm *lt = localtime(&now);
+        if (lt) {
+            char tbuf[16], dbuf[64];
+            strftime(tbuf, sizeof(tbuf), "%H:%M", lt);
+            strftime(dbuf, sizeof(dbuf), "%a, %b %d", lt);
+            char markup_t[64];
+            snprintf(markup_t, sizeof(markup_t),
+                "<span font='36' weight='300' foreground='#ffffff'>%s</span>", tbuf);
+            gtk_label_set_markup(GTK_LABEL(widget_clock_time), markup_t);
+            gtk_label_set_text(GTK_LABEL(widget_clock_date), dbuf);
+        }
+    }
+
+    return G_SOURCE_CONTINUE;
+}
+
+static void create_desktop_widgets(GtkWidget *overlay)
+{
+    /* Outer vertical stack for both cards — top-left of desktop */
+    GtkWidget *stack = gtk_box_new(GTK_ORIENTATION_VERTICAL, 12);
+    gtk_widget_set_halign(stack, GTK_ALIGN_START);
+    gtk_widget_set_valign(stack, GTK_ALIGN_START);
+    gtk_widget_set_margin_top(stack, PANEL_HEIGHT + 20);
+    gtk_widget_set_margin_start(stack, 24);
+
+    /* ─── System card: CPU + Memory bars ───────────────────────── */
+    GtkWidget *sys_card = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+    GtkStyleContext *sys_ctx = gtk_widget_get_style_context(sys_card);
+    gtk_style_context_add_class(sys_ctx, "nova-widget-card");
+    gtk_widget_set_size_request(sys_card, 280, -1);
+
+    GtkWidget *sys_title = gtk_label_new(NULL);
+    gtk_label_set_markup(GTK_LABEL(sys_title),
+        "<span font='10' weight='600' foreground='#9999aa' letter_spacing='1500'>SYSTEM</span>");
+    gtk_widget_set_halign(sys_title, GTK_ALIGN_START);
+    gtk_box_pack_start(GTK_BOX(sys_card), sys_title, FALSE, FALSE, 0);
+
+    /* CPU row */
+    GtkWidget *cpu_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    GtkWidget *cpu_title = gtk_label_new("CPU");
+    gtk_widget_set_halign(cpu_title, GTK_ALIGN_START);
+    gtk_widget_set_hexpand(cpu_title, TRUE);
+    gtk_box_pack_start(GTK_BOX(cpu_row), cpu_title, TRUE, TRUE, 0);
+    widget_cpu_label = gtk_label_new("--");
+    GtkStyleContext *cpu_lbl_ctx = gtk_widget_get_style_context(widget_cpu_label);
+    gtk_style_context_add_class(cpu_lbl_ctx, "nova-widget-value");
+    gtk_box_pack_end(GTK_BOX(cpu_row), widget_cpu_label, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(sys_card), cpu_row, FALSE, FALSE, 0);
+    widget_cpu_bar = gtk_progress_bar_new();
+    gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(widget_cpu_bar), 0.0);
+    gtk_box_pack_start(GTK_BOX(sys_card), widget_cpu_bar, FALSE, FALSE, 0);
+
+    /* Memory row */
+    GtkWidget *mem_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    GtkWidget *mem_title = gtk_label_new("Memory");
+    gtk_widget_set_halign(mem_title, GTK_ALIGN_START);
+    gtk_widget_set_hexpand(mem_title, TRUE);
+    gtk_box_pack_start(GTK_BOX(mem_row), mem_title, TRUE, TRUE, 0);
+    widget_mem_label = gtk_label_new("--");
+    GtkStyleContext *mem_lbl_ctx = gtk_widget_get_style_context(widget_mem_label);
+    gtk_style_context_add_class(mem_lbl_ctx, "nova-widget-value");
+    gtk_box_pack_end(GTK_BOX(mem_row), widget_mem_label, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(sys_card), mem_row, FALSE, FALSE, 0);
+    widget_mem_bar = gtk_progress_bar_new();
+    gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(widget_mem_bar), 0.0);
+    gtk_box_pack_start(GTK_BOX(sys_card), widget_mem_bar, FALSE, FALSE, 0);
+
+    gtk_box_pack_start(GTK_BOX(stack), sys_card, FALSE, FALSE, 0);
+
+    /* ─── Clock card: big time + date ─────────────────────────── */
+    GtkWidget *clock_card = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+    GtkStyleContext *clk_ctx = gtk_widget_get_style_context(clock_card);
+    gtk_style_context_add_class(clk_ctx, "nova-widget-card");
+    gtk_widget_set_size_request(clock_card, 280, -1);
+
+    widget_clock_time = gtk_label_new(NULL);
+    gtk_label_set_markup(GTK_LABEL(widget_clock_time),
+        "<span font='36' weight='300' foreground='#ffffff'>00:00</span>");
+    gtk_widget_set_halign(widget_clock_time, GTK_ALIGN_START);
+    gtk_box_pack_start(GTK_BOX(clock_card), widget_clock_time, FALSE, FALSE, 0);
+
+    widget_clock_date = gtk_label_new("—");
+    GtkStyleContext *date_ctx = gtk_widget_get_style_context(widget_clock_date);
+    gtk_style_context_add_class(date_ctx, "nova-widget-sub");
+    gtk_widget_set_halign(widget_clock_date, GTK_ALIGN_START);
+    gtk_box_pack_start(GTK_BOX(clock_card), widget_clock_date, FALSE, FALSE, 0);
+
+    gtk_box_pack_start(GTK_BOX(stack), clock_card, FALSE, FALSE, 0);
+
+    gtk_overlay_add_overlay(GTK_OVERLAY(overlay), stack);
+
+    /* Prime the widgets so they don't show "--" for 2 seconds on
+     * boot. Safe to call before widget_show_all — gtk_label_set_text
+     * just caches the value and renders when the widget becomes
+     * visible. Then schedule the periodic 2s refresh. */
+    update_desktop_widgets(NULL);
+    g_timeout_add_seconds(2, update_desktop_widgets, NULL);
+}
+
 static void create_desktop(void)
 {
     desktop_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
@@ -1654,6 +1861,12 @@ static void create_desktop(void)
         }
     }
     gtk_overlay_add_overlay(GTK_OVERLAY(overlay), icon_grid);
+
+    /* ─── Desktop widgets (top-left) ────────────────────────────
+     * Mirrors the web widgets.js set: System (CPU / Memory /
+     * Battery) + big Clock. Drawn as GTK widgets overlaid on the
+     * wallpaper, updated every 2 seconds from /proc + date. */
+    create_desktop_widgets(overlay);
 
     /* Invisible event box on top to catch right-clicks */
     GtkWidget *evbox = gtk_event_box_new();
@@ -2066,12 +2279,24 @@ static void create_panel(void)
     GtkWidget *left_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     gtk_box_pack_start(GTK_BOX(hbox), left_box, FALSE, FALSE, 0);
 
-    /* Astrion menu button */
+    /* Astrion menu button — prefer the real SVG logo (matches the web
+     * menubar exactly: white circle stroke + inscribed diamond). Falls
+     * back to the \xE2\x97\x86 glyph character if the SVG can't be loaded. */
     GtkWidget *apple_btn = gtk_button_new();
-    GtkWidget *apple_label = gtk_label_new(NULL);
-    gtk_label_set_markup(GTK_LABEL(apple_label),
-        "<span weight='bold' foreground='#007aff'> \xE2\x97\x86 </span>");
-    gtk_container_add(GTK_CONTAINER(apple_btn), apple_label);
+    GdkPixbuf *logo_pixbuf = gdk_pixbuf_new_from_file_at_size(
+        "/opt/nova-os/assets/icons/astrion-logo.svg", 22, 22, NULL);
+    if (logo_pixbuf) {
+        GtkWidget *logo_img = gtk_image_new_from_pixbuf(logo_pixbuf);
+        g_object_unref(logo_pixbuf);
+        gtk_widget_set_margin_start(logo_img, 8);
+        gtk_widget_set_margin_end(logo_img, 4);
+        gtk_container_add(GTK_CONTAINER(apple_btn), logo_img);
+    } else {
+        GtkWidget *apple_label = gtk_label_new(NULL);
+        gtk_label_set_markup(GTK_LABEL(apple_label),
+            "<span weight='bold' foreground='#ffffff'> \xE2\x97\x86 </span>");
+        gtk_container_add(GTK_CONTAINER(apple_btn), apple_label);
+    }
     gtk_button_set_relief(GTK_BUTTON(apple_btn), GTK_RELIEF_NONE);
     GtkStyleContext *apple_ctx = gtk_widget_get_style_context(apple_btn);
     gtk_style_context_add_class(apple_ctx, "nova-panel-apple");

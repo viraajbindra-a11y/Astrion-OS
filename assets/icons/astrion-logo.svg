@@ -1,0 +1,8 @@
+<svg width="80" height="80" viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Astrion identity mark: circle with inscribed diamond.
+       Same geometry as the web menubar logo (index.html line 99).
+       Scaled up from 16×16 to 80×80 so nova-shell's pixbuf loader
+       can pick a crisp icon for any target size. -->
+  <circle cx="40" cy="40" r="36" stroke="white" stroke-width="3" fill="none"/>
+  <path d="M28 40 L40 28 L52 40 L40 52 Z" fill="white"/>
+</svg>
