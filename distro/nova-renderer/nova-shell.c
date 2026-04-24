@@ -359,9 +359,9 @@ static void draw_rounded_rect(cairo_t *cr, double x, double y,
 
 static gboolean update_battery(gpointer data)
 {
-    GtkLabel *label = GTK_LABEL(data);
-    char cap_buf[16] = "??";
-    char stat_buf[32] = "";
+    GtkWidget *label = GTK_WIDGET(data);
+    char cap_buf[16] = {0};
+    char stat_buf[32] = {0};
 
     const char *paths[] = {
         "/sys/class/power_supply/BAT0",
@@ -370,13 +370,16 @@ static gboolean update_battery(gpointer data)
         NULL
     };
 
+    gboolean found = FALSE;
     for (int i = 0; paths[i]; i++) {
         char path[256];
         snprintf(path, sizeof(path), "%s/capacity", paths[i]);
         FILE *f = fopen(path, "r");
         if (f) {
-            if (fgets(cap_buf, sizeof(cap_buf), f))
+            if (fgets(cap_buf, sizeof(cap_buf), f)) {
                 cap_buf[strcspn(cap_buf, "\n")] = 0;
+                if (cap_buf[0]) found = TRUE;
+            }
             fclose(f);
 
             snprintf(path, sizeof(path), "%s/status", paths[i]);
@@ -390,6 +393,15 @@ static gboolean update_battery(gpointer data)
         }
     }
 
+    /* Desktops + QEMU + broken ACPI report no battery. Rather than
+     * showing a sad "??%" the label is hidden entirely — matching
+     * the desktop widget + the web menubar's behavior. */
+    if (!found) {
+        gtk_widget_set_visible(label, FALSE);
+        return TRUE;
+    }
+    gtk_widget_set_visible(label, TRUE);
+
     char display[128];
     if (strstr(stat_buf, "Charging"))
         snprintf(display, sizeof(display),
@@ -398,7 +410,7 @@ static gboolean update_battery(gpointer data)
         snprintf(display, sizeof(display),
             "<span foreground='#c0c0c0'>\xF0\x9F\x94\x8B %s%%</span>", cap_buf);
 
-    gtk_label_set_markup(label, display);
+    gtk_label_set_markup(GTK_LABEL(label), display);
     return TRUE;
 }
 
@@ -427,8 +439,11 @@ static gboolean update_wifi(gpointer data)
                     "<span foreground='#c0c0c0'>\xF0\x9F\x93\xB6 Connected</span>");
             }
         } else {
+            /* Not connected — dim the icon, drop the "Off" text.
+             * Keeps the icon visible as an affordance to click the
+             * Wi-Fi picker. */
             snprintf(display, sizeof(display),
-                "<span foreground='#888888'>\xF0\x9F\x93\xB6 Off</span>");
+                "<span foreground='#555566'>\xF0\x9F\x93\xB6</span>");
         }
         pclose(fp);
     } else {
