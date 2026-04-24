@@ -1235,11 +1235,24 @@ static void apply_css_theme(void)
         "  font-size: 42px;\n"
         "  padding: 6px 8px;\n"
         "  border-radius: 14px;\n"
-        "  transition: 180ms ease;\n"
+        "  transition: all 180ms cubic-bezier(.3, .9, .3, 1);\n"
+        "  border: none;\n"
+        "  min-width: 0;\n"
+        "  min-height: 0;\n"
         "}\n"
         "\n"
         ".nova-dock-icon:hover {\n"
         "  background: #26263a;\n"
+        "  padding: 2px 4px;\n"  /* Slight pop — GTK can't scale, but tighter padding gives lift */
+        "}\n"
+        "\n"
+        ".nova-dock-icon image {\n"
+        "  -gtk-icon-transform: scale(1);\n"
+        "  transition: -gtk-icon-transform 180ms cubic-bezier(.3, .9, .3, 1);\n"
+        "}\n"
+        "\n"
+        ".nova-dock-icon:hover image {\n"
+        "  -gtk-icon-transform: scale(1.12);\n"
         "}\n"
         "\n"
         ".nova-dock-dot {\n"
@@ -1614,6 +1627,10 @@ static GtkWidget *widget_bat_label = NULL;
 static GtkWidget *widget_bat_row = NULL;  /* hidden if no battery found */
 static GtkWidget *widget_clock_time = NULL;
 static GtkWidget *widget_clock_date = NULL;
+static GtkWidget *widget_weather_location = NULL;
+static GtkWidget *widget_weather_temp = NULL;
+static GtkWidget *widget_weather_condition = NULL;
+static time_t widget_weather_last_fetch = 0;
 
 /* Prior-tick CPU readings for delta math (CPU % requires two samples) */
 static unsigned long long cpu_prev_total = 0, cpu_prev_idle = 0;
@@ -1708,6 +1725,53 @@ static gboolean update_desktop_widgets(gpointer data)
         }
     }
 
+    /* ─ Weather: read the cache file written by a background curl ──
+     * wttr.in returns plain text formatted as:
+     *     New York\n
+     *     72°F\n
+     *     Partly cloudy\n
+     * The fetch runs as a detached `curl -s --max-time 6` once every
+     * 30 minutes (see weather_refresh_cache below) so reading here is
+     * zero-cost. Cache missing → show "—" placeholder. */
+    {
+        time_t now = time(NULL);
+        /* Kick off a background refresh every 30 min. First one fires
+         * 10 seconds after shell startup so the shell UI appears fast. */
+        if (widget_weather_last_fetch == 0 || (now - widget_weather_last_fetch) > 1800) {
+            widget_weather_last_fetch = now;
+            g_spawn_command_line_async(
+                "sh -c 'curl -s --max-time 6 \"wttr.in/?format=%l\\n%t\\n%C\\n\" "
+                "> /tmp/astrion-weather.cache.new 2>/dev/null && "
+                "mv /tmp/astrion-weather.cache.new /tmp/astrion-weather.cache 2>/dev/null'",
+                NULL);
+        }
+        FILE *wf = fopen("/tmp/astrion-weather.cache", "r");
+        if (wf && widget_weather_location) {
+            char loc[128] = {0}, temp[32] = {0}, cond[128] = {0};
+            if (fgets(loc, sizeof(loc), wf))  loc[strcspn(loc, "\n")] = 0;
+            if (fgets(temp, sizeof(temp), wf)) temp[strcspn(temp, "\n")] = 0;
+            if (fgets(cond, sizeof(cond), wf)) cond[strcspn(cond, "\n")] = 0;
+            if (loc[0]) {
+                /* Preserve kicker styling (caps, letter-spaced, dim)
+                 * when swapping the placeholder for a real city name. */
+                char loc_markup[256];
+                snprintf(loc_markup, sizeof(loc_markup),
+                    "<span font='10' weight='600' foreground='#9999aa' letter_spacing='1500'>%s</span>",
+                    loc);
+                gtk_label_set_markup(GTK_LABEL(widget_weather_location), loc_markup);
+            }
+            if (temp[0] && widget_weather_temp) {
+                char markup[64];
+                snprintf(markup, sizeof(markup),
+                    "<span font='32' weight='300' foreground='#ffffff'>%s</span>", temp);
+                gtk_label_set_markup(GTK_LABEL(widget_weather_temp), markup);
+            }
+            if (cond[0] && widget_weather_condition)
+                gtk_label_set_text(GTK_LABEL(widget_weather_condition), cond);
+        }
+        if (wf) fclose(wf);
+    }
+
     /* ─ Clock: big time + date below ── */
     if (widget_clock_time && widget_clock_date) {
         time_t now = time(NULL);
@@ -1800,6 +1864,32 @@ static void create_desktop_widgets(GtkWidget *overlay)
      * before gtk_widget_show_all() via the prime call below. */
 
     gtk_box_pack_start(GTK_BOX(stack), sys_card, FALSE, FALSE, 0);
+
+    /* ─── Weather card: city + big temp + condition ──────────────── */
+    GtkWidget *wx_card = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
+    GtkStyleContext *wx_ctx = gtk_widget_get_style_context(wx_card);
+    gtk_style_context_add_class(wx_ctx, "nova-widget-card");
+    gtk_widget_set_size_request(wx_card, 280, -1);
+
+    widget_weather_location = gtk_label_new(NULL);
+    gtk_label_set_markup(GTK_LABEL(widget_weather_location),
+        "<span font='10' weight='600' foreground='#9999aa' letter_spacing='1500'>WEATHER</span>");
+    gtk_widget_set_halign(widget_weather_location, GTK_ALIGN_START);
+    gtk_box_pack_start(GTK_BOX(wx_card), widget_weather_location, FALSE, FALSE, 0);
+
+    widget_weather_temp = gtk_label_new(NULL);
+    gtk_label_set_markup(GTK_LABEL(widget_weather_temp),
+        "<span font='32' weight='300' foreground='#ffffff'>—</span>");
+    gtk_widget_set_halign(widget_weather_temp, GTK_ALIGN_START);
+    gtk_box_pack_start(GTK_BOX(wx_card), widget_weather_temp, FALSE, FALSE, 0);
+
+    widget_weather_condition = gtk_label_new("—");
+    GtkStyleContext *wxc_ctx = gtk_widget_get_style_context(widget_weather_condition);
+    gtk_style_context_add_class(wxc_ctx, "nova-widget-sub");
+    gtk_widget_set_halign(widget_weather_condition, GTK_ALIGN_START);
+    gtk_box_pack_start(GTK_BOX(wx_card), widget_weather_condition, FALSE, FALSE, 0);
+
+    gtk_box_pack_start(GTK_BOX(stack), wx_card, FALSE, FALSE, 0);
 
     /* ─── Clock card: big time + date ─────────────────────────── */
     GtkWidget *clock_card = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
