@@ -87,6 +87,15 @@ export function getRemainingBudget() {
   return Math.max(0, DAILY_TOKEN_LIMIT - getBudgetUsed());
 }
 
+export function getBudgetStats() {
+  return {
+    used: getBudgetUsed(),
+    limit: DAILY_TOKEN_LIMIT,
+    remaining: Math.max(0, DAILY_TOKEN_LIMIT - getBudgetUsed()),
+    day: getTodayKey(),
+  };
+}
+
 // ═══════════════════════════════════════════════════════════════
 // EXECUTOR
 // ═══════════════════════════════════════════════════════════════

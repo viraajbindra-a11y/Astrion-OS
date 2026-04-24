@@ -170,6 +170,7 @@ function buildPanel() {
     <div class="cp-hint" id="cp-hint">
       Enter to send \u00B7 Shift+Enter for newline \u00B7 Ctrl+Shift+K to toggle
     </div>
+    <div class="cp-footer-stats" id="cp-footer-stats" aria-live="polite"></div>
   `;
   document.body.appendChild(panelEl);
 
@@ -214,6 +215,28 @@ function buildPanel() {
 
   applyModeUI();
   renderEmpty();
+  updateFooterStats();
+  // Refresh stats after each plan + on a slow timer (resets at midnight
+  // via getTodayKey). 30s is fast enough to show recent cost + cheap.
+  eventBus.on('plan:completed', updateFooterStats);
+  eventBus.on('plan:failed', updateFooterStats);
+  setInterval(updateFooterStats, 30000);
+}
+
+async function updateFooterStats() {
+  if (!panelEl) return;
+  const el = panelEl.querySelector('#cp-footer-stats');
+  if (!el) return;
+  try {
+    const { getBudgetStats } = await import('../kernel/intent-executor.js');
+    const b = getBudgetStats();
+    const fraction = b.limit > 0 ? b.used / b.limit : 0;
+    const hue = fraction < 0.6 ? 150 : fraction < 0.85 ? 40 : 0;
+    el.innerHTML = `
+      <span class="cp-budget-dot" style="background:hsl(${hue},70%,55%);"></span>
+      <span class="cp-budget-text">Budget \u00B7 ${b.used}/${b.limit} irreversibility tokens used today</span>
+    `;
+  } catch { /* silent */ }
 }
 
 function applyModeUI() {
@@ -1260,11 +1283,26 @@ function injectStyles() {
     .cp-send:hover { filter: brightness(1.1); }
 
     .cp-hint {
-      padding: 0 12px 8px 12px;
+      padding: 0 12px 4px 12px;
       font-size: 10px;
       color: rgba(255,255,255,0.35);
       text-align: center;
     }
+
+    .cp-footer-stats {
+      padding: 0 12px 8px 12px;
+      font-size: 10px;
+      color: rgba(255,255,255,0.45);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+    .cp-budget-dot {
+      display: inline-block;
+      width: 6px; height: 6px; border-radius: 50%;
+    }
+    .cp-budget-text { font-family: ui-monospace, Menlo, monospace; }
 
     @media (max-width: 500px) {
       .chat-panel { width: 100vw; max-width: 100vw; border-radius: 0; }
