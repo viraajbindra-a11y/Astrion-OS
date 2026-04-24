@@ -1197,6 +1197,30 @@ static void apply_css_theme(void)
         "  color: #c0c0c0;\n"
         "}\n"
         "\n"
+        /* Menubar menu items — hover state matches the web menubar */
+        ".nova-menu-item {\n"
+        "  padding: 2px 10px;\n"
+        "  border-radius: 6px;\n"
+        "  min-height: 0;\n"
+        "  background: transparent;\n"
+        "  border: none;\n"
+        "  box-shadow: none;\n"
+        "}\n"
+        "\n"
+        ".nova-menu-item:hover {\n"
+        "  background: #26263a;\n"
+        "}\n"
+        "\n"
+        ".nova-menu-item:active {\n"
+        "  background: #3a3a4a;\n"
+        "}\n"
+        "\n"
+        ".nova-menu-item label {\n"
+        "  font-size: 15px;\n"
+        "  color: #d0d0d0;\n"
+        "  padding: 0;\n"
+        "}\n"
+        "\n"
         /* Solid colors only — lesson 1: rgba() without a compositor\n"
          * renders WHITE on X11. Visually this is close enough to the\n"
          * web dock's semi-transparent pill. */
@@ -1585,6 +1609,9 @@ static GtkWidget *widget_cpu_bar = NULL;
 static GtkWidget *widget_cpu_label = NULL;
 static GtkWidget *widget_mem_bar = NULL;
 static GtkWidget *widget_mem_label = NULL;
+static GtkWidget *widget_bat_bar = NULL;
+static GtkWidget *widget_bat_label = NULL;
+static GtkWidget *widget_bat_row = NULL;  /* hidden if no battery found */
 static GtkWidget *widget_clock_time = NULL;
 static GtkWidget *widget_clock_date = NULL;
 
@@ -1639,6 +1666,45 @@ static gboolean update_desktop_widgets(gpointer data)
             char buf[32];
             snprintf(buf, sizeof(buf), "%d%%", (int)(frac * 100));
             gtk_label_set_text(GTK_LABEL(widget_mem_label), buf);
+        }
+    }
+
+    /* ─ Battery: /sys/class/power_supply/BAT*/capacity ── */
+    /* Surface Pro 6 exposes BAT0 or BAT1 depending on firmware.
+     * QEMU + desktop machines typically have nothing here — the row
+     * stays hidden (set visible=FALSE) so the card doesn't show a
+     * dead "-- %" slot. */
+    {
+        const char *paths[] = {
+            "/sys/class/power_supply/BAT0/capacity",
+            "/sys/class/power_supply/BAT1/capacity",
+            "/sys/class/power_supply/battery/capacity",
+            NULL
+        };
+        int battery_pct = -1;
+        for (int i = 0; paths[i] != NULL; i++) {
+            f = fopen(paths[i], "r");
+            if (f) {
+                int val = -1;
+                if (fscanf(f, "%d", &val) == 1 && val >= 0 && val <= 100) {
+                    battery_pct = val;
+                }
+                fclose(f);
+                if (battery_pct >= 0) break;
+            }
+        }
+        if (widget_bat_row && widget_bat_bar && widget_bat_label) {
+            if (battery_pct >= 0) {
+                gtk_widget_set_visible(widget_bat_row, TRUE);
+                gtk_widget_set_visible(widget_bat_bar, TRUE);
+                gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(widget_bat_bar), battery_pct / 100.0);
+                char buf[16];
+                snprintf(buf, sizeof(buf), "%d%%", battery_pct);
+                gtk_label_set_text(GTK_LABEL(widget_bat_label), buf);
+            } else {
+                gtk_widget_set_visible(widget_bat_row, FALSE);
+                gtk_widget_set_visible(widget_bat_bar, FALSE);
+            }
         }
     }
 
@@ -1711,6 +1777,27 @@ static void create_desktop_widgets(GtkWidget *overlay)
     widget_mem_bar = gtk_progress_bar_new();
     gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(widget_mem_bar), 0.0);
     gtk_box_pack_start(GTK_BOX(sys_card), widget_mem_bar, FALSE, FALSE, 0);
+
+    /* Battery row — hidden by default; update_desktop_widgets() shows it
+     * if /sys/class/power_supply/BAT*/capacity returns a real value. */
+    widget_bat_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+    GtkWidget *bat_title = gtk_label_new("Battery");
+    gtk_widget_set_halign(bat_title, GTK_ALIGN_START);
+    gtk_widget_set_hexpand(bat_title, TRUE);
+    gtk_box_pack_start(GTK_BOX(widget_bat_row), bat_title, TRUE, TRUE, 0);
+    widget_bat_label = gtk_label_new("--");
+    GtkStyleContext *bat_lbl_ctx = gtk_widget_get_style_context(widget_bat_label);
+    gtk_style_context_add_class(bat_lbl_ctx, "nova-widget-value");
+    gtk_box_pack_end(GTK_BOX(widget_bat_row), widget_bat_label, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(sys_card), widget_bat_row, FALSE, FALSE, 0);
+    widget_bat_bar = gtk_progress_bar_new();
+    gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(widget_bat_bar), 0.0);
+    gtk_box_pack_start(GTK_BOX(sys_card), widget_bat_bar, FALSE, FALSE, 0);
+    /* Row is visible by default; the FIRST update tick hides it if no
+     * battery is detected. Avoids the no_show_all + show_all-children
+     * mess. The "--" label it shows for ~100 ms is invisible in
+     * practice because update_desktop_widgets() runs synchronously
+     * before gtk_widget_show_all() via the prime call below. */
 
     gtk_box_pack_start(GTK_BOX(stack), sys_card, FALSE, FALSE, 0);
 
@@ -2311,42 +2398,26 @@ static void create_panel(void)
     pango_attr_list_unref(attrs);
     gtk_box_pack_start(GTK_BOX(left_box), app_name, FALSE, FALSE, 4);
 
-    /* Menu items: File, Edit, View, Window, Help — functional dropdowns */
+    /* Menu items: File, Edit, View, Window, Help — GtkButton variants
+     * so they get :hover CSS states for free. GtkButton still emits
+     * "button-press-event" with the same GdkEventButton signature, so
+     * the existing handlers work unchanged. */
     {
-        /* File menu */
-        GtkWidget *file_lbl = gtk_label_new("File");
-        GtkWidget *file_evbox = gtk_event_box_new();
-        gtk_container_add(GTK_CONTAINER(file_evbox), file_lbl);
-        g_signal_connect(file_evbox, "button-press-event", G_CALLBACK(on_file_menu_click), NULL);
-        gtk_box_pack_start(GTK_BOX(left_box), file_evbox, FALSE, FALSE, 8);
-
-        /* Edit menu */
-        GtkWidget *edit_lbl = gtk_label_new("Edit");
-        GtkWidget *edit_evbox = gtk_event_box_new();
-        gtk_container_add(GTK_CONTAINER(edit_evbox), edit_lbl);
-        g_signal_connect(edit_evbox, "button-press-event", G_CALLBACK(on_edit_menu_click), NULL);
-        gtk_box_pack_start(GTK_BOX(left_box), edit_evbox, FALSE, FALSE, 8);
-
-        /* View menu */
-        GtkWidget *view_lbl = gtk_label_new("View");
-        GtkWidget *view_evbox = gtk_event_box_new();
-        gtk_container_add(GTK_CONTAINER(view_evbox), view_lbl);
-        g_signal_connect(view_evbox, "button-press-event", G_CALLBACK(on_view_menu_click), NULL);
-        gtk_box_pack_start(GTK_BOX(left_box), view_evbox, FALSE, FALSE, 8);
-
-        /* Window menu */
-        GtkWidget *win_lbl = gtk_label_new("Window");
-        GtkWidget *win_evbox = gtk_event_box_new();
-        gtk_container_add(GTK_CONTAINER(win_evbox), win_lbl);
-        g_signal_connect(win_evbox, "button-press-event", G_CALLBACK(on_window_menu_click), NULL);
-        gtk_box_pack_start(GTK_BOX(left_box), win_evbox, FALSE, FALSE, 8);
-
-        /* Help menu */
-        GtkWidget *help_lbl = gtk_label_new("Help");
-        GtkWidget *help_evbox = gtk_event_box_new();
-        gtk_container_add(GTK_CONTAINER(help_evbox), help_lbl);
-        g_signal_connect(help_evbox, "button-press-event", G_CALLBACK(on_help_menu_click), NULL);
-        gtk_box_pack_start(GTK_BOX(left_box), help_evbox, FALSE, FALSE, 8);
+        struct { const char *label; GCallback cb; } items[] = {
+            { "File",   G_CALLBACK(on_file_menu_click)   },
+            { "Edit",   G_CALLBACK(on_edit_menu_click)   },
+            { "View",   G_CALLBACK(on_view_menu_click)   },
+            { "Window", G_CALLBACK(on_window_menu_click) },
+            { "Help",   G_CALLBACK(on_help_menu_click)   },
+        };
+        for (int i = 0; i < 5; i++) {
+            GtkWidget *btn = gtk_button_new_with_label(items[i].label);
+            gtk_button_set_relief(GTK_BUTTON(btn), GTK_RELIEF_NONE);
+            GtkStyleContext *c = gtk_widget_get_style_context(btn);
+            gtk_style_context_add_class(c, "nova-menu-item");
+            g_signal_connect(btn, "button-press-event", items[i].cb, NULL);
+            gtk_box_pack_start(GTK_BOX(left_box), btn, FALSE, FALSE, 2);
+        }
     }
 
     /* ─── Spacer ─── */
