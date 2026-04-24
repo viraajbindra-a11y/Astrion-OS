@@ -385,12 +385,45 @@ function messageNode(msg) {
       row.appendChild(renderClarifyCard(msg));
     } else {
       const meta = msg.meta?.brain ? `<span class="cp-bubble-meta">${escapeHtml(msg.meta.brain)}</span>` : '';
+      const isStreaming = !!msg.meta?.streaming;
+      const hasText = msg.text && msg.text.length > 2;  /* skip "…" placeholder */
+      const copyId = `cpcopy-${msg.id}`;
+      const regenId = `cpregen-${msg.id}`;
       row.innerHTML = `
         <div class="cp-bubble assistant">
           <div class="cp-bubble-text">${escapeHtml(msg.text)}</div>
           ${meta}
+          ${hasText && !isStreaming ? `
+            <div class="cp-bubble-actions">
+              <button class="cp-bubble-action" id="${copyId}" title="Copy reply">\u2398</button>
+              <button class="cp-bubble-action" id="${regenId}" title="Regenerate">\u21BB</button>
+            </div>
+          ` : ''}
         </div>
       `;
+      /* Wire Copy + Regenerate after DOM insertion */
+      setTimeout(() => {
+        const copyBtn = document.getElementById(copyId);
+        const regenBtn = document.getElementById(regenId);
+        copyBtn?.addEventListener('click', async () => {
+          try {
+            await navigator.clipboard.writeText(msg.text || '');
+            copyBtn.innerHTML = '\u2713';
+            setTimeout(() => { copyBtn.innerHTML = '\u2398'; }, 1200);
+          } catch {}
+        });
+        regenBtn?.addEventListener('click', () => {
+          /* Walk back to find the most recent user message above this one */
+          const idx = messages.indexOf(msg);
+          for (let i = idx - 1; i >= 0; i--) {
+            if (messages[i].role === 'user') {
+              inputEl.value = messages[i].text;
+              handleSend();
+              return;
+            }
+          }
+        });
+      }, 0);
     }
   }
   return row;
@@ -1129,6 +1162,29 @@ function injectStyles() {
       color: rgba(255,255,255,0.4);
       text-transform: uppercase;
       letter-spacing: 0.05em;
+    }
+    .cp-bubble-actions {
+      display: flex;
+      gap: 4px;
+      margin-top: 6px;
+      opacity: 0.55;
+      transition: opacity 0.15s ease;
+    }
+    .cp-bubble.assistant:hover .cp-bubble-actions { opacity: 1; }
+    .cp-bubble-action {
+      width: 22px; height: 22px;
+      padding: 0;
+      border: 1px solid rgba(255,255,255,0.1);
+      background: rgba(255,255,255,0.04);
+      border-radius: 5px;
+      color: rgba(255,255,255,0.7);
+      font-size: 12px;
+      cursor: pointer;
+      font-family: inherit;
+    }
+    .cp-bubble-action:hover {
+      background: rgba(255,255,255,0.1);
+      color: white;
     }
     .cp-mode-dot {
       display: inline-block;
