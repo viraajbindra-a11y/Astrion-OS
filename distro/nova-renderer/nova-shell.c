@@ -1332,6 +1332,23 @@ static void apply_css_theme(void)
         "  background: #1a3a6e;\n"
         "}\n"
         "\n"
+        /* Launchpad grid tiles — icon + name, rounded hover */
+        ".nova-launcher-tile {\n"
+        "  border-radius: 14px;\n"
+        "  padding: 2px;\n"
+        "  transition: background 160ms ease;\n"
+        "}\n"
+        "\n"
+        ".nova-launcher-tile:hover {\n"
+        "  background: #26263a;\n"
+        "}\n"
+        "\n"
+        ".nova-launcher-tile label {\n"
+        "  font-size: 12px;\n"
+        "  color: #dddddd;\n"
+        "  padding: 0;\n"
+        "}\n"
+        "\n"
         ".nova-window-titlebar {\n"
         "  background: #282837;\n"
         "  border-bottom: 1px solid #1a1a28;\n"
@@ -2785,27 +2802,95 @@ static void update_dock(void)
  * App Launcher (Spotlight)
  * ═══════════════════════════════════════════════ */
 
-static void on_launcher_entry_changed(GtkEditable *editable, gpointer data)
+/* Clear every child of launcher_results. */
+static void launcher_results_clear(void)
 {
-    const char *text = gtk_entry_get_text(GTK_ENTRY(launcher_entry));
-    if (!text || strlen(text) == 0) {
-        /* Clear results */
-        GList *children = gtk_container_get_children(GTK_CONTAINER(launcher_results));
-        for (GList *l = children; l; l = l->next) {
-            gtk_widget_destroy(GTK_WIDGET(l->data));
-        }
-        g_list_free(children);
-        return;
-    }
-
-    /* Clear previous results */
     GList *children = gtk_container_get_children(GTK_CONTAINER(launcher_results));
-    for (GList *l = children; l; l = l->next) {
-        gtk_widget_destroy(GTK_WIDGET(l->data));
-    }
+    for (GList *l = children; l; l = l->next) gtk_widget_destroy(GTK_WIDGET(l->data));
     g_list_free(children);
+}
 
-    /* Search apps */
+/* Build ONE grid tile for an app — used by the empty-state Launchpad
+ * view. Larger icon + name below, click launches. */
+static GtkWidget *launcher_make_tile(NovaApp *app)
+{
+    GtkWidget *tile = gtk_event_box_new();
+    GtkStyleContext *t_ctx = gtk_widget_get_style_context(tile);
+    gtk_style_context_add_class(t_ctx, "nova-launcher-tile");
+
+    GtkWidget *col = gtk_box_new(GTK_ORIENTATION_VERTICAL, 6);
+    gtk_widget_set_margin_top(col, 12);
+    gtk_widget_set_margin_bottom(col, 12);
+    gtk_widget_set_margin_start(col, 8);
+    gtk_widget_set_margin_end(col, 8);
+    gtk_container_add(GTK_CONTAINER(tile), col);
+
+    /* Prefer SVG icon (matches web), fall back to emoji */
+    char icon_path[512];
+    snprintf(icon_path, sizeof(icon_path),
+             "/opt/nova-os/assets/icons/%s.svg", app->id);
+    GdkPixbuf *px = gdk_pixbuf_new_from_file_at_size(icon_path, 56, 56, NULL);
+    if (px) {
+        GtkWidget *img = gtk_image_new_from_pixbuf(px);
+        g_object_unref(px);
+        gtk_widget_set_halign(img, GTK_ALIGN_CENTER);
+        gtk_box_pack_start(GTK_BOX(col), img, FALSE, FALSE, 0);
+    } else {
+        GtkWidget *icon = gtk_label_new(app->icon);
+        PangoAttrList *a = pango_attr_list_new();
+        pango_attr_list_insert(a, pango_attr_size_new(40 * PANGO_SCALE));
+        gtk_label_set_attributes(GTK_LABEL(icon), a);
+        pango_attr_list_unref(a);
+        gtk_widget_set_halign(icon, GTK_ALIGN_CENTER);
+        gtk_box_pack_start(GTK_BOX(col), icon, FALSE, FALSE, 0);
+    }
+
+    GtkWidget *name = gtk_label_new(app->name);
+    gtk_label_set_ellipsize(GTK_LABEL(name), PANGO_ELLIPSIZE_END);
+    gtk_label_set_max_width_chars(GTK_LABEL(name), 14);
+    gtk_widget_set_halign(name, GTK_ALIGN_CENTER);
+    gtk_box_pack_start(GTK_BOX(col), name, FALSE, FALSE, 0);
+
+    g_signal_connect(tile, "button-press-event",
+        G_CALLBACK(on_launcher_result_clicked), app);
+    return tile;
+}
+
+/* Empty-state Launchpad view: grid of ALL app icons. */
+static void launcher_populate_grid(void)
+{
+    launcher_results_clear();
+
+    GtkWidget *grid = gtk_flow_box_new();
+    gtk_flow_box_set_max_children_per_line(GTK_FLOW_BOX(grid), 7);
+    gtk_flow_box_set_min_children_per_line(GTK_FLOW_BOX(grid), 4);
+    gtk_flow_box_set_homogeneous(GTK_FLOW_BOX(grid), TRUE);
+    gtk_flow_box_set_selection_mode(GTK_FLOW_BOX(grid), GTK_SELECTION_NONE);
+    gtk_flow_box_set_row_spacing(GTK_FLOW_BOX(grid), 10);
+    gtk_flow_box_set_column_spacing(GTK_FLOW_BOX(grid), 10);
+
+    for (int i = 0; app_registry[i].id != NULL; i++) {
+        if (!app_registry[i].installed) continue;
+        gtk_flow_box_insert(GTK_FLOW_BOX(grid),
+            launcher_make_tile(&app_registry[i]), -1);
+    }
+
+    /* Wrap in a scrolled window so >49 apps still fit on small screens */
+    GtkWidget *scroll = gtk_scrolled_window_new(NULL, NULL);
+    gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll),
+        GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+    gtk_widget_set_size_request(scroll, -1, 460);
+    gtk_container_add(GTK_CONTAINER(scroll), grid);
+
+    gtk_box_pack_start(GTK_BOX(launcher_results), scroll, TRUE, TRUE, 0);
+    gtk_widget_show_all(launcher_results);
+}
+
+/* Typed-query view: list of filtered matches (prior behavior). */
+static void launcher_populate_list(const char *text)
+{
+    launcher_results_clear();
+
     char lower[256];
     strncpy(lower, text, sizeof(lower) - 1);
     lower[sizeof(lower) - 1] = '\0';
@@ -2836,9 +2921,6 @@ static void on_launcher_entry_changed(GtkEditable *editable, gpointer data)
             gtk_widget_set_opacity(type_label, 0.5);
             gtk_box_pack_end(GTK_BOX(row), type_label, FALSE, FALSE, 8);
 
-            /* Make it clickable — use button-press-event which has 3 args:
-             * (GtkWidget *widget, GdkEventButton *event, gpointer user_data)
-             * We need a wrapper since on_dock_icon_clicked expects "clicked" sig */
             GtkWidget *evbox = gtk_event_box_new();
             gtk_container_add(GTK_CONTAINER(evbox), row);
 
@@ -2851,6 +2933,17 @@ static void on_launcher_entry_changed(GtkEditable *editable, gpointer data)
     }
 
     gtk_widget_show_all(launcher_results);
+}
+
+static void on_launcher_entry_changed(GtkEditable *editable, gpointer data)
+{
+    (void)editable; (void)data;
+    const char *text = gtk_entry_get_text(GTK_ENTRY(launcher_entry));
+    if (!text || !text[0]) {
+        launcher_populate_grid();
+    } else {
+        launcher_populate_list(text);
+    }
 }
 
 /* Wrapper for launcher result clicks — button-press-event has 3 args */
@@ -2912,7 +3005,9 @@ static void create_launcher(void)
     gtk_window_set_skip_taskbar_hint(GTK_WINDOW(launcher_window), TRUE);
     gtk_window_set_skip_pager_hint(GTK_WINDOW(launcher_window), TRUE);
     gtk_window_set_type_hint(GTK_WINDOW(launcher_window), GDK_WINDOW_TYPE_HINT_DIALOG);
-    gtk_window_set_default_size(GTK_WINDOW(launcher_window), 560, 60);
+    /* Default size — grid view wants 720×560. Resizable so typed-list
+     * view can collapse vertically via nova_show_launcher's resize. */
+    gtk_window_set_default_size(GTK_WINDOW(launcher_window), 720, 560);
     gtk_window_set_resizable(GTK_WINDOW(launcher_window), FALSE);
     gtk_window_set_position(GTK_WINDOW(launcher_window), GTK_WIN_POS_CENTER);
     gtk_window_set_keep_above(GTK_WINDOW(launcher_window), TRUE);
@@ -2954,16 +3049,16 @@ static void nova_show_launcher(void)
     if (launcher_visible) return;
     gtk_entry_set_text(GTK_ENTRY(launcher_entry), "");
 
-    /* Clear results */
-    GList *children = gtk_container_get_children(GTK_CONTAINER(launcher_results));
-    for (GList *l = children; l; l = l->next) {
-        gtk_widget_destroy(GTK_WIDGET(l->data));
-    }
-    g_list_free(children);
+    /* Populate empty-state grid (all apps) — user can type to filter */
+    launcher_populate_grid();
 
-    /* Position at top-center of screen */
-    int lx = (screen_width - 560) / 2;
-    int ly = screen_height / 4;
+    /* Position near top-center. Bigger window now because the grid needs
+     * real estate; width 720 comfortably fits 7 icons per row. */
+    int lx = (screen_width - 720) / 2;
+    int ly = (screen_height - 560) / 3;
+    if (lx < 20) lx = 20;
+    if (ly < PANEL_HEIGHT + 20) ly = PANEL_HEIGHT + 20;
+    gtk_window_resize(GTK_WINDOW(launcher_window), 720, 560);
     gtk_window_move(GTK_WINDOW(launcher_window), lx, ly);
 
     gtk_widget_show_all(launcher_window);
