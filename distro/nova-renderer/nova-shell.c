@@ -1718,7 +1718,7 @@ static gboolean update_desktop_widgets(gpointer data)
         }
     }
 
-    /* ─ Battery: /sys/class/power_supply/BAT*/capacity ── */
+    /* Battery: reads /sys/class/power_supply/BATn/capacity. */
     /* Surface Pro 6 exposes BAT0 or BAT1 depending on firmware.
      * QEMU + desktop machines typically have nothing here — the row
      * stays hidden (set visible=FALSE) so the card doesn't show a
@@ -1875,7 +1875,7 @@ static void create_desktop_widgets(GtkWidget *overlay)
     gtk_box_pack_start(GTK_BOX(sys_card), widget_mem_bar, FALSE, FALSE, 0);
 
     /* Battery row — hidden by default; update_desktop_widgets() shows it
-     * if /sys/class/power_supply/BAT*/capacity returns a real value. */
+     * if /sys/class/power_supply/BATn/capacity returns a real value. */
     widget_bat_row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     GtkWidget *bat_title = gtk_label_new("Battery");
     gtk_widget_set_halign(bat_title, GTK_ALIGN_START);
@@ -2884,8 +2884,11 @@ static void launcher_populate_grid(void)
     gtk_flow_box_set_row_spacing(GTK_FLOW_BOX(grid), 10);
     gtk_flow_box_set_column_spacing(GTK_FLOW_BOX(grid), 10);
 
+    /* Launchpad shows EVERY registered app. No filter — the registry
+     * doesn't distinguish "installed" vs "not installed" today; every
+     * entry is reachable. Skipping pinned=FALSE would defeat the whole
+     * point (Launchpad exists so unpinned apps are findable). */
     for (int i = 0; app_registry[i].id != NULL; i++) {
-        if (!app_registry[i].installed) continue;
         gtk_flow_box_insert(GTK_FLOW_BOX(grid),
             launcher_make_tile(&app_registry[i]), -1);
     }
