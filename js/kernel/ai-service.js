@@ -173,6 +173,12 @@ class AIService {
       try {
         const ollamaUrl = this.getOllamaUrl();
         const model = options.model || this.getOllamaModel();
+        // If caller passed a signal, compose it with our 180s timeout so
+        // either channel (user-abort OR deadline) cancels the fetch.
+        const timeoutSignal = AbortSignal.timeout(180000);
+        const signal = options.signal
+          ? AbortSignal.any([timeoutSignal, options.signal])
+          : timeoutSignal;
         const res = await fetch('/api/ai/ollama-stream', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
@@ -183,7 +189,7 @@ class AIService {
             messages,
             ...(options.maxTokens ? { max_tokens: options.maxTokens } : {}),
           }),
-          signal: AbortSignal.timeout(180000),
+          signal,
         });
         if (res.ok && res.body) {
           const reader = res.body.getReader();

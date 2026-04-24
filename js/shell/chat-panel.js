@@ -185,7 +185,17 @@ function buildPanel() {
 
   panelEl.querySelector('#cp-close-btn').addEventListener('click', closeChatPanel);
   panelEl.querySelector('#cp-clear-btn').addEventListener('click', clearConversation);
-  panelEl.querySelector('#cp-send').addEventListener('click', handleSend);
+  panelEl.querySelector('#cp-send').addEventListener('click', (e) => {
+    const btn = e.currentTarget;
+    if (btn.dataset.mode === 'stop') {
+      // Mid-stream — user wants to interrupt the current reply
+      if (chatAbortController) {
+        try { chatAbortController.abort(); } catch {}
+      }
+    } else {
+      handleSend();
+    }
+  });
 
   inputEl.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -494,11 +504,19 @@ async function handleSend() {
 
 // CHAT mode: direct Q&A with the AI — no planner, no capability dispatch,
 // no L2 gates, no self-mod machinery. Tokens stream in live so the reply
-// bubble paints as the model generates. Useful when the user just wants to
-// ask a question and read the answer, not instruct the OS to do something.
+// bubble paints as the model generates. The Stop button (below the input
+// while streaming) aborts the fetch mid-stream via AbortController.
+let chatAbortController = null;
+
 async function sendChat(query) {
-  // Create a live-updating assistant bubble we'll append to as tokens
-  // arrive. Start with a typing indicator so it's visibly "thinking."
+  // Abort any in-flight stream when a new message starts
+  if (chatAbortController) {
+    try { chatAbortController.abort(); } catch {}
+    chatAbortController = null;
+  }
+  chatAbortController = new AbortController();
+  toggleChatStopButton(true);
+
   const replyMsg = pushAssistantMessage('\u2026', { kind: 'text', meta: { streaming: true } });
   let assembled = '';
   let firstChunk = true;
@@ -509,8 +527,8 @@ async function sendChat(query) {
       skipHistory: false,
       capCategory: 'chat',
       maxTokens: 800,
+      signal: chatAbortController.signal,
     }, (delta) => {
-      // First chunk clears the "…" placeholder; subsequent chunks append.
       if (firstChunk) { assembled = ''; firstChunk = false; }
       assembled += delta;
       updateMessage(replyMsg.id, m => {
@@ -518,16 +536,44 @@ async function sendChat(query) {
         m.kind = 'text';
       });
     });
-    // On completion, clear the streaming marker so the meta badge hides
     updateMessage(replyMsg.id, m => {
       if (!m.text) m.text = '(no reply)';
       m.meta = { ...(m.meta || {}), streaming: false };
     });
   } catch (err) {
+    // AbortError = user clicked Stop; keep whatever tokens we got + mark
+    const aborted = err?.name === 'AbortError';
     updateMessage(replyMsg.id, m => {
       m.kind = 'text';
-      m.text = '\u2717 Chat failed: ' + (err?.message || String(err));
+      if (aborted && assembled) m.text = assembled + '  \u2014 (stopped)';
+      else if (aborted) m.text = '\u2014 (stopped)';
+      else m.text = '\u2717 Chat failed: ' + (err?.message || String(err));
+      m.meta = { ...(m.meta || {}), streaming: false };
     });
+  } finally {
+    chatAbortController = null;
+    toggleChatStopButton(false);
+  }
+}
+
+function toggleChatStopButton(streaming) {
+  if (!panelEl) return;
+  const send = panelEl.querySelector('#cp-send');
+  const hintEl = panelEl.querySelector('#cp-hint');
+  if (streaming) {
+    if (send) {
+      send.innerHTML = '\u25A0'; /* stop square */
+      send.title = 'Stop';
+      send.dataset.mode = 'stop';
+    }
+    if (hintEl) hintEl.textContent = 'Streaming\u2026 click the stop button to interrupt';
+  } else {
+    if (send) {
+      send.innerHTML = '\u27A4'; /* arrow send */
+      send.title = 'Send (Enter)';
+      send.dataset.mode = 'send';
+    }
+    if (hintEl) hintEl.textContent = 'Enter to send \u00B7 Shift+Enter for newline \u00B7 Ctrl+Shift+K to toggle';
   }
 }
 
