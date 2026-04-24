@@ -176,6 +176,33 @@ app.post('/api/ai/ollama-pull', async (req, res) => {
 });
 
 // ─── Ollama proxy (local or remote LLM) ───
+// List models currently pulled into the running Ollama. Used by
+// Settings > AI to populate a model dropdown. Accepts the Ollama URL
+// via ?url= so the client can pick the right host (local vs LAN).
+app.get('/api/ai/ollama-tags', async (req, res) => {
+  const ollamaUrl = req.query.url || 'http://localhost:11434';
+  try {
+    const upstream = await fetch(`${ollamaUrl}/api/tags`, {
+      signal: AbortSignal.timeout(5000),
+    });
+    if (!upstream.ok) {
+      return res.status(upstream.status).json({
+        error: 'Ollama tags rejected: ' + upstream.statusText,
+      });
+    }
+    const data = await upstream.json();
+    // data.models is [{ name, size, modified_at, ... }, ...]
+    const models = (data.models || []).map(m => ({
+      name: m.name,
+      size_bytes: m.size,
+      modified: m.modified_at,
+    }));
+    res.json({ ok: true, models });
+  } catch (error) {
+    res.status(502).json({ ok: false, error: error.message });
+  }
+});
+
 // Streaming Ollama proxy — NDJSON passthrough. Used by ai-service.askStream
 // so the chat panel can paint tokens as they arrive.
 app.post('/api/ai/ollama-stream', async (req, res) => {

@@ -348,7 +348,8 @@ function initSettings(container) {
             <div class="settings-row-label">Model</div>
             <div class="settings-row-desc">e.g. qwen2.5:7b, qwen2.5:1.5b, llama3.2, phi3 — pull via <code>ollama pull MODEL</code></div>
           </div>
-          <input type="text" id="ai-ollama-model" class="settings-select" value="${ollamaModel}" style="width:180px; font-family:var(--mono,monospace); font-size:12px;">
+          <input type="text" id="ai-ollama-model" list="ai-model-suggestions" class="settings-select" value="${ollamaModel}" style="width:180px; font-family:var(--mono,monospace); font-size:12px;">
+          <datalist id="ai-model-suggestions"></datalist>
         </div>
         <div class="settings-row">
           <div>
@@ -356,9 +357,16 @@ function initSettings(container) {
             <div class="settings-row-desc" id="ai-redteam-pull-status">A DIFFERENT model from above reviews every L2+ action. Blank = use primary. True second-opinion safety — pull a different family (e.g. llama3.2) for real diversity.</div>
           </div>
           <div style="display:flex; gap:6px;">
-            <input type="text" id="ai-redteam-model" class="settings-select" value="${localStorage.getItem('nova-ai-redteam-model') || ''}" placeholder="e.g. llama3.2" style="width:140px; font-family:var(--mono,monospace); font-size:12px;">
+            <input type="text" id="ai-redteam-model" list="ai-model-suggestions" class="settings-select" value="${localStorage.getItem('nova-ai-redteam-model') || ''}" placeholder="e.g. llama3.2" style="width:140px; font-family:var(--mono,monospace); font-size:12px;">
             <button id="ai-redteam-pull-btn" style="padding:6px 10px; border-radius:6px; border:none; background:#8b5cf6; color:white; font-size:11px; cursor:pointer; font-family:var(--font);">Pull</button>
           </div>
+        </div>
+        <div class="settings-row">
+          <div>
+            <div class="settings-row-label">Available models <span style="font-size:10px; color:rgba(255,255,255,0.4); font-weight:normal;">(pulled in this Ollama)</span></div>
+            <div class="settings-row-desc" id="ai-model-list-status">Click Refresh to list models — picks them up in the dropdowns above</div>
+          </div>
+          <button id="ai-refresh-models-btn" style="padding:6px 14px; border-radius:6px; border:1px solid rgba(255,255,255,0.15); background:transparent; color:rgba(255,255,255,0.8); font-size:12px; cursor:pointer; font-family:var(--font);">Refresh</button>
         </div>
         <div class="settings-row">
           <div>
@@ -411,6 +419,35 @@ function initSettings(container) {
     main.querySelector('#ai-ollama-model').addEventListener('change', (e) => {
       localStorage.setItem('nova-ai-ollama-model', e.target.value.trim());
     });
+
+    // Fetch available models from the configured Ollama host + populate
+    // the <datalist>. Runs on Settings render AND on Refresh click so the
+    // user can add/remove models externally and sync without a reload.
+    async function refreshOllamaModels() {
+      const urlInput = main.querySelector('#ai-ollama-url');
+      const url = (urlInput && urlInput.value.trim()) || 'http://localhost:11434';
+      const status = main.querySelector('#ai-model-list-status');
+      const list = main.querySelector('#ai-model-suggestions');
+      if (!list) return;
+      if (status) status.textContent = 'Fetching models from ' + url + '\u2026';
+      try {
+        const res = await fetch('/api/ai/ollama-tags?url=' + encodeURIComponent(url), {
+          signal: AbortSignal.timeout(6000),
+        });
+        const data = await res.json();
+        if (!data.ok) throw new Error(data.error || 'fetch failed');
+        list.innerHTML = data.models.map(m => {
+          const gb = m.size_bytes ? (m.size_bytes / 1024 / 1024 / 1024).toFixed(1) + ' GB' : '';
+          return `<option value="${escapeHtml(m.name)}">${escapeHtml(m.name)} ${gb}</option>`;
+        }).join('');
+        if (status) status.textContent = data.models.length + ' model' + (data.models.length === 1 ? '' : 's') + ' pulled — type in the fields above to filter';
+      } catch (err) {
+        if (status) status.textContent = '\u2717 ' + (err?.message || 'fetch failed') + ' \u00B7 the datalist will stay empty until Ollama is reachable';
+      }
+    }
+    main.querySelector('#ai-refresh-models-btn')?.addEventListener('click', refreshOllamaModels);
+    // Auto-fire once on tab open (fire-and-forget)
+    refreshOllamaModels();
 
     // M8.P3.b — save red-team model override
     main.querySelector('#ai-redteam-model').addEventListener('change', (e) => {
