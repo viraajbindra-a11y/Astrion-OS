@@ -176,6 +176,60 @@ app.post('/api/ai/ollama-pull', async (req, res) => {
 });
 
 // ─── Ollama proxy (local or remote LLM) ───
+// Streaming Ollama proxy — NDJSON passthrough. Used by ai-service.askStream
+// so the chat panel can paint tokens as they arrive.
+app.post('/api/ai/ollama-stream', async (req, res) => {
+  const { url, model, system, messages, max_tokens } = req.body;
+  const ollamaUrl = url || 'http://localhost:11434';
+  try {
+    const ollamaBody = {
+      model: model || 'llama3.2',
+      messages: [
+        { role: 'system', content: system || 'You are Astrion, a helpful AI assistant.' },
+        ...(messages || []),
+      ],
+      stream: true,
+    };
+    if (max_tokens) ollamaBody.options = { num_predict: max_tokens };
+
+    const upstream = await fetch(`${ollamaUrl}/api/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(ollamaBody),
+      signal: AbortSignal.timeout(180000),
+    });
+    if (!upstream.ok || !upstream.body) {
+      return res.status(upstream.status || 502).json({
+        error: 'Ollama stream rejected: ' + (upstream.statusText || 'no body'),
+      });
+    }
+    // Set up chunked transfer — NDJSON, one object per line, flushed as arrived
+    res.setHeader('Content-Type', 'application/x-ndjson; charset=utf-8');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('X-Accel-Buffering', 'no');
+    res.flushHeaders?.();
+
+    const reader = upstream.body.getReader();
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        res.write(Buffer.from(value));
+      }
+    } finally {
+      try { res.end(); } catch {}
+    }
+  } catch (error) {
+    if (!res.headersSent) {
+      res.status(502).json({
+        error: 'Could not stream from Ollama at ' + ollamaUrl + ': ' + error.message,
+      });
+    } else {
+      try { res.end(); } catch {}
+    }
+  }
+});
+
 app.post('/api/ai/ollama', async (req, res) => {
   const { url, model, system, messages, max_tokens, format } = req.body;
   const ollamaUrl = url || 'http://localhost:11434';

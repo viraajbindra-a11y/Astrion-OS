@@ -141,6 +141,88 @@ class AIService {
     return reply;
   }
 
+  /**
+   * Stream a response from Ollama token-by-token. Calls onChunk(text)
+   * for each delta as it arrives, then returns the complete reply
+   * string (concatenation of all chunks) when done. Useful for the
+   * chat panel's direct-chat mode where watching the tokens appear
+   * is itself the UX.
+   *
+   * Falls back to a one-shot ask() if streaming is unsupported (e.g.,
+   * Anthropic-only configuration or offline mode) — the onChunk then
+   * fires once with the full reply so the caller's UI logic is the
+   * same either way.
+   *
+   * @param {string} prompt
+   * @param {object} [options]          same shape as askWithMeta
+   * @param {(text:string) => void} onChunk  called per-token
+   * @returns {Promise<{ reply, meta }>}
+   */
+  async askStream(prompt, options = {}, onChunk) {
+    const provider = this.getProvider();
+    const sysCtx = this._buildSystemContext();
+    const skip = !!options.skipHistory;
+    const messages = [
+      ...(skip ? [] : this.conversationHistory.slice(-6)),
+      { role: 'user', content: prompt }
+    ];
+
+    // Only Ollama streaming is wired today. For Anthropic or offline,
+    // fall through to the non-streaming path and emit one chunk.
+    if (provider === 'ollama' || provider === 'auto') {
+      try {
+        const ollamaUrl = this.getOllamaUrl();
+        const model = options.model || this.getOllamaModel();
+        const res = await fetch('/api/ai/ollama-stream', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            url: ollamaUrl,
+            model,
+            system: sysCtx,
+            messages,
+            ...(options.maxTokens ? { max_tokens: options.maxTokens } : {}),
+          }),
+          signal: AbortSignal.timeout(180000),
+        });
+        if (res.ok && res.body) {
+          const reader = res.body.getReader();
+          const decoder = new TextDecoder();
+          let buf = '';
+          let assembled = '';
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buf += decoder.decode(value, { stream: true });
+            // NDJSON — split on newlines, parse each complete line
+            let nl;
+            while ((nl = buf.indexOf('\n')) >= 0) {
+              const line = buf.slice(0, nl).trim();
+              buf = buf.slice(nl + 1);
+              if (!line) continue;
+              try {
+                const obj = JSON.parse(line);
+                const delta = obj.message?.content || '';
+                if (delta) {
+                  assembled += delta;
+                  try { onChunk && onChunk(delta); } catch {}
+                }
+              } catch { /* malformed line, skip */ }
+            }
+          }
+          const meta = { brain: 's1', confidence: 0.85, provider: 'ollama', model, escalated: false };
+          eventBus.emit('ai:response', meta);
+          return { reply: assembled, meta };
+        }
+      } catch { /* fall through */ }
+    }
+
+    // Fallback — non-streaming one-shot, emit full reply as one chunk
+    const r = await this.askWithMeta(prompt, options);
+    try { onChunk && r.reply && onChunk(r.reply); } catch {}
+    return r;
+  }
+
   async _tryOllama(system, messages, options) {
     try {
       const ollamaUrl = this.getOllamaUrl();

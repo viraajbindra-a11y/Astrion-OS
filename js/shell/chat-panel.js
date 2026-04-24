@@ -29,6 +29,7 @@ const MODE = {
   NORMAL: 'normal',
   PLAN: 'plan',
   BYPASS: 'bypass',
+  CHAT: 'chat',   // Direct Q&A with streaming tokens — no planner, no gates
 };
 
 // Module-level state
@@ -49,7 +50,7 @@ const MODE_KEY = 'astrion-chat-panel-mode';
 
 function loadMode() {
   const saved = localStorage.getItem(MODE_KEY);
-  if (saved === MODE.PLAN || saved === MODE.BYPASS || saved === MODE.NORMAL) {
+  if (saved === MODE.PLAN || saved === MODE.BYPASS || saved === MODE.NORMAL || saved === MODE.CHAT) {
     currentMode = saved;
   }
 }
@@ -147,6 +148,10 @@ function buildPanel() {
         <span class="cp-mode-icon">\u26A1</span>
         <span class="cp-mode-label">Bypass</span>
       </button>
+      <button class="cp-mode-btn" data-mode="chat" role="tab">
+        <span class="cp-mode-icon">\u{1F4AC}</span>
+        <span class="cp-mode-label">Chat</span>
+      </button>
     </div>
 
     <div class="cp-banner" id="cp-banner"></div>
@@ -215,6 +220,10 @@ function applyModeUI() {
     banner.textContent = '\u{1F50D} Plan mode — plans are previewed; nothing runs until you approve.';
     banner.classList.add('visible');
     banner.classList.remove('danger');
+  } else if (currentMode === MODE.CHAT) {
+    banner.textContent = '\u{1F4AC} Chat mode — direct Q&A with streaming tokens. No planner, no capabilities, no gates.';
+    banner.classList.add('visible');
+    banner.classList.remove('danger');
   } else {
     banner.classList.remove('visible', 'danger');
     banner.textContent = '';
@@ -227,7 +236,7 @@ function applyModeUI() {
 }
 
 function setMode(mode) {
-  if (mode !== MODE.NORMAL && mode !== MODE.PLAN && mode !== MODE.BYPASS) return;
+  if (mode !== MODE.NORMAL && mode !== MODE.PLAN && mode !== MODE.BYPASS && mode !== MODE.CHAT) return;
   if (mode === currentMode) return;
   currentMode = mode;
   saveMode();
@@ -236,7 +245,10 @@ function setMode(mode) {
 }
 
 function labelFor(mode) {
-  return mode === MODE.PLAN ? 'Plan' : mode === MODE.BYPASS ? 'Bypass' : 'Normal';
+  return mode === MODE.PLAN ? 'Plan'
+       : mode === MODE.BYPASS ? 'Bypass'
+       : mode === MODE.CHAT ? 'Chat'
+       : 'Normal';
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -457,7 +469,7 @@ function clearConversation() {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// SEND FLOW — three mode handlers
+// SEND FLOW — four mode handlers
 // ═══════════════════════════════════════════════════════════════
 
 async function handleSend() {
@@ -474,6 +486,47 @@ async function handleSend() {
     sendPlan(query);
   } else if (currentMode === MODE.BYPASS) {
     sendBypass(query);
+  } else if (currentMode === MODE.CHAT) {
+    sendChat(query);
+  }
+}
+
+// CHAT mode: direct Q&A with the AI — no planner, no capability dispatch,
+// no L2 gates, no self-mod machinery. Tokens stream in live so the reply
+// bubble paints as the model generates. Useful when the user just wants to
+// ask a question and read the answer, not instruct the OS to do something.
+async function sendChat(query) {
+  // Create a live-updating assistant bubble we'll append to as tokens
+  // arrive. Start with a typing indicator so it's visibly "thinking."
+  const replyMsg = pushAssistantMessage('\u2026', { kind: 'text', meta: { streaming: true } });
+  let assembled = '';
+  let firstChunk = true;
+
+  try {
+    const aiMod = await import('../kernel/ai-service.js');
+    await aiMod.aiService.askStream(query, {
+      skipHistory: false,
+      capCategory: 'chat',
+      maxTokens: 800,
+    }, (delta) => {
+      // First chunk clears the "…" placeholder; subsequent chunks append.
+      if (firstChunk) { assembled = ''; firstChunk = false; }
+      assembled += delta;
+      updateMessage(replyMsg.id, m => {
+        m.text = assembled;
+        m.kind = 'text';
+      });
+    });
+    // On completion, clear the streaming marker so the meta badge hides
+    updateMessage(replyMsg.id, m => {
+      if (!m.text) m.text = '(no reply)';
+      m.meta = { ...(m.meta || {}), streaming: false };
+    });
+  } catch (err) {
+    updateMessage(replyMsg.id, m => {
+      m.kind = 'text';
+      m.text = '\u2717 Chat failed: ' + (err?.message || String(err));
+    });
   }
 }
 
@@ -815,6 +868,7 @@ function injectStyles() {
     }
     .cp-title-dot.mode-plan { background: #5ac8fa; }
     .cp-title-dot.mode-bypass { background: #ff453a; box-shadow: 0 0 8px rgba(255,69,58,0.7); }
+    .cp-title-dot.mode-chat { background: #bf5af2; }
 
     .cp-header-actions { display: flex; gap: 4px; }
     .cp-iconbtn {
@@ -863,6 +917,10 @@ function injectStyles() {
     .cp-mode-btn[data-mode="normal"].active {
       background: rgba(52,199,89,0.18);
       border-color: rgba(52,199,89,0.5);
+    }
+    .cp-mode-btn[data-mode="chat"].active {
+      background: rgba(191,90,242,0.18);
+      border-color: rgba(191,90,242,0.55);
     }
     .cp-mode-icon { font-size: 11px; }
 
