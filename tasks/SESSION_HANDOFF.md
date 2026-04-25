@@ -3,14 +3,19 @@
 **Demo:** Sunday 2026-04-26 on Surface Pro 6 booted from Astrion ISO,
 Ollama `gpt-oss:16b` on remote PC over LAN.
 
-**Latest released ISO:** `astrion-os-0.2.251-amd64.iso` (1.37 GiB,
-SHA `763474743bd60fb2eb88378d644ab070b96ef736a6c908d7aad00c59478700c8`,
-commit `26eaee5`).
+**Latest released ISO:** `astrion-os-0.2.254-amd64.iso` (1.37 GiB,
+SHA `b4b2db2d96df43bc0d36fc1bccd611debed745ae1753b8515beb89a1124363c6`,
+commit `1cb879f`). Has Launchpad CSS fix + nova-shell pass 8
+(notification toast restyle) + GDK_SCALE kernel cmdline bridge +
+voice-input mic button.
 
-**Build in flight at handoff:** [run 24936235571](https://github.com/viraajbindra-a11y/Astrion-OS/actions/runs/24936235571)
-on commit `af2e702` — adds the Launchpad black-interior CSS fix
-(one line, low risk). Will release as the next version when green
-(~30 min from trigger).
+**Web-only commits riding on next nova-update tick** (no ISO rebuild
+needed — these land in the running OS within an hour of boot):
+  - `4238dc4` Voice OUTPUT: per-bubble Read-aloud + auto-speak toggle
+  - `884ab41` Spotlight `compose skill <description>` AI YAML drafter
+  - `16035e1` Live token-cost preview in chat input hint
+  - `78cef7f`, `7636c14`, `de44bc4` (history viewer, model badge,
+    cmdline bridge JS pieces)
 
 ## What shipped this sprint
 
@@ -92,12 +97,18 @@ via `astrion-native-shell` kernel cmdline.
 | fix | 26eaee5 | `*/` in C comment + made-up `.installed` field — fixed. |
 | fix | af2e702 | Launchpad black-interior — flowbox/scrolledwindow transparent. |
 
-### AI streaming infrastructure
+### AI features (all web — land via nova-update)
 
-- `/api/ai/ollama-stream` server endpoint (NDJSON passthrough)
-- `aiService.askStream(prompt, opts, onChunk)` with optional
-  `signal` for AbortController
-- `/api/ai/ollama-tags` for the model picker dropdown
+- `/api/ai/ollama-stream` + `aiService.askStream` with AbortController
+- `/api/ai/ollama-tags` + Settings model dropdown (datalist, GB sizes)
+- Chat panel 4th tab + thought-phase + Stop + per-bubble Copy/Regen/Speak
+- Conversation history viewer + JSON export in Settings > AI
+- Per-bubble model badge (brain · model · provider)
+- Budget footer (color dot reflects daily-token-cap usage)
+- Voice INPUT — mic 🎤 button → Web Speech Recognition → input field
+- Voice OUTPUT — per-bubble Read-aloud + header 🔊 auto-speak toggle
+- Cost preview — chat input hint shows ~N input tokens while typing
+- Spotlight `compose skill <description>` — AI drafts a .skill YAML
 
 ### Kernel cmdline → env var bridge
 
