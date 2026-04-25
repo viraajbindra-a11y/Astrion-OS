@@ -152,6 +152,35 @@ function formatRelativeTime(ts) {
 
 // ---------- init (thin; no event subscriptions needed) ----------
 
+/**
+ * Fetch ALL turns across all sessions, newest first. Used by Settings >
+ * AI > Conversation history. Capped at limit so a few thousand turns
+ * don't kill the UI.
+ */
+export async function getAllTurns(limit = 100) {
+  try {
+    const results = await graphQuery(graphStore, {
+      type: 'select',
+      from: 'conversation-turn',
+      where: {},
+      orderBy: { field: 'createdAt', dir: 'desc' },
+      limit,
+    });
+    return results.map(n => ({
+      id: n.id,
+      sessionId: n.props.sessionId,
+      query: n.props.query,
+      ok: n.props.ok,
+      error: n.props.error,
+      capSummary: n.props.capSummary,
+      ts: n.props.ts || n.createdAt,
+    }));
+  } catch (err) {
+    console.warn('[conversation-memory] getAllTurns failed:', err?.message || err);
+    return [];
+  }
+}
+
 export function initConversationMemory() {
   // Nothing to wire — this module is pull-based. The planner calls
   // getOrCreateSession() + getRecentTurns() on every query; the executor

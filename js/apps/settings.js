@@ -404,6 +404,7 @@ function initSettings(container) {
 
     // ─── M3 Budget & Calibration Dashboard ───
     renderAIBudgetDashboard();
+    renderConversationHistory();
 
     // Save provider on change
     main.querySelector('#ai-provider').addEventListener('change', (e) => {
@@ -910,6 +911,88 @@ function initSettings(container) {
         status.textContent = '✗ ' + r.error;
         status.style.color = '#ff5555';
       }
+    });
+  }
+
+  // ─── AI Conversation history viewer ────────────────────────────
+  // Renders the most recent 100 turns across all sessions, with a
+  // search box (live-filter), a Clear button, and a Download .json
+  // button so the user can grab the audit trail. Appended below the
+  // budget dashboard in the AI tab.
+  async function renderConversationHistory() {
+    const main = container.querySelector('#settings-main');
+    if (!main) return;
+    let mod;
+    try { mod = await import('../kernel/conversation-memory.js'); }
+    catch { return; }
+    let turns = [];
+    try { turns = await mod.getAllTurns(100); } catch {}
+
+    const fmtAge = (ts) => {
+      const d = Date.now() - ts;
+      if (d < 60_000) return Math.round(d/1000) + 's';
+      if (d < 3_600_000) return Math.round(d/60_000) + 'm';
+      if (d < 86_400_000) return Math.round(d/3_600_000) + 'h';
+      return Math.round(d/86_400_000) + 'd';
+    };
+
+    const panel = document.createElement('div');
+    panel.id = 'ai-history-panel';
+    panel.style.cssText = 'margin-top:18px;padding:18px;background:rgba(255,255,255,0.04);border-radius:10px;';
+    panel.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+        <div style="font-size:14px;font-weight:600;">\u{1F4DC} Conversation history</div>
+        <div style="display:flex;gap:6px;">
+          <button id="ai-history-export" style="padding:5px 10px;border-radius:5px;border:1px solid rgba(255,255,255,0.15);background:transparent;color:rgba(255,255,255,0.75);font-size:11px;cursor:pointer;font-family:var(--font);">\u2193 Export JSON</button>
+          <button id="ai-history-refresh" style="padding:5px 10px;border-radius:5px;border:1px solid rgba(255,255,255,0.15);background:transparent;color:rgba(255,255,255,0.75);font-size:11px;cursor:pointer;font-family:var(--font);">\u21BB Refresh</button>
+        </div>
+      </div>
+      <p style="font-size:12px;color:rgba(255,255,255,0.55);margin:0 0 10px;">
+        Last ${turns.length} turn${turns.length === 1 ? '' : 's'} across all sessions.
+        Type to filter; Export saves the full list as JSON.
+      </p>
+      <input type="text" id="ai-history-filter" placeholder="Filter\u2026" style="width:100%;padding:7px 10px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.1);border-radius:6px;color:white;font-size:12px;box-sizing:border-box;outline:none;margin-bottom:10px;">
+      <div id="ai-history-list" style="display:flex;flex-direction:column;gap:6px;max-height:360px;overflow-y:auto;"></div>
+    `;
+
+    /* Append below the budget dashboard if not already there */
+    if (!main.querySelector('#ai-history-panel')) {
+      main.appendChild(panel);
+    } else {
+      main.querySelector('#ai-history-panel').replaceWith(panel);
+    }
+
+    function rerender(filter) {
+      const list = panel.querySelector('#ai-history-list');
+      const f = (filter || '').toLowerCase();
+      const filtered = f
+        ? turns.filter(t => (t.query || '').toLowerCase().includes(f) || (t.capSummary || '').toLowerCase().includes(f))
+        : turns;
+      if (filtered.length === 0) {
+        list.innerHTML = `<div style="font-size:11px;color:rgba(255,255,255,0.45);font-style:italic;padding:10px 0;">${f ? 'No matches.' : 'No conversation turns yet — chat with Astrion in Spotlight or the chat panel.'}</div>`;
+        return;
+      }
+      list.innerHTML = filtered.map(t => `
+        <div style="background:rgba(255,255,255,0.03);border-left:2px solid ${t.ok ? '#34c759' : '#ff5f57'};padding:8px 12px;border-radius:0 5px 5px 0;">
+          <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+            <div style="font-size:12px;color:#e0e0e0;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(t.query || '(empty)')}</div>
+            <span style="font-size:10px;color:rgba(255,255,255,0.4);white-space:nowrap;">${fmtAge(t.ts)} ago</span>
+          </div>
+          <div style="font-size:10.5px;color:rgba(255,255,255,0.5);margin-top:3px;font-family:ui-monospace,monospace;">${escapeHtml(t.capSummary || (t.ok ? 'ok' : 'failed'))}${t.error ? ' \u00B7 ' + escapeHtml(t.error.slice(0, 60)) : ''}</div>
+        </div>
+      `).join('');
+    }
+
+    rerender('');
+    panel.querySelector('#ai-history-filter').addEventListener('input', (e) => rerender(e.target.value));
+    panel.querySelector('#ai-history-refresh').addEventListener('click', () => renderConversationHistory());
+    panel.querySelector('#ai-history-export').addEventListener('click', () => {
+      const blob = new Blob([JSON.stringify(turns, null, 2)], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = 'astrion-conversation-history-' + new Date().toISOString().slice(0, 10) + '.json';
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 5000);
     });
   }
 
