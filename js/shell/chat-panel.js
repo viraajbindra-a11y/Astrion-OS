@@ -160,6 +160,7 @@ function buildPanel() {
     <div class="cp-messages" id="cp-messages" role="log" aria-live="polite"></div>
 
     <div class="cp-input-row">
+      <button class="cp-mic" id="cp-mic" title="Speak (Web Speech API)" aria-label="Voice input">\u{1F3A4}</button>
       <textarea id="cp-input"
         rows="1"
         placeholder="Ask Astrion anything..."
@@ -186,6 +187,7 @@ function buildPanel() {
 
   panelEl.querySelector('#cp-close-btn').addEventListener('click', closeChatPanel);
   panelEl.querySelector('#cp-clear-btn').addEventListener('click', clearConversation);
+  panelEl.querySelector('#cp-mic')?.addEventListener('click', startVoiceInput);
   panelEl.querySelector('#cp-send').addEventListener('click', (e) => {
     const btn = e.currentTarget;
     if (btn.dataset.mode === 'stop') {
@@ -535,11 +537,73 @@ function scrollToBottom() {
   });
 }
 
+// Web Speech API mic — pushes the recognized text into the input field.
+// User still has to hit Enter to send. Stub gracefully if the browser
+// has no SpeechRecognition (Firefox without flag, some WebKitGTK builds).
+let voiceRecognizer = null;
+function startVoiceInput() {
+  const Sr = window.SpeechRecognition || window.webkitSpeechRecognition;
+  const micBtn = panelEl?.querySelector('#cp-mic');
+  if (!Sr) {
+    if (micBtn) {
+      micBtn.title = 'Voice input not supported in this browser';
+      micBtn.style.opacity = '0.3';
+    }
+    return;
+  }
+  if (voiceRecognizer) {
+    /* Already listening — stop. */
+    try { voiceRecognizer.stop(); } catch {}
+    voiceRecognizer = null;
+    if (micBtn) micBtn.classList.remove('listening');
+    return;
+  }
+  voiceRecognizer = new Sr();
+  voiceRecognizer.lang = 'en-US';
+  voiceRecognizer.interimResults = true;
+  voiceRecognizer.continuous = false;
+  if (micBtn) micBtn.classList.add('listening');
+
+  let assembled = '';
+  voiceRecognizer.onresult = (e) => {
+    let text = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      text += e.results[i][0].transcript;
+    }
+    assembled = text;
+    if (inputEl) {
+      inputEl.value = assembled;
+      inputEl.style.height = 'auto';
+      inputEl.style.height = Math.min(inputEl.scrollHeight, 140) + 'px';
+    }
+  };
+  voiceRecognizer.onend = () => {
+    voiceRecognizer = null;
+    if (micBtn) micBtn.classList.remove('listening');
+  };
+  voiceRecognizer.onerror = () => {
+    voiceRecognizer = null;
+    if (micBtn) micBtn.classList.remove('listening');
+  };
+  try { voiceRecognizer.start(); } catch {}
+}
+
 function clearConversation() {
   messages = [];
   planGroups.clear();
   listEl.innerHTML = '';
   renderEmpty();
+  // Also start a fresh conversation session so the planner / chat
+  // history doesn't carry over the old context. Best-effort import —
+  // ok if the module isn't ready yet.
+  import('../kernel/conversation-memory.js')
+    .then(m => m.startFreshSession?.())
+    .catch(() => {});
+  // Same for ai-service's running conversationHistory (used as
+  // implicit context for askStream/askWithMeta when skipHistory=false)
+  import('../kernel/ai-service.js')
+    .then(m => { if (m.aiService?.conversationHistory) m.aiService.conversationHistory = []; })
+    .catch(() => {});
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -1350,6 +1414,32 @@ function injectStyles() {
       align-self: flex-end;
     }
     .cp-send:hover { filter: brightness(1.1); }
+
+    .cp-mic {
+      width: 36px; height: 36px;
+      border: 1px solid rgba(255,255,255,0.1);
+      background: rgba(255,255,255,0.04);
+      color: rgba(255,255,255,0.75);
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 14px;
+      align-self: flex-end;
+      transition: background 160ms ease, color 160ms ease;
+    }
+    .cp-mic:hover {
+      background: rgba(255,255,255,0.1);
+      color: white;
+    }
+    .cp-mic.listening {
+      background: rgba(255,69,58,0.18);
+      border-color: rgba(255,69,58,0.6);
+      color: #ff6b5e;
+      animation: cp-mic-pulse 1.2s ease-in-out infinite;
+    }
+    @keyframes cp-mic-pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(255,69,58,0.4); }
+      50%      { box-shadow: 0 0 0 6px rgba(255,69,58,0); }
+    }
 
     .cp-hint {
       padding: 0 12px 4px 12px;

@@ -1368,6 +1368,18 @@ static void apply_css_theme(void)
         "  background: #26263a;\n"
         "}\n"
         "\n"
+        /* Notification toast — same pill aesthetic as the dock. */
+        ".nova-notification {\n"
+        "  background: #141420;\n"
+        "  border: 1px solid #2a2a3a;\n"
+        "  border-radius: 12px;\n"
+        "}\n"
+        "\n"
+        ".nova-notification label {\n"
+        "  color: #e8e8f0;\n"
+        "  padding: 0;\n"
+        "}\n"
+        "\n"
         ".nova-launcher-tile label {\n"
         "  font-size: 12px;\n"
         "  color: #dddddd;\n"
@@ -3576,28 +3588,53 @@ static void nova_show_notification(const char *title, const char *body)
     gtk_window_set_default_size(GTK_WINDOW(notif_win), 320, 80);
     gtk_window_move(GTK_WINDOW(notif_win), screen_width - 340, 40);
 
+    /* Outer card with rounded-look styling via the existing nova-dock
+     * pattern (lesson 1: solid colors only, no compositor on the ISO). */
+    GtkWidget *card = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 12);
+    GtkStyleContext *card_ctx = gtk_widget_get_style_context(card);
+    gtk_style_context_add_class(card_ctx, "nova-notification");
+    gtk_widget_set_margin_start(card, 14);
+    gtk_widget_set_margin_end(card, 14);
+    gtk_widget_set_margin_top(card, 12);
+    gtk_widget_set_margin_bottom(card, 12);
+
+    /* Astrion logo on the left side of every notification — small but
+     * gives them a consistent identity instead of looking like generic
+     * desktop toasts. Falls back to nothing if the SVG is missing. */
+    GdkPixbuf *logo_pix = gdk_pixbuf_new_from_file_at_size(
+        "/opt/nova-os/assets/icons/astrion-logo.svg", 36, 36, NULL);
+    if (logo_pix) {
+        GtkWidget *logo = gtk_image_new_from_pixbuf(logo_pix);
+        g_object_unref(logo_pix);
+        gtk_widget_set_valign(logo, GTK_ALIGN_START);
+        gtk_box_pack_start(GTK_BOX(card), logo, FALSE, FALSE, 0);
+    }
+
     GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
-    gtk_widget_set_margin_start(box, 16);
-    gtk_widget_set_margin_end(box, 16);
-    gtk_widget_set_margin_top(box, 12);
-    gtk_widget_set_margin_bottom(box, 12);
 
     GtkWidget *title_lbl = gtk_label_new(NULL);
     char markup[256];
     snprintf(markup, sizeof(markup),
-        "<span weight='bold' foreground='#ffffff'>%s</span>", title);
+        "<span weight='bold' foreground='#ffffff' font='13'>%s</span>", title);
     gtk_label_set_markup(GTK_LABEL(title_lbl), markup);
     gtk_label_set_xalign(GTK_LABEL(title_lbl), 0);
+    gtk_label_set_line_wrap(GTK_LABEL(title_lbl), TRUE);
+    gtk_label_set_max_width_chars(GTK_LABEL(title_lbl), 32);
     gtk_box_pack_start(GTK_BOX(box), title_lbl, FALSE, FALSE, 0);
 
     GtkWidget *body_lbl = gtk_label_new(body);
     gtk_label_set_xalign(GTK_LABEL(body_lbl), 0);
-    gtk_widget_set_opacity(body_lbl, 0.7);
+    gtk_label_set_line_wrap(GTK_LABEL(body_lbl), TRUE);
+    gtk_label_set_max_width_chars(GTK_LABEL(body_lbl), 36);
+    gtk_widget_set_opacity(body_lbl, 0.78);
     gtk_box_pack_start(GTK_BOX(box), body_lbl, FALSE, FALSE, 0);
 
-    gtk_container_add(GTK_CONTAINER(notif_win), box);
+    gtk_box_pack_start(GTK_BOX(card), box, TRUE, TRUE, 0);
+    gtk_container_add(GTK_CONTAINER(notif_win), card);
 
-    GdkRGBA notif_bg = {0.12, 0.12, 0.18, 1.0};
+    /* Match the dock's color (#141420) so notifications and the dock
+     * read as the same surface. */
+    GdkRGBA notif_bg = {0.0784, 0.0784, 0.1255, 1.0};
     gtk_widget_override_background_color(notif_win, GTK_STATE_FLAG_NORMAL, &notif_bg);
 
     gtk_widget_show_all(notif_win);

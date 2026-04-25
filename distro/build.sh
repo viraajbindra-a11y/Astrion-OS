@@ -681,6 +681,15 @@ fi
 if [ -z "$SCREEN_W" ]; then SCREEN_W=1920; fi
 echo "Detected screen width: ${SCREEN_W}px"
 
+# Honor kernel cmdline override: `astrion-scale=1` or `astrion-scale=2`
+# on the GRUB linux line (or QEMU -append). Useful when auto-detection
+# misreads the screen width — e.g., a Surface in tablet mode reporting
+# its display weirdly. Symmetric with `astrion-native-shell` bridge.
+if grep -qE "(^| )astrion-scale=[12]( |\$)" /proc/cmdline 2>/dev/null; then
+  ASTRION_GDK_SCALE=$(grep -oE 'astrion-scale=[12]' /proc/cmdline | cut -d= -f2 | head -1)
+  echo "Honoring kernel cmdline: astrion-scale=$ASTRION_GDK_SCALE"
+fi
+
 if [ -n "$ASTRION_GDK_SCALE" ]; then
   export GDK_SCALE="$ASTRION_GDK_SCALE"
   echo "HiDPI: forced by ASTRION_GDK_SCALE=$ASTRION_GDK_SCALE"
