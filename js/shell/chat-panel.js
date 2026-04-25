@@ -384,7 +384,14 @@ function messageNode(msg) {
     } else if (msg.kind === 'clarify') {
       row.appendChild(renderClarifyCard(msg));
     } else {
-      const meta = msg.meta?.brain ? `<span class="cp-bubble-meta">${escapeHtml(msg.meta.brain)}</span>` : '';
+      const m = msg.meta || {};
+      const metaParts = [];
+      if (m.brain)    metaParts.push(escapeHtml(m.brain));
+      if (m.model)    metaParts.push(escapeHtml(m.model));
+      if (m.provider && m.provider !== 'ollama') metaParts.push(escapeHtml(m.provider));
+      const meta = metaParts.length
+        ? `<span class="cp-bubble-meta">${metaParts.join(' \u00B7 ')}</span>`
+        : '';
       const isStreaming = !!msg.meta?.streaming;
       const hasText = msg.text && msg.text.length > 2;  /* skip "…" placeholder */
       const copyId = `cpcopy-${msg.id}`;
@@ -579,7 +586,7 @@ async function sendChat(query) {
 
   try {
     const aiMod = await import('../kernel/ai-service.js');
-    await aiMod.aiService.askStream(query, {
+    const result = await aiMod.aiService.askStream(query, {
       skipHistory: false,
       capCategory: 'chat',
       maxTokens: 800,
@@ -594,7 +601,13 @@ async function sendChat(query) {
     });
     updateMessage(replyMsg.id, m => {
       if (!m.text) m.text = '(no reply)';
-      m.meta = { ...(m.meta || {}), streaming: false };
+      m.meta = {
+        ...(m.meta || {}),
+        streaming: false,
+        brain: result?.meta?.brain,
+        model: result?.meta?.model,
+        provider: result?.meta?.provider,
+      };
     });
   } catch (err) {
     // AbortError = user clicked Stop; keep whatever tokens we got + mark
