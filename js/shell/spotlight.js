@@ -781,6 +781,7 @@ export function initSpotlight() {
         { cmd: 'branches · timeline · history', desc: 'See recent L2+ operations with rewind buttons' },
         { cmd: 'rehearse <query> · preview <query>', desc: 'Dry-run a plan in a branch, see the diff, then Apply or Discard' },
         { cmd: 'upgrade yourself · improve yourself [js/apps/<file>]', desc: 'AI reads screen + source, proposes a fix, walks 5 M8 gates, writes to disk' },
+        { cmd: 'compose skill <description> · make a skill that <X>', desc: 'AI drafts a .skill YAML file from your description; install in one click' },
         { cmd: 'undo upgrade · rollback upgrade', desc: 'Revert the most recent self-upgrade — restores the pre-upgrade file content' },
         { cmd: '<skill phrase>', desc: 'Run a skill by its phrase (see Settings > Skills)' },
         { cmd: '<math expression>', desc: 'Calculate: 2+2, sqrt(16), 5!, 15% of 200' },
@@ -867,6 +868,98 @@ export function initSpotlight() {
     // the change to disk via /api/files/write. Allow-list restricts the
     // AI to js/apps + js/shell + css/apps — kernel + safety rails are
     // never reachable from this path.
+    // ─── Skill composer: "compose skill <description>" / "make a skill that <description>" ───
+    // Asks the AI to draft a .skill YAML file from a natural-language
+    // description. Shows the generated YAML inline + Install button
+    // that calls installUserSkill (lesson 155 still applies — won't
+    // shadow a bundled skill).
+    const composeMatch = lower.match(/^(?:compose|make|create|draft|new)\s+(?:a\s+)?skill\s+(?:that\s+|to\s+)?(.+)/i)
+      || lower.match(/^(?:skill|skill\s+for)\s*:\s*(.+)/i);
+    if (composeMatch) {
+      const desc = (composeMatch[1] || '').trim();
+      if (!desc) {
+        results.innerHTML = `<div class="spotlight-result-group">
+          <div class="spotlight-result-label">\u{1F9E9} Compose a skill</div>
+          <div class="spotlight-result-subtitle" style="padding:10px 16px;">Describe what you want — e.g. "compose skill that opens the calendar at 9am every weekday"</div>
+        </div>`;
+        return;
+      }
+      results.innerHTML = `<div class="spotlight-result-group">
+        <div class="spotlight-result-label">\u{1F9E9} Drafting skill…</div>
+        <div class="spotlight-result-subtitle" style="padding:8px 16px;opacity:0.7;">${escapeHtml(desc)}</div>
+      </div>`;
+      try {
+        const aiMod = await import('../kernel/ai-service.js');
+        const sys = `You generate Astrion .skill files. The format is YAML with these top-level keys:
+  goal: short one-line description
+  trigger:
+    - phrase: "exact spoken phrase"   # zero or more
+    - cron: "0 9 * * 1-5"            # optional, standard cron
+    - event: "events:eventName"      # optional
+  do: |
+    Multi-line natural-language instruction for what Astrion should do.
+  constraints:
+    level: L0 | L1 | L2
+    budget_tokens: 5
+
+Return ONLY the YAML content, no \`\`\` fences, no commentary.`;
+        const reply = await aiMod.aiService.ask(
+          'Compose a .skill file for this request: ' + desc,
+          { skipHistory: true, capCategory: 'skill-compose', maxTokens: 500 }
+        );
+        const yaml = (reply || '').trim().replace(/^```(?:yaml|yml)?\s*/i, '').replace(/```\s*$/i, '');
+        if (!yaml) {
+          results.innerHTML = `<div class="spotlight-result-group">
+            <div class="spotlight-result-label">✗ Empty draft</div>
+            <div class="spotlight-result-subtitle" style="padding:10px 16px;color:#ff5555;">AI returned no content. Try a more specific description.</div>
+          </div>`;
+          return;
+        }
+        results.innerHTML = `
+          <div class="spotlight-result-group">
+            <div class="spotlight-result-label">\u{1F9E9} Drafted skill</div>
+            <div style="padding:12px 16px;">
+              <pre style="font-family:ui-monospace,monospace;font-size:11.5px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.08);border-radius:6px;padding:10px;color:#e0e0e0;max-height:280px;overflow:auto;white-space:pre-wrap;margin:0;">${escapeHtml(yaml)}</pre>
+              <div style="display:flex;gap:8px;margin-top:12px;">
+                <button id="spotlight-skill-install" style="padding:7px 14px;border-radius:6px;border:none;background:#34c759;color:white;font-size:12px;cursor:pointer;font-family:var(--font);font-weight:600;">✓ Install</button>
+                <button id="spotlight-skill-discard" style="padding:7px 14px;border-radius:6px;border:1px solid rgba(255,255,255,0.15);background:transparent;color:rgba(255,255,255,0.75);font-size:12px;cursor:pointer;font-family:var(--font);">Discard</button>
+                <span id="spotlight-skill-status" style="font-size:11px;color:rgba(255,255,255,0.55);align-self:center;"></span>
+              </div>
+            </div>
+          </div>`;
+        results.querySelector('#spotlight-skill-install').addEventListener('click', async () => {
+          const status = results.querySelector('#spotlight-skill-status');
+          status.textContent = 'Installing…';
+          try {
+            const sm = await import('../kernel/skill-registry.js');
+            const r = await sm.installUserSkill(yaml);
+            if (r.ok) {
+              status.textContent = '✓ Installed as ' + r.name;
+              status.style.color = '#a6e3a1';
+            } else {
+              status.textContent = '✗ ' + r.error;
+              status.style.color = '#ff5555';
+            }
+          } catch (err) {
+            status.textContent = '✗ ' + (err?.message || String(err));
+            status.style.color = '#ff5555';
+          }
+        });
+        results.querySelector('#spotlight-skill-discard').addEventListener('click', () => {
+          results.innerHTML = `<div class="spotlight-result-group">
+            <div class="spotlight-result-label">✕ Discarded</div>
+            <div class="spotlight-result-subtitle" style="padding:10px 16px;opacity:0.6;">Nothing installed.</div>
+          </div>`;
+        });
+      } catch (err) {
+        results.innerHTML = `<div class="spotlight-result-group">
+          <div class="spotlight-result-label">✗ Compose error</div>
+          <div class="spotlight-result-subtitle" style="padding:8px 16px;color:#ff5555;">${escapeHtml(err?.message || String(err))}</div>
+        </div>`;
+      }
+      return;
+    }
+
     const upgradeMatch = lower.match(/^(?:upgrade|improve|self[- ]?improve|self[- ]?upgrade)\s*(?:yourself|astrion|os)?(?:\s+(.+))?$/i);
     if (upgradeMatch && /upgrade|improve/.test(lower)) {
       const focusHint = (upgradeMatch[1] || '').trim() || null;
