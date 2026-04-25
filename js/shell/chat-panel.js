@@ -130,6 +130,7 @@ function buildPanel() {
         <span>Astrion Chat</span>
       </div>
       <div class="cp-header-actions">
+        <button class="cp-iconbtn" id="cp-autospeak-btn" title="Auto-speak Chat replies">\u{1F509}</button>
         <button class="cp-iconbtn" id="cp-clear-btn" title="Clear conversation">\u{1F5D1}</button>
         <button class="cp-iconbtn" id="cp-close-btn" title="Close (Ctrl+Shift+K)">\u2715</button>
       </div>
@@ -188,6 +189,27 @@ function buildPanel() {
   panelEl.querySelector('#cp-close-btn').addEventListener('click', closeChatPanel);
   panelEl.querySelector('#cp-clear-btn').addEventListener('click', clearConversation);
   panelEl.querySelector('#cp-mic')?.addEventListener('click', startVoiceInput);
+  /* Auto-speak toggle — persists to localStorage. Active state shown
+   * by an .active class (accent border + tinted bg). */
+  const autoSpeakBtn = panelEl.querySelector('#cp-autospeak-btn');
+  function reflectAutoSpeak() {
+    const on = localStorage.getItem('astrion-chat-autospeak') === '1';
+    autoSpeakBtn?.classList.toggle('active', on);
+    if (autoSpeakBtn) autoSpeakBtn.title = on
+      ? 'Auto-speak ON — Chat replies read aloud'
+      : 'Auto-speak Chat replies';
+  }
+  reflectAutoSpeak();
+  autoSpeakBtn?.addEventListener('click', () => {
+    const on = localStorage.getItem('astrion-chat-autospeak') === '1';
+    if (on) {
+      localStorage.removeItem('astrion-chat-autospeak');
+      try { window.speechSynthesis?.cancel?.(); } catch {}
+    } else {
+      localStorage.setItem('astrion-chat-autospeak', '1');
+    }
+    reflectAutoSpeak();
+  });
   panelEl.querySelector('#cp-send').addEventListener('click', (e) => {
     const btn = e.currentTarget;
     if (btn.dataset.mode === 'stop') {
@@ -406,6 +428,7 @@ function messageNode(msg) {
             <div class="cp-bubble-actions">
               <button class="cp-bubble-action" id="${copyId}" title="Copy reply">\u2398</button>
               <button class="cp-bubble-action" id="${regenId}" title="Regenerate">\u21BB</button>
+              <button class="cp-bubble-action cp-speak-btn" data-msg-id="${msg.id}" title="Read aloud">\u{1F509}</button>
             </div>
           ` : ''}
         </div>
@@ -432,6 +455,8 @@ function messageNode(msg) {
             }
           }
         });
+        const speakBtn = panelEl?.querySelector(`.cp-speak-btn[data-msg-id="${msg.id}"]`);
+        speakBtn?.addEventListener('click', () => speakText(msg.text));
       }, 0);
     }
   }
@@ -535,6 +560,20 @@ function scrollToBottom() {
   requestAnimationFrame(() => {
     listEl.scrollTop = listEl.scrollHeight;
   });
+}
+
+// Web Speech Synthesis — read text aloud. Cancel any prior utterance
+// so back-to-back clicks don't queue up. No-op if synth unavailable.
+function speakText(text) {
+  if (!text || typeof window.speechSynthesis === 'undefined') return;
+  try {
+    window.speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(text.slice(0, 2000));
+    u.lang = 'en-US';
+    u.rate = 1.0;
+    u.pitch = 1.0;
+    window.speechSynthesis.speak(u);
+  } catch {}
 }
 
 // Web Speech API mic — pushes the recognized text into the input field.
@@ -673,6 +712,11 @@ async function sendChat(query) {
         provider: result?.meta?.provider,
       };
     });
+    /* Auto-speak the reply if the user toggled it on (persisted to
+     * localStorage). Demo-relevant for hands-free Q&A. */
+    if (localStorage.getItem('astrion-chat-autospeak') === '1' && assembled) {
+      speakText(assembled);
+    }
   } catch (err) {
     // AbortError = user clicked Stop; keep whatever tokens we got + mark
     const aborted = err?.name === 'AbortError';
@@ -1089,6 +1133,11 @@ function injectStyles() {
       font-size: 13px;
     }
     .cp-iconbtn:hover { background: rgba(255,255,255,0.08); color: white; }
+    .cp-iconbtn.active {
+      background: rgba(90,200,250,0.18);
+      color: #5ac8fa;
+      border: 1px solid rgba(90,200,250,0.4);
+    }
 
     .cp-mode-row {
       display: flex;
