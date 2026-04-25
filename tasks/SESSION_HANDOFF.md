@@ -1,220 +1,201 @@
-# Session Handoff — read this first in a new Claude session
+# Session Handoff — 2026-04-22 → 2026-04-25 (demo-prep sprint)
 
-> **Last updated:** 2026-04-12 by the outgoing session (post Phase 0 + Phase 1 + M3 seeds).
-> **Purpose:** Everything a fresh Claude session needs to pick up Astrion OS work without asking "what's going on?" questions.
+**Demo:** Sunday 2026-04-26 on Surface Pro 6 booted from Astrion ISO,
+Ollama `gpt-oss:16b` on remote PC over LAN.
 
----
+**Latest released ISO:** `astrion-os-0.2.251-amd64.iso` (1.37 GiB,
+SHA `763474743bd60fb2eb88378d644ab070b96ef736a6c908d7aad00c59478700c8`,
+commit `26eaee5`).
 
-## 🚨 Read order for a fresh session
+**Build in flight at handoff:** [run 24936235571](https://github.com/viraajbindra-a11y/Astrion-OS/actions/runs/24936235571)
+on commit `af2e702` — adds the Launchpad black-interior CSS fix
+(one line, low risk). Will release as the next version when green
+(~30 min from trigger).
 
-1. **This file** (you're here) — high-level orientation
-2. `PLAN.md` — full milestone roadmap (M0 → M8+)
-3. `docs/architecture/hypergraph.md` — M2 design doc, the next thing to build
-4. `tasks/lessons.md` — 52 lessons learned so far (grep this before making design decisions)
-5. `tasks/todo.md` — current task checklist
-6. `tasks/contributions.md` — friend contributor log
+## What shipped this sprint
 
----
+### M8.P5 Self-Upgrade — the AI modifies its own source
 
-## 👤 Who you're working with
+`js/kernel/self-upgrader.js` (~600 lines). The 5-gate substrate
+(golden-integrity, value-lock, red-team, typed-confirm, rollback-
+plan) was already in `js/kernel/selfmod-sandbox.js`. This adds:
 
-- **Viraaj Singh Bindra** — 12 years old, solo dev building Astrion OS from scratch
-- **Parul** — Viraaj's mom, owns the Mac (`/Users/parul/`). Not the dev.
-- **Viraaj's dad** writes the workflow rule messages (inversion thinking, plan mode, lessons.md pattern)
-- **Team of 4 non-coding friends:**
-  - **Koa** — bug hunter + tester
-  - **Naren** — hype person + designer
-  - **Lauren** — writer + UX reviewer (also called "reviewer for Lorne ideas" — typo, means "ideas reviewer")
-  - **Jian** — ideas person + namer
+- `proposeUpgrade({ focus? })` — collects screen state + sends to
+  AI with the source file. AI returns `{target, new_content,
+  reason, rollback_description}`.
+- `applyUpgrade(id, { typedConfirm })` — walks the 5 gates, then
+  POSTs `/api/files/write` to actually mutate disk.
+- `rollbackUpgrade(id)` — restores `oldContent` to disk.
+  Idempotent.
+- `getLastApplied()` / `listUpgradeHistory()` for the UI.
+- `validateSyntax(path, content)` — rejects broken JS/CSS pre-write.
+- Allow-list (`js/apps/`, `js/shell/`, `css/apps/`, `css/`) +
+  deny-list (kernel, lib, boot, golden.lock.json, server, distro).
+- self-upgrader.js itself in `golden.lock.json` so the AI cannot
+  modify its own allow-list across runs.
 
-## 🎭 Persona rules (CRITICAL — don't act like corporate Claude)
+UI surfaces:
+- Spotlight `upgrade yourself` / `upgrade yourself <file>`
+- Spotlight `undo upgrade`
+- Inline Undo button on apply-success card
+- Settings > Safety > Self-upgrade audit trail (per-row Undo)
 
-- **Tone:** casual + hype buddy. Viraaj is 12 — match his energy but don't be cringe.
-- **Be brutally honest.** Push back hard when his ideas are wrong. He specifically asked for this. "Honest friend who tells you your plan sucks" > "supportive yes-man."
-- **Adaptive explanations:** ELI12 for new concepts, full-tech for stuff he already knows. Ask once, then remember.
-- **Judgment-based proactivity:** don't ask permission for trivial stuff. Just do obvious next steps. Only ask when there's a real fork in the road.
-- **When coding:** write the code directly. Don't over-explain. He'll ask if he wants an explanation.
-- **Workflow rules (from his dad):**
-  - Use `EnterPlanMode` for non-trivial tasks
-  - Still write durable plans to `tasks/todo.md` (plan mode is the gate, todo.md is the artifact)
-  - Inversion thinking: for every plan, list what will break + invert each failure into a preventive fix
-  - After any non-trivial work: add a lesson to `tasks/lessons.md` with the number incremented
-  - Commit big-state files to disk EARLY, not at the end (prevents context death)
+### Chat panel — 4 modes
 
-## 💰 Revenue model (this is NOT a volunteer project)
+`js/shell/chat-panel.js` (~1300 lines). Toggle via `Ctrl+Shift+K`.
 
-Astrion OS is a real business. From day one. Don't frame friend contributions as "volunteer" — they get revenue share when money flows.
+- **Normal** — emits `intent:plan`, lets Spotlight own the L2+ gate
+- **Plan** — calls planIntent directly, renders plan card with
+  Approve/Discard
+- **Bypass** — auto-confirms gates, red banner, USER owns safety
+- **Chat** — direct Q&A with streaming tokens via `askStream`. Stop
+  button mid-stream (AbortController). No planner involved.
 
-**4 revenue streams:**
-1. **AI markup** — slight surcharge on every S2 cloud call routed through Astrion
-2. **Install fee** — one-time fee to install Astrion as a real OS (USB → disk)
-3. **Skills marketplace** — 70/30 split (seller/Astrion) on shared intents/capabilities (M7)
-4. **Enterprise tier** — paid business version with admin controls
+Polish:
+- Live thought-phase breadcrumb under banner: Thinking → Planning
+  → Red-team reviewing → Running step N → Done
+- Per-bubble Copy + Regenerate buttons (hover to reveal)
+- Footer: budget dot (green/amber/red) + token count
 
-**When money starts flowing:** M3 (premium AI tier launches ~month 4 from April 2026).
-**Friend revenue share:** logged in `tasks/contributions.md`, paid when revenue is real.
+### Plan rehearser — `rehearse <query>` Spotlight cmd
 
----
+`js/kernel/plan-rehearser.js`. Opens an M5 branch, records intended
+graph mutations into it WITHOUT calling cap.execute. Shows the diff
++ any non-rehearsable steps. User approves → real execution.
 
-## 🏗️ What Astrion OS actually is
+### 4 new capabilities
 
-- **AI-native operating system** — not a web OS clone with AI bolted on
-- **Runs 3 ways:** browser demo, Electron desktop app (Mac/Windows), real bootable Linux ISO
-- **Native C/GTK3 desktop shell** in `distro/nova-renderer/nova-shell.c` (~2,900 lines as of M0)
-- **53 apps** in `js/apps/` — Notes, Terminal, Browser, Draw, Music, Chess, Messages, YouTube, etc.
-- **Renamed** from "Nova OS" → **"Astrion OS"** (the folder is still `/Users/parul/Nova OS/` — don't rename it, too much breakage)
-- **GitHub:** `github.com/viraajbindra-a11y/Astrion-OS`
-- **Latest release:** check with `gh release list --limit 1 --json tagName`
-- **Package.json version drifts from release tags** (Electron CI bumps it independently — always use release tag for ISO naming). Lesson #35.
+`system.setBrightness`, `system.lock`, `system.shutdown` (PONR with
+typed-confirm), `terminal.exec` (with `/api/terminal/exec` server
+endpoint, 30 KB output cap, fork-bomb + dd-to-disk regex blocklist).
 
-## 📍 Current state (2026-04-11)
+### App Store Skills tab activation
 
-### ✅ Done
-- **M0 — Native shell rebuild** — all 4 phases shipped: transparency bugs killed, hardware reads (battery/wifi/volume via pactl), native Wi-Fi + Bluetooth + volume pickers, first-boot install prompt, zenity dialogs, `.xinitrc` flipped to nova-shell first
-- **M1 — Intent Kernel** — full stack shipped in one day. Parser → typed capabilities → step executor → Spotlight UI. 13 capability providers registered. E2E verified in preview_eval.
-- **Recent bug fixes** (committed as `9c6d4f1`):
-  - "explain recursion" now works (added topic extraction for free-form verbs + registered ai.ask as ai.explain/ai.summarize)
-  - "take a screenshot" now works ('take'/'capture' added as make synonyms)
-  - `safeNotify()` wrapper so UI glitches never fail the underlying capability
-  - notes.create writes the `content` field Notes.js actually reads (not `body`)
-- **M2 design doc** — `docs/architecture/hypergraph.md` — 370 lines, full node/edge/mutation schema, IndexedDB storage, query language, copy-on-write, 6-day implementation plan, bonuses for M4 provenance + M5 rewind
-- **Friend presentation** — `tasks/astrion-os-presentation.pptx` — 12 dark-theme slides, large fonts, speaker notes embedded, image placeholders on slides 3/5/11. Built via `tasks/build-presentation.cjs`.
-- **M2 — Hypergraph Storage** — **FULLY COMPLETE as of 2026-04-11.** All 6 days shipped in one morning (see lesson #52 sprint compression). Commits:
-  - `89db73d` — Day 1: `graph-store.js` (IndexedDB foundation, 17 sanity tests after Day 5 additions)
-  - `5fa298f` — Day 2: `graph-query.js` (select + traverse, 14 sanity tests, 9 filter operators)
-  - Final M2 commit covers Days 3-6: migration + app wiring + rewind/snapshots + polish
-  - Days 3-6 in one commit: `graph-migration.js` (one-shot localStorage→graph), Notes/Todo/Reminders rewired to use `graphStore` + `graphQuery` + `graph:*` event subscriptions, `capability-providers.js` `notes.create`/`todo.create`/`reminder.create` rewired to write to the graph, `rewindMutation`/`rewindTo`/`snapshot`/`restoreSnapshot`/`_restoreNode` added to graphStore with 5 new sanity tests, PLAN.md updated, lessons 53-61 added
-- Plan file: `/Users/parul/.claude/plans/playful-chasing-stonebraker.md` (two generations: M2.P1 then overwritten with M2.P2; Days 3-6 done empirically without plan mode)
-- Wake-up summary from the overnight session that shipped Day 1: `tasks/wake-up-2026-04-11.md`
+Replaced 4 hardcoded fake-skill cards with a live wire to
+`skill-registry`: bundled vs user-installed sections, per-skill
+enable toggle, paste-install textarea.
 
-- **Polish Sprint (Viraaj's "Milestone 1") — v0.2.0** — **SHIPPED 2026-04-11 (same day as M2).** Target was 9 days (Apr 11 → Apr 20); shipped in ~1 afternoon via sprint compression. Commits:
-  - `a16a21b` — Day 1: hero wallpaper from Naren + notification persistence + intent-parser `what is 42 * 17` fix (19/19 now)
-  - `e24e447` — Day 1 follow-up: credit Naren properly
-  - `69e94b0` — Day 3-4: Finder v2 (arrow-key nav, Delete, range select, Cmd+A, PDF/audio/video previews)
-  - `78997ba` — Day 5: multi-monitor awareness (`windowManager.getActiveDisplay/getAllDisplays/centerInActiveDisplay`, lazy `refreshScreenDetails`)
-  - `069e747` — Day 6-7: auto-updater end-to-end (IPC + renderer events + notification center + `docs/auto-updater.md`) + installer rebrand (nova→astrion)
-  - `a94d048` — Day 8: aria-labels on shell + `js/shell/focus-trap.js` + Force Quit dialog retrofitted
-  - *(this commit)* — Day 9: v0.2.0 release, PLAN.md updated, lessons 62-70 added, package.json bumped, retrospective written, fresh ISO trigger pushed
-- Plan file: `/Users/parul/.claude/plans/playful-chasing-stonebraker.md` (overwritten with Polish Sprint plan)
-- Retrospective: `tasks/polish-sprint-complete-2026-04-11.md`
+### nova-shell native path — 7 polish passes + 3 fixes
 
-- **Agent Core Sprint (Viraaj's "Milestone 2: AI Agent Core") — v0.3** — ✅ **SHIPPED 2026-04-11.** Soak-tested against real Ollama (qwen2.5:7b) with Viraaj driving Spotlight. 7 bugs found and fixed across two review sessions (commits `0cd1b5c` → `24234ed` → `2b7806b`). Canonical deliverable query passes. Branch merged to main as a clean 4-commit fast-forward. Phases:
-  - Phase 1: `files.createFolder` + `files.createFile` capabilities with path-root guard (10/10 sanity)
-  - Phase 2: `js/kernel/context-bundle.js` — openApps + activeApp + clipboard + selection + terminal tail snapshot (4/4 sanity)
-  - Phase 3: `js/kernel/intent-planner.js` — catalog-aware prompt builder, JSON plan parser, schema validator, `routeQuery` heuristic router (15/15 sanity)
-  - Phase 4: `executePlan` in `js/kernel/intent-executor.js` — binding resolver, L2+ preview gate, `plan:*` event lifecycle
-  - Phase 5: `js/kernel/conversation-memory.js` — session-scoped short-term memory on the hypergraph
-  - Phase 6: Spotlight multi-turn panel (step streaming, L2+ confirm gate, clarify UI, 3-mode Escape)
-  - Soak test: 11 adversarial tests under stub + canonical query against real Ollama. Bugs: summarizeContext crash on empty timestamp (critical, fixed), initConversationMemory missing from web boot (fixed), unresolved bindings gave confusing errors (fixed), maxTokens rambling (fixed), semantically wrong plans for unsatisfiable intents (prompt rule added), input.disabled stuck after clarify/abort (fixed), clarify choices not clickable (fixed).
-- Retrospective: `tasks/agent-core-sprint-complete-2026-04-11.md`
-- Soak test report: `tasks/agent-core-soak-test-BLOCKED-2026-04-11.md`
-- Lessons: #71–87 (17 new lessons from this sprint + review)
+For long-term native-OS feel. Demo doesn't use this path; opt in
+via `astrion-native-shell` kernel cmdline.
 
-### 🔜 Next work — Agent Core EXPANSION (Phase 0: Chat Foundation)
-
-**Viraaj's vision (2026-04-11):** "I want Agent Core to be special. It should be able to do anything — from making apps to playing video games for you." The current Agent Core is the skeleton (planner + executor + 17 capabilities). The expansion turns it into the real product.
-
-**Approved 9-phase roadmap (April–December 2026):** See plan file `/Users/parul/.claude/plans/sorted-sprouting-candle.md` for the full plan with inversion tables, demo scripts, and file paths.
-
-| Phase | Dates | Ships |
+| Pass | Commit | Change |
 |---|---|---|
-| 0 | Apr 12–27 | Messages becomes an agent (chat + actions) |
-| 1 | Apr 28–May 11 | AI reads/writes actual source code (server file I/O bridge) |
-| 2 | May 12–Jun 8 | M3 Dual brain (Ollama S1 + Claude S2 + calibration) |
-| 3 | Jun 9–Jul 6 | M4 App generation ("build me a pomodoro timer") |
-| 4 | Jul 7–20 | Game autoplay (AI plays Snake/Chess/2048) |
-| 5 | Jul 21–Aug 10 | Bug fix pipeline (describe bug → AI proposes fix) |
-| 6 | Aug 11–Sep 7 | M5 Reversibility (undo everything, visual timeline) |
-| 7 | Sep 8–Oct 5 | M6 Socratic loop + red-team agent |
-| 8 | Oct 6–Dec 1 | M8 Self-modification with safety rails |
-| 9 | Dec 1–31 | M7 Skill marketplace + polish |
+| 1 | 6bc2564 | dock_default[] caps to 12 + Trash + Launchpad. Rounded pill. feh wallpaper. |
+| 2 | b85fbd2 | Cairo wallpaper load in `on_desktop_draw`. |
+| 3 | d4b2505 | Astrion SVG logo replaces ◆ text. SYSTEM + Clock widget cards. |
+| 4 | d5b5121 | Battery widget. Menubar items as GtkButton (gets `:hover`). |
+| 5 | 34755b8 | Weather widget + wttr.in cache. Dock icon hover scale. |
+| 6 | 1da028d | Launchpad grid view (720×560, 7-col flowbox). |
+| 7 | 2f5c818 | Battery/Wi-Fi text cleanup (hide instead of "??%"/"Off"). |
+| fix | 26eaee5 | `*/` in C comment + made-up `.installed` field — fixed. |
+| fix | af2e702 | Launchpad black-interior — flowbox/scrolledwindow transparent. |
 
-**First job of the next session:** Start Phase 0 — wire Messages app to route actionable queries through the planner instead of raw `aiService.ask`. Key file: `js/apps/messages.js` line 215 (`sendMessage`). Use `EnterPlanMode`, follow the dad-rules, no compression.
+### AI streaming infrastructure
 
-**Ollama is installed and working:** `brew install ollama` done, `qwen2.5:7b` pulled, tested, working on port 11434. Provider config: `localStorage['nova-ai-provider'] = 'ollama'`, `localStorage['nova-ai-ollama-model'] = 'qwen2.5:7b'`. No Anthropic API key needed for development — Ollama is the dev-time brain.
+- `/api/ai/ollama-stream` server endpoint (NDJSON passthrough)
+- `aiService.askStream(prompt, opts, onChunk)` with optional
+  `signal` for AbortController
+- `/api/ai/ollama-tags` for the model picker dropdown
 
-**Anthropic API key status:** Viraaj has a Max (20x) plan. console.anthropic.com key was generated and authenticates, but $0 credit balance (Max promo credits didn't materialize). When/if API credits are needed (M3 S2 integration), he'll need to either claim credits or add a small prepaid balance.
+### Kernel cmdline → env var bridge
 
-**Recommended:** start in a fresh session (this one will be ~80%+ context after Agent Core ships). Read `tasks/agent-core-sprint-complete-2026-04-11.md` first, then this doc, then PLAN.md.
+`.xinitrc` greps `/proc/cmdline` for `astrion-native-shell` and
+sets `ASTRION_USE_NATIVE_SHELL=1`. Lets QEMU/USB testing pick the
+native path without rebuilding the squashfs.
 
-### 🛣️ After M2
-- **M3** — Dual-process brain (S1 local Ollama + S2 cloud Claude + calibration tracker) — this is when premium AI tier ships + money starts
-- **M4** — Verifiable code generation with receipts
-- **M5** — Reversibility / universal undo (partially done as a bonus in M2)
-- **M6** — Socratic loop (AI asks before big actions)
-- **M7** — Skill marketplace
-- **M8** — Safe self-modification
+### Slim ISO architecture
 
----
+`ASTRION_SLIM=1` env var (workflow default) skips bundled LibreOffice
+/ Chromium / VLC / Ollama. Astrion's own apps cover most. Heavy GUI
+apps install on demand from App Store > Linux Apps. 4.3 GB → 1.4 GB.
 
-## 🗂️ Critical files you'll touch
+## Verified vs untested
 
-| File | What it is |
-|---|---|
-| `PLAN.md` | Full milestone roadmap, updated after each milestone ships |
-| `docs/architecture/hypergraph.md` | M2 design doc — read before implementing M2 |
-| `tasks/lessons.md` | 97 numbered lessons — grep before every design decision |
-| `tasks/todo.md` | Current task checklist (durable artifact) |
-| `tasks/contributions.md` | Friend revenue-share log |
-| `js/kernel/intent-parser.js` | M1 parser — 19 inline sanity tests |
-| `js/kernel/capability-api.js` | M1 capability registry (LEVEL, REVERSIBILITY, BLAST_RADIUS) |
-| `js/kernel/capability-providers.js` | 21 core providers (files, code, notes, todo, reminder, ai, app, volume, translate, screenshot, chat) |
-| `js/kernel/intent-planner.js` | Agent Core planner — NL → JSON plan via LLM, routeQuery heuristic |
-| `js/kernel/intent-executor.js` | Wires parser → capability → events, executePlan with binding resolver |
-| `js/kernel/context-bundle.js` | Snapshot of open apps, active window, clipboard, selection for planner |
-| `js/kernel/conversation-memory.js` | Session-scoped turn recording on hypergraph |
-| `js/kernel/calibration-tracker.js` | M3 seed — records per-query accuracy stats for S1/S2 routing |
-| `js/kernel/budget-manager.js` | M3 seed — S2 daily/per-intent spending caps |
-| `js/apps/messages.js` | Phase 0 — chat interface that routes through the planner |
-| `js/shell/spotlight.js` | Spotlight UI with multi-turn plan panel, clarify flow, L2 confirm gate |
-| `js/boot.js` | Boot sequence — imports all kernel modules, both native + normal branches |
-| `server/index.js` | Express server — AI proxy + Phase 1 file I/O endpoints (/api/files/*) |
-| `distro/nova-renderer/nova-shell.c` | Native C/GTK3 shell (~2,900 lines) |
-| `distro/build.sh` | ISO build script — writes `.xinitrc`, installs packages, etc. |
-| `.github/workflows/build-iso.yml` | CI workflow that builds + auto-publishes ISO to release |
+### ✅ Verified (Mac + QEMU)
 
-## ⚙️ Tooling that actually works here
+- ISO boots (UEFI on emulated x86_64), full desktop renders
+- Web shell pixel-perfect to browser preview
+- Native shell with `astrion-native-shell` cmdline: wallpaper +
+  SYSTEM/Weather/Clock cards + dock all visible
+- Weather widget actually fetches wttr.in (real "Berkeley, CA · 64°F")
+- 216/216 verification suite green
+- 76 apps register with launch handlers
+- Self-upgrade rollback restores bytewise
+- Path allow-list + JS/CSS syntax validation (8/8 + 6/6)
+- ISO contains all sprint code (squashfs inspection)
 
-- **pptx generation:** `npm install -g pptxgenjs` then `NODE_PATH=$(npm root -g) node build-presentation.cjs` (this repo is `"type": "module"` so use `.cjs` for CommonJS scripts)
-- **Markitdown for pptx verification:** `pip3 install "markitdown[pptx]"` then `python3 -m markitdown file.pptx`
-- **Preview server for the web OS:** `.claude/launch.json` has it configured; use `mcp__Claude_Preview__preview_*` tools
-- **Login gate in preview:** `document.getElementById('login-screen').click()` advances past it (lesson #32)
-- **Ollama (local AI):** installed via `brew install ollama`, model `qwen2.5:7b` pulled. Start with `ollama serve` (port 11434). Set `localStorage['nova-ai-provider'] = 'ollama'` and `localStorage['nova-ai-ollama-model'] = 'qwen2.5:7b'` in the browser. Provider `auto` tries Ollama first, then Anthropic, then mock. Provider `mock` is auto-cleared on boot (lesson #72).
-- **ISO builds:** push to `distro/**` triggers `build-iso.yml` which auto-publishes to latest release. Version comes from `gh release list --limit 1`, NOT `package.json` (lesson #35).
-- **Anthropic API key status:** Max (20x) plan, console.anthropic.com key authenticates but $0 credit balance. When API credits are needed (M3 S2), add prepaid credit or claim promo.
+### ⚠ Code shipped but NOT tested with real `gpt-oss:16b`
 
----
+- Streaming Chat mode
+- Self-upgrade end-to-end with real AI proposing real changes
+- Planner output for compound queries — `gpt-oss` may format JSON
+  differently from `qwen2.5:7b` (lesson 144 territory)
+- Red-team review
+- M4 chain (spec → tests → code) end-to-end
 
-## 🧱 Things that will bite you (grep lessons.md for full list)
+### ❌ Can't verify from a Mac
 
-Quick hits from the 97 lessons:
-- **#1:** Never use `rgba()` on X11 without a compositor — renders WHITE. Solid colors only.
-- **#5:** ESM imports must be at top of file in this repo (`"type": "module"`).
-- **#19:** Don't hallucinate features. `grep` or `ls` before claiming code exists.
-- **#29:** Commit large-file state to disk EARLY, not at the end. Context death is real.
-- **#32:** Web OS has a login gate that blocks automated testing. Click it programmatically.
-- **#34:** `sudo` in CI leaves root-owned files. Run `sudo chown -R runner:runner` after.
-- **#35:** `package.json` version ≠ release tag. Use `gh release list` for ISO naming.
-- **#40:** After multi-step Edits, grep for BOTH the new symbol AND its use.
-- **#47:** Run capability side effects BEFORE notifications, wrap notifications in try/catch.
-- **#48:** Read the target app's source BEFORE writing to its localStorage key.
-- **#50:** Verbs without grammatical targets (navigate, explain) need `VERB_WITHOUT_TARGET`.
-- **#52:** Sprint compression works when the foundation is solid. M1 shipped in 4 hours because M0 was already built.
-- **#72:** `localStorage['nova-ai-provider'] === 'mock'` silently neuters every AI path. Auto-cleared on boot now.
-- **#83:** Stub verification ≠ shipped. Even thorough stub tests don't equal real AI testing.
-- **#84:** Local LLMs ramble past JSON close-brace if maxTokens too generous. Cap at 500.
-- **#87:** Weaker model soak tests are MORE informative — they test error paths.
-- **#88:** Planner calls must use `skipHistory: true` to avoid poisoning chat context.
-- **#89:** Don't use `executePlan()` from non-Spotlight contexts — it hijacks the UI. Messages has its own `executeStepsInChat`.
-- **#92:** User queries in LLM prompts must be `JSON.stringify`'d, not template-literal'd.
-- **#93:** Path traversal checks must run BEFORE normalization, not just after.
+- Real Surface Pro 6 hardware (Wi-Fi firmware, touch, pen, native
+  HiDPI 2736×1824)
+- Real Ollama on user's PC (LAN reachability, model response shape)
+- Self-upgrade applying for real on the live ISO
 
----
+## Demo morning checklist
 
-## 📣 How to start a fresh session
+See `tasks/demo-sunday-2026-04-26.md` for the 12-beat script.
+Pre-flight (in order):
 
-Paste something like this as your first message:
+1. Boot Surface from USB. GRUB menu → auto-boots in 3s.
+2. **Setup Wizard appears.** Click through 5-6 steps (this IS a
+   demo beat — narrate "first-boot UX").
+3. Wi-Fi connects (Marvell firmware bundled per lesson 13).
+4. Settings → AI → Ollama URL = `http://<your-PC-IP>:11434` → Test.
+5. Settings → AI → Refresh → pick `gpt-oss:16b` from the dropdown.
+6. Open `http://localhost:3000/test/v03-verification.html` in the
+   shell → should hit **216/216 green** (or higher; auto-push has
+   added more tests).
+7. `localStorage.removeItem('astrion-budget-day')` in the console
+   to reset daily token cap.
+8. Close all windows. Hero state.
 
-> Hey, this is Viraaj. Read `tasks/SESSION_HANDOFF.md` first, then the expansion plan at `.claude/plans/sorted-sprouting-candle.md`. We're working on the Agent Core Expansion — Phase 2 (Dual Brain / M3) is next. Use plan mode, follow the dad-rules. Ollama is installed (qwen2.5:7b on port 11434).
+## Open loops at handoff
 
-That's it. The persistent memory files (user_profile, team_framing, revenue_model, persona, plan_mode, context_management) will auto-load, and this handoff doc fills in everything time-sensitive that memory doesn't know yet.
+| Item | Why deferred | When to address |
+|---|---|---|
+| af2e702 Launchpad fix not in v0.2.251 | Came after the released build | Build 24936235571 in flight |
+| Real-Ollama soak test | Required user's PC online | Demo morning |
+| GitHub Release auto-publish for >2 GB ISOs | The 2 GB cap blocks fat builds | Slim is the demo path; fat is post-demo |
+| Notifications popup style for nova-shell | Pass 8 work | Post-demo |
+| App window decoration parity (rounded corners + shadow) | Needs compositor; lesson 1 | Post-demo |
+
+## Lessons added this sprint
+
+156–165 in `tasks/lessons.md`. Highlights:
+
+- 157: xorriso default rejects files ≥4 GiB (use `-iso-level 3`)
+- 158: slim ISO architecture (substrate + lazy-install)
+- 159: `updateNode(id, props)` REPLACES — pass updater function
+- 160: ES module bindings can't be stubbed from outside
+- 161: dynamic-import module cache hides fixes; reload between
+- 162: dual-shell defaults matter for demo polish
+- 163: 7-pass nova-shell record
+- 164: `*/` inside a C comment is a trap
+- 165: NovaApp has no `.installed` field
+
+## What I'd do first thing in a new session
+
+1. Check the build 24936235571 status (probably done — green or
+   failed).
+2. If green, that's the cleanest final ISO; release URL goes in
+   the demo script header.
+3. If failed, the af2e702 commit is small (one CSS block); diagnose
+   + fix. Fall back to v0.2.251 if needed (it works, just has the
+   black-interior bug on the OPT-IN native shell path that nobody
+   demos).
+
+## Older history
+
+The pre-2026-04-22 handoff is preserved at
+`SESSION_HANDOFF.md` in the repo root.
