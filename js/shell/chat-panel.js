@@ -231,10 +231,23 @@ function buildPanel() {
     }
   });
 
-  // Auto-grow textarea
+  // Auto-grow textarea + live cost-preview badge.
+  // The hint line shows "Enter to send · ~N tokens" when typing.
+  // Estimate is char-count / 4 (the standard rough English tokenization
+  // ratio). Resets when input is empty.
   inputEl.addEventListener('input', () => {
     inputEl.style.height = 'auto';
     inputEl.style.height = Math.min(inputEl.scrollHeight, 140) + 'px';
+    const hintEl = panelEl.querySelector('#cp-hint');
+    const len = inputEl.value.length;
+    if (hintEl && !hintEl.dataset.streaming) {
+      if (len > 0) {
+        const tokens = Math.max(1, Math.ceil(len / 4));
+        hintEl.textContent = `~${tokens} input tokens · Enter to send`;
+      } else {
+        hintEl.textContent = 'Enter to send · Shift+Enter for newline · Ctrl+Shift+K to toggle';
+      }
+    }
   });
 
   applyModeUI();
