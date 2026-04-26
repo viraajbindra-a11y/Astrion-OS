@@ -40,6 +40,7 @@ let currentMode = MODE.NORMAL;
 let messages = []; // { id, role, text, kind, planId?, meta? }
 let planGroups = new Map(); // planId -> { messageIds:[], plan, status, mode }
 let bypassAutoConfirmOn = false; // guards interception:preview auto-confirm
+let pendingAttachment = null;     // { name, content, bytes } from drag-drop
 let inputEl = null;
 let listEl = null;
 let modeChipEl = null;
@@ -189,6 +190,50 @@ function buildPanel() {
   panelEl.querySelector('#cp-close-btn').addEventListener('click', closeChatPanel);
   panelEl.querySelector('#cp-clear-btn').addEventListener('click', clearConversation);
   panelEl.querySelector('#cp-mic')?.addEventListener('click', startVoiceInput);
+
+  /* Drag-and-drop file upload — drop a file onto the panel and the
+   * file content gets attached to the next user message as context.
+   * The AI sees `[attached: filename.txt]\n<content>\n\n<your query>`.
+   * Plain text only (utf-8); binary files rejected with a notice. */
+  ['dragover', 'dragenter'].forEach(ev =>
+    panelEl.addEventListener(ev, (e) => {
+      e.preventDefault();
+      panelEl.classList.add('cp-drag-over');
+    }));
+  ['dragleave', 'dragend'].forEach(ev =>
+    panelEl.addEventListener(ev, (e) => {
+      if (e.target === panelEl) panelEl.classList.remove('cp-drag-over');
+    }));
+  panelEl.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    panelEl.classList.remove('cp-drag-over');
+    const file = e.dataTransfer?.files?.[0];
+    if (!file) return;
+    if (file.size > 200 * 1024) {
+      pushSystemMessage(`✗ ${file.name} too big (${Math.round(file.size/1024)} KB > 200 KB cap). Drop a smaller file.`);
+      return;
+    }
+    try {
+      const text = await file.text();
+      /* Cheap UTF-8 sanity: if first 2KB has > 5% non-printable bytes,
+       * call it binary + reject. Avoids stuffing a JPEG into the prompt. */
+      const sample = text.slice(0, 2000);
+      let nonPrint = 0;
+      for (let i = 0; i < sample.length; i++) {
+        const c = sample.charCodeAt(i);
+        if (c < 9 || (c > 13 && c < 32) || c === 127) nonPrint++;
+      }
+      if (sample.length > 0 && nonPrint / sample.length > 0.05) {
+        pushSystemMessage(`✗ ${file.name} looks binary; chat only accepts text files.`);
+        return;
+      }
+      pendingAttachment = { name: file.name, content: text, bytes: file.size };
+      pushSystemMessage(`\u{1F4CE} Attached ${file.name} (${file.size} bytes) — your next message will include it as context.`);
+      reflectAttachment();
+    } catch (err) {
+      pushSystemMessage(`✗ Couldn't read ${file.name}: ${err?.message || String(err)}`);
+    }
+  });
   /* Auto-speak toggle — persists to localStorage. Active state shown
    * by an .active class (accent border + tinted bg). */
   const autoSpeakBtn = panelEl.querySelector('#cp-autospeak-btn');
@@ -672,21 +717,50 @@ function clearConversation() {
 // ═══════════════════════════════════════════════════════════════
 
 async function handleSend() {
-  const query = (inputEl.value || '').trim();
-  if (!query) return;
+  let query = (inputEl.value || '').trim();
+  if (!query && !pendingAttachment) return;
   inputEl.value = '';
   inputEl.style.height = 'auto';
 
-  pushUserMessage(query);
+  /* If a file was dropped onto the panel, prepend its content as
+   * context for the AI. Drop the attachment after one send so it
+   * doesn't accumulate across questions. */
+  let visibleQuery = query;
+  let modelQuery = query;
+  if (pendingAttachment) {
+    const attached = pendingAttachment;
+    pendingAttachment = null;
+    reflectAttachment();
+    visibleQuery = `\u{1F4CE} ${attached.name}\n${query || '(attached above)'}`;
+    modelQuery = `[attached file: ${attached.name}, ${attached.bytes} bytes]\n` +
+      attached.content.slice(0, 50000) +
+      (attached.content.length > 50000 ? '\n[...truncated to 50KB]' : '') +
+      `\n\nUser question: ${query || '(no question — explain or summarize this file)'}`;
+  }
+
+  pushUserMessage(visibleQuery);
 
   if (currentMode === MODE.NORMAL) {
-    sendNormal(query);
+    sendNormal(modelQuery);
   } else if (currentMode === MODE.PLAN) {
-    sendPlan(query);
+    sendPlan(modelQuery);
   } else if (currentMode === MODE.BYPASS) {
-    sendBypass(query);
+    sendBypass(modelQuery);
   } else if (currentMode === MODE.CHAT) {
-    sendChat(query);
+    sendChat(modelQuery);
+  }
+}
+
+function reflectAttachment() {
+  if (!panelEl) return;
+  const hintEl = panelEl.querySelector('#cp-hint');
+  if (!hintEl) return;
+  if (pendingAttachment) {
+    hintEl.textContent = `\u{1F4CE} ${pendingAttachment.name} attached · will send with your next message`;
+    hintEl.dataset.attached = '1';
+  } else {
+    delete hintEl.dataset.attached;
+    hintEl.textContent = 'Enter to send · Shift+Enter for newline · Ctrl+Shift+K to toggle';
   }
 }
 
@@ -1117,6 +1191,24 @@ function injectStyles() {
       box-shadow: -8px 0 40px rgba(0,0,0,0.35);
     }
     .chat-panel.open { transform: translateX(0); }
+
+    .chat-panel.cp-drag-over {
+      box-shadow: inset 0 0 0 3px rgba(90,200,250,0.6);
+    }
+    .chat-panel.cp-drag-over::before {
+      content: 'Drop file to attach as chat context';
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(90,200,250,0.12);
+      color: #5ac8fa;
+      padding: 12px 18px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      pointer-events: none;
+      z-index: 10;
+    }
 
     .chat-panel[data-mode="bypass"] {
       border-color: rgba(255, 69, 58, 0.3);
