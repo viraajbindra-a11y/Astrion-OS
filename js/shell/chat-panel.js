@@ -582,9 +582,18 @@ function speakText(text) {
   try {
     window.speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(text.slice(0, 2000));
-    u.lang = 'en-US';
-    u.rate = 1.0;
-    u.pitch = 1.0;
+    /* Honor Settings > AI > Voice picks (voice / rate / pitch). All
+     * persisted to localStorage by the settings panel. Falls back to
+     * en-US 1.0/1.0 if absent. */
+    const wantedVoice = localStorage.getItem('astrion-tts-voice');
+    if (wantedVoice) {
+      const voices = window.speechSynthesis.getVoices();
+      const v = voices.find(vv => vv.voiceURI === wantedVoice);
+      if (v) { u.voice = v; u.lang = v.lang; }
+    }
+    if (!u.lang) u.lang = 'en-US';
+    u.rate = parseFloat(localStorage.getItem('astrion-tts-rate') || '1.0') || 1.0;
+    u.pitch = parseFloat(localStorage.getItem('astrion-tts-pitch') || '1.0') || 1.0;
     window.speechSynthesis.speak(u);
   } catch {}
 }

@@ -405,6 +405,7 @@ function initSettings(container) {
     // ─── M3 Budget & Calibration Dashboard ───
     renderAIBudgetDashboard();
     renderConversationHistory();
+    renderVoiceSettings();
 
     // Save provider on change
     main.querySelector('#ai-provider').addEventListener('change', (e) => {
@@ -993,6 +994,99 @@ function initSettings(container) {
       a.download = 'astrion-conversation-history-' + new Date().toISOString().slice(0, 10) + '.json';
       a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+    });
+  }
+
+  // ─── Voice / TTS settings ────────────────────────────────────
+  // Picks voice + rate + pitch + lang for the chat panel's read-aloud
+  // and auto-speak features. Persists to localStorage; the chat panel
+  // reads them at speak time.
+  function renderVoiceSettings() {
+    const main = container.querySelector('#settings-main');
+    if (!main) return;
+    if (typeof window.speechSynthesis === 'undefined') return;
+
+    const panel = document.createElement('div');
+    panel.id = 'ai-voice-panel';
+    panel.style.cssText = 'margin-top:18px;padding:18px;background:rgba(255,255,255,0.04);border-radius:10px;';
+    panel.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+        <div style="font-size:14px;font-weight:600;">\u{1F509} Voice (text-to-speech)</div>
+        <button id="ai-voice-test" style="padding:5px 12px;border-radius:5px;border:1px solid rgba(255,255,255,0.15);background:transparent;color:rgba(255,255,255,0.85);font-size:11px;cursor:pointer;font-family:var(--font);">▶ Test</button>
+      </div>
+      <p style="font-size:12px;color:rgba(255,255,255,0.55);margin:0 0 14px;">
+        Used by the chat panel's Read-aloud button + auto-speak toggle.
+        Voice list comes from your OS — Surface, Mac, Linux all expose different sets.
+      </p>
+      <div style="display:grid;grid-template-columns:auto 1fr;gap:10px 12px;align-items:center;">
+        <label style="font-size:12px;color:rgba(255,255,255,0.7);">Voice</label>
+        <select id="ai-voice-select" style="padding:6px 10px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.1);border-radius:6px;color:white;font-size:12px;width:100%;"></select>
+        <label style="font-size:12px;color:rgba(255,255,255,0.7);">Rate</label>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <input type="range" id="ai-voice-rate" min="0.5" max="2" step="0.1" style="flex:1;">
+          <span id="ai-voice-rate-val" style="font-family:ui-monospace,monospace;font-size:11px;color:rgba(255,255,255,0.6);min-width:32px;text-align:right;"></span>
+        </div>
+        <label style="font-size:12px;color:rgba(255,255,255,0.7);">Pitch</label>
+        <div style="display:flex;align-items:center;gap:8px;">
+          <input type="range" id="ai-voice-pitch" min="0" max="2" step="0.1" style="flex:1;">
+          <span id="ai-voice-pitch-val" style="font-family:ui-monospace,monospace;font-size:11px;color:rgba(255,255,255,0.6);min-width:32px;text-align:right;"></span>
+        </div>
+      </div>
+    `;
+
+    if (!main.querySelector('#ai-voice-panel')) {
+      main.appendChild(panel);
+    } else {
+      main.querySelector('#ai-voice-panel').replaceWith(panel);
+    }
+
+    const sel = panel.querySelector('#ai-voice-select');
+    const rate = panel.querySelector('#ai-voice-rate');
+    const pitch = panel.querySelector('#ai-voice-pitch');
+    const rateVal = panel.querySelector('#ai-voice-rate-val');
+    const pitchVal = panel.querySelector('#ai-voice-pitch-val');
+
+    function loadVoices() {
+      const voices = window.speechSynthesis.getVoices();
+      const saved = localStorage.getItem('astrion-tts-voice') || '';
+      sel.innerHTML = `<option value="">Default (browser pick)</option>` +
+        voices.map(v => `<option value="${escapeHtml(v.voiceURI)}" ${v.voiceURI === saved ? 'selected' : ''}>${escapeHtml(v.name)} · ${escapeHtml(v.lang)}${v.default ? ' ★' : ''}</option>`).join('');
+    }
+    loadVoices();
+    /* Browsers fire voiceschanged async; some only populate after this. */
+    if (window.speechSynthesis.onvoiceschanged === null) {
+      window.speechSynthesis.onvoiceschanged = loadVoices;
+    }
+
+    rate.value = localStorage.getItem('astrion-tts-rate') || '1.0';
+    pitch.value = localStorage.getItem('astrion-tts-pitch') || '1.0';
+    rateVal.textContent = parseFloat(rate.value).toFixed(1) + '×';
+    pitchVal.textContent = parseFloat(pitch.value).toFixed(1) + '×';
+
+    sel.addEventListener('change', () => {
+      if (sel.value) localStorage.setItem('astrion-tts-voice', sel.value);
+      else localStorage.removeItem('astrion-tts-voice');
+    });
+    rate.addEventListener('input', () => {
+      rateVal.textContent = parseFloat(rate.value).toFixed(1) + '×';
+      localStorage.setItem('astrion-tts-rate', rate.value);
+    });
+    pitch.addEventListener('input', () => {
+      pitchVal.textContent = parseFloat(pitch.value).toFixed(1) + '×';
+      localStorage.setItem('astrion-tts-pitch', pitch.value);
+    });
+    panel.querySelector('#ai-voice-test').addEventListener('click', () => {
+      try {
+        window.speechSynthesis.cancel();
+        const u = new SpeechSynthesisUtterance('Astrion ready. Hello, this is your selected voice.');
+        const voices = window.speechSynthesis.getVoices();
+        const picked = voices.find(v => v.voiceURI === sel.value);
+        if (picked) u.voice = picked;
+        u.rate = parseFloat(rate.value) || 1;
+        u.pitch = parseFloat(pitch.value) || 1;
+        u.lang = picked?.lang || 'en-US';
+        window.speechSynthesis.speak(u);
+      } catch {}
     });
   }
 
