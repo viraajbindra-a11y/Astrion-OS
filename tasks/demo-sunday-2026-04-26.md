@@ -1,9 +1,9 @@
 # Sunday Demo — 2026-04-26
 
 **Device:** Surface Pro 6, booted from Astrion OS live ISO
-**ISO:** [astrion-os-0.2.243-amd64.iso](https://github.com/viraajbindra-a11y/Astrion-OS/releases/download/v0.2.243/astrion-os-0.2.243-amd64.iso) (1.4 GB, slim build)
-**SHA256:** `a2da7796eb030fa0ab1514f3be2e4cee66d2b3a1a013a0c0d5367cebdb075146`
-**Build commit:** `cc45fcf` — everything from this sprint + M8.P5 self-upgrader + rollback + syntax validation + history audit
+**ISO:** [astrion-os-0.2.254-amd64.iso](https://github.com/viraajbindra-a11y/Astrion-OS/releases/download/v0.2.254/astrion-os-0.2.254-amd64.iso) (1.37 GB, slim build)
+**SHA256:** `b4b2db2d96df43bc0d36fc1bccd611debed745ae1753b8515beb89a1124363c6`
+**Build commit:** `1cb879f` — everything from this sprint + M8.P5 self-upgrader + rollback + syntax validation + history audit + nova-shell pass 8 (notification toast) + chat voice mic + clear-resets-history + `astrion-scale=` cmdline override
 **Brain:** Ollama `gpt-oss:16b` on remote PC (9800X3D + RTX 5080)
 **Connection:** Surface → remote Ollama over LAN (Settings > AI > Ollama URL)
 
@@ -284,9 +284,11 @@ Escape here instead of actually shutting down.)
 - Don't claim gpt-oss:16b specifically has been soak-tested for
   each beat — verified against qwen2.5:7b; gpt-oss is LAN-reachable
   and should behave similarly but bigger + slightly slower.
-- Don't claim "self-modification is working" — M8.P5 (real source
-  mutation) is deferred. Substrate is shipped + gates fire; disk
-  writes are intentionally off.
+- M8.P5 IS shipped (self-upgrader.js writes to disk via /api/files/write
+  after all 5 gates pass). What's still NOT done: a real `gpt-oss:16b`
+  soak proving the proposal/red-team JSON shape on this model — Beat
+  11 may need 1-2 retries if the model returns malformed JSON. The
+  retry-loop handles it but narrate calmly.
 
 ## Recovery one-liners
 
