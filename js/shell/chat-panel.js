@@ -1128,11 +1128,36 @@ function summarizeResults(results) {
 
 function subscribeKeyboard() {
   document.addEventListener('keydown', (e) => {
-    // Ctrl+Shift+K (or Cmd+Shift+K) toggles the panel
     const mod = e.ctrlKey || e.metaKey;
+    /* Ctrl+Shift+K toggles the panel */
     if (mod && e.shiftKey && (e.key === 'K' || e.key === 'k')) {
       e.preventDefault();
       toggleChatPanel();
+      return;
+    }
+    /* Ctrl+Shift+A — "Ask Astrion about this": grab whatever's
+     * selected on the page and pre-fill the chat panel with it as
+     * an attachment. Skips if no selection or selection is just
+     * whitespace. Switches to Chat mode automatically so the
+     * planner doesn't try to dispatch the selection as a command. */
+    if (mod && e.shiftKey && (e.key === 'A' || e.key === 'a')) {
+      const sel = window.getSelection?.()?.toString().trim();
+      if (sel && sel.length > 0) {
+        e.preventDefault();
+        if (!isOpen) openChatPanel();
+        if (currentMode !== MODE.CHAT) setMode(MODE.CHAT);
+        pendingAttachment = {
+          name: 'selection',
+          content: sel.slice(0, 50000),
+          bytes: sel.length,
+        };
+        reflectAttachment();
+        if (inputEl) {
+          inputEl.value = '';
+          setTimeout(() => inputEl.focus(), 50);
+        }
+        pushSystemMessage(`\u{1F4CE} Selected ${sel.length} chars attached · type a question or hit Enter.`);
+      }
     }
   });
 }
