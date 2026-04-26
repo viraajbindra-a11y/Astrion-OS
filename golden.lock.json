@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-04-22T22:44:17.430Z",
+  "generated_at": "2026-04-26T03:53:12.059Z",
   "files": {
     "js/kernel/capability-api.js": "d4124838b9f66a68c620281ded34cc323c122fe9ae2c18c02471b83f8ae9e046",
     "js/kernel/operation-interceptor.js": "8cb583c547779556b1d8aacab1cc50d9e8156de1cf4cf25040570ffbf5222d6b",
@@ -8,7 +8,7 @@
     "js/kernel/rubber-stamp-tracker.js": "0867195d3be0ec520e24d980051ea9bbdd366eb619049c152193b990ef2e241e",
     "js/kernel/chaos-injector.js": "77616f1284a7551406e0d4da56da91252427102deeaf24824cdba0c03f7122f5",
     "js/kernel/branch-manager.js": "e5909c7424e212fbbd8a414ca8281af7bc51b312298777d9328ec0e82517bc20",
-    "js/kernel/intent-executor.js": "b22b465647ad448c520231c5191ebc921ff732824224c9fdadea39684b3eae23",
+    "js/kernel/intent-executor.js": "c2772a87613f3e9be31a407468ce63959831c2b95fddf9e3b3789318a9380773",
     "js/kernel/budget-manager.js": "bd8b48b8f4377c03cf818e57015e577623b26662098a7bf2ea114331dd404bca",
     "js/kernel/socratic-prompter.js": "f2a183a6a2c65ef044cd989d1741faafa516275fb4e00f1dc23ec804c1f237d8",
     "js/kernel/skill-parser.js": "4ed522e4a856f7795a624e2f1198993652557feb2d5b55d912fc5629f0234fda",
