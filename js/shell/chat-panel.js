@@ -1126,6 +1126,29 @@ function summarizeResults(results) {
 // KEYBOARD
 // ═══════════════════════════════════════════════════════════════
 
+// External integration point: any app can fire a CustomEvent
+// 'astrion:chat-attach' with { name, content, question } in detail to
+// pre-fill the chat panel + auto-attach text + drop a starter question.
+// Used by Text Editor's ✨ Explain / Improve buttons; any future
+// per-app AI button can use the same hook with no chat-panel changes.
+window.addEventListener('astrion:chat-attach', (e) => {
+  const { name, content, question } = e.detail || {};
+  if (!content) return;
+  if (!isOpen) openChatPanel();
+  if (currentMode !== MODE.CHAT) setMode(MODE.CHAT);
+  pendingAttachment = {
+    name: name || 'attached',
+    content: String(content).slice(0, 50000),
+    bytes: content.length,
+  };
+  reflectAttachment();
+  if (inputEl) {
+    inputEl.value = question || '';
+    setTimeout(() => inputEl.focus(), 50);
+  }
+  pushSystemMessage(`\u{1F4CE} ${name || 'content'} attached · ${question ? 'starter question pre-filled' : 'type a question + Enter'}`);
+});
+
 function subscribeKeyboard() {
   document.addEventListener('keydown', (e) => {
     const mod = e.ctrlKey || e.metaKey;

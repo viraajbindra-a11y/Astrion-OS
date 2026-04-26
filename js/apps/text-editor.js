@@ -164,6 +164,9 @@ async function initTextEditor(container, instanceId, options = {}) {
         <div class="texteditor-toolbar-separator"></div>
         <button class="texteditor-toolbar-btn" data-action="find" title="Find">Find</button>
         <button class="texteditor-toolbar-btn" data-action="replace" title="Replace">Replace</button>
+        <div class="texteditor-toolbar-separator"></div>
+        <button class="texteditor-toolbar-btn" data-action="ai-explain" title="Ask Astrion to explain (Ctrl+Shift+E)">\u2728 Explain</button>
+        <button class="texteditor-toolbar-btn" data-action="ai-improve" title="Ask Astrion to improve">\u2728 Improve</button>
         <span class="texteditor-filename" id="editor-filename-${instanceId}">${fileName}${modified ? ' \u2022' : ''}</span>
       </div>
       <div class="texteditor-body">
@@ -425,8 +428,45 @@ async function initTextEditor(container, instanceId, options = {}) {
       case 'replace':
         toggleFindBar(true);
         break;
+      case 'ai-explain':
+        askAI('explain');
+        break;
+      case 'ai-improve':
+        askAI('improve');
+        break;
     }
   });
+
+  /* Pipe the current selection (or full file) into the chat panel
+   * with a prefilled question. Always switches to Chat mode so the
+   * planner doesn't dispatch the file content as a command. */
+  async function askAI(mode) {
+    const selStart = textarea.selectionStart;
+    const selEnd = textarea.selectionEnd;
+    const text = (selStart !== selEnd)
+      ? textarea.value.slice(selStart, selEnd)
+      : textarea.value;
+    if (!text.trim()) return;
+
+    try {
+      const cp = await import('../shell/chat-panel.js');
+      cp.openChatPanel?.();
+      /* Stash directly via the panel's drop pipeline. The chat panel
+       * needs the attachment + a prefilled question. */
+      const ev = new CustomEvent('astrion:chat-attach', {
+        detail: {
+          name: fileName + (selStart !== selEnd ? ' (selection)' : ''),
+          content: text,
+          question: mode === 'explain'
+            ? 'Explain what this code does, briefly.'
+            : 'Suggest concrete improvements to this code. Show the changes inline.',
+        },
+      });
+      window.dispatchEvent(ev);
+    } catch (err) {
+      console.warn('[text-editor] ai dispatch failed', err);
+    }
+  }
 
   function updateLineNumbers() {
     const lines = textarea.value.split('\n').length;
