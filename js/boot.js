@@ -257,6 +257,8 @@ import { initVolumeHud } from './shell/volume-hud.js';
     // who rubber-stamp every preview by handing them a fake plan they
     // should refuse to confirm.
     (await import('./kernel/chaos-injector.js')).initChaosInjector();
+    // AI audio cues — soft beeps for thinking/response/gate/applied.
+    (await import('./kernel/ai-audio-cues.js')).initAIAudioCues();
     // M7.P2 skill registry: load .skill files, index phrase triggers,
     // so Spotlight can translate "organize downloads" → a skill
     // dispatch instead of a raw planner call.
@@ -528,6 +530,8 @@ import { initVolumeHud } from './shell/volume-hud.js';
   (await import('./kernel/skill-registry.js')).loadSkillRegistry();
   // M8.P1 golden file integrity check.
   (await import('./kernel/golden-check.js')).initGoldenCheck();
+  // AI audio cues — soft beeps for thinking/response/gate/applied.
+  (await import('./kernel/ai-audio-cues.js')).initAIAudioCues();
 
   // Phase 0: kill mock provider trap permanently (lesson #72).
   // If a prior Settings test left provider='mock', every AI path silently
