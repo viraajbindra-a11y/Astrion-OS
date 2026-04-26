@@ -11,9 +11,16 @@ voice-input mic button.
 
 **Web-only commits riding on next nova-update tick** (no ISO rebuild
 needed — these land in the running OS within an hour of boot):
-  - `4238dc4` Voice OUTPUT: per-bubble Read-aloud + auto-speak toggle
-  - `884ab41` Spotlight `compose skill <description>` AI YAML drafter
+  - `f6f0c5d` Text Editor ✨ Explain + Improve → chat panel via
+    `astrion:chat-attach` CustomEvent (reusable for any per-app AI)
+  - `95beb02` Ctrl+Shift+A — universal "Ask Astrion about this
+    selection" — works in every app
+  - `fa50a55` AI audio cues (thinking/response/gate/applied beeps)
+  - `23fdf31` Drag-and-drop file upload to chat (text only, 200 KB cap)
+  - `eb4765f` Voice settings panel (TTS voice/rate/pitch + Test)
   - `16035e1` Live token-cost preview in chat input hint
+  - `884ab41` Spotlight `compose skill <description>` AI YAML drafter
+  - `4238dc4` Voice OUTPUT: per-bubble Read-aloud + auto-speak toggle
   - `78cef7f`, `7636c14`, `de44bc4` (history viewer, model badge,
     cmdline bridge JS pieces)
 
