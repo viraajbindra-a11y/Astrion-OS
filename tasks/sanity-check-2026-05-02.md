@@ -169,4 +169,14 @@ The blue sky is shrunk. Brain Tech owns "intent-based phone OS." OpenClaw owns "
 
 ---
 
+## Update 2026-05-02 (later in day)
+
+- **Sunday demo was CANCELLED, not run.** Lesson #169 added. Verification debt unchanged but forcing function shifted from "tomorrow's audience" to "v1.0 launch Dec 21."
+- **Domain decided: `astrion-os.com`.** Landing page meta updated. Dad handles billing.
+- **First two hardware testers in pipeline.** Friend with Chromebook (free) + AMD Lenovo (user-funded). Phase 4 hardware matrix: 2/5 testers committed (Surface Pro 6 + Chromebook + AMD Lenovo).
+- **Self-hosted AI** added to roadmap — Astrion should host its own AI brain, not depend on a remote PC. See `tasks/self-hosted-ai-proposal-2026-05-02.md`.
+- **Competitive-watch agent** scheduled via `/schedule` — runs weekly, searches for Brain Tech US expansion / OpenClaw OS-mode / Anthropic CoEvoSkills product / MS Recall rollback signals, notifies on hit.
+
+---
+
 *Audit date: 2026-05-02. Re-audit: 2026-06-01 (or after any major shipping milestone, whichever first).*
