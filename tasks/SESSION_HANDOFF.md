@@ -1,7 +1,9 @@
-# Session Handoff — 2026-05-02 Sprints A+B (self-hosted AI end-to-end)
+# Session Handoff — 2026-05-02 marathon (self-hosted AI + Phase 2 + hardening)
 
-**Sprint A** (first-boot brain picker) and **Sprint B** (RAM gate +
-Ollama diagnostics) both shipped this session.
+**Eight commits shipped this session.** Self-hosted AI thread
+(Sprints A+B) closed end-to-end. Phase 2 distribution started. Two
+architectural debts and one Phase 1 perf-baseline task knocked off
+along the way.
 **Today: 2026-05-02 (Saturday).**
 
 **Latest released ISO:** [`astrion-os-0.2.262-amd64.iso`](https://github.com/viraajbindra-a11y/Astrion-OS/releases/download/v0.2.262/astrion-os-0.2.262-amd64.iso)
@@ -9,7 +11,18 @@ Ollama diagnostics) both shipped this session.
 
 **Domain:** `astrion-os.com` — Dad billing.
 
-## What shipped this session
+## What shipped this session — eight commits
+
+| # | Commit | Theme |
+|---|---|---|
+| 1 | [`9bdafe2`](https://github.com/viraajbindra-a11y/Astrion-OS/commit/9bdafe2) | Sprint A — first-boot AI brain picker |
+| 2 | [`7a7eed0`](https://github.com/viraajbindra-a11y/Astrion-OS/commit/7a7eed0) | Sprint B — RAM gate + Ollama Diagnostics |
+| 3 | [`17157b4`](https://github.com/viraajbindra-a11y/Astrion-OS/commit/17157b4) | Landing page First Boot section + install docs |
+| 4 | [`a07ff9b`](https://github.com/viraajbindra-a11y/Astrion-OS/commit/a07ff9b) | App-count drift reconciled (canonical: 76) |
+| 5 | [`a4ab730`](https://github.com/viraajbindra-a11y/Astrion-OS/commit/a4ab730) | README hero + 10-min safety video script |
+| 6 | [`8a617a2`](https://github.com/viraajbindra-a11y/Astrion-OS/commit/8a617a2) | boot.js refactor — single `registerAllApps()` |
+| 7 | [`e549ff2`](https://github.com/viraajbindra-a11y/Astrion-OS/commit/e549ff2) | Close 6 `err.message → innerHTML` XSS sites |
+| 8 | [`3d4f6ce`](https://github.com/viraajbindra-a11y/Astrion-OS/commit/3d4f6ce) | Boot timeline instrumentation |
 
 **Sprint B — RAM-aware safety + Ollama diagnostics.** Both pull buttons
 in Settings > AI now run through `ramGateAllowsPull(model)`. The gate
@@ -61,10 +74,12 @@ buttons. Restart calls `sudo -n systemctl restart ollama`.
 - `distro/build.sh` — slim mode now installs Ollama (was skipped),
   but only the full build auto-enables the systemd unit. Slim relies
   on the wizard's `/api/ai/ollama-start` call to wake the daemon.
-- `tasks/lessons.md` — lessons #171–173 (Sprint A) + #174–175 (Sprint
-  B) added.
+- `tasks/lessons.md` — lessons #171–178 added: A-Sprint substrate
+  rule (171–173), B-Sprint soft-warn + per-field diagnostics (174–
+  175), drift-hazard refactor (176), XSS class lesson (177), measure-
+  before-optimize boot baseline (178).
 
-## Verified ✓ (Sprints A + B)
+## Verified ✓ (this session)
 
 - **RAM gate** — typed `gpt-oss:16b` (10 GB) into Settings > AI on a
   4 GB-free box; modal showed "~10 GB for 4 GB free", Cancel restored
@@ -72,6 +87,16 @@ buttons. Restart calls `sudo -n systemctl restart ollama`.
 - **Diagnostics panel** — auto-refreshed on AI tab open; rendered
   "Running (responding on :11434) — 2 models pulled (qwen2.5:1.5b,
   qwen2.5:7b) · RAM unknown · 966.7 GB free disk".
+- **boot.js refactor** — desktop boots, 76 / 76 apps registered via
+  the single helper, no console errors.
+- **escapeHtml/escapeError** — hostile `<img src=x onerror=alert(1)>`
+  → `&lt;img src=x onerror=alert(1)&gt;`; null/undefined → `''`;
+  number coerced to string.
+- **Boot timeline** — captured on every boot, persisted to
+  `localStorage['nova-boot-timing']`, surfaced in System Info as
+  e.g. "11242 ms to desktop · 12246 ms shell ready".
+- **216/216 v03 verification** stayed green across all eight commits.
+- **Golden lock 18/18** still match.
 
 
 
@@ -121,26 +146,29 @@ buttons. Restart calls `sudo -n systemctl restart ollama`.
 | Competitive-watch agent | `/schedule` backend | Retry tomorrow |
 | Stripe / entity for $7/mo Pro tier (Oct) | Legal | Dad |
 
-## ⚡ NEXT TASK: Sprint C (post-v1.0) OR pivot
+## ⚡ NEXT TASK CANDIDATES
 
-Sprint C from the proposal — LAN share mode (one beefy Astrion
-serving Ollama to other hosts via mDNS) — was scoped post-v1.0. With
-A+B done, the self-hosted-AI thread is at a clean pause. Real work
-candidates for the next sitting:
+The clean pause points after this session:
 
 1. **Real-AI soak on `gpt-oss:16b`** — still gating M8.P5 propose for
    the launch story. Needs the user's remote PC URL + 2-3 hours.
-2. **Surface Pro 6 retest with v0.2.263+** — once the Sprint A/B ISO
-   builds (this push triggers it), boot on the Surface and run the
-   wizard end-to-end on real Linux to validate the slim-Ollama path.
-3. **Spotlight Phase 1 hardening pick E** — the next item from
-   tasks/sanity-check-2026-05-02.md if user wants polish over feature.
-4. **Phase 2 distribution** — landing-page polish, install docs,
-   maybe the contributor-onboarding doc since friends have offered to
-   help.
+2. **Surface Pro 6 retest with v0.2.263+** — the Ollama-in-slim
+   change (commit 9bdafe2) triggers a fresh ISO build; once it
+   lands, boot on the Surface and run the wizard end-to-end on
+   real Linux to validate the slim-Ollama path.
+3. **Boot perf attack** — instrumentation just landed (commit
+   3d4f6ce); macOS dev baseline is 3.2s to kernel:ready. Roadmap
+   target is 1.5s. Lazy-loading the 76-app register sweep is the
+   biggest known lever (~1s phase). Sprint candidate.
+4. **Sprint C — LAN share mode** — one beefy Astrion serving Ollama
+   to other Astrion installs via mDNS. Scoped post-v1.0 in the
+   proposal; could move forward if friends want to share a model.
+5. **Headless UI test runner** — sanity-check #5 still open. v03's
+   216 tests are kernel-level; UI breakages can land silently. A
+   puppeteer-style runner is multi-day work but high-leverage.
 
-User picks; spec lives in `tasks/sanity-check-2026-05-02.md` or
-`PLAN.md` for any of these.
+User picks; specs live in `tasks/sanity-check-2026-05-02.md`,
+`tasks/self-hosted-ai-proposal-2026-05-02.md`, and `PLAN.md`.
 
 ## Read order for the new session
 
