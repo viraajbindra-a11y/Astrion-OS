@@ -19,6 +19,7 @@ import { graphStore } from '../kernel/graph-store.js';
 import { query as graphQuery } from '../kernel/graph-query.js';
 import { getRecentApps } from './recent-apps.js';
 import { getSmartAnswer } from '../lib/smart-answers.js';
+import { safeMathEval } from '../lib/safe-math.js';
 
 let isOpen = false;
 // Search history — persisted to localStorage
@@ -1331,28 +1332,21 @@ Return ONLY the YAML content, no \`\`\` fences, no commentary.`;
       </div>`;
     }
 
-    // Inline calculator — detect math expressions + math functions
-    // Support: sqrt, sin, cos, tan, log, ln, abs, ceil, floor, round, pow, pi, e
-    const mathFnQuery = query
-      .replace(/\bsqrt\b/gi, 'Math.sqrt')
-      .replace(/\bsin\b/gi, 'Math.sin')
-      .replace(/\bcos\b/gi, 'Math.cos')
-      .replace(/\btan\b/gi, 'Math.tan')
-      .replace(/\blog\b/gi, 'Math.log10')
-      .replace(/\bln\b/gi, 'Math.log')
-      .replace(/\babs\b/gi, 'Math.abs')
-      .replace(/\bceil\b/gi, 'Math.ceil')
-      .replace(/\bfloor\b/gi, 'Math.floor')
-      .replace(/\bround\b/gi, 'Math.round')
-      .replace(/\bpow\b/gi, 'Math.pow')
-      .replace(/\bpi\b/gi, 'Math.PI')
-      .replace(/\be\b/gi, 'Math.E')
-      .replace(/\^/g, '**');
-    const mathClean = mathFnQuery.replace(/[^0-9+\-*/.() %Math.sqrtsincoanlgbefhpow,PI E]/g, '');
-    const hasMathContent = /\d/.test(mathClean) && (/[\d].*[+\-*/^%].*[\d]/.test(mathClean) || /Math\.\w+/.test(mathClean));
-    if (mathClean.length > 2 && mathClean.length < 200 && hasMathContent) {
+    // Inline calculator — uses safeMathEval (lib/safe-math.js).
+    //
+    // Security: previously this used `Function('"use strict"; return ...')`
+    // gated by a permissive character regex (allowed M/a/t/h/c/o/n/s/t/r
+    // /u/c/t/o/r in any order, which let `Math.constructor("evil")()`
+    // survive and execute). Music audit 2026-04-12 flagged it; closed
+    // 2026-05-02 (lesson #166).
+    //
+    // safeMathEval throws on any non-allowlisted identifier so sqrt/sin/
+    // Math/constructor all reject. Trade-off: Calculator app keeps the
+    // full Math.* surface; Spotlight quick-preview drops it. Basic
+    // arithmetic + parens + ^/** + pi/e + scientific notation still work.
+    if (query.length > 1 && query.length < 200 && /\d/.test(query) && /[+\-*/^%]/.test(query)) {
       try {
-        const result = Function('"use strict"; return (' + mathClean + ')')();
+        const result = safeMathEval(query);
         if (typeof result === 'number' && isFinite(result)) {
           html += `<div class="spotlight-result-group">
             <div class="spotlight-result-label">Calculator</div>
