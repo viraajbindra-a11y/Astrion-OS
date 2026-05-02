@@ -96,7 +96,7 @@ Total: 35 weeks. Build assumes ~70% on-time delivery (so deliver 35w of work in 
 - Week 20 (May 18–24): Buffer + bugs + the inevitable "the rollback didn't actually rollback" debugging
 
 **Option B (Realistic): Defer M8.P5**
-- Week 17–20: Hardening pass. Real-API soak deepens to 250+ tests. Bug-fix triage. Performance work. Lazy-load all 80 apps. Boot time <1.5s. Empty/error states for every app.
+- Week 17–20: Hardening pass. Real-API soak deepens to 250+ tests. Bug-fix triage. Performance work. Lazy-load all 76 apps. Boot time <1.5s. Empty/error states for every app.
 
 **Pick by end of Phase 0.** The ambitious path is real; the realistic path is honest. If your gut says "I might miss," pick B and use the time to make v1.0 *actually polished* instead of *technically more advanced and broken*.
 

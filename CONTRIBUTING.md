@@ -25,7 +25,7 @@
 
 2. **Write the pitch** (use this as a starting point):
    > "Astrion OS is an AI-native operating system built by teenagers.
-   > 51 apps, native C desktop shell, runs on real hardware.
+   > 76 apps, native C desktop shell, runs on real hardware.
    > Built from scratch in 2 weeks."
 
 3. **Create content:**
@@ -59,7 +59,7 @@
 **How to test:**
 
 1. Go to https://viraajbindra-a11y.github.io/Astrion-OS/
-2. Try EVERY app — there are 51 of them
+2. Try EVERY app — there are 76 of them
 3. For each app, fill out this template:
 
 ```
@@ -98,7 +98,7 @@ Screenshot: [attach if possible]
 - [ ] Calendar (dates correct?)
 
 **Then test the rest:**
-- [ ] All 51 apps in the dock
+- [ ] All 76 apps in the dock
 - [ ] Spotlight search (Cmd+Space or Ctrl+Space)
 - [ ] Setup wizard (clear localStorage in DevTools, refresh)
 - [ ] Login screen (set a password in wizard, try logging in)
@@ -124,7 +124,7 @@ Screenshot: [attach if possible]
    - Tools: Figma (free), Illustrator, or Canva
 
 2. **Redesign app icons** (currently basic SVGs)
-   - 51 apps need icons
+   - 76 apps need icons
    - Style guide: rounded square (like macOS), gradient backgrounds
    - Each icon: 120x120 SVG
    - Look at macOS/iOS icons for inspiration

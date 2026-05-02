@@ -190,7 +190,7 @@ import { initVolumeHud } from './shell/volume-hud.js';
     await graphStore.init();
     await migrateLocalStorageToGraph();
 
-    // Register ALL 52 apps so any of them can launch in native mode.
+    // Register ALL 76 apps so any of them can launch in native mode.
     // M0.P3: was previously only registering the first 16 — which meant
     // launching Chess, Kanban, Beat Studio, etc. from nova-shell failed
     // silently because processManager didn't know about them.

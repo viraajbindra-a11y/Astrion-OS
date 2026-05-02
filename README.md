@@ -1,6 +1,6 @@
 # Astrion OS
 
-An AI-native operating system with 50 apps, built from scratch.
+An AI-native operating system with 76 apps, built from scratch.
 
 **Native C/GTK3 desktop shell** — not a web page pretending to be an OS. Each app opens in its own real window. The menubar, dock, and desktop are native widgets. Hardware access (battery, Wi-Fi, volume) reads directly from the system.
 
@@ -21,7 +21,7 @@ An AI-native operating system with 50 apps, built from scratch.
 - Screensaver (5 min idle)
 - HiDPI support (auto-detects Surface Pro resolution)
 
-### 50 Apps
+### 76 Apps
 
 | Category | Apps |
 |---|---|

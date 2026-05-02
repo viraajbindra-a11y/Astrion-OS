@@ -143,10 +143,10 @@ Each milestone has: a 1-sentence success definition, **explicit phases** (the su
 - **M0.P3 — Web Apps in Native Mode** *(Day 5–6)* ✅ **COMPLETE — 2026-04-17**
   - ✅ `/app/:appId` route serves stripped page: only `system.css` + `window.css` + the requested app's CSS (if it exists). Shell chrome (menubar/dock/spotlight/control-center/launchpad/setup) NOT loaded.
   - ✅ `body.nova-native-app` + inline display:none rules hide any chrome elements that boot.js's window-manager still references.
-  - ✅ Per-app CSS dynamic include via `existsSync('css/apps/${appId}.css')` — covers all 80 apps (previously hardcoded list covered 17).
+  - ✅ Per-app CSS dynamic include via `existsSync('css/apps/${appId}.css')` — covers all 76 apps (previously hardcoded list covered 17).
   - ✅ Path traversal guard: `/^[a-z0-9-]+$/` whitelist on `:appId` returns 400 for `/app/../../etc/passwd`.
   - ✅ Browser app: launches Chromium (decision changed from PLAN v1's `astrion-browser` per ISO session lessons — Chromium is a battle-tested fallback. The standalone `astrion-browser.c` exists in source for reference but is not wired.)
-  - Native-window E2E test of all 80 apps requires real hardware boot — that piece deferred until next ISO build.
+  - Native-window E2E test of all 76 apps requires real hardware boot — that piece deferred until next ISO build.
 - **M0.P4 — Install + Persistence** *(Day 7–8)* ✅ **COMPLETE — already shipped, verified 2026-04-17**
   - ✅ `nova-first-boot.sh` (zenity install/try/never-ask dialog) wired in `.xinitrc` before nova-shell starts (build.sh:731).
   - ✅ `nova-install` script + parted/rsync/dosfstools deps in build.sh.

@@ -164,7 +164,7 @@ A thin wrapper around the parser + S2 that translates English queries into the s
 
 ## Backward compatibility layer
 
-The existing 52 apps all read/write their own `localStorage` keys. We can't rewrite them all at once. Solution: **a read-through compatibility shim.**
+The existing 76 apps all read/write their own `localStorage` keys. We can't rewrite them all at once. Solution: **a read-through compatibility shim.**
 
 - `graph.getLegacy(key)` reads from the graph first, falls back to localStorage
 - `graph.setLegacy(key, value)` writes to localStorage AND mirrors into the graph as a typed node
