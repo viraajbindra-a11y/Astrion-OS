@@ -166,6 +166,26 @@ function registerAllApps() {
   registerRandomFacts(); registerBmiCalc();
 }
 
+// Phase 1 hardening (2026-05-02): boot timeline instrumentation. The
+// roadmap's "boot time <1.5s" target was unmeasured per
+// tasks/sanity-check-2026-05-02.md. We collect per-phase timings on
+// every desktop boot and stash them in localStorage so a later
+// diagnostics view (or a curious user via DevTools) can read them.
+const __bootT0 = performance.now();
+const __bootTimeline = [];
+function __bootMark(label) {
+  __bootTimeline.push({ label, ms: Math.round(performance.now() - __bootT0) });
+}
+function __bootFlush(reason) {
+  __bootMark(reason || 'boot:done');
+  try { localStorage.setItem('nova-boot-timing', JSON.stringify({ at: Date.now(), marks: __bootTimeline })); } catch {}
+  // Make it inspectable from DevTools without digging through localStorage.
+  window.__NOVA_BOOT_TIMING__ = __bootTimeline.slice();
+  if (typeof console !== 'undefined') {
+    console.log('[boot] timeline (ms):', __bootTimeline.map(m => `${m.label}=${m.ms}`).join(' '));
+  }
+}
+
 // Boot sequence
 (async function boot() {
   // ─── Native Spotlight Popup Mode ───
@@ -251,6 +271,7 @@ function registerAllApps() {
     return;
   }
 
+  __bootMark('boot:start');
   const bootScreen = document.getElementById('boot-screen');
   const loginScreen = document.getElementById('login-screen');
   const desktop = document.getElementById('desktop');
@@ -263,14 +284,17 @@ function registerAllApps() {
   await fileSystem.init();
   await graphStore.init();
   await migrateLocalStorageToGraph();
+  __bootMark('storage:ready');
   await animate(progressBar, 60, 300);
 
   // Register all apps
   registerAllApps();
+  __bootMark('apps:registered');
   await animate(progressBar, 85, 200);
 
   // Init kernel
   windowManager.init();
+  __bootMark('kernel:ready');
   await animate(progressBar, 100, 300);
 
   // Phase 2: Fade out boot screen
@@ -374,6 +398,8 @@ function registerAllApps() {
     });
   });
 
+  __bootMark('login:complete');
+
   // Phase 4: Transition to desktop
   loginScreen.style.transition = 'opacity 0.5s ease, transform 0.5s ease';
   loginScreen.style.opacity = '0';
@@ -387,6 +413,7 @@ function registerAllApps() {
   desktop.style.opacity = '0';
   desktop.style.transition = 'opacity 0.5s ease';
   requestAnimationFrame(() => { desktop.style.opacity = '1'; });
+  __bootMark('desktop:visible');
 
   // Apply saved preferences
   applyWallpaper();
@@ -479,6 +506,7 @@ function registerAllApps() {
     duration: 5000,
   });
 
+  __bootFlush('shell:ready');
   console.log('Astrion OS booted successfully.');
 })();
 

@@ -31,6 +31,21 @@ async function initSystemInfo(container) {
   const upH = Math.floor((cpu.uptime || 0) / 3600);
   const upM = Math.floor(((cpu.uptime || 0) % 3600) / 60);
   const userName = localStorage.getItem('nova-username') || 'astrion';
+  const appCount = processManager.getAllApps().length;
+  // Read the boot timeline persisted by boot.js. Last entry is the
+  // total wall-clock boot duration (excluding wizard / login waits
+  // since we mark login:complete before flush).
+  let bootLabel = 'unknown';
+  try {
+    const t = JSON.parse(localStorage.getItem('nova-boot-timing') || 'null');
+    if (t && Array.isArray(t.marks) && t.marks.length) {
+      const total = t.marks[t.marks.length - 1].ms;
+      const desktopVisible = t.marks.find(m => m.label === 'desktop:visible');
+      bootLabel = desktopVisible
+        ? `${desktopVisible.ms} ms to desktop · ${total} ms shell ready`
+        : `${total} ms`;
+    }
+  } catch {}
 
   container.innerHTML = `
     <div style="display:flex; gap:24px; padding:24px; height:100%; font-family:'JetBrains Mono','Fira Code',monospace; font-size:12px; color:#c9d1d9; background:#0a0a14; align-items:center;">
@@ -59,7 +74,8 @@ async function initSystemInfo(container) {
         <div><span style="color:#58a6ff;">Memory:</span> ${mem.used || '?'} MB / ${mem.total || '?'} MB</div>
         <div><span style="color:#58a6ff;">Uptime:</span> ${upH}h ${upM}m</div>
         <div><span style="color:#58a6ff;">Browser:</span> Astrion Browser (WebKitGTK)</div>
-        <div><span style="color:#58a6ff;">Apps:</span> 29+</div>
+        <div><span style="color:#58a6ff;">Apps:</span> ${appCount}</div>
+        <div><span style="color:#58a6ff;">Boot:</span> ${bootLabel}</div>
         <div><span style="color:#58a6ff;">Resolution:</span> ${window.screen?.width || '?'}x${window.screen?.height || '?'}</div>
         <div style="margin-top:8px; display:flex; gap:4px;">
           ${['#ff3b30','#ff9500','#ffd60a','#34c759','#007aff','#5856d6','#af52de','#ff2d55'].map(c => `<div style="width:24px;height:24px;background:${c};border-radius:4px;"></div>`).join('')}
