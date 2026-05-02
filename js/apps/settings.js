@@ -5,6 +5,7 @@ import { windowManager } from '../kernel/window-manager.js';
 import { eventBus } from '../kernel/event-bus.js';
 import { getTodaySummary, getDailyCap, setDailyCap, resetBudget } from '../kernel/budget-manager.js';
 import { getAllAccuracy, getEscalatedCategories } from '../kernel/calibration-tracker.js';
+import { escapeError } from '../lib/safe-html.js';
 
 export function registerSettings() {
   processManager.register('settings', {
@@ -193,7 +194,7 @@ function initSettings(container) {
       });
 
     } catch (err) {
-      main.innerHTML = `<div style="padding:24px; color:rgba(255,255,255,0.4);">Display settings unavailable<br><span style="font-size:11px;">${err.message}</span></div>`;
+      main.innerHTML = `<div style="padding:24px; color:rgba(255,255,255,0.4);">Display settings unavailable<br><span style="font-size:11px;">${escapeError(err)}</span></div>`;
     }
   }
 
@@ -987,7 +988,7 @@ function initSettings(container) {
     main.innerHTML = `<div style="padding:24px;color:rgba(255,255,255,0.4);">Loading skills…</div>`;
     let mod;
     try { mod = await import('../kernel/skill-registry.js'); }
-    catch (err) { main.innerHTML = `<div style="padding:24px;color:#ff5f57;">Skill registry failed: ${err.message}</div>`; return; }
+    catch (err) { main.innerHTML = `<div style="padding:24px;color:#ff5f57;">Skill registry failed: ${escapeError(err)}</div>`; return; }
     await mod.loadSkillRegistry();
     const skills = mod.listSkills();
     const enabledCount = skills.filter(s => s.enabled).length;
@@ -1268,7 +1269,7 @@ function initSettings(container) {
       stats = (await import('../kernel/rubber-stamp-tracker.js')).getStats();
       chaos = (await import('../kernel/chaos-injector.js')).getChaosState();
     } catch (err) {
-      main.innerHTML = `<div style="padding:24px;color:#ff5f57;">Failed to load safety stats: ${err.message}</div>`;
+      main.innerHTML = `<div style="padding:24px;color:#ff5f57;">Failed to load safety stats: ${escapeError(err)}</div>`;
       return;
     }
     const ratePct = Math.round((stats.rapidRate || 0) * 100);

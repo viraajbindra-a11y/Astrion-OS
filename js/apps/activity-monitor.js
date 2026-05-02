@@ -6,6 +6,7 @@
 import { processManager } from '../kernel/process-manager.js';
 import { windowManager } from '../kernel/window-manager.js';
 import { notifications } from '../kernel/notifications.js';
+import { escapeError } from '../lib/safe-html.js';
 
 export function registerActivityMonitor() {
   processManager.register('activity-monitor', {
@@ -195,7 +196,7 @@ function initTaskManager(container, instanceId) {
         }
       };
     } catch (err) {
-      el.innerHTML = `<div style="padding:40px; text-align:center; color:rgba(255,255,255,0.4);">Could not load processes<br><span style="font-size:11px;">${err.message}</span></div>`;
+      el.innerHTML = `<div style="padding:40px; text-align:center; color:rgba(255,255,255,0.4);">Could not load processes<br><span style="font-size:11px;">${escapeError(err)}</span></div>`;
     }
   }
 
@@ -282,7 +283,7 @@ function initTaskManager(container, instanceId) {
       drawChart('tm-cpu-chart', cpuHistory, '#007aff');
       drawChart('tm-mem-chart', memHistory, '#34c759');
     } catch (err) {
-      el.innerHTML = `<div style="padding:40px; text-align:center; color:rgba(255,255,255,0.4);">Could not load performance data<br><span style="font-size:11px;">${err.message}</span></div>`;
+      el.innerHTML = `<div style="padding:40px; text-align:center; color:rgba(255,255,255,0.4);">Could not load performance data<br><span style="font-size:11px;">${escapeError(err)}</span></div>`;
     }
   }
 
@@ -320,7 +321,7 @@ function initTaskManager(container, instanceId) {
         </div>
       `;
     } catch (err) {
-      el.innerHTML = `<div style="padding:40px; text-align:center; color:rgba(255,255,255,0.4);">Could not load services<br><span style="font-size:11px;">${err.message}</span></div>`;
+      el.innerHTML = `<div style="padding:40px; text-align:center; color:rgba(255,255,255,0.4);">Could not load services<br><span style="font-size:11px;">${escapeError(err)}</span></div>`;
     }
   }
 

@@ -2,6 +2,7 @@
 
 import { processManager } from '../kernel/process-manager.js';
 import { appInstaller } from '../kernel/app-installer.js';
+import { escapeError } from '../lib/safe-html.js';
 
 export function registerAppStore() {
   processManager.register('appstore', {
@@ -209,7 +210,7 @@ function initAppStore(container) {
     let mod;
     try { mod = await import('../kernel/skill-registry.js'); }
     catch (err) {
-      content.innerHTML = `<div style="padding:30px;color:#ff5f57;font-size:13px;">Skill registry failed: ${err.message}</div>`;
+      content.innerHTML = `<div style="padding:30px;color:#ff5f57;font-size:13px;">Skill registry failed: ${escapeError(err)}</div>`;
       return;
     }
     await mod.loadSkillRegistry();
@@ -560,8 +561,7 @@ function initAppStore(container) {
         appList.innerHTML = '<div style="color:rgba(255,255,255,0.3); font-size:12px;">Could not load apps</div>';
       }
     } catch (err) {
-      const _em = document.createElement('span'); _em.textContent = err.message;
-      content.innerHTML = `<div style="padding:40px; text-align:center; color:rgba(255,255,255,0.4);">Android runtime unavailable<br><span style="font-size:11px;">${_em.innerHTML}</span></div>`;
+      content.innerHTML = `<div style="padding:40px; text-align:center; color:rgba(255,255,255,0.4);">Android runtime unavailable<br><span style="font-size:11px;">${escapeError(err)}</span></div>`;
     }
   }
 
@@ -613,8 +613,7 @@ function initAppStore(container) {
         `;
         bindFlatpakButtons(resultsEl);
       } catch (err) {
-        const _em2 = document.createElement('span'); _em2.textContent = err.message;
-        resultsEl.innerHTML = `<div style="color:#ff6b6b; font-size:12px; padding:10px;">Search failed: ${_em2.innerHTML}. Flatpak may not be available.</div>`;
+        resultsEl.innerHTML = `<div style="color:#ff6b6b; font-size:12px; padding:10px;">Search failed: ${escapeError(err)}. Flatpak may not be available.</div>`;
       }
     };
 
