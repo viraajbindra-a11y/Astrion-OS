@@ -214,24 +214,25 @@ apt-get install -y -qq cage weston 2>/dev/null || true
 # ═══════════════════════════════════════════════════
 # Ollama — local LLM runtime (M3.P1 S1 brain)
 # Bundled so Astrion has a working "fast brain" out of the box.
-# The installer creates /usr/local/bin/ollama + the ollama systemd
-# service. The actual model is NOT bundled (it would push the ISO
-# past the 2GB GitHub release cap); the user can pull qwen2.5:0.5b
-# from Settings > AI on first launch when network is up.
+# Installer creates /usr/local/bin/ollama + ollama.service. The actual
+# model is NOT bundled (it would push the ISO past the 2GB GitHub cap);
+# the wizard picks one on first boot via the AI brain step.
 # https://ollama.com
+#
+# Sprint A (2026-05-02): slim now installs Ollama too — just doesn't
+# auto-enable the systemd unit. The first-boot wizard turns it on via
+# /api/ai/ollama-start when the user picks a brain. Avoids the "AI OS
+# without an AI" smell on the small ISO.
 # ═══════════════════════════════════════════════════
-if [ "$ASTRION_SLIM" = "1" ]; then
-  echo "Skipping Ollama bundle (slim build) — install on first boot via Settings > AI > Install local AI runtime."
-else
-  echo "Installing Ollama (S1 local LLM runtime)..."
-  curl -fsSL https://ollama.com/install.sh | sh 2>/dev/null || \
-    echo "  Ollama install failed (no network in chroot?) — continuing without S1 runtime"
-fi
+echo "Installing Ollama (S1 local LLM runtime)..."
+curl -fsSL https://ollama.com/install.sh | sh 2>/dev/null || \
+  echo "  Ollama install failed (no network in chroot?) — continuing without S1 runtime"
 
-# Make sure the systemd unit is enabled so ollama starts on boot.
-# The official installer creates /etc/systemd/system/ollama.service
-# but does NOT enable it inside a chroot. Enable it manually.
-if [ -f /etc/systemd/system/ollama.service ]; then
+# Auto-enable the systemd unit only in the full build. Slim ISOs leave
+# Ollama installed-but-stopped; the wizard wakes it up when the user
+# commits to a brain (so a 4 GB Chromebook isn't running a daemon it
+# never asked for).
+if [ -f /etc/systemd/system/ollama.service ] && [ "$ASTRION_SLIM" != "1" ]; then
   systemctl enable ollama.service 2>/dev/null || \
     ln -sf /etc/systemd/system/ollama.service \
            /etc/systemd/system/multi-user.target.wants/ollama.service

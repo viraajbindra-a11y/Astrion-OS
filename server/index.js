@@ -175,6 +175,28 @@ app.post('/api/ai/ollama-pull', async (req, res) => {
   }
 });
 
+// ─── Ollama service: enable + start ───
+// Slim ISOs install Ollama but don't auto-enable the systemd unit
+// (Sprint A, 2026-05-02). The first-boot wizard hits this endpoint
+// before pulling so the daemon is alive when the pull arrives.
+// Idempotent: on a non-slim build (where systemd already started it)
+// or on a host without systemd (macOS dev), this is a no-op success.
+app.post('/api/ai/ollama-start', async (req, res) => {
+  try {
+    const probe = await fetch('http://localhost:11434/api/tags', {
+      signal: AbortSignal.timeout(1500),
+    });
+    if (probe.ok) return res.json({ ok: true, alreadyRunning: true });
+  } catch {}
+  const r = await runShell('sudo', ['-n', 'systemctl', 'enable', '--now', 'ollama']);
+  if (r.code === 0) {
+    // Give the daemon a beat to come up before the wizard hits /api/pull.
+    await new Promise(rsv => setTimeout(rsv, 600));
+    return res.json({ ok: true, started: true });
+  }
+  res.status(502).json({ ok: false, error: (r.stderr || r.stdout || 'systemctl failed').trim().slice(0, 400) });
+});
+
 // ─── Ollama proxy (local or remote LLM) ───
 // List models currently pulled into the running Ollama. Used by
 // Settings > AI to populate a model dropdown. Accepts the Ollama URL

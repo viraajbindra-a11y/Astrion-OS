@@ -1,203 +1,152 @@
-# Session Handoff — 2026-04-30 → 2026-05-02 (post-demo strategic pivot)
+# Session Handoff — 2026-05-02 Sprint A (self-hosted AI brain picker)
 
-**Sunday 2026-04-26 demo was CANCELLED** (not failed). Lesson #169.
-**Today: 2026-05-02.** Saturday. v1.0 ships Dec 21, 2026 — 33 calendar
-weeks / ~24 productive weeks remaining.
+**Sprint A is done.** First-boot wizard now picks an AI brain.
+**Today: 2026-05-02 (still Saturday, same session as the strategic pivot).**
 
 **Latest released ISO:** [`astrion-os-0.2.262-amd64.iso`](https://github.com/viraajbindra-a11y/Astrion-OS/releases/download/v0.2.262/astrion-os-0.2.262-amd64.iso)
-(1.37 GiB, slim, SHA `0003923d3ebb862e03b5394fd06afda53ed2980849b68e4bb3e85d5ab8855b52`,
-commit `1cb879f`, lockfile-fix included).
+(1.37 GiB slim — about to bump because slim now bundles Ollama).
 
-**Domain decided: `astrion-os.com`** — Dad handles billing.
+**Domain:** `astrion-os.com` — Dad billing.
 
 ## What shipped this session
 
-**Strategic pivot:** Phase 2 distribution pulled forward 3 weeks (per
-v3 roadmap was May 25; started May 2). Phase 1 hardening compresses
-to 2 weeks instead of 4. Calendar net unchanged; effort redistributed.
+**Sprint A — self-hosted AI on first boot.** Setup wizard grew a new
+"Pick your AI brain" step between accent picker and feature tour:
 
-**Code:**
-- Spotlight `Function()` injection killed — new `js/lib/safe-math.js`
-  with hardened recursive-descent parser. Music-audit debt closed
-  3 weeks late. (`b01bb8f`)
-- Spotlight `?` help index categorized into 5 groups + empty-state
-  hint pointing at `?` for discoverability. (`bd48cdd`)
-- Landing page rewritten to lead with the safety triple, drops the
-  contested "AI-native OS" lead claim. M8.P5 self-mod showcase + vs-
-  the-field comparison table + v0.2.262 download. Auto-deployed via
-  GH Pages. (`0f79cdb`, domain swap `270eaad`)
+- 5 options — Tiny (`qwen2.5:1.5b` ~1 GB), Standard (`qwen2.5:7b` ~4.7
+  GB), Big (`gpt-oss:16b` ~10 GB), Remote (URL prompt for a beefy LAN
+  PC), Skip (provider stays auto, falls to mock).
+- RAM detection via `/api/system/memory` highlights the right option
+  with a `RECOMMENDED` badge; cards that don't fit available RAM get a
+  red border + "needs N GB, you have M" warning.
+- On Continue with Tiny/Standard/Big: streams `/api/ai/ollama-pull`
+  ndjson into an in-pane progress bar; on success auto-advances to
+  the tour. On failure shows Try-again / Skip-for-now.
+- On Continue with Remote: URL-validates `http(s)://…`, commits
+  `nova-ai-provider=ollama` + `nova-ai-ollama-url=<remote>`.
+- On Continue with Skip: commits `nova-ai-provider=auto` (so
+  ai-service falls back to mock until the user opens Settings > AI).
 
-**Docs:**
-- `tasks/competitive-2026-05-02.md` — landscape map. The "AI-native
-  OS" category contested by Brain Tech (shipped Apr 24 in Japan),
-  OpenClaw (140k★), MS Copilot+, Apple Intelligence, Anthropic
-  Cowork, VAST Data, AIOS. Astrion's true moat: shipping safety
-  triple + open + free + boots from USB. Lead claim is "the AI-
-  native OS whose safety story is actually true."
-- `tasks/sanity-check-2026-05-02.md` — brutal audit. Verified:
-  216/216, golden lock 18/18, 76 apps register clean, ISO boots
-  through UEFI. Unverified: gpt-oss:16b on M8.P5 propose path
-  (highest demo risk). False alarm corrected: `safe-storage.js`
-  globally patches Storage.prototype so all "unguarded localStorage"
-  worries were already mitigated. Lesson #166.
-- `tasks/self-hosted-ai-proposal-2026-05-02.md` — **THE NEXT BUILD.**
-  Astrion shouldn't need a remote PC. Substrate already there
-  (Ollama bundled, Settings has pull UX). Gap is a first-boot AI
-  brain picker step in setup wizard. Sprint A spec inside.
-- `tasks/weekly-2026-18.md` — week 18 retro.
+**Files touched:**
+- `js/shell/wizard-ai-brain.js` (new) — picker UI, RAM-recommend,
+  ndjson pull streamer, `commitBrainChoice()` writer.
+- `js/shell/setup-wizard.js` — `totalSteps` 6 → 7, new `case 4` for
+  the brain step, `next()` async-pulls before advancing,
+  `commitBrainChoice` in `finish()`, lightweight onChange branch for
+  the URL input so typing doesn't wipe focus.
+- `server/index.js` — new `POST /api/ai/ollama-start`. Idempotent:
+  probes `/api/tags` first (1.5s timeout), falls through to
+  `sudo -n systemctl enable --now ollama` only if the probe fails.
+  No-op success on macOS dev or any host without systemd.
+- `distro/build.sh` — slim mode now installs Ollama (was skipped),
+  but only the full build auto-enables the systemd unit. Slim relies
+  on the wizard's `/api/ai/ollama-start` call to wake the daemon.
+- `tasks/lessons.md` — lessons #171–173 added.
 
-**Lessons added: #166–#170**
-- 166 — audit-the-audit; check existing fix infrastructure first
-- 167 — "AI-native OS" no longer blue sky; differentiate on safety
-- 168 — Edit-tool escape mismatch; use Python sed for surgical edits
-- 169 — cancelled demo ≠ failed demo; different lesson
-- 170 — help indexes need categories past ~10 entries
+## Verified ✓ (Sprint A)
 
-## Verified ✓ (today)
+- **Skip path** — fresh wizard → step 4 → click Skip → Continue →
+  finish → `localStorage` has `nova-ai-provider=auto`, model unset.
+- **Remote path** — pick Remote, fill `http://192.168.1.42:11434` →
+  Continue is enabled (URL validated, focus preserved while typing) →
+  finish → `provider=ollama, url=<remote>`.
+- **Local pull path (real Ollama)** — picked Tiny on macOS dev with
+  Ollama running, watched `qwen2.5:1.5b` stream to 100%, advanced to
+  tour, finished, then `ollama-stream` round-trip "what is 2+2"
+  returned `4` in 49 ms.
+- **216/216 v03 verification still green.**
+- **18/18 `golden.lock.json` still match** (`node tools/sign-golden.mjs --check`).
+- **No new console errors** during the wizard run.
 
-- 216/216 v03 verification green
-- Golden lock 18/18 match (`node tools/sign-golden.mjs --check`)
-- 76 apps register cleanly
-- 170 lessons documented
-- Skill manifest 20/20 files exist
-- Spotlight calculator works after the safe-math swap (`42 * 17 = 714`)
-- Spotlight `?` shows 5 categories, 17 commands
-- Empty-state Spotlight shows "Type ? to see all commands" hint
-- Landing page hero renders with new claim, no console errors
+## Acceptance — handoff said:
+
+1. Fresh boot → wizard appears ✓
+2. New step "Pick your AI brain" with 5 options ✓
+3. RAM detection from `/api/system/memory` highlights recommended ✓
+4. On confirm, model pulls with progress (reuses `/api/ai/ollama-pull`) ✓
+5. Desktop boots with `provider=ollama, url=localhost:11434, model=chosen` ✓
+6. Spotlight "what is 2+2" → AI responds via local model ✓ (49 ms)
+7. v03 verification still 216/216 ✓
+8. Lesson #171+ captures whatever breaks ✓ (171, 172, 173)
 
 ## Unverified ⚠ (still risky)
 
-- **M8.P5 propose path on `gpt-oss:16b`** — local qwen2.5:7b timed out
-  >30s last test. Headline feature for v1.0 launch. Needs user's
-  remote PC URL + 2-3 hours.
-- M4 chain (spec→tests→code→app) on real frontier model.
-- Hardware compatibility beyond Surface Pro 6.
-
-## Hardware testers in pipeline
-
-| Device | Status | When |
-|---|---|---|
-| Surface Pro 6 | ✓ verified base | (existing) |
-| Chromebook (friend) | committed | when received |
-| AMD Lenovo (user-funded) | committed | when ordered |
-
-3/5 of v3 roadmap Phase 4 hardware matrix.
+- **M8.P5 propose path on `gpt-oss:16b`** — same as before. Local
+  qwen2.5:7b times out at 30s; remote PC URL still required.
+- **Slim ISO end-to-end** — Sprint A's build.sh changes are
+  unbuilt. Next slim ISO build will include Ollama + the
+  wizard's wake-on-pull. Expected size: 1.37 GiB → ~1.5 GiB
+  (Ollama binary is ~80 MB).
+- **Surface Pro 6 retest with v0.2.263+ slim** — pending hardware
+  free moment.
 
 ## Open loops
 
 | Item | Blocker | Unblock |
 |---|---|---|
 | Real-AI soak gpt-oss:16b on M8.P5 propose | Remote PC URL | When user is on that PC |
-| Domain registration (astrion-os.com) | Billing (12yo founder) | Dad's call |
-| Surface Pro 6 v0.2.262 retest | Hardware in use | Any future free moment |
-| Competitive-watch agent | `/schedule` backend was down | Retry tomorrow |
-| Stripe / entity for $7/mo Pro tier (Oct) | Legal | Dad conversation |
+| Domain registration (astrion-os.com) | Billing | Dad |
+| Slim ISO retest with Sprint A (v0.2.263+) | ISO build trigger | Push commit to main |
+| Surface Pro 6 retest | Hardware in use | Any free moment |
+| Competitive-watch agent | `/schedule` backend | Retry tomorrow |
+| Stripe / entity for $7/mo Pro tier (Oct) | Legal | Dad |
 
-## ⚡ THE NEXT TASK: Sprint A — Self-hosted AI brain picker
+## ⚡ NEXT TASK: Sprint B — RAM-aware safety + Ollama diagnostics
 
-Spec: `tasks/self-hosted-ai-proposal-2026-05-02.md`
+Spec: `tasks/self-hosted-ai-proposal-2026-05-02.md` § Sprint B.
 
-**Mission:** Astrion already bundles Ollama (`distro/build.sh:215`).
-The setup wizard should ask which AI brain you want at first boot,
-RAM-check to recommend a size, pull the model with the existing
-ndjson progress UI, default to localhost:11434.
+**Mission:** Settings > AI > Pull Model still has no RAM gate (a
+user with 4 GB free can hit "Pull" on a 10 GB model and OOM-kill
+the box). And there's no in-shell view of Ollama's status/logs/
+pulled models — when something breaks, the user has nowhere to
+look.
 
 **Files to touch:**
-- `js/shell/setup-wizard.js` — add new step `step-ai-brain` between
-  accent picker and ready
-- New `js/shell/wizard-ai-brain.js` — the picker UI + pull logic
-- `js/kernel/ai-service.js` — set `nova-ai-provider='ollama'` +
-  `nova-ai-ollama-model=<chosen>` after wizard
-- `server/index.js` — confirm `/api/system/memory` exists
-  (`grep -n "/api/system/memory" server/index.js`); the agent reports
-  said it does — verify before adding
-- `distro/build.sh` — slim ISO should install Ollama but NOT enable
-  systemd by default (user opts in via wizard); current behavior
-  skips Ollama entirely in slim per `ASTRION_SLIM=1`
+- `js/apps/settings.js` — wrap the existing `#ai-pull-btn` click in
+  a RAM check. If `(model_size + 2 GB headroom) > free_ram`, show a
+  warning modal: "This model needs N GB; you have M. Pulling will
+  swap hard. Continue?" with explicit confirm.
+- `server/index.js` — new `GET /api/ai/ollama-status` returning
+  `{ active, lastLogs, models, freeRamMb, freeDiskMb }`. Reuse
+  `/api/system/memory` + `/api/ai/ollama-tags` + a journalctl tail.
+- `js/apps/settings.js` — new "Diagnostics" subsection under AI
+  with a refresh button + Restart Ollama button (calls
+  `sudo -n systemctl restart ollama`).
 
-**5 options in the picker:**
-- **Tiny** — `phi3:3.8b-mini` or `qwen2.5:1.5b` (~1.5 GB) — for low-RAM
-- **Standard** — `qwen2.5:7b` (~4.7 GB) — recommended default
-- **Big** — `gpt-oss:16b` or current frontier (~10 GB) — for 16GB+ RAM
-- **Remote** — URL prompt for "I have a beefy PC on the LAN"
-- **None** — skip; provider stays auto, falls to mock
-
-**Acceptance:**
-1. Fresh boot → wizard appears
-2. New step "Pick your AI brain" with the 5 options above
-3. RAM detection from `/api/system/memory` highlights recommended option
-4. On confirm, model pulls with progress (reuse `/api/ai/ollama-pull`)
-5. Desktop boots with provider=ollama, URL=localhost:11434, model=chosen
-6. Type "what is 2+2" in Spotlight → AI responds via local model
-7. v03 verification still 216/216
-8. Lesson #171+ captures whatever breaks
-
-**Constraints / rails:**
-- Don't touch files in `golden.lock.json` (intent-executor, capability-
-  api, self-upgrader, etc.). M8-locked. If you must, re-run
-  `node tools/sign-golden.mjs` after.
-- Don't add new apps (CI moratorium via `.github/workflows/moratorium-
-  check.yml`).
-- Don't break v03 (216 tests).
-- Use existing `/api/ai/ollama-pull` ndjson endpoint, don't rebuild.
-- `safe-storage.js` already wraps `Storage.prototype` globally —
-  `localStorage.setItem(...)` is safe everywhere, don't add try/catch
-  (lesson #166).
-- Use existing `js/lib/safe-math.js`, don't reintroduce `Function(...)`.
-
-**Out of scope (defer):**
-- LAN-share mode (Astrion as Ollama server for other Astrion installs)
-  — proposal says post-v1.0
-- RAM-aware safety modal in Settings > Pull Model — Sprint B
-- Diagnostics panel (journalctl in browser) — Sprint B
-
-**When done:**
-1. Commit + push (auto-deploys to GH Pages; auto-builds ISO if you
-   touched `distro/**`).
-2. Update `PLAN.md` only if M3.P1 status changes.
-3. Lesson #171+ in `tasks/lessons.md`.
-4. Overwrite this `tasks/SESSION_HANDOFF.md` with what shipped + what's
-   next.
+**Out of scope (Sprint C, post-v1.0):**
+- LAN share mode (one beefy Astrion serving Ollama to other hosts
+  via mDNS) — defer until after v1.0.
 
 ## Read order for the new session
 
 1. `tasks/SESSION_HANDOFF.md` (this file)
-2. `tasks/self-hosted-ai-proposal-2026-05-02.md` (Sprint A spec)
+2. `tasks/self-hosted-ai-proposal-2026-05-02.md` § Sprint B
 3. `tasks/sanity-check-2026-05-02.md` (current state)
-4. `tasks/competitive-2026-05-02.md` (positioning)
-5. `PLAN.md` if you need M-level context
-6. `ROADMAP-DEC-2026-v3.md` if you need calendar context
-7. `tasks/lessons.md` tail (lessons #160-#170 are recent)
+4. `PLAN.md` if you need M-level context
+5. `tasks/lessons.md` tail (171–173 are the freshest)
 
 ## Persona reminder
 
 - User: 12yo solo founder. Casual + hype buddy tone. Brutally honest
-  pushback when right. Action over deliberation.
-- Dad writes the workflow-rule messages. Don't take dad's tone as the
-  user's tone.
-- The user wants COMMITS, not analysis. Sprint A ships → all good.
+  pushback. Action over deliberation.
+- Dad writes the workflow-rule messages.
+- The user wants COMMITS, not analysis. Sprint B ships → all good.
 
 ## What I'd do first
 
-1. Read this file + the proposal.
+1. Read this file + Sprint B section.
 2. `git status` — confirm clean.
-3. `node server/index.js` + `npm run dev` (or `node server/index.js`).
-4. Open `http://localhost:3000` in preview, dismiss login.
-5. `grep -n "/api/system/memory" server/index.js` — find existing
-   endpoint or note absence.
-6. Read `js/shell/setup-wizard.js` to find the seam between accent
-   picker and ready step.
-7. Sketch the wizard step in `js/shell/wizard-ai-brain.js` standalone,
-   integrate after.
-8. Test in preview before committing.
-9. Single coherent commit per acceptance criterion. Don't batch.
+3. `node server/index.js` + open `localhost:3000`.
+4. Open Settings > AI to find the `#ai-pull-btn` handler.
+5. Sketch the modal, add `/api/ai/ollama-status`, add Diagnostics.
+6. v03 must stay 216/216.
 
-GO BUILD SPRINT A.
+GO BUILD SPRINT B.
 
 ---
 
 ## Older history
 
-The 2026-04-22 → 2026-04-25 demo-prep sprint handoff is preserved in
-git history (commit `78cef7f`). The pre-2026-04-22 handoff is at
-`SESSION_HANDOFF.md` in the repo root.
+The 2026-04-30 → 2026-05-02 strategic pivot handoff is preserved in
+git history (commit `dff5491`). The 2026-04-22 → 2026-04-25 demo-prep
+sprint is at commit `78cef7f`.

@@ -2,6 +2,15 @@
 // Fullscreen, animated, multi-step onboarding
 
 import { hashPassword } from '../kernel/crypto.js';
+import {
+  BRAIN_OPTIONS,
+  recommendBrain,
+  fetchMemory,
+  renderBrainPicker,
+  streamPull,
+  commitBrainChoice,
+  canAdvance as canAdvanceAiBrain,
+} from './wizard-ai-brain.js';
 
 const wallpapers = [
   { id: 'aurora',    name: 'Aurora',    colors: "url('assets/wallpapers/aurora.svg')" },
@@ -29,12 +38,25 @@ export function showSetupWizard() {
     }
 
     let step = 0;
-    const totalSteps = 6;
+    const totalSteps = 7;
     let userName = '';
     let selectedWallpaper = 'gradient-purple';
     let selectedAccent = '#007aff';
     let selectedDockSize = 'medium';
     let aiEnabled = true;
+    const aiBrainState = {
+      brain: null,
+      remoteUrl: '',
+      ramTotalMb: null,
+      ramAvailableMb: null,
+      recommendation: null,
+      pulling: false,
+      pullStatus: '',
+      pullPercent: null,
+      pullError: null,
+      ramFetched: false,
+    };
+    let aiBrainPullAbort = null;
 
     const wizard = document.createElement('div');
     wizard.id = 'setup-wizard';
@@ -51,6 +73,7 @@ export function showSetupWizard() {
         'radial-gradient(ellipse at 30% 60%, #1a0a3e 0%, #0a0a1e 70%)',
         '',  // wallpaper step uses selected wallpaper
         'radial-gradient(ellipse at 70% 40%, #0a1a3e 0%, #0a0a1e 70%)',
+        'radial-gradient(ellipse at 40% 50%, #0a1e2e 0%, #0a0a1e 70%)',  // ai brain
         'radial-gradient(ellipse at 50% 50%, #1a1a2e 0%, #0a0a1e 70%)',
         'radial-gradient(ellipse at 50% 30%, #0a0a2e 0%, #000 70%)',
       ];
@@ -62,6 +85,13 @@ export function showSetupWizard() {
         ? `background-image:${bg};background-size:cover;background-position:center;`
         : `background:${bg};`;
 
+      // The AI brain step manages its own continue/retry/skip buttons
+      // when a pull is in flight or has errored, so hide the wizard's
+      // shared nav during those phases.
+      const aiBrainBlocking = step === 4 && (aiBrainState.pulling || !!aiBrainState.pullError);
+      const nextLabel = step === totalSteps - 1 ? 'Get Started' : 'Continue';
+      const nextDisabled = step === 4 && !aiBrainState.pulling && !canAdvanceAiBrain(aiBrainState);
+
       wizard.innerHTML = `
         <div style="position:absolute;top:0;left:0;right:0;bottom:0;width:100%;height:100%;${bgStyle}transition:background 0.6s ease;"></div>
         <div style="position:absolute;top:0;left:0;right:0;height:3px;background:rgba(255,255,255,0.1);z-index:2;">
@@ -69,12 +99,12 @@ export function showSetupWizard() {
         </div>
         <div style="position:absolute;top:0;left:0;width:100%;height:100%;z-index:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px;box-sizing:border-box;">
           <div id="setup-content" style="max-width:560px;width:100%;animation:scaleIn 0.35s cubic-bezier(0.16,1,0.3,1);"></div>
-          <div style="position:absolute;bottom:32px;left:0;right:0;display:flex;justify-content:center;align-items:center;gap:16px;">
+          <div style="position:absolute;bottom:32px;left:0;right:0;display:flex;justify-content:center;align-items:center;gap:16px;${aiBrainBlocking ? 'visibility:hidden;' : ''}">
             ${step > 0 ? `<button id="setup-back" style="background:rgba(255,255,255,0.08);border:none;color:rgba(255,255,255,0.6);padding:10px 24px;border-radius:10px;font-size:14px;font-family:var(--font);cursor:pointer;">Back</button>` : ''}
             <div style="display:flex;gap:6px;">
               ${Array.from({length: totalSteps}, (_, i) => `<div style="width:${i === step ? '24px' : '8px'};height:8px;border-radius:4px;background:${i === step ? 'var(--accent)' : i < step ? 'rgba(255,255,255,0.4)' : 'rgba(255,255,255,0.15)'};transition:all 0.3s;"></div>`).join('')}
             </div>
-            <button id="setup-next" style="background:var(--accent);border:none;color:white;padding:10px 32px;border-radius:10px;font-size:14px;font-weight:600;font-family:var(--font);cursor:pointer;min-width:120px;">${step === totalSteps - 1 ? 'Get Started' : 'Continue'}</button>
+            <button id="setup-next" ${nextDisabled ? 'disabled' : ''} style="background:var(--accent);border:none;color:white;padding:10px 32px;border-radius:10px;font-size:14px;font-weight:600;font-family:var(--font);cursor:pointer;min-width:120px;${nextDisabled ? 'opacity:0.4;cursor:not-allowed;' : ''}">${nextLabel}</button>
           </div>
         </div>
       `;
@@ -82,7 +112,8 @@ export function showSetupWizard() {
       const content = wizard.querySelector('#setup-content');
       renderStep(content);
 
-      wizard.querySelector('#setup-next').addEventListener('click', next);
+      const nextBtn = wizard.querySelector('#setup-next');
+      if (nextBtn) nextBtn.addEventListener('click', next);
       const backBtn = wizard.querySelector('#setup-back');
       if (backBtn) backBtn.addEventListener('click', () => { step--; render(); });
     }
@@ -227,7 +258,40 @@ export function showSetupWizard() {
           });
           break;
 
-        case 4: // Features tour
+        case 4: // AI brain picker
+          renderBrainPicker(el, aiBrainState, (reason) => {
+            if (reason === 'input') {
+              // Just sync the Continue button — re-rendering would steal
+              // focus from the URL input the user is typing into.
+              const btn = wizard.querySelector('#setup-next');
+              if (btn) {
+                const canGo = canAdvanceAiBrain(aiBrainState);
+                btn.disabled = !canGo;
+                btn.style.opacity = canGo ? '1' : '0.4';
+                btn.style.cursor = canGo ? 'pointer' : 'not-allowed';
+              }
+              return;
+            }
+            render();
+          });
+          if (!aiBrainState.ramFetched) {
+            aiBrainState.ramFetched = true;
+            fetchMemory().then(mem => {
+              if (mem) {
+                aiBrainState.ramTotalMb = mem.totalMb;
+                aiBrainState.ramAvailableMb = mem.availableMb;
+                aiBrainState.recommendation = recommendBrain(mem.availableMb);
+                if (!aiBrainState.brain) aiBrainState.brain = aiBrainState.recommendation;
+              } else {
+                aiBrainState.recommendation = 'standard';
+                if (!aiBrainState.brain) aiBrainState.brain = 'standard';
+              }
+              if (step === 4) render();
+            });
+          }
+          break;
+
+        case 5: // Features tour
           el.innerHTML = `
             <div style="text-align:center;">
               <h1 style="font-size:30px;font-weight:700;margin-bottom:8px;">Quick tips</h1>
@@ -266,7 +330,7 @@ export function showSetupWizard() {
           `;
           break;
 
-        case 5: // Ready
+        case 6: // Ready
           el.innerHTML = `
             <div style="text-align:center;">
               <div style="font-size:72px;margin-bottom:20px;animation:dockBounce 0.8s ease;">&#x1F680;</div>
@@ -286,7 +350,12 @@ export function showSetupWizard() {
                   <span style="color:var(--accent);">&#x2713;</span> 12 apps ready to use
                 </div>
                 <div style="display:flex;align-items:center;gap:10px;font-size:14px;color:rgba(255,255,255,0.6);">
-                  <span style="color:var(--accent);">&#x2713;</span> AI assistant standing by
+                  <span style="color:var(--accent);">&#x2713;</span> ${(() => {
+                    const opt = BRAIN_OPTIONS.find(o => o.id === aiBrainState.brain);
+                    if (!opt || opt.id === 'none') return 'AI assistant standing by';
+                    if (opt.id === 'remote') return 'AI brain connected: remote Ollama';
+                    return `AI brain ready: ${opt.name} (${opt.model})`;
+                  })()}
                 </div>
               </div>
             </div>
@@ -297,13 +366,33 @@ export function showSetupWizard() {
 
     let userPassword = '';
 
-    function next() {
+    async function next() {
       // Save data from current step
       if (step === 1) {
         const nameInput = wizard.querySelector('#setup-name');
         const pwInput = wizard.querySelector('#setup-password');
         if (nameInput) userName = nameInput.value.trim() || '';
         if (pwInput) userPassword = pwInput.value;
+      }
+
+      // AI brain step: kick off the pull (or just advance for none/remote).
+      if (step === 4) {
+        if (!canAdvanceAiBrain(aiBrainState)) return;
+        const opt = BRAIN_OPTIONS.find(o => o.id === aiBrainState.brain);
+        if (!opt) return;
+        if (opt.id === 'none' || opt.id === 'remote') {
+          step++; render(); return;
+        }
+        // tiny / standard / big: pull in place, then advance on success.
+        aiBrainPullAbort = new AbortController();
+        const ok = await streamPull(aiBrainState, () => { if (step === 4) render(); }, aiBrainPullAbort.signal);
+        aiBrainPullAbort = null;
+        if (ok && step === 4) {
+          await new Promise(r => setTimeout(r, 500));
+          step++;
+          render();
+        }
+        return;
       }
 
       if (step >= totalSteps - 1) {
@@ -319,6 +408,7 @@ export function showSetupWizard() {
       localStorage.setItem('nova-username', userName || 'User');
       localStorage.setItem('nova-wallpaper', selectedWallpaper);
       localStorage.setItem('nova-accent', selectedAccent);
+      if (aiBrainState.brain) commitBrainChoice(aiBrainState);
 
       // Hash password with PBKDF2-SHA256 if the user chose one
       if (userPassword) {
