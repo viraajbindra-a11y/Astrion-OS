@@ -727,6 +727,14 @@ export function initSpotlight() {
         </div>`;
     }
 
+    // Lesson #170: Discoverability hint on the empty-state panel.
+    // Most users don't realize Spotlight has 30+ commands; surface ?
+    // as the path to the index.
+    results.innerHTML += `
+      <div style="padding:10px 16px 14px;text-align:center;font-size:11px;color:rgba(255,255,255,0.4);border-top:1px solid rgba(255,255,255,0.04);margin-top:8px;">
+        Type <kbd style="background:rgba(255,255,255,0.08);padding:1px 6px;border-radius:3px;font-family:var(--font-mono,monospace);color:rgba(255,255,255,0.7);">?</kbd> to see all commands
+      </div>`;
+
     results.querySelectorAll('.spotlight-result-item').forEach(item => {
       item.addEventListener('click', () => {
         // If it's a history item, put the query in the input and search
@@ -778,32 +786,71 @@ export function initSpotlight() {
     // Discoverability: users shouldn't need to read source to find
     // branches/timeline/skills/etc. One canonical index.
     if (/^(help|\?|commands|what can (i|you) (type|do|say))$/.test(lower)) {
-      const commands = [
-        { cmd: 'branches · timeline · history', desc: 'See recent L2+ operations with rewind buttons' },
-        { cmd: 'rehearse <query> · preview <query>', desc: 'Dry-run a plan in a branch, see the diff, then Apply or Discard' },
-        { cmd: 'upgrade yourself · improve yourself [js/apps/<file>]', desc: 'AI reads screen + source, proposes a fix, walks 5 M8 gates, writes to disk' },
-        { cmd: 'compose skill <description> · make a skill that <X>', desc: 'AI drafts a .skill YAML file from your description; install in one click' },
-        { cmd: 'undo upgrade · rollback upgrade', desc: 'Revert the most recent self-upgrade — restores the pre-upgrade file content' },
-        { cmd: '<skill phrase>', desc: 'Run a skill by its phrase (see Settings > Skills)' },
-        { cmd: '<math expression>', desc: 'Calculate: 2+2, sqrt(16), 5!, 15% of 200' },
-        { cmd: '<N> <unit> to <unit>', desc: 'Convert: 5 lbs to kg, 100 cm to inches, 72 f to c' },
-        { cmd: '<N> <currency> to <currency>', desc: '50 usd to eur, 100 gbp in yen' },
-        { cmd: 'time in <city>', desc: 'Tokyo, London, NYC, Sydney, Dubai, etc.' },
-        { cmd: 'age <yyyy-mm-dd>', desc: 'Age in years + days since birth' },
-        { cmd: 'roman <num> · <num> in binary', desc: 'Numeral base conversions' },
-        { cmd: 'morse <text> · rot13 <text>', desc: 'Encoding conversions' },
-        { cmd: 'tip <amount> · emoji <char>', desc: 'Tip calculator, emoji meaning' },
-        { cmd: 'random color · coin flip · roll dice', desc: 'Random generators' },
-        { cmd: '<app name>', desc: 'Open an app — also aliases: calc, term, note, msg' },
+      // Grouped command index (lesson #170 — 16-item flat list was overwhelming).
+      // Categories ordered by AI-headline-first → utility → discovery.
+      const categories = [
+        {
+          label: '🛡 Safety + Reversibility',
+          subtitle: 'The unique stuff Astrion does that no other OS ships.',
+          commands: [
+            { cmd: 'upgrade yourself · improve yourself [js/apps/<file>]', desc: 'AI reads screen + source, proposes a fix, walks 5 safety gates, writes to disk' },
+            { cmd: 'undo upgrade · rollback upgrade', desc: 'Restore the pre-upgrade file content. Bytewise, idempotent.' },
+            { cmd: 'branches · timeline · history', desc: 'See recent L2+ operations. Click ⏪ Rewind on any committed branch.' },
+            { cmd: 'rehearse <query> · preview <query>', desc: 'Dry-run a plan in a branch, see the diff, then Apply or Discard' },
+          ],
+        },
+        {
+          label: '🧩 Skills + Apps',
+          commands: [
+            { cmd: 'compose skill <description> · make a skill that <X>', desc: 'AI drafts a .skill YAML from your description; one-click install' },
+            { cmd: '<skill phrase>', desc: 'Run a skill by its phrase trigger (see Settings → Skills)' },
+            { cmd: '<app name>', desc: 'Open any app. Aliases: calc, term, note, msg, files, web, yt' },
+          ],
+        },
+        {
+          label: '🧮 Math + Convert',
+          commands: [
+            { cmd: '<math expression>', desc: '2+2, (1+2)*3, 2^10, pi, e, scientific notation' },
+            { cmd: '<N> <unit> to <unit>', desc: '5 lbs to kg, 100 cm to inches, 72 f to c' },
+            { cmd: '<N> <currency> to <currency>', desc: '50 usd to eur, 100 gbp in yen' },
+            { cmd: 'roman <num> · <num> in binary', desc: 'Numeral base conversions' },
+            { cmd: 'morse <text> · rot13 <text>', desc: 'Encoding conversions' },
+            { cmd: 'tip <amount>', desc: 'Tip calculator with split' },
+          ],
+        },
+        {
+          label: '🌍 World + Time',
+          commands: [
+            { cmd: 'time in <city>', desc: 'Tokyo, London, NYC, Sydney, Dubai, …' },
+            { cmd: 'age <yyyy-mm-dd>', desc: 'Age in years + days since a date' },
+          ],
+        },
+        {
+          label: '🎲 Random + Misc',
+          commands: [
+            { cmd: 'random color · coin flip · roll dice', desc: 'Quick random generators' },
+            { cmd: 'emoji <char>', desc: 'Emoji meaning + name lookup' },
+          ],
+        },
       ];
+      const categoryHtml = categories.map(cat => `
+        <div style="margin-bottom:14px;">
+          <div class="spotlight-result-label" style="margin-bottom:4px;">${cat.label}</div>
+          ${cat.subtitle ? `<div style="padding:0 16px 6px;font-size:11px;color:rgba(255,255,255,0.45);">${cat.subtitle}</div>` : ''}
+          ${cat.commands.map(c => `
+            <div class="spotlight-result-item" style="padding:8px 16px;">
+              <div style="font-family:var(--font-mono,monospace);font-size:12px;color:var(--accent,#007aff);">${c.cmd}</div>
+              <div style="font-size:11px;opacity:0.7;margin-top:2px;">${c.desc}</div>
+            </div>
+          `).join('')}
+        </div>
+      `).join('');
       results.innerHTML = `<div class="spotlight-result-group">
-        <div class="spotlight-result-label">? Spotlight Commands</div>
-        ${commands.map(c => `
-          <div class="spotlight-result-item" style="padding:8px 16px;">
-            <div style="font-family:var(--font-mono,monospace);font-size:12px;color:var(--accent,#007aff);">${c.cmd}</div>
-            <div style="font-size:11px;opacity:0.7;margin-top:2px;">${c.desc}</div>
-          </div>
-        `).join('')}
+        <div style="padding:10px 16px 14px;border-bottom:1px solid rgba(255,255,255,0.06);margin-bottom:8px;">
+          <div style="font-size:14px;font-weight:600;color:#fff;">? Spotlight Commands</div>
+          <div style="font-size:11px;color:rgba(255,255,255,0.55);margin-top:2px;">Type a command, an app name, or just ask. Esc to close.</div>
+        </div>
+        ${categoryHtml}
       </div>`;
       return;
     }
