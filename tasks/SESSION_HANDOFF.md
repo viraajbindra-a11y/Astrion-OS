@@ -1,219 +1,203 @@
-# Session Handoff — 2026-04-22 → 2026-04-25 (demo-prep sprint)
+# Session Handoff — 2026-04-30 → 2026-05-02 (post-demo strategic pivot)
 
-**Demo:** Sunday 2026-04-26 on Surface Pro 6 booted from Astrion ISO,
-Ollama `gpt-oss:16b` on remote PC over LAN.
+**Sunday 2026-04-26 demo was CANCELLED** (not failed). Lesson #169.
+**Today: 2026-05-02.** Saturday. v1.0 ships Dec 21, 2026 — 33 calendar
+weeks / ~24 productive weeks remaining.
 
-**Latest released ISO:** `astrion-os-0.2.254-amd64.iso` (1.37 GiB,
-SHA `b4b2db2d96df43bc0d36fc1bccd611debed745ae1753b8515beb89a1124363c6`,
-commit `1cb879f`). Has Launchpad CSS fix + nova-shell pass 8
-(notification toast restyle) + GDK_SCALE kernel cmdline bridge +
-voice-input mic button.
+**Latest released ISO:** [`astrion-os-0.2.262-amd64.iso`](https://github.com/viraajbindra-a11y/Astrion-OS/releases/download/v0.2.262/astrion-os-0.2.262-amd64.iso)
+(1.37 GiB, slim, SHA `0003923d3ebb862e03b5394fd06afda53ed2980849b68e4bb3e85d5ab8855b52`,
+commit `1cb879f`, lockfile-fix included).
 
-**Web-only commits riding on next nova-update tick** (no ISO rebuild
-needed — these land in the running OS within an hour of boot):
-  - `f6f0c5d` Text Editor ✨ Explain + Improve → chat panel via
-    `astrion:chat-attach` CustomEvent (reusable for any per-app AI)
-  - `95beb02` Ctrl+Shift+A — universal "Ask Astrion about this
-    selection" — works in every app
-  - `fa50a55` AI audio cues (thinking/response/gate/applied beeps)
-  - `23fdf31` Drag-and-drop file upload to chat (text only, 200 KB cap)
-  - `eb4765f` Voice settings panel (TTS voice/rate/pitch + Test)
-  - `16035e1` Live token-cost preview in chat input hint
-  - `884ab41` Spotlight `compose skill <description>` AI YAML drafter
-  - `4238dc4` Voice OUTPUT: per-bubble Read-aloud + auto-speak toggle
-  - `78cef7f`, `7636c14`, `de44bc4` (history viewer, model badge,
-    cmdline bridge JS pieces)
+**Domain decided: `astrion-os.com`** — Dad handles billing.
 
-## What shipped this sprint
+## What shipped this session
 
-### M8.P5 Self-Upgrade — the AI modifies its own source
+**Strategic pivot:** Phase 2 distribution pulled forward 3 weeks (per
+v3 roadmap was May 25; started May 2). Phase 1 hardening compresses
+to 2 weeks instead of 4. Calendar net unchanged; effort redistributed.
 
-`js/kernel/self-upgrader.js` (~600 lines). The 5-gate substrate
-(golden-integrity, value-lock, red-team, typed-confirm, rollback-
-plan) was already in `js/kernel/selfmod-sandbox.js`. This adds:
+**Code:**
+- Spotlight `Function()` injection killed — new `js/lib/safe-math.js`
+  with hardened recursive-descent parser. Music-audit debt closed
+  3 weeks late. (`b01bb8f`)
+- Spotlight `?` help index categorized into 5 groups + empty-state
+  hint pointing at `?` for discoverability. (`bd48cdd`)
+- Landing page rewritten to lead with the safety triple, drops the
+  contested "AI-native OS" lead claim. M8.P5 self-mod showcase + vs-
+  the-field comparison table + v0.2.262 download. Auto-deployed via
+  GH Pages. (`0f79cdb`, domain swap `270eaad`)
 
-- `proposeUpgrade({ focus? })` — collects screen state + sends to
-  AI with the source file. AI returns `{target, new_content,
-  reason, rollback_description}`.
-- `applyUpgrade(id, { typedConfirm })` — walks the 5 gates, then
-  POSTs `/api/files/write` to actually mutate disk.
-- `rollbackUpgrade(id)` — restores `oldContent` to disk.
-  Idempotent.
-- `getLastApplied()` / `listUpgradeHistory()` for the UI.
-- `validateSyntax(path, content)` — rejects broken JS/CSS pre-write.
-- Allow-list (`js/apps/`, `js/shell/`, `css/apps/`, `css/`) +
-  deny-list (kernel, lib, boot, golden.lock.json, server, distro).
-- self-upgrader.js itself in `golden.lock.json` so the AI cannot
-  modify its own allow-list across runs.
+**Docs:**
+- `tasks/competitive-2026-05-02.md` — landscape map. The "AI-native
+  OS" category contested by Brain Tech (shipped Apr 24 in Japan),
+  OpenClaw (140k★), MS Copilot+, Apple Intelligence, Anthropic
+  Cowork, VAST Data, AIOS. Astrion's true moat: shipping safety
+  triple + open + free + boots from USB. Lead claim is "the AI-
+  native OS whose safety story is actually true."
+- `tasks/sanity-check-2026-05-02.md` — brutal audit. Verified:
+  216/216, golden lock 18/18, 76 apps register clean, ISO boots
+  through UEFI. Unverified: gpt-oss:16b on M8.P5 propose path
+  (highest demo risk). False alarm corrected: `safe-storage.js`
+  globally patches Storage.prototype so all "unguarded localStorage"
+  worries were already mitigated. Lesson #166.
+- `tasks/self-hosted-ai-proposal-2026-05-02.md` — **THE NEXT BUILD.**
+  Astrion shouldn't need a remote PC. Substrate already there
+  (Ollama bundled, Settings has pull UX). Gap is a first-boot AI
+  brain picker step in setup wizard. Sprint A spec inside.
+- `tasks/weekly-2026-18.md` — week 18 retro.
 
-UI surfaces:
-- Spotlight `upgrade yourself` / `upgrade yourself <file>`
-- Spotlight `undo upgrade`
-- Inline Undo button on apply-success card
-- Settings > Safety > Self-upgrade audit trail (per-row Undo)
+**Lessons added: #166–#170**
+- 166 — audit-the-audit; check existing fix infrastructure first
+- 167 — "AI-native OS" no longer blue sky; differentiate on safety
+- 168 — Edit-tool escape mismatch; use Python sed for surgical edits
+- 169 — cancelled demo ≠ failed demo; different lesson
+- 170 — help indexes need categories past ~10 entries
 
-### Chat panel — 4 modes
+## Verified ✓ (today)
 
-`js/shell/chat-panel.js` (~1300 lines). Toggle via `Ctrl+Shift+K`.
+- 216/216 v03 verification green
+- Golden lock 18/18 match (`node tools/sign-golden.mjs --check`)
+- 76 apps register cleanly
+- 170 lessons documented
+- Skill manifest 20/20 files exist
+- Spotlight calculator works after the safe-math swap (`42 * 17 = 714`)
+- Spotlight `?` shows 5 categories, 17 commands
+- Empty-state Spotlight shows "Type ? to see all commands" hint
+- Landing page hero renders with new claim, no console errors
 
-- **Normal** — emits `intent:plan`, lets Spotlight own the L2+ gate
-- **Plan** — calls planIntent directly, renders plan card with
-  Approve/Discard
-- **Bypass** — auto-confirms gates, red banner, USER owns safety
-- **Chat** — direct Q&A with streaming tokens via `askStream`. Stop
-  button mid-stream (AbortController). No planner involved.
+## Unverified ⚠ (still risky)
 
-Polish:
-- Live thought-phase breadcrumb under banner: Thinking → Planning
-  → Red-team reviewing → Running step N → Done
-- Per-bubble Copy + Regenerate buttons (hover to reveal)
-- Footer: budget dot (green/amber/red) + token count
+- **M8.P5 propose path on `gpt-oss:16b`** — local qwen2.5:7b timed out
+  >30s last test. Headline feature for v1.0 launch. Needs user's
+  remote PC URL + 2-3 hours.
+- M4 chain (spec→tests→code→app) on real frontier model.
+- Hardware compatibility beyond Surface Pro 6.
 
-### Plan rehearser — `rehearse <query>` Spotlight cmd
+## Hardware testers in pipeline
 
-`js/kernel/plan-rehearser.js`. Opens an M5 branch, records intended
-graph mutations into it WITHOUT calling cap.execute. Shows the diff
-+ any non-rehearsable steps. User approves → real execution.
-
-### 4 new capabilities
-
-`system.setBrightness`, `system.lock`, `system.shutdown` (PONR with
-typed-confirm), `terminal.exec` (with `/api/terminal/exec` server
-endpoint, 30 KB output cap, fork-bomb + dd-to-disk regex blocklist).
-
-### App Store Skills tab activation
-
-Replaced 4 hardcoded fake-skill cards with a live wire to
-`skill-registry`: bundled vs user-installed sections, per-skill
-enable toggle, paste-install textarea.
-
-### nova-shell native path — 7 polish passes + 3 fixes
-
-For long-term native-OS feel. Demo doesn't use this path; opt in
-via `astrion-native-shell` kernel cmdline.
-
-| Pass | Commit | Change |
+| Device | Status | When |
 |---|---|---|
-| 1 | 6bc2564 | dock_default[] caps to 12 + Trash + Launchpad. Rounded pill. feh wallpaper. |
-| 2 | b85fbd2 | Cairo wallpaper load in `on_desktop_draw`. |
-| 3 | d4b2505 | Astrion SVG logo replaces ◆ text. SYSTEM + Clock widget cards. |
-| 4 | d5b5121 | Battery widget. Menubar items as GtkButton (gets `:hover`). |
-| 5 | 34755b8 | Weather widget + wttr.in cache. Dock icon hover scale. |
-| 6 | 1da028d | Launchpad grid view (720×560, 7-col flowbox). |
-| 7 | 2f5c818 | Battery/Wi-Fi text cleanup (hide instead of "??%"/"Off"). |
-| fix | 26eaee5 | `*/` in C comment + made-up `.installed` field — fixed. |
-| fix | af2e702 | Launchpad black-interior — flowbox/scrolledwindow transparent. |
+| Surface Pro 6 | ✓ verified base | (existing) |
+| Chromebook (friend) | committed | when received |
+| AMD Lenovo (user-funded) | committed | when ordered |
 
-### AI features (all web — land via nova-update)
+3/5 of v3 roadmap Phase 4 hardware matrix.
 
-- `/api/ai/ollama-stream` + `aiService.askStream` with AbortController
-- `/api/ai/ollama-tags` + Settings model dropdown (datalist, GB sizes)
-- Chat panel 4th tab + thought-phase + Stop + per-bubble Copy/Regen/Speak
-- Conversation history viewer + JSON export in Settings > AI
-- Per-bubble model badge (brain · model · provider)
-- Budget footer (color dot reflects daily-token-cap usage)
-- Voice INPUT — mic 🎤 button → Web Speech Recognition → input field
-- Voice OUTPUT — per-bubble Read-aloud + header 🔊 auto-speak toggle
-- Cost preview — chat input hint shows ~N input tokens while typing
-- Spotlight `compose skill <description>` — AI drafts a .skill YAML
+## Open loops
 
-### Kernel cmdline → env var bridge
-
-`.xinitrc` greps `/proc/cmdline` for `astrion-native-shell` and
-sets `ASTRION_USE_NATIVE_SHELL=1`. Lets QEMU/USB testing pick the
-native path without rebuilding the squashfs.
-
-### Slim ISO architecture
-
-`ASTRION_SLIM=1` env var (workflow default) skips bundled LibreOffice
-/ Chromium / VLC / Ollama. Astrion's own apps cover most. Heavy GUI
-apps install on demand from App Store > Linux Apps. 4.3 GB → 1.4 GB.
-
-## Verified vs untested
-
-### ✅ Verified (Mac + QEMU)
-
-- ISO boots (UEFI on emulated x86_64), full desktop renders
-- Web shell pixel-perfect to browser preview
-- Native shell with `astrion-native-shell` cmdline: wallpaper +
-  SYSTEM/Weather/Clock cards + dock all visible
-- Weather widget actually fetches wttr.in (real "Berkeley, CA · 64°F")
-- 216/216 verification suite green
-- 76 apps register with launch handlers
-- Self-upgrade rollback restores bytewise
-- Path allow-list + JS/CSS syntax validation (8/8 + 6/6)
-- ISO contains all sprint code (squashfs inspection)
-
-### ⚠ Code shipped but NOT tested with real `gpt-oss:16b`
-
-- Streaming Chat mode
-- Self-upgrade end-to-end with real AI proposing real changes
-- Planner output for compound queries — `gpt-oss` may format JSON
-  differently from `qwen2.5:7b` (lesson 144 territory)
-- Red-team review
-- M4 chain (spec → tests → code) end-to-end
-
-### ❌ Can't verify from a Mac
-
-- Real Surface Pro 6 hardware (Wi-Fi firmware, touch, pen, native
-  HiDPI 2736×1824)
-- Real Ollama on user's PC (LAN reachability, model response shape)
-- Self-upgrade applying for real on the live ISO
-
-## Demo morning checklist
-
-See `tasks/demo-sunday-2026-04-26.md` for the 12-beat script.
-Pre-flight (in order):
-
-1. Boot Surface from USB. GRUB menu → auto-boots in 3s.
-2. **Setup Wizard appears.** Click through 5-6 steps (this IS a
-   demo beat — narrate "first-boot UX").
-3. Wi-Fi connects (Marvell firmware bundled per lesson 13).
-4. Settings → AI → Ollama URL = `http://<your-PC-IP>:11434` → Test.
-5. Settings → AI → Refresh → pick `gpt-oss:16b` from the dropdown.
-6. Open `http://localhost:3000/test/v03-verification.html` in the
-   shell → should hit **216/216 green** (or higher; auto-push has
-   added more tests).
-7. `localStorage.removeItem('astrion-budget-day')` in the console
-   to reset daily token cap.
-8. Close all windows. Hero state.
-
-## Open loops at handoff
-
-| Item | Why deferred | When to address |
+| Item | Blocker | Unblock |
 |---|---|---|
-| af2e702 Launchpad fix not in v0.2.251 | Came after the released build | Build 24936235571 in flight |
-| Real-Ollama soak test | Required user's PC online | Demo morning |
-| GitHub Release auto-publish for >2 GB ISOs | The 2 GB cap blocks fat builds | Slim is the demo path; fat is post-demo |
-| Notifications popup style for nova-shell | Pass 8 work | Post-demo |
-| App window decoration parity (rounded corners + shadow) | Needs compositor; lesson 1 | Post-demo |
+| Real-AI soak gpt-oss:16b on M8.P5 propose | Remote PC URL | When user is on that PC |
+| Domain registration (astrion-os.com) | Billing (12yo founder) | Dad's call |
+| Surface Pro 6 v0.2.262 retest | Hardware in use | Any future free moment |
+| Competitive-watch agent | `/schedule` backend was down | Retry tomorrow |
+| Stripe / entity for $7/mo Pro tier (Oct) | Legal | Dad conversation |
 
-## Lessons added this sprint
+## ⚡ THE NEXT TASK: Sprint A — Self-hosted AI brain picker
 
-156–165 in `tasks/lessons.md`. Highlights:
+Spec: `tasks/self-hosted-ai-proposal-2026-05-02.md`
 
-- 157: xorriso default rejects files ≥4 GiB (use `-iso-level 3`)
-- 158: slim ISO architecture (substrate + lazy-install)
-- 159: `updateNode(id, props)` REPLACES — pass updater function
-- 160: ES module bindings can't be stubbed from outside
-- 161: dynamic-import module cache hides fixes; reload between
-- 162: dual-shell defaults matter for demo polish
-- 163: 7-pass nova-shell record
-- 164: `*/` inside a C comment is a trap
-- 165: NovaApp has no `.installed` field
+**Mission:** Astrion already bundles Ollama (`distro/build.sh:215`).
+The setup wizard should ask which AI brain you want at first boot,
+RAM-check to recommend a size, pull the model with the existing
+ndjson progress UI, default to localhost:11434.
 
-## What I'd do first thing in a new session
+**Files to touch:**
+- `js/shell/setup-wizard.js` — add new step `step-ai-brain` between
+  accent picker and ready
+- New `js/shell/wizard-ai-brain.js` — the picker UI + pull logic
+- `js/kernel/ai-service.js` — set `nova-ai-provider='ollama'` +
+  `nova-ai-ollama-model=<chosen>` after wizard
+- `server/index.js` — confirm `/api/system/memory` exists
+  (`grep -n "/api/system/memory" server/index.js`); the agent reports
+  said it does — verify before adding
+- `distro/build.sh` — slim ISO should install Ollama but NOT enable
+  systemd by default (user opts in via wizard); current behavior
+  skips Ollama entirely in slim per `ASTRION_SLIM=1`
 
-1. Check the build 24936235571 status (probably done — green or
-   failed).
-2. If green, that's the cleanest final ISO; release URL goes in
-   the demo script header.
-3. If failed, the af2e702 commit is small (one CSS block); diagnose
-   + fix. Fall back to v0.2.251 if needed (it works, just has the
-   black-interior bug on the OPT-IN native shell path that nobody
-   demos).
+**5 options in the picker:**
+- **Tiny** — `phi3:3.8b-mini` or `qwen2.5:1.5b` (~1.5 GB) — for low-RAM
+- **Standard** — `qwen2.5:7b` (~4.7 GB) — recommended default
+- **Big** — `gpt-oss:16b` or current frontier (~10 GB) — for 16GB+ RAM
+- **Remote** — URL prompt for "I have a beefy PC on the LAN"
+- **None** — skip; provider stays auto, falls to mock
+
+**Acceptance:**
+1. Fresh boot → wizard appears
+2. New step "Pick your AI brain" with the 5 options above
+3. RAM detection from `/api/system/memory` highlights recommended option
+4. On confirm, model pulls with progress (reuse `/api/ai/ollama-pull`)
+5. Desktop boots with provider=ollama, URL=localhost:11434, model=chosen
+6. Type "what is 2+2" in Spotlight → AI responds via local model
+7. v03 verification still 216/216
+8. Lesson #171+ captures whatever breaks
+
+**Constraints / rails:**
+- Don't touch files in `golden.lock.json` (intent-executor, capability-
+  api, self-upgrader, etc.). M8-locked. If you must, re-run
+  `node tools/sign-golden.mjs` after.
+- Don't add new apps (CI moratorium via `.github/workflows/moratorium-
+  check.yml`).
+- Don't break v03 (216 tests).
+- Use existing `/api/ai/ollama-pull` ndjson endpoint, don't rebuild.
+- `safe-storage.js` already wraps `Storage.prototype` globally —
+  `localStorage.setItem(...)` is safe everywhere, don't add try/catch
+  (lesson #166).
+- Use existing `js/lib/safe-math.js`, don't reintroduce `Function(...)`.
+
+**Out of scope (defer):**
+- LAN-share mode (Astrion as Ollama server for other Astrion installs)
+  — proposal says post-v1.0
+- RAM-aware safety modal in Settings > Pull Model — Sprint B
+- Diagnostics panel (journalctl in browser) — Sprint B
+
+**When done:**
+1. Commit + push (auto-deploys to GH Pages; auto-builds ISO if you
+   touched `distro/**`).
+2. Update `PLAN.md` only if M3.P1 status changes.
+3. Lesson #171+ in `tasks/lessons.md`.
+4. Overwrite this `tasks/SESSION_HANDOFF.md` with what shipped + what's
+   next.
+
+## Read order for the new session
+
+1. `tasks/SESSION_HANDOFF.md` (this file)
+2. `tasks/self-hosted-ai-proposal-2026-05-02.md` (Sprint A spec)
+3. `tasks/sanity-check-2026-05-02.md` (current state)
+4. `tasks/competitive-2026-05-02.md` (positioning)
+5. `PLAN.md` if you need M-level context
+6. `ROADMAP-DEC-2026-v3.md` if you need calendar context
+7. `tasks/lessons.md` tail (lessons #160-#170 are recent)
+
+## Persona reminder
+
+- User: 12yo solo founder. Casual + hype buddy tone. Brutally honest
+  pushback when right. Action over deliberation.
+- Dad writes the workflow-rule messages. Don't take dad's tone as the
+  user's tone.
+- The user wants COMMITS, not analysis. Sprint A ships → all good.
+
+## What I'd do first
+
+1. Read this file + the proposal.
+2. `git status` — confirm clean.
+3. `node server/index.js` + `npm run dev` (or `node server/index.js`).
+4. Open `http://localhost:3000` in preview, dismiss login.
+5. `grep -n "/api/system/memory" server/index.js` — find existing
+   endpoint or note absence.
+6. Read `js/shell/setup-wizard.js` to find the seam between accent
+   picker and ready step.
+7. Sketch the wizard step in `js/shell/wizard-ai-brain.js` standalone,
+   integrate after.
+8. Test in preview before committing.
+9. Single coherent commit per acceptance criterion. Don't batch.
+
+GO BUILD SPRINT A.
+
+---
 
 ## Older history
 
-The pre-2026-04-22 handoff is preserved at
+The 2026-04-22 → 2026-04-25 demo-prep sprint handoff is preserved in
+git history (commit `78cef7f`). The pre-2026-04-22 handoff is at
 `SESSION_HANDOFF.md` in the repo root.
