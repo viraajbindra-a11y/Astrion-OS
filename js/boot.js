@@ -131,6 +131,41 @@ import { verifyPassword } from './kernel/crypto.js';
 import { sounds } from './kernel/sound.js';
 import { initVolumeHud } from './shell/volume-hud.js';
 
+// Single source of truth for the app-register sequence. The three boot
+// modes (Spotlight popup, native single-app, normal desktop) used to
+// each maintain their own copy of this list; a new app meant editing
+// four places (import + 3 blocks). Now they share one helper. Order
+// matters for the dock — keep new apps appended at the end so the
+// dock layout stays stable.
+function registerAllApps() {
+  registerFinder(); registerNotes(); registerTerminal();
+  registerCalculator(); registerSettings(); registerTextEditor();
+  registerDraw(); registerBrowser(); registerMusic();
+  registerCalendar(); registerAppStore(); registerPhotos();
+  registerWeather(); registerClock(); registerReminders();
+  registerActivityMonitor();
+  registerVault(); registerMessages(); registerScreenRecorder();
+  registerTrash(); registerInstaller(); registerStickyNotes();
+  registerContacts(); registerMaps(); registerVoiceMemos();
+  registerPomodoro(); registerPdfViewer(); registerKanban();
+  registerHabitTracker(); registerVideoPlayer(); registerSystemInfo();
+  registerTranslator(); registerUnitConverter(); registerColorPicker();
+  registerStopwatch(); registerTimer(); registerWhiteboard();
+  registerPasswordGen(); registerMarkdown(); registerQrCode();
+  registerDictionary(); registerJournal(); registerFlashcards();
+  registerChess(); registerSnake(); register2048();
+  registerBudget(); registerQuotes(); registerTypingTest();
+  registerTodo(); registerBeatStudio(); registerLiveChat();
+  registerYouTube(); registerPixelArt(); registerTetris();
+  registerMinesweeper(); registerMatrixRain(); registerNeonVoid();
+  registerAnimate(); registerVideoEditor(); registerAiArt(); registerAiWriter();
+  registerSudoku(); registerSpeedTest(); registerRecipeBook();
+  registerEmojiKitchen(); registerWordle(); registerMeditation();
+  registerSoundboard(); registerCountdown(); registerReactionTest();
+  registerColorPalette(); registerRockPaperScissors(); registerTicTacToe();
+  registerRandomFacts(); registerBmiCalc();
+}
+
 // Boot sequence
 (async function boot() {
   // ─── Native Spotlight Popup Mode ───
@@ -142,35 +177,7 @@ import { initVolumeHud } from './shell/volume-hud.js';
     await migrateLocalStorageToGraph();
 
     // Register all apps so Spotlight can find them
-    registerFinder(); registerNotes(); registerTerminal();
-    registerCalculator(); registerSettings(); registerTextEditor();
-    registerDraw(); registerBrowser(); registerMusic();
-    registerCalendar(); registerAppStore(); registerPhotos();
-    registerWeather(); registerClock(); registerReminders();
-    registerActivityMonitor();
-    registerVault(); registerMessages(); registerScreenRecorder();
-    registerTrash(); registerInstaller(); registerStickyNotes();
-    registerContacts(); registerMaps(); registerVoiceMemos();
-    registerPomodoro(); registerPdfViewer(); registerKanban();
-    registerHabitTracker(); registerVideoPlayer(); registerSystemInfo();
-    registerTranslator(); registerUnitConverter(); registerColorPicker();
-    registerStopwatch(); registerTimer(); registerWhiteboard();
-    registerPasswordGen(); registerMarkdown(); registerQrCode();
-    registerDictionary(); registerJournal(); registerFlashcards();
-    registerChess(); registerSnake(); register2048();
-    registerBudget(); registerQuotes(); registerTypingTest();
-    registerTodo(); registerBeatStudio(); registerLiveChat();
-    registerYouTube(); registerPixelArt(); registerTetris();
-    registerMinesweeper(); registerMatrixRain(); registerNeonVoid();
-    registerAnimate(); registerVideoEditor(); registerAiArt(); registerAiWriter();
-    registerSudoku(); registerSpeedTest(); registerRecipeBook();
-    registerEmojiKitchen(); registerWordle(); registerMeditation();
-    registerSoundboard(); registerCountdown(); registerReactionTest();
-    registerColorPalette();
-    registerRockPaperScissors();
-    registerTicTacToe();
-    registerRandomFacts();
-    registerBmiCalc();
+    registerAllApps();
 
     windowManager.init();
     initSpotlight();
@@ -191,47 +198,9 @@ import { initVolumeHud } from './shell/volume-hud.js';
     await migrateLocalStorageToGraph();
 
     // Register ALL 76 apps so any of them can launch in native mode.
-    // M0.P3: was previously only registering the first 16 — which meant
-    // launching Chess, Kanban, Beat Studio, etc. from nova-shell failed
-    // silently because processManager didn't know about them.
-    registerFinder(); registerNotes(); registerTerminal();
-    registerCalculator(); registerSettings(); registerTextEditor();
-    registerDraw(); registerBrowser(); registerMusic();
-    registerCalendar(); registerAppStore(); registerPhotos();
-    registerWeather(); registerClock(); registerReminders();
-    registerActivityMonitor();
-    registerVault(); registerMessages(); registerScreenRecorder();
-    registerTrash(); registerInstaller(); registerStickyNotes();
-    registerContacts(); registerMaps(); registerVoiceMemos();
-    registerPomodoro(); registerPdfViewer(); registerKanban();
-    registerHabitTracker(); registerVideoPlayer(); registerSystemInfo();
-    registerTranslator(); registerUnitConverter(); registerColorPicker();
-    registerStopwatch(); registerTimer(); registerWhiteboard();
-    registerPasswordGen(); registerMarkdown(); registerQrCode();
-    registerDictionary(); registerJournal(); registerFlashcards();
-    registerChess(); registerSnake(); register2048();
-    registerBudget(); registerQuotes(); registerTypingTest();
-    registerTodo(); registerBeatStudio(); registerLiveChat();
-    registerYouTube(); registerPixelArt(); registerTetris();
-    registerMinesweeper(); registerMatrixRain(); registerNeonVoid();
-    registerAnimate();
-    registerVideoEditor();
-    registerAiArt();
-    registerAiWriter();
-    registerSudoku();
-    registerSpeedTest();
-    registerRecipeBook();
-    registerEmojiKitchen();
-    registerWordle();
-    registerMeditation();
-    registerSoundboard();
-    registerCountdown();
-    registerReactionTest();
-    registerColorPalette();
-    registerRockPaperScissors();
-    registerTicTacToe();
-    registerRandomFacts();
-    registerBmiCalc();
+    // M0.P3 history: was previously only registering the first 16, so
+    // launching Chess/Kanban/Beat Studio from nova-shell failed silently.
+    registerAllApps();
 
     windowManager.init();
 
@@ -297,82 +266,7 @@ import { initVolumeHud } from './shell/volume-hud.js';
   await animate(progressBar, 60, 300);
 
   // Register all apps
-  registerFinder();
-  registerNotes();
-  registerTerminal();
-  registerCalculator();
-  registerSettings();
-  registerTextEditor();
-  registerDraw();
-  registerBrowser();
-  registerMusic();
-  registerCalendar();
-  registerAppStore();
-  registerPhotos();
-  registerWeather();
-  registerClock();
-  registerReminders();
-  registerActivityMonitor();
-  registerVault();
-  registerMessages();
-  registerScreenRecorder();
-  registerTrash();
-  registerInstaller();
-  registerStickyNotes();
-  registerContacts();
-  registerMaps();
-  registerVoiceMemos();
-  registerPomodoro();
-  registerPdfViewer();
-  registerKanban();
-  registerHabitTracker();
-  registerVideoPlayer();
-  registerSystemInfo();
-  registerTranslator();
-  registerUnitConverter();
-  registerColorPicker();
-  registerStopwatch();
-  registerTimer();
-  registerWhiteboard();
-  registerPasswordGen();
-  registerMarkdown();
-  registerQrCode();
-  registerDictionary();
-  registerJournal();
-  registerFlashcards();
-  registerChess();
-  registerSnake();
-  register2048();
-  registerBudget();
-  registerQuotes();
-  registerTypingTest();
-  registerTodo();
-  registerBeatStudio();
-  registerLiveChat();
-  registerYouTube();
-  registerPixelArt();
-  registerTetris();
-  registerMinesweeper();
-  registerMatrixRain();
-  registerNeonVoid();
-  registerAnimate();
-  registerVideoEditor();
-  registerAiArt();
-  registerAiWriter();
-  registerSudoku();
-  registerSpeedTest();
-  registerRecipeBook();
-  registerEmojiKitchen();
-  registerWordle();
-  registerMeditation();
-  registerSoundboard();
-  registerCountdown();
-  registerReactionTest();
-  registerColorPalette();
-  registerRockPaperScissors();
-  registerTicTacToe();
-  registerRandomFacts();
-  registerBmiCalc();
+  registerAllApps();
   await animate(progressBar, 85, 200);
 
   // Init kernel
