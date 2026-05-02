@@ -311,6 +311,90 @@ function initSettings(container) {
     });
   }
 
+  // Sprint B (2026-05-02) — known model sizes in GB. Lets the RAM gate
+  // estimate "is this model too big for this box" before the user kicks
+  // off a 4-GB download that's going to swap-thrash a 4-GB Chromebook.
+  // Anything not in this table falls through to "size unknown" → soft
+  // warning instead of a hard block.
+  const MODEL_SIZE_GB = {
+    'qwen2.5:0.5b': 0.4, 'qwen2.5:1.5b': 1.0, 'qwen2.5:3b': 1.9,
+    'qwen2.5:7b': 4.7, 'qwen2.5:14b': 9.0, 'qwen2.5:32b': 20.0, 'qwen2.5:72b': 47.0,
+    'qwen2.5-coder:7b': 4.7, 'qwen2.5-coder:14b': 9.0,
+    'gpt-oss:7b': 4.7, 'gpt-oss:16b': 10.0, 'gpt-oss:70b': 40.0,
+    'llama3.2': 2.0, 'llama3.2:1b': 1.3, 'llama3.2:3b': 2.0,
+    'llama3.1': 4.7, 'llama3.1:8b': 4.7, 'llama3.1:70b': 40.0,
+    'phi3': 2.2, 'phi3:mini': 2.2, 'phi3:3.8b-mini': 2.2, 'phi3:medium': 7.9,
+    'mistral': 4.1, 'mistral:7b': 4.1, 'mixtral:8x7b': 26.0,
+    'gemma2:2b': 1.6, 'gemma2:9b': 5.4, 'gemma2:27b': 16.0,
+    'codegemma:7b': 5.0, 'codellama:7b': 3.8, 'codellama:13b': 7.4,
+    'deepseek-r1:7b': 4.7, 'deepseek-r1:14b': 9.0, 'deepseek-r1:32b': 20.0,
+    'tinyllama': 0.6, 'tinyllama:1.1b': 0.6,
+  };
+
+  // Returns the best size estimate (GB) we have for a model. Prefers the
+  // already-pulled actual size over the lookup table — actual is always
+  // right, table is a hint.
+  function estimateModelSizeGb(name, actualBytes) {
+    if (actualBytes && actualBytes > 0) return actualBytes / 1024 / 1024 / 1024;
+    const key = name.toLowerCase();
+    if (MODEL_SIZE_GB[key] != null) return MODEL_SIZE_GB[key];
+    // Fuzzy: match the family if the user typed an unknown tag.
+    const family = key.split(':')[0];
+    if (MODEL_SIZE_GB[family] != null) return MODEL_SIZE_GB[family];
+    return null; // unknown — caller should soft-warn
+  }
+
+  // Modal: ask the user to confirm a pull when (size + 2 GB headroom)
+  // exceeds free RAM. Resolves to true if they want to proceed anyway.
+  // Sprint B safety gate.
+  function confirmRamGate({ model, sizeGb, freeRamGb, headroomGb = 2 }) {
+    return new Promise((resolve) => {
+      const modal = document.createElement('div');
+      modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);backdrop-filter:blur(8px);z-index:99998;display:flex;align-items:center;justify-content:center;animation:fadeIn 0.2s ease;';
+      const sizeLabel = sizeGb != null ? `~${sizeGb.toFixed(1)} GB` : 'unknown size';
+      const ramLabel = freeRamGb != null ? `${freeRamGb.toFixed(1)} GB free` : 'unknown RAM';
+      const reason = sizeGb == null
+        ? 'We don’t recognize this model name, so we can’t check whether it fits.'
+        : `${model} needs roughly ${sizeGb.toFixed(1)} GB to load (plus ~${headroomGb} GB headroom). You have ${ramLabel}. Pulling will succeed but running it will likely swap hard or OOM-kill.`;
+      modal.innerHTML = `
+        <div style="background:#1c1c1e;border:1px solid rgba(255,255,255,0.08);border-radius:14px;padding:24px;max-width:440px;color:white;font-family:var(--font);box-shadow:0 16px 48px rgba(0,0,0,0.6);animation:scaleIn 0.2s cubic-bezier(0.16,1,0.3,1);">
+          <div style="font-size:14px;font-weight:600;color:#ff9f0a;margin-bottom:8px;">&#x26A0;&#xFE0F; Heads-up: ${sizeLabel} for ${ramLabel}</div>
+          <div style="font-size:13px;color:rgba(255,255,255,0.75);line-height:1.5;margin-bottom:18px;">${reason}</div>
+          <div style="display:flex;gap:8px;justify-content:flex-end;">
+            <button id="ram-gate-cancel" style="background:rgba(255,255,255,0.08);border:none;color:rgba(255,255,255,0.85);padding:8px 18px;border-radius:8px;font-size:13px;font-family:var(--font);cursor:pointer;">Cancel</button>
+            <button id="ram-gate-proceed" style="background:#ff9f0a;border:none;color:#1c1c1e;padding:8px 18px;border-radius:8px;font-size:13px;font-weight:600;font-family:var(--font);cursor:pointer;">Pull anyway</button>
+          </div>
+        </div>
+      `;
+      document.body.appendChild(modal);
+      const cleanup = (v) => { modal.remove(); resolve(v); };
+      modal.querySelector('#ram-gate-cancel').addEventListener('click', () => cleanup(false));
+      modal.querySelector('#ram-gate-proceed').addEventListener('click', () => cleanup(true));
+      modal.addEventListener('click', (e) => { if (e.target === modal) cleanup(false); });
+    });
+  }
+
+  // Returns true if the pull should proceed. False = user cancelled.
+  // Hits /api/system/memory once per call so we don't cache stale data.
+  async function ramGateAllowsPull(model) {
+    let freeRamMb = null;
+    try {
+      const res = await fetch('/api/system/memory');
+      if (res.ok) {
+        const m = await res.json();
+        if (typeof m.available === 'number') freeRamMb = m.available;
+      }
+    } catch {}
+    const sizeGb = estimateModelSizeGb(model);
+    const freeRamGb = freeRamMb != null ? freeRamMb / 1024 : null;
+    // Unknown size + unknown RAM → don't bother the user, just go.
+    if (sizeGb == null && freeRamGb == null) return true;
+    // Known size, known RAM, fits → go.
+    if (sizeGb != null && freeRamGb != null && sizeGb + 2 <= freeRamGb) return true;
+    // Otherwise prompt.
+    return await confirmRamGate({ model, sizeGb, freeRamGb });
+  }
+
   function renderAI() {
     const currentProvider = localStorage.getItem('nova-ai-provider') || 'auto';
     const ollamaUrl = localStorage.getItem('nova-ai-ollama-url') || 'http://localhost:11434';
@@ -385,6 +469,21 @@ function initSettings(container) {
       </div>
 
       <div class="settings-group">
+        <div style="padding:8px 14px 4px; font-size:11px; font-weight:600; color:rgba(255,255,255,0.5); text-transform:uppercase; letter-spacing:0.5px;">Diagnostics</div>
+        <div class="settings-row" style="align-items:flex-start;">
+          <div style="flex:1; min-width:0;">
+            <div class="settings-row-label">Ollama service</div>
+            <div class="settings-row-desc" id="ai-diag-summary">Click Refresh to fetch service status, pulled models, RAM, and disk.</div>
+            <pre id="ai-diag-logs" style="margin-top:8px; max-height:140px; overflow:auto; background:rgba(0,0,0,0.35); border:1px solid rgba(255,255,255,0.06); border-radius:6px; padding:8px 10px; font-family:var(--mono,monospace); font-size:11px; color:rgba(255,255,255,0.7); white-space:pre-wrap; word-break:break-word; display:none;"></pre>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:6px;">
+            <button id="ai-diag-refresh-btn" style="padding:6px 14px; border-radius:6px; border:1px solid rgba(255,255,255,0.15); background:transparent; color:rgba(255,255,255,0.8); font-size:12px; cursor:pointer; font-family:var(--font);">Refresh</button>
+            <button id="ai-diag-restart-btn" style="padding:6px 14px; border-radius:6px; border:none; background:#ff9f0a; color:#1c1c1e; font-size:12px; font-weight:600; cursor:pointer; font-family:var(--font);">Restart</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="settings-group">
         <div class="settings-row">
           <div>
             <div class="settings-row-label">AI in Apps</div>
@@ -406,6 +505,66 @@ function initSettings(container) {
     renderAIBudgetDashboard();
     renderConversationHistory();
     renderVoiceSettings();
+
+    // ─── Sprint B: Diagnostics panel ───
+    async function refreshDiagnostics() {
+      const summary = main.querySelector('#ai-diag-summary');
+      const logs = main.querySelector('#ai-diag-logs');
+      if (!summary || !logs) return;
+      summary.textContent = 'Loading…';
+      summary.style.color = 'rgba(255,255,255,0.5)';
+      try {
+        const res = await fetch('/api/ai/ollama-status', { signal: AbortSignal.timeout(8000) });
+        const d = await res.json();
+        const dot = (color) => `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${color};margin-right:6px;vertical-align:middle;"></span>`;
+        const stateColor = d.alive ? '#34c759' : d.active ? '#ff9f0a' : '#ff3b30';
+        const stateLabel = d.alive ? 'Running (responding on :11434)' : d.active ? 'Active but not responding' : 'Stopped';
+        const ramLabel = d.freeRamMb != null ? `${(d.freeRamMb / 1024).toFixed(1)} GB free RAM` : 'RAM unknown';
+        const diskLabel = d.freeDiskMb != null ? `${(d.freeDiskMb / 1024).toFixed(1)} GB free disk` : 'disk unknown';
+        const modelsLabel = d.models && d.models.length
+          ? `${d.models.length} model${d.models.length === 1 ? '' : 's'} pulled (${d.models.map(m => m.name).slice(0, 3).join(', ')}${d.models.length > 3 ? '…' : ''})`
+          : 'no models pulled';
+        summary.innerHTML = `${dot(stateColor)}<strong>${stateLabel}</strong> — ${modelsLabel} · ${ramLabel} · ${diskLabel}`;
+        summary.style.color = 'rgba(255,255,255,0.85)';
+        if (d.logs && d.logs.trim()) {
+          logs.style.display = 'block';
+          logs.textContent = d.logs.trim();
+          logs.scrollTop = logs.scrollHeight;
+        } else {
+          logs.style.display = 'none';
+        }
+      } catch (err) {
+        summary.textContent = '❌ ' + (err.message || 'Could not reach diagnostics endpoint');
+        summary.style.color = '#ff3b30';
+      }
+    }
+    main.querySelector('#ai-diag-refresh-btn')?.addEventListener('click', refreshDiagnostics);
+    main.querySelector('#ai-diag-restart-btn')?.addEventListener('click', async () => {
+      const summary = main.querySelector('#ai-diag-summary');
+      const btn = main.querySelector('#ai-diag-restart-btn');
+      if (!summary || !btn) return;
+      btn.disabled = true; btn.textContent = 'Restarting…';
+      summary.textContent = 'Restarting Ollama service…';
+      summary.style.color = 'rgba(255,255,255,0.5)';
+      try {
+        const res = await fetch('/api/ai/ollama-restart', { method: 'POST' });
+        const d = await res.json();
+        if (d.ok) {
+          summary.textContent = '✅ Restart sent. Refreshing…';
+          summary.style.color = '#34c759';
+          setTimeout(refreshDiagnostics, 800);
+        } else {
+          summary.textContent = '❌ ' + (d.error || 'Restart failed');
+          summary.style.color = '#ff3b30';
+        }
+      } catch (err) {
+        summary.textContent = '❌ ' + err.message;
+        summary.style.color = '#ff3b30';
+      }
+      btn.disabled = false; btn.textContent = 'Restart';
+    });
+    // Auto-refresh once on AI tab open so the panel isn't empty.
+    refreshDiagnostics();
 
     // Save provider on change
     main.querySelector('#ai-provider').addEventListener('change', (e) => {
@@ -471,6 +630,9 @@ function initSettings(container) {
         status.style.color = '#ff3b30';
         return;
       }
+      // Sprint B RAM gate: same check as the primary-model pull.
+      const proceed = await ramGateAllowsPull(model);
+      if (!proceed) { status.textContent = 'Cancelled.'; status.style.color = 'rgba(255,255,255,0.5)'; return; }
       btn.disabled = true; btn.textContent = 'Pulling…';
       status.style.color = 'rgba(255,255,255,0.65)';
       status.textContent = `Starting pull for ${model}…`;
@@ -561,6 +723,9 @@ function initSettings(container) {
       const url = main.querySelector('#ai-ollama-url').value.trim();
       const model = main.querySelector('#ai-ollama-model').value.trim();
       if (!model) { status.textContent = 'Set a model name first'; return; }
+      // Sprint B RAM gate: warn if the model won't fit on this box.
+      const proceed = await ramGateAllowsPull(model);
+      if (!proceed) { status.textContent = 'Cancelled.'; status.style.color = 'rgba(255,255,255,0.5)'; return; }
       btn.disabled = true; btn.textContent = 'Pulling…';
       status.style.color = 'rgba(255,255,255,0.65)';
       status.textContent = `Starting pull for ${model}…`;

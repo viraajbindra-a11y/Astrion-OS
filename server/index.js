@@ -197,6 +197,60 @@ app.post('/api/ai/ollama-start', async (req, res) => {
   res.status(502).json({ ok: false, error: (r.stderr || r.stdout || 'systemctl failed').trim().slice(0, 400) });
 });
 
+// ─── Ollama service: restart ───
+// Sprint B (2026-05-02): Settings > AI > Diagnostics has a Restart
+// button so the user doesn't have to drop to a terminal when Ollama
+// has wedged. Same passwordless-sudo path as ollama-start.
+app.post('/api/ai/ollama-restart', async (req, res) => {
+  const r = await runShell('sudo', ['-n', 'systemctl', 'restart', 'ollama']);
+  if (r.code === 0) {
+    await new Promise(rsv => setTimeout(rsv, 800));
+    return res.json({ ok: true, restarted: true });
+  }
+  res.status(502).json({ ok: false, error: (r.stderr || r.stdout || 'systemctl restart failed').trim().slice(0, 400) });
+});
+
+// ─── Ollama service: status (Sprint B diagnostics) ───
+// Returns whether the daemon is running, the last 30 journalctl
+// lines, the list of pulled models with sizes, and free RAM/disk so
+// the Diagnostics panel can paint a single coherent dashboard.
+//
+// Each piece is best-effort: missing systemctl/journalctl/df isn't
+// fatal — the panel just shows what it could fetch.
+app.get('/api/ai/ollama-status', async (req, res) => {
+  const out = { active: false, alive: false, models: [], logs: '', freeRamMb: null, freeDiskMb: null, hostUrl: 'http://localhost:11434' };
+  // Daemon liveness — same probe the wizard uses, hopefully fast.
+  try {
+    const probe = await fetch('http://localhost:11434/api/tags', { signal: AbortSignal.timeout(1500) });
+    if (probe.ok) {
+      out.alive = true;
+      const data = await probe.json();
+      out.models = (data.models || []).map(m => ({ name: m.name, size_bytes: m.size, modified: m.modified_at }));
+    }
+  } catch {}
+  // systemctl is-active — distinguishes "not installed" vs "stopped" vs "running".
+  const sysctl = await runShell('systemctl', ['is-active', 'ollama']);
+  out.active = sysctl.stdout.trim() === 'active';
+  // journalctl tail (last 30) — surface logs for OOM-kill / port collisions.
+  const j = await runShell('journalctl', ['-u', 'ollama', '-n', '30', '--no-pager']);
+  out.logs = (j.stdout || j.stderr || '').slice(-4000);
+  // Free RAM (MB).
+  try {
+    const fs = await import('fs/promises');
+    const meminfo = await fs.readFile('/proc/meminfo', 'utf-8');
+    const m = meminfo.match(/MemAvailable:\s+(\d+)/);
+    if (m) out.freeRamMb = Math.round(parseInt(m[1]) / 1024);
+  } catch {}
+  // Free disk on the partition that holds Ollama's model store.
+  const df = await runShell('df', ['-Pm', process.env.HOME ? `${process.env.HOME}/.ollama` : '/']);
+  const dfLine = df.stdout.split('\n').filter(Boolean).pop();
+  if (dfLine) {
+    const cols = dfLine.trim().split(/\s+/);
+    if (cols[3]) out.freeDiskMb = parseInt(cols[3]);
+  }
+  res.json(out);
+});
+
 // ─── Ollama proxy (local or remote LLM) ───
 // List models currently pulled into the running Ollama. Used by
 // Settings > AI to populate a model dropdown. Accepts the Ollama URL

@@ -1,7 +1,8 @@
-# Session Handoff — 2026-05-02 Sprint A (self-hosted AI brain picker)
+# Session Handoff — 2026-05-02 Sprints A+B (self-hosted AI end-to-end)
 
-**Sprint A is done.** First-boot wizard now picks an AI brain.
-**Today: 2026-05-02 (still Saturday, same session as the strategic pivot).**
+**Sprint A** (first-boot brain picker) and **Sprint B** (RAM gate +
+Ollama diagnostics) both shipped this session.
+**Today: 2026-05-02 (Saturday).**
 
 **Latest released ISO:** [`astrion-os-0.2.262-amd64.iso`](https://github.com/viraajbindra-a11y/Astrion-OS/releases/download/v0.2.262/astrion-os-0.2.262-amd64.iso)
 (1.37 GiB slim — about to bump because slim now bundles Ollama).
@@ -9,6 +10,17 @@
 **Domain:** `astrion-os.com` — Dad billing.
 
 ## What shipped this session
+
+**Sprint B — RAM-aware safety + Ollama diagnostics.** Both pull buttons
+in Settings > AI now run through `ramGateAllowsPull(model)`. The gate
+estimates the model's size (lookup table for common families, or the
+already-pulled actual byte count when known), pulls free RAM via
+`/api/system/memory`, and shows a confirm modal when `size + 2 GB
+headroom > free RAM` or when either piece is unknown. Cancel aborts;
+"Pull anyway" lets the user override. New Diagnostics group renders
+service status (alive/active/stopped) + pulled-models summary + free
+RAM + free disk + last 30 journalctl lines, with Refresh and Restart
+buttons. Restart calls `sudo -n systemctl restart ollama`.
 
 **Sprint A — self-hosted AI on first boot.** Setup wizard grew a new
 "Pick your AI brain" step between accent picker and feature tour:
@@ -27,7 +39,15 @@
 - On Continue with Skip: commits `nova-ai-provider=auto` (so
   ai-service falls back to mock until the user opens Settings > AI).
 
-**Files touched:**
+**Files touched (Sprint B):**
+- `server/index.js` — new `GET /api/ai/ollama-status` (per-field soft
+  failure: alive probe + systemctl + journalctl + memory + disk) and
+  `POST /api/ai/ollama-restart`.
+- `js/apps/settings.js` — `MODEL_SIZE_GB` lookup, `confirmRamGate()`
+  modal, `ramGateAllowsPull()` helper called by primary AND red-team
+  pull buttons; new Diagnostics group with refresh + restart wired.
+
+**Files touched (Sprint A):**
 - `js/shell/wizard-ai-brain.js` (new) — picker UI, RAM-recommend,
   ndjson pull streamer, `commitBrainChoice()` writer.
 - `js/shell/setup-wizard.js` — `totalSteps` 6 → 7, new `case 4` for
@@ -41,9 +61,19 @@
 - `distro/build.sh` — slim mode now installs Ollama (was skipped),
   but only the full build auto-enables the systemd unit. Slim relies
   on the wizard's `/api/ai/ollama-start` call to wake the daemon.
-- `tasks/lessons.md` — lessons #171–173 added.
+- `tasks/lessons.md` — lessons #171–173 (Sprint A) + #174–175 (Sprint
+  B) added.
 
-## Verified ✓ (Sprint A)
+## Verified ✓ (Sprints A + B)
+
+- **RAM gate** — typed `gpt-oss:16b` (10 GB) into Settings > AI on a
+  4 GB-free box; modal showed "~10 GB for 4 GB free", Cancel restored
+  the Pull button cleanly, status read "Cancelled."
+- **Diagnostics panel** — auto-refreshed on AI tab open; rendered
+  "Running (responding on :11434) — 2 models pulled (qwen2.5:1.5b,
+  qwen2.5:7b) · RAM unknown · 966.7 GB free disk".
+
+
 
 - **Skip path** — fresh wizard → step 4 → click Skip → Continue →
   finish → `localStorage` has `nova-ai-provider=auto`, model unset.
@@ -91,57 +121,50 @@
 | Competitive-watch agent | `/schedule` backend | Retry tomorrow |
 | Stripe / entity for $7/mo Pro tier (Oct) | Legal | Dad |
 
-## ⚡ NEXT TASK: Sprint B — RAM-aware safety + Ollama diagnostics
+## ⚡ NEXT TASK: Sprint C (post-v1.0) OR pivot
 
-Spec: `tasks/self-hosted-ai-proposal-2026-05-02.md` § Sprint B.
+Sprint C from the proposal — LAN share mode (one beefy Astrion
+serving Ollama to other hosts via mDNS) — was scoped post-v1.0. With
+A+B done, the self-hosted-AI thread is at a clean pause. Real work
+candidates for the next sitting:
 
-**Mission:** Settings > AI > Pull Model still has no RAM gate (a
-user with 4 GB free can hit "Pull" on a 10 GB model and OOM-kill
-the box). And there's no in-shell view of Ollama's status/logs/
-pulled models — when something breaks, the user has nowhere to
-look.
+1. **Real-AI soak on `gpt-oss:16b`** — still gating M8.P5 propose for
+   the launch story. Needs the user's remote PC URL + 2-3 hours.
+2. **Surface Pro 6 retest with v0.2.263+** — once the Sprint A/B ISO
+   builds (this push triggers it), boot on the Surface and run the
+   wizard end-to-end on real Linux to validate the slim-Ollama path.
+3. **Spotlight Phase 1 hardening pick E** — the next item from
+   tasks/sanity-check-2026-05-02.md if user wants polish over feature.
+4. **Phase 2 distribution** — landing-page polish, install docs,
+   maybe the contributor-onboarding doc since friends have offered to
+   help.
 
-**Files to touch:**
-- `js/apps/settings.js` — wrap the existing `#ai-pull-btn` click in
-  a RAM check. If `(model_size + 2 GB headroom) > free_ram`, show a
-  warning modal: "This model needs N GB; you have M. Pulling will
-  swap hard. Continue?" with explicit confirm.
-- `server/index.js` — new `GET /api/ai/ollama-status` returning
-  `{ active, lastLogs, models, freeRamMb, freeDiskMb }`. Reuse
-  `/api/system/memory` + `/api/ai/ollama-tags` + a journalctl tail.
-- `js/apps/settings.js` — new "Diagnostics" subsection under AI
-  with a refresh button + Restart Ollama button (calls
-  `sudo -n systemctl restart ollama`).
-
-**Out of scope (Sprint C, post-v1.0):**
-- LAN share mode (one beefy Astrion serving Ollama to other hosts
-  via mDNS) — defer until after v1.0.
+User picks; spec lives in `tasks/sanity-check-2026-05-02.md` or
+`PLAN.md` for any of these.
 
 ## Read order for the new session
 
 1. `tasks/SESSION_HANDOFF.md` (this file)
-2. `tasks/self-hosted-ai-proposal-2026-05-02.md` § Sprint B
-3. `tasks/sanity-check-2026-05-02.md` (current state)
+2. `tasks/sanity-check-2026-05-02.md` (current state)
+3. `tasks/self-hosted-ai-proposal-2026-05-02.md` § Sprint C if going
+   the LAN-share route
 4. `PLAN.md` if you need M-level context
-5. `tasks/lessons.md` tail (171–173 are the freshest)
+5. `tasks/lessons.md` tail (171–175 are the freshest)
 
 ## Persona reminder
 
 - User: 12yo solo founder. Casual + hype buddy tone. Brutally honest
   pushback. Action over deliberation.
 - Dad writes the workflow-rule messages.
-- The user wants COMMITS, not analysis. Sprint B ships → all good.
+- The user wants COMMITS, not analysis. Sprints A+B shipped → all good.
 
 ## What I'd do first
 
-1. Read this file + Sprint B section.
+1. Read this file.
 2. `git status` — confirm clean.
-3. `node server/index.js` + open `localhost:3000`.
-4. Open Settings > AI to find the `#ai-pull-btn` handler.
-5. Sketch the modal, add `/api/ai/ollama-status`, add Diagnostics.
-6. v03 must stay 216/216.
-
-GO BUILD SPRINT B.
+3. Ask the user which thread they want next (real-AI soak,
+   Surface retest, Phase 2 distribution, or Sprint C).
+4. v03 must stay 216/216 across whatever ships.
 
 ---
 
