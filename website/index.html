@@ -3,26 +3,31 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Astrion OS — The AI-Native Operating System</title>
-  <meta name="description" content="Astrion OS is an AI-native operating system built from scratch. 63+ apps, smart Spotlight, dual-process AI brain, and real desktop experience — all in your browser or on bare metal.">
+  <title>Astrion OS — The AI-native OS whose safety story is actually true.</title>
+  <meta name="description" content="Astrion is an open-source AI-native operating system. It writes code that passes its own tests, lets you rewind any change it makes, and refuses to modify itself unless five gates agree. Free. Boots from USB.">
   <meta name="theme-color" content="#007aff">
-  <meta property="og:title" content="Astrion OS — The AI-Native Operating System">
-  <meta property="og:description" content="A real operating system with 63+ apps, AI built into every layer. Try it in your browser or install the bootable ISO.">
+  <meta property="og:title" content="Astrion OS — the AI-native OS whose safety story is actually true.">
+  <meta property="og:description" content="76 apps. Verifiable. Reversible. Socratic. Open source. Built by a 12-year-old.">
   <meta property="og:type" content="website">
-  <meta property="og:url" content="https://astrion-os.com">
+  <meta property="og:url" content="https://astrion.computer">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='45' stroke='%23007aff' stroke-width='3' fill='none'/><path d='M35 50 L50 35 L65 50 L50 65 Z' fill='%23007aff'/></svg>">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
     :root {
       --accent: #007aff;
+      --accent-soft: rgba(0, 122, 255, 0.12);
       --bg: #0a0a0f;
       --bg-card: rgba(255, 255, 255, 0.03);
       --text: #f0f0f5;
       --text-secondary: rgba(255, 255, 255, 0.55);
       --text-tertiary: rgba(255, 255, 255, 0.3);
       --border: rgba(255, 255, 255, 0.06);
+      --green: #34c759;
+      --yellow: #f1fa8c;
+      --red: #ff5f57;
       --font: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', system-ui, sans-serif;
+      --mono: 'SF Mono', 'JetBrains Mono', Menlo, monospace;
       --radius: 16px;
     }
 
@@ -77,18 +82,18 @@
     .hero-badge {
       display: inline-flex; align-items: center; gap: 8px;
       padding: 6px 16px; border-radius: 20px;
-      background: rgba(0, 122, 255, 0.1); border: 1px solid rgba(0, 122, 255, 0.2);
+      background: var(--accent-soft); border: 1px solid rgba(0, 122, 255, 0.2);
       font-size: 12px; color: var(--accent); font-weight: 500;
       margin-bottom: 24px;
     }
     .hero h1 {
       font-size: clamp(40px, 7vw, 72px); font-weight: 700;
-      line-height: 1.1; max-width: 800px; letter-spacing: -0.02em;
+      line-height: 1.1; max-width: 900px; letter-spacing: -0.02em;
     }
     .hero h1 span { color: var(--accent); }
     .hero p {
       font-size: clamp(16px, 2vw, 20px); color: var(--text-secondary);
-      max-width: 600px; margin: 20px auto 36px; line-height: 1.7;
+      max-width: 640px; margin: 24px auto 36px; line-height: 1.7;
     }
     .hero-buttons { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
     .btn {
@@ -97,9 +102,7 @@
       align-items: center; gap: 8px; transition: all 0.2s;
       font-family: var(--font);
     }
-    .btn-primary {
-      background: var(--accent); color: white; border: none;
-    }
+    .btn-primary { background: var(--accent); color: white; border: none; }
     .btn-primary:hover { filter: brightness(1.15); transform: translateY(-1px); }
     .btn-secondary {
       background: rgba(255,255,255,0.06); color: var(--text);
@@ -107,23 +110,22 @@
     }
     .btn-secondary:hover { background: rgba(255,255,255,0.1); transform: translateY(-1px); }
 
-    .hero-screenshot {
-      margin-top: 60px; max-width: 1000px; width: 100%;
-      border-radius: 16px; overflow: hidden;
-      box-shadow: 0 40px 120px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255,255,255,0.06);
-      position: relative;
+    /* ── Pull-quote ── */
+    .pullquote {
+      max-width: 760px; margin: 60px auto 0; padding: 0 24px;
+      text-align: center;
     }
-    .hero-screenshot img {
-      width: 100%; display: block; border-radius: 16px;
+    .pullquote p {
+      font-size: clamp(20px, 2.5vw, 26px); font-weight: 500;
+      line-height: 1.5; color: var(--text);
     }
-    .hero-screenshot-placeholder {
-      width: 100%; aspect-ratio: 16/10; background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
-      display: flex; align-items: center; justify-content: center;
-      font-size: 48px; color: rgba(255,255,255,0.1);
-      border-radius: 16px;
+    .pullquote p span { color: var(--accent); }
+    .pullquote small {
+      display: block; margin-top: 16px; color: var(--text-tertiary);
+      font-size: 13px; letter-spacing: 1px; text-transform: uppercase;
     }
 
-    /* ── Features ── */
+    /* ── Sections ── */
     .section {
       padding: 100px 24px; max-width: 1100px; margin: 0 auto;
     }
@@ -133,13 +135,123 @@
     }
     .section h2 {
       font-size: clamp(28px, 4vw, 42px); font-weight: 700;
-      line-height: 1.2; max-width: 600px; margin-bottom: 16px;
+      line-height: 1.2; max-width: 720px; margin-bottom: 16px;
     }
     .section > p {
-      color: var(--text-secondary); font-size: 17px; max-width: 600px;
+      color: var(--text-secondary); font-size: 17px; max-width: 640px;
       margin-bottom: 48px;
     }
 
+    /* ── Stats ── */
+    .stats {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+      gap: 16px;
+    }
+    .stat {
+      text-align: center; padding: 24px;
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: var(--radius);
+    }
+    .stat-number {
+      font-size: 36px; font-weight: 700; color: var(--accent);
+      line-height: 1;
+    }
+    .stat-label { font-size: 13px; color: var(--text-secondary); margin-top: 6px; }
+
+    /* ── Safety Triple ── */
+    .safety {
+      padding: 100px 24px;
+      background: linear-gradient(180deg, transparent 0%, rgba(0,122,255,0.03) 50%, transparent 100%);
+    }
+    .safety-inner { max-width: 1100px; margin: 0 auto; }
+    .safety-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 20px; margin-top: 40px;
+    }
+    .safety-pillar {
+      padding: 32px 28px; border-radius: var(--radius);
+      background: var(--bg-card); border: 1px solid var(--border);
+      transition: border-color 0.2s, transform 0.2s;
+    }
+    .safety-pillar:hover {
+      border-color: rgba(0,122,255,0.25);
+      transform: translateY(-2px);
+    }
+    .safety-pillar h3 {
+      font-size: 22px; font-weight: 700; margin-bottom: 6px;
+      display: flex; align-items: center; gap: 10px;
+    }
+    .safety-pillar h3 .dot {
+      width: 10px; height: 10px; border-radius: 50%;
+      display: inline-block; flex-shrink: 0;
+    }
+    .safety-pillar .tag {
+      font-size: 11px; letter-spacing: 1px; text-transform: uppercase;
+      color: var(--text-tertiary); margin-bottom: 16px;
+    }
+    .safety-pillar p { color: var(--text-secondary); font-size: 14px; }
+    .safety-pillar code {
+      display: inline-block; padding: 2px 8px; border-radius: 6px;
+      background: rgba(255,255,255,0.06); font-family: var(--mono);
+      font-size: 12px; color: var(--text);
+    }
+
+    /* ── M8 self-mod showcase ── */
+    .selfmod {
+      padding: 100px 24px;
+      max-width: 1100px; margin: 0 auto;
+    }
+    .selfmod-card {
+      margin-top: 36px; padding: 36px 32px; border-radius: var(--radius);
+      background: linear-gradient(135deg, rgba(255,69,58,0.04) 0%, rgba(0,122,255,0.04) 100%);
+      border: 1px solid rgba(255,69,58,0.2);
+    }
+    .gates {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 12px; margin-top: 24px;
+    }
+    .gate {
+      padding: 16px 18px; border-radius: 10px;
+      background: rgba(0,0,0,0.25); border: 1px solid rgba(52,199,89,0.25);
+      font-family: var(--mono); font-size: 13px;
+    }
+    .gate-num {
+      display: inline-block; font-size: 11px;
+      color: var(--green); margin-right: 6px;
+    }
+    .gate-name { color: var(--text); font-weight: 500; }
+    .gate-sub {
+      display: block; margin-top: 4px; font-size: 11px;
+      color: var(--text-tertiary); font-family: var(--font);
+    }
+
+    /* ── Compare ── */
+    .compare {
+      max-width: 1100px; margin: 0 auto; padding: 60px 24px 100px;
+    }
+    .compare-table {
+      width: 100%; border-collapse: collapse; margin-top: 24px;
+      font-size: 14px;
+    }
+    .compare-table th, .compare-table td {
+      padding: 14px 16px; text-align: left;
+      border-bottom: 1px solid var(--border);
+    }
+    .compare-table th {
+      font-weight: 600; color: var(--text-secondary);
+      text-transform: uppercase; font-size: 11px; letter-spacing: 1px;
+    }
+    .compare-table th.us { color: var(--accent); }
+    .compare-table td { color: var(--text-secondary); }
+    .compare-table td.us {
+      color: var(--text); font-weight: 500;
+      background: rgba(0,122,255,0.05);
+    }
+    .check { color: var(--green); }
+    .ex { color: var(--red); }
+    .partial { color: var(--yellow); }
+
+    /* ── Features ── */
     .features-grid {
       display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
       gap: 16px;
@@ -157,24 +269,6 @@
     .feature-card h3 { font-size: 17px; font-weight: 600; margin-bottom: 8px; }
     .feature-card p { font-size: 14px; color: var(--text-secondary); line-height: 1.6; }
 
-    /* ── Stats ── */
-    .stats {
-      display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-      gap: 16px; margin: 60px 0;
-    }
-    .stat {
-      text-align: center; padding: 24px;
-      background: var(--bg-card); border: 1px solid var(--border);
-      border-radius: var(--radius);
-    }
-    .stat-number {
-      font-size: 36px; font-weight: 700; color: var(--accent);
-      line-height: 1;
-    }
-    .stat-label {
-      font-size: 13px; color: var(--text-secondary); margin-top: 6px;
-    }
-
     /* ── Apps showcase ── */
     .apps-scroll {
       display: flex; gap: 12px; overflow-x: auto; padding: 8px 0;
@@ -191,7 +285,7 @@
     /* ── Download ── */
     .download-section {
       text-align: center; padding: 80px 24px;
-      background: linear-gradient(180deg, transparent 0%, rgba(0,122,255,0.03) 100%);
+      background: linear-gradient(180deg, transparent 0%, rgba(0,122,255,0.04) 100%);
     }
     .download-options {
       display: flex; gap: 16px; justify-content: center; flex-wrap: wrap;
@@ -214,6 +308,21 @@
       background: var(--accent); color: white; text-decoration: none;
       font-size: 13px; font-weight: 500;
     }
+    .download-card .meta {
+      display: block; margin-top: 12px;
+      font-family: var(--mono); font-size: 11px;
+      color: var(--text-tertiary); word-break: break-all;
+    }
+
+    /* ── Founder ── */
+    .founder {
+      padding: 80px 24px; text-align: center; max-width: 720px;
+      margin: 0 auto;
+    }
+    .founder p {
+      color: var(--text-secondary); font-size: 17px;
+    }
+    .founder strong { color: var(--text); }
 
     /* ── Footer ── */
     footer {
@@ -221,7 +330,7 @@
       border-top: 1px solid var(--border);
       font-size: 13px; color: var(--text-tertiary);
     }
-    footer a { color: var(--text-secondary); text-decoration: none; }
+    footer a { color: var(--text-secondary); text-decoration: none; margin: 0 6px; }
     footer a:hover { color: var(--text); }
 
     /* ── Mobile ── */
@@ -231,8 +340,11 @@
       .nav-links a:not(.nav-cta) { display: none; }
       .hero { padding: 100px 16px 60px; }
       .section { padding: 60px 16px; }
+      .safety, .selfmod, .compare { padding: 60px 16px; }
       .features-grid { grid-template-columns: 1fr; }
       .download-options { flex-direction: column; align-items: center; }
+      .compare-table { font-size: 12px; }
+      .compare-table th, .compare-table td { padding: 10px 8px; }
     }
 
     /* ── Animations ── */
@@ -245,14 +357,13 @@
     }
     .hero p { animation-delay: 0.1s; }
     .hero-buttons { animation-delay: 0.2s; }
-    .hero-screenshot { animation: fadeInUp 0.8s ease 0.3s both; }
   </style>
 </head>
 <body>
 
   <!-- Navigation -->
   <nav>
-    <a href="/" class="nav-logo">
+    <a href="#top" class="nav-logo">
       <svg viewBox="0 0 80 80" fill="none">
         <circle cx="40" cy="40" r="36" stroke="#007aff" stroke-width="2.5"/>
         <path d="M28 40 L40 28 L52 40 L40 52 Z" fill="#007aff"/>
@@ -261,8 +372,9 @@
       Astrion OS
     </a>
     <div class="nav-links">
-      <a href="#features">Features</a>
-      <a href="#apps">Apps</a>
+      <a href="#safety">Safety</a>
+      <a href="#self-mod">Self-Mod</a>
+      <a href="#compare">vs Others</a>
       <a href="#download">Download</a>
       <a href="https://github.com/viraajbindra-a11y/Astrion-OS" target="_blank">GitHub</a>
       <a href="https://viraajbindra-a11y.github.io/Astrion-OS/" target="_blank" class="nav-cta">Try Online</a>
@@ -270,106 +382,276 @@
   </nav>
 
   <!-- Hero -->
-  <section class="hero">
+  <section class="hero" id="top">
     <div class="hero-badge">
-      <span>v0.2</span>
-      63+ Apps &middot; AI-Native &middot; Open Source
+      <span style="background:var(--green); width:8px; height:8px; border-radius:50%; display:inline-block;"></span>
+      v0.2.262 &middot; Free &middot; Open Source &middot; MIT
     </div>
-    <h1>The operating system built for <span>humans and AI</span> to work together</h1>
-    <p>Astrion OS is a real desktop operating system built from scratch with AI woven into every layer. 63 apps, smart search, dual-process AI brain &mdash; runs in your browser or boots from a USB drive.</p>
+    <h1>The AI-native OS whose <span>safety story is actually true.</span></h1>
+    <p>
+      Every AI feature in Windows, macOS, or any phone is bolted onto an OS that wasn't built for it.
+      Astrion is the OS, AI woven through every layer — and the only one that ships verifiable code,
+      reversible actions, and five gates between "the AI proposes a change" and "the change hits disk."
+    </p>
     <div class="hero-buttons">
       <a href="https://viraajbindra-a11y.github.io/Astrion-OS/" target="_blank" class="btn btn-primary">
-        Try in Browser &rarr;
+        Try in Browser →
       </a>
-      <a href="#download" class="btn btn-secondary">
-        Download ISO
-      </a>
+      <a href="#download" class="btn btn-secondary">Download ISO</a>
       <a href="https://github.com/viraajbindra-a11y/Astrion-OS" target="_blank" class="btn btn-secondary">
         View Source
       </a>
     </div>
-
-    <div class="hero-screenshot">
-      <div class="hero-screenshot-placeholder">
-        <!-- Replace with actual screenshot: <img src="screenshot.png" alt="Astrion OS Desktop"> -->
-        Astrion OS
-      </div>
-    </div>
   </section>
+
+  <!-- Pull quote / one-sentence pitch -->
+  <div class="pullquote">
+    <p>
+      Astrion OS is the right shape for a human and a super-smart AI to <span>work together without
+      the human going to sleep at the wheel.</span>
+    </p>
+    <small>— PLAN.md, the one sentence</small>
+  </div>
 
   <!-- Stats -->
   <section class="section">
     <div class="stats">
-      <div class="stat">
-        <div class="stat-number">63+</div>
-        <div class="stat-label">Built-in Apps</div>
+      <div class="stat"><div class="stat-number">76</div><div class="stat-label">Built-in Apps</div></div>
+      <div class="stat"><div class="stat-number">5</div><div class="stat-label">Self-Mod Gates</div></div>
+      <div class="stat"><div class="stat-number">216</div><div class="stat-label">Verification Tests</div></div>
+      <div class="stat"><div class="stat-number">0</div><div class="stat-label">Telemetry</div></div>
+      <div class="stat"><div class="stat-number">100%</div><div class="stat-label">Open Source</div></div>
+    </div>
+  </section>
+
+  <!-- The Safety Triple -->
+  <section class="safety" id="safety">
+    <div class="safety-inner">
+      <div class="section-label">The Safety Triple</div>
+      <h2>Three rules. All mandatory. Skip any one and the rest break.</h2>
+      <p>
+        This is the only thing in the AI-OS market that no competitor ships. Microsoft, Apple, OpenAI,
+        Anthropic — they have pieces. Astrion has the stack.
+      </p>
+
+      <div class="safety-grid">
+        <div class="safety-pillar">
+          <h3><span class="dot" style="background:var(--green);"></span>Verifiable</h3>
+          <div class="tag">Receipts on every artifact</div>
+          <p>
+            Ask Astrion to build an app — it writes the spec first, then tests against the spec, then
+            code that passes the tests. Every artifact ships with a provenance chain: which model wrote
+            it, which seed, which tests it passed. Code <code>app.bundle</code> refuses unless tests
+            pass and the spec is frozen.
+          </p>
+        </div>
+
+        <div class="safety-pillar">
+          <h3><span class="dot" style="background:var(--accent);"></span>Reversible</h3>
+          <div class="tag">Branch + rewind any L2 action</div>
+          <p>
+            Every dangerous thing happens in a practice universe first. You see the diff, then say
+            "yes for real." Type <code>branches</code> in Spotlight to see every committed branch
+            with a ⏪ Rewind button. Mistakes are never permanent — except for actions explicitly
+            marked point-of-no-return, which require typing the capability id to confirm.
+          </p>
+        </div>
+
+        <div class="safety-pillar">
+          <h3><span class="dot" style="background:var(--yellow);"></span>Socratic</h3>
+          <div class="tag">It asks before doing big stuff</div>
+          <p>
+            Not "are you sure?" popups. Real questions: "you said you wanted X, did you think about Y?"
+            A second AI red-teams every L2+ plan in a different model and shows risks side-by-side
+            with the planner's intent. A rubber-stamp tracker watches for "approved in &lt;1.5s" and
+            warns you when you stop reading. The AI never trains you to stop deciding.
+          </p>
+        </div>
       </div>
-      <div class="stat">
-        <div class="stat-number">0</div>
-        <div class="stat-label">Frameworks Used</div>
+    </div>
+  </section>
+
+  <!-- Watch It Modify Itself -->
+  <section class="selfmod" id="self-mod">
+    <div class="section-label">M8.P5 — The Loaded Gun</div>
+    <h2>Watch the AI fix its own bug. Then watch you undo it.</h2>
+    <p>
+      Type <code style="background:rgba(255,255,255,0.06); padding:2px 8px; border-radius:6px; font-family:var(--mono); font-size:13px;">upgrade yourself</code>
+      in Spotlight. The AI reads the screen, picks one file from the allow-list, proposes a fix,
+      and walks five gates before a single byte hits disk.
+    </p>
+
+    <div class="selfmod-card">
+      <div style="font-size:13px; color:var(--text-tertiary); font-family:var(--mono); margin-bottom:6px;">
+        astrion://self-upgrade <span style="color:var(--green);">approved</span>
       </div>
-      <div class="stat">
-        <div class="stat-number">30+</div>
-        <div class="stat-label">Smart Answers</div>
+      <div style="font-size:18px; font-weight:600; margin-bottom:8px;">
+        Target: <code style="font-family:var(--mono); color:var(--accent);">js/apps/notes.js</code>
       </div>
-      <div class="stat">
-        <div class="stat-number">100%</div>
-        <div class="stat-label">Open Source</div>
+      <div style="color:var(--text-secondary); font-size:14px;">
+        "Add a Tab key handler that inserts 2 spaces in the editor textarea."
       </div>
+
+      <div class="gates">
+        <div class="gate"><span class="gate-num">1 ✓</span><span class="gate-name">golden-integrity</span><span class="gate-sub">18 safety files unchanged</span></div>
+        <div class="gate"><span class="gate-num">2 ✓</span><span class="gate-name">value-lock</span><span class="gate-sub">LOCKED_VALUES match baseline</span></div>
+        <div class="gate"><span class="gate-num">3 ✓</span><span class="gate-name">red-team</span><span class="gate-sub">2nd model, no high-severity risks</span></div>
+        <div class="gate"><span class="gate-num">4 ✓</span><span class="gate-name">typed-confirm</span><span class="gate-sub">user typed proposal id</span></div>
+        <div class="gate"><span class="gate-num">5 ✓</span><span class="gate-name">rollback-plan</span><span class="gate-sub">inverse diff stored</span></div>
+      </div>
+
+      <div style="margin-top:24px; padding:14px 18px; background:rgba(255,255,255,0.04); border-radius:10px; font-size:13px; color:var(--text-secondary);">
+        ↩ <strong style="color:var(--text);">Undo path:</strong> type <code style="font-family:var(--mono);">undo upgrade</code> in Spotlight,
+        or click "Undo" in Settings → Safety → Self-upgrade audit trail. The pre-upgrade content
+        is restored bytewise. Idempotent. Always available.
+      </div>
+    </div>
+  </section>
+
+  <!-- Versus the field -->
+  <section class="compare" id="compare">
+    <div class="section-label">vs. the field</div>
+    <h2>Most "AI OSes" are AI bolted onto an OS. Astrion is the OS.</h2>
+    <p>
+      Every feature on this list is shipping in main today, on the v0.2.262 ISO. Refreshed 2026-05-02.
+    </p>
+
+    <div style="overflow-x:auto;">
+      <table class="compare-table">
+        <thead>
+          <tr>
+            <th>Capability</th>
+            <th class="us">Astrion</th>
+            <th>Microsoft Copilot+</th>
+            <th>Apple Intelligence</th>
+            <th>Anthropic Cowork</th>
+            <th>OpenInterpreter / 01</th>
+            <th>Brain Tech / Natural OS</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Open source</td>
+            <td class="us check">✓</td>
+            <td class="ex">✗</td>
+            <td class="ex">✗</td>
+            <td class="ex">✗</td>
+            <td class="check">✓</td>
+            <td class="ex">✗</td>
+          </tr>
+          <tr>
+            <td>Free / BYO key</td>
+            <td class="us check">✓</td>
+            <td class="ex">$</td>
+            <td class="ex">$</td>
+            <td class="ex">$</td>
+            <td class="check">✓</td>
+            <td class="ex">$</td>
+          </tr>
+          <tr>
+            <td>Boots from USB on commodity hardware</td>
+            <td class="us check">✓</td>
+            <td class="ex">✗</td>
+            <td class="ex">✗</td>
+            <td class="ex">✗</td>
+            <td class="ex">✗ (runs on host)</td>
+            <td class="ex">✗ (custom phone)</td>
+          </tr>
+          <tr>
+            <td>Verifiable code generation (spec→tests→code)</td>
+            <td class="us check">✓</td>
+            <td class="ex">✗</td>
+            <td class="ex">✗</td>
+            <td class="partial">~</td>
+            <td class="ex">✗</td>
+            <td class="ex">✗</td>
+          </tr>
+          <tr>
+            <td>Branch + rewind any L2 action</td>
+            <td class="us check">✓</td>
+            <td class="partial">~ (System Restore)</td>
+            <td class="partial">~ (Time Machine)</td>
+            <td class="ex">✗</td>
+            <td class="ex">✗</td>
+            <td class="ex">✗</td>
+          </tr>
+          <tr>
+            <td>Red-team review on L2+ caps (different model)</td>
+            <td class="us check">✓</td>
+            <td class="ex">✗</td>
+            <td class="ex">✗</td>
+            <td class="ex">✗</td>
+            <td class="ex">✗</td>
+            <td class="ex">✗</td>
+          </tr>
+          <tr>
+            <td>Self-modification with 5 gates → disk write</td>
+            <td class="us check">✓</td>
+            <td class="ex">✗</td>
+            <td class="ex">✗</td>
+            <td class="partial">research only</td>
+            <td class="ex">✗</td>
+            <td class="ex">✗</td>
+          </tr>
+          <tr>
+            <td>Anti-rubber-stamp Socratic tracker</td>
+            <td class="us check">✓</td>
+            <td class="ex">✗</td>
+            <td class="ex">✗</td>
+            <td class="ex">✗</td>
+            <td class="ex">✗</td>
+            <td class="ex">✗</td>
+          </tr>
+          <tr>
+            <td>Skill marketplace (open .skill DSL)</td>
+            <td class="us check">✓</td>
+            <td class="partial">Copilot Studio</td>
+            <td class="partial">Shortcuts</td>
+            <td class="check">✓ Skills</td>
+            <td class="check">✓ Plugins</td>
+            <td class="ex">✗</td>
+          </tr>
+        </tbody>
+      </table>
     </div>
   </section>
 
   <!-- Features -->
   <section class="section" id="features">
-    <div class="section-label">Features</div>
-    <h2>Not just a demo. A real operating system.</h2>
-    <p>Every feature you'd expect from a desktop OS, plus AI capabilities that no other OS has.</p>
+    <div class="section-label">Under the hood</div>
+    <h2>Architecture, not bolt-on.</h2>
+    <p>The kernel knows about intents and capabilities. The shell knows about agents and gates. Every layer was built knowing AI was here.</p>
 
     <div class="features-grid">
       <div class="feature-card">
         <div class="feature-icon">🧠</div>
-        <h3>Smart Spotlight Search</h3>
-        <p>Type anything. Convert units, check time zones, preview colors, flip coins, generate UUIDs, calculate math &mdash; all instant, all offline, no AI key needed.</p>
+        <h3>Intent Kernel</h3>
+        <p>You say what you want, not what to do. The kernel decomposes intents into capability calls, executes them with budget tracking, halts on failure with an explicit step list. Spotlight, the chat panel, and skills all flow through it.</p>
       </div>
       <div class="feature-card">
         <div class="feature-icon">🤖</div>
-        <h3>Dual-Process AI Brain</h3>
-        <p>System 1 (fast, local) handles easy stuff. System 2 (careful, cloud) handles hard stuff. The boundary shifts as AI gets smarter. Your OS evolves with the tech.</p>
+        <h3>Dual-Process Brain</h3>
+        <p>System 1 is local Ollama, always on, handles reflexes. System 2 is Claude or OpenAI, called on uncertainty. A calibration tracker watches per-category accuracy and escalates topics permanently when S1 falls below 70%.</p>
       </div>
       <div class="feature-card">
         <div class="feature-icon">🪟</div>
-        <h3>Real Window Management</h3>
-        <p>Drag to edges for snap layouts. Pin on top. PiP mini-mode. Grid tile. Cascade. Corner snap for quadrants. Alt+Scroll for transparency. All with keyboard shortcuts.</p>
+        <h3>Native C/GTK3 Shell</h3>
+        <p>Each app opens in its own real GTK window. Menubar, dock, desktop are native widgets. Battery, Wi-Fi, and volume read from the actual hardware. 4068 lines of C — not a browser pretending to be an OS.</p>
       </div>
       <div class="feature-card">
-        <div class="feature-icon">🌐</div>
-        <h3>Built-in Web Browser</h3>
-        <p>Browse real websites with a server-side proxy that makes iframe embedding actually work. Tab bar, bookmarks, back/forward, YouTube embed.</p>
+        <div class="feature-icon">📐</div>
+        <h3>Hypergraph Storage</h3>
+        <p>Notes, todos, reminders, contacts — all nodes in one graph. Spotlight queries it. Apps read from it. Every mutation is a commit, undoable for 30 days. Goodbye files-and-folders, hello structured everything.</p>
       </div>
       <div class="feature-card">
-        <div class="feature-icon">📝</div>
-        <h3>Full-Featured Apps</h3>
-        <p>Text editor with syntax highlighting, find bar, and VS Code shortcuts. Notes with markdown preview. Finder with breadcrumbs and sort. Calculator with history.</p>
+        <div class="feature-icon">🧩</div>
+        <h3>Skill DSL (M7)</h3>
+        <p>Five keywords: <code>goal</code>, <code>trigger</code>, <code>when</code>, <code>do</code>, <code>constraints</code>. Phrase, cron, or event triggers. Per-skill capability level + token budget. Bundled 20, install more by paste.</p>
       </div>
       <div class="feature-card">
-        <div class="feature-icon">🔒</div>
-        <h3>Safety by Design</h3>
-        <p>Capability tiering (L0-L3), irreversibility budgets, diff previews before writes, Socratic prompts. The AI never promotes itself &mdash; you stay in control.</p>
-      </div>
-      <div class="feature-card">
-        <div class="feature-icon">🎮</div>
-        <h3>Games with AI Autoplay</h3>
-        <p>Snake, Chess, 2048, Tetris, Minesweeper &mdash; each with an AI autoplay button that uses pathfinding and evaluation algorithms. Watch the AI play.</p>
-      </div>
-      <div class="feature-card">
-        <div class="feature-icon">🎨</div>
-        <h3>Customizable Everything</h3>
-        <p>8 accent colors, wallpaper picker, window opacity, dock toggle, virtual desktops (Spaces), focus/DND mode, keyboard shortcuts overlay.</p>
-      </div>
-      <div class="feature-card">
-        <div class="feature-icon">📋</div>
-        <h3>Smart Clipboard</h3>
-        <p>Clipboard history (Ctrl+Shift+V) auto-detects URLs, emails, colors, JSON, code, phone numbers. Color entries show a live swatch preview.</p>
+        <div class="feature-icon">🔌</div>
+        <h3>Capability Tiers</h3>
+        <p>L0 observe → L1 sandbox → L2 real → L3 self-mod. Every action declares its level, reversibility, and blast radius. The AI never promotes itself across tiers. You stay in control.</p>
       </div>
     </div>
   </section>
@@ -377,8 +659,8 @@
   <!-- Apps -->
   <section class="section" id="apps">
     <div class="section-label">Apps</div>
-    <h2>63 apps. Zero dependencies.</h2>
-    <p>Every app is built from scratch in vanilla JavaScript. No React, no Vue, no frameworks. Just code.</p>
+    <h2>76 apps. Zero frameworks.</h2>
+    <p>Every app built from scratch in vanilla JavaScript. No React, no Vue. Just code you can read.</p>
 
     <div class="apps-scroll">
       <div class="app-chip">📁 Finder</div>
@@ -401,7 +683,7 @@
       <div class="app-chip">🔐 Vault</div>
       <div class="app-chip">🗂 Kanban</div>
       <div class="app-chip">🍅 Pomodoro</div>
-      <div class="app-chip">📊 System Info</div>
+      <div class="app-chip">📊 Activity Monitor</div>
       <div class="app-chip">♟️ Chess</div>
       <div class="app-chip">🐍 Snake</div>
       <div class="app-chip">🎲 2048</div>
@@ -412,8 +694,15 @@
       <div class="app-chip">🔤 Typing Test</div>
       <div class="app-chip">💰 Budget</div>
       <div class="app-chip">🌐 Translator</div>
-      <div class="app-chip">📏 Converter</div>
-      <div class="app-chip">+ 30 more</div>
+      <div class="app-chip">📏 Unit Converter</div>
+      <div class="app-chip">🟩 Wordle</div>
+      <div class="app-chip">🧘 Meditation</div>
+      <div class="app-chip">📡 Speed Test</div>
+      <div class="app-chip">🍳 Recipe Book</div>
+      <div class="app-chip">🤖 AI Writer</div>
+      <div class="app-chip">🎨 AI Art</div>
+      <div class="app-chip">🎬 Animate</div>
+      <div class="app-chip">+ 36 more</div>
     </div>
   </section>
 
@@ -422,44 +711,53 @@
     <div class="section-label">Get Astrion OS</div>
     <h2 style="font-size:clamp(28px, 4vw, 42px); font-weight:700; max-width:600px; margin:0 auto 16px;">Three ways to try it</h2>
     <p style="color:var(--text-secondary); font-size:17px; max-width:500px; margin:0 auto;">
-      No account needed. No install required. Just click and go.
+      No account. No telemetry. No card. Just click and go.
     </p>
 
     <div class="download-options">
       <div class="download-card">
         <div class="dl-icon">🌐</div>
         <h3>Try Online</h3>
-        <p>Run Astrion OS right in your browser. Nothing to install. Works on any device.</p>
+        <p>Run Astrion right in your browser. Same JS as the ISO.</p>
         <a href="https://viraajbindra-a11y.github.io/Astrion-OS/" target="_blank">Open in Browser</a>
       </div>
       <div class="download-card">
         <div class="dl-icon">💿</div>
-        <h3>Download ISO</h3>
-        <p>Boot from USB on real hardware. Full native experience with GTK3 shell.</p>
-        <a href="https://github.com/viraajbindra-a11y/Astrion-OS/releases/latest" target="_blank">Download ISO</a>
+        <h3>Bootable ISO</h3>
+        <p>Flash to USB, boot any UEFI laptop. Native GTK3 shell.</p>
+        <a href="https://github.com/viraajbindra-a11y/Astrion-OS/releases/download/v0.2.262/astrion-os-0.2.262-amd64.iso" target="_blank">Download v0.2.262 (1.37 GB)</a>
+        <span class="meta">SHA-256: 0003923d3ebb862e03b5394fd06afda53ed2980849b68e4bb3e85d5ab8855b52</span>
       </div>
       <div class="download-card">
         <div class="dl-icon">🐙</div>
         <h3>Clone Source</h3>
-        <p>Fork it, hack it, make it yours. 100% open source, vanilla JS.</p>
+        <p>Fork it. Hack it. Ship a skill. MIT, audit every line.</p>
         <a href="https://github.com/viraajbindra-a11y/Astrion-OS" target="_blank">View on GitHub</a>
       </div>
     </div>
   </section>
 
-  <!-- Built By -->
-  <section class="section" style="text-align:center;">
-    <p style="color:var(--text-secondary); font-size:15px;">
-      Built from scratch by <strong style="color:var(--text);">Viraaj</strong> &mdash; a 12-year-old developer inspired by the future of human-AI collaboration.
+  <!-- Founder + Roadmap -->
+  <section class="founder">
+    <p>
+      Built from scratch by <strong>a 12-year-old developer</strong> with help from Claude.
+      Targeting v1.0 on <strong>December 21, 2026</strong> — the first AI-native OS whose
+      safety story is verifiable, reversible, and Socratic. Nothing less ships.
+    </p>
+    <p style="margin-top:20px; font-size:14px;">
+      <a href="https://github.com/viraajbindra-a11y/Astrion-OS/blob/main/PLAN.md" target="_blank" style="color:var(--accent); text-decoration:none;">Read the plan →</a>
+      &nbsp;&middot;&nbsp;
+      <a href="https://github.com/viraajbindra-a11y/Astrion-OS/blob/main/ROADMAP-DEC-2026-v3.md" target="_blank" style="color:var(--accent); text-decoration:none;">See the roadmap →</a>
     </p>
   </section>
 
   <!-- Footer -->
   <footer>
     <p>
-      &copy; 2026 Astrion OS &middot;
-      <a href="https://github.com/viraajbindra-a11y/Astrion-OS">GitHub</a> &middot;
-      <a href="https://github.com/viraajbindra-a11y/Astrion-OS/releases">Releases</a> &middot;
+      © 2026 Astrion OS &middot; MIT licensed
+      <br>
+      <a href="https://github.com/viraajbindra-a11y/Astrion-OS">GitHub</a> ·
+      <a href="https://github.com/viraajbindra-a11y/Astrion-OS/releases">Releases</a> ·
       <a href="https://viraajbindra-a11y.github.io/Astrion-OS/">Try Online</a>
     </p>
   </footer>
