@@ -351,7 +351,13 @@ export async function proposeUpgrade(opts = {}) {
   let raw, meta;
   try {
     const r = await aiService.askWithMeta(prompt, {
-      maxTokens: 2500,
+      // 8000 not 2500 — reasoning models (gpt-oss, deepseek-r1, etc.)
+      // burn 1000-2000 tokens in the thinking field BEFORE emitting the
+      // JSON `new_content`. Verified 2026-05-03 with gpt-oss:20b on
+      // notes.js: 2500 truncated mid-content; 8000 lets the full file
+      // come through. Non-reasoning models (qwen2.5, llama3.2) ignore
+      // the extra budget — they stop at done_reason='stop' early.
+      maxTokens: 8000,
       skipHistory: true,
       capCategory: 'self-upgrade',
       format: 'json',

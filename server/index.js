@@ -348,11 +348,14 @@ app.post('/api/ai/ollama', async (req, res) => {
     };
     if (max_tokens) ollamaBody.options = { num_predict: max_tokens };
     if (format === 'json') ollamaBody.format = 'json';
+    // 300s for big-budget calls (M8.P5 propose with 8K tokens on a
+    // reasoning model). Standard chat keeps 120s (lesson #179).
+    const upstreamTimeoutMs = max_tokens && max_tokens > 2000 ? 300000 : 120000;
     const response = await fetch(`${ollamaUrl}/api/chat`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(ollamaBody),
-      signal: AbortSignal.timeout(120000),
+      signal: AbortSignal.timeout(upstreamTimeoutMs),
     });
 
     if (!response.ok) {

@@ -234,7 +234,12 @@ class AIService {
       const ollamaUrl = this.getOllamaUrl();
       const model = options.model || this.getOllamaModel();
 
-      // Try via our server proxy (handles CORS)
+      // Try via our server proxy (handles CORS).
+      // 300s timeout — reasoning models (gpt-oss, deepseek-r1) at large
+      // maxTokens budgets routinely take 2-3 min on M-series Macs. The
+      // M8.P5 self-upgrader path with maxTokens=8000 was hitting the
+      // prior 120s ceiling and falling through to mock (lesson #179).
+      const ollamaTimeoutMs = (options.maxTokens && options.maxTokens > 2000) ? 300000 : 120000;
       const res = await fetch('/api/ai/ollama', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -246,7 +251,7 @@ class AIService {
           ...(options.maxTokens ? { max_tokens: options.maxTokens } : {}),
           ...(options.format ? { format: options.format } : {}),
         }),
-        signal: AbortSignal.timeout(120000),
+        signal: AbortSignal.timeout(ollamaTimeoutMs),
       });
 
       if (res.ok) {
