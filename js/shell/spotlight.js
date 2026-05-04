@@ -440,9 +440,24 @@ export function initSpotlight() {
 
   eventBus.on('plan:completed', ({ planId }) => {
     if (planId !== activePlanId) return;
-    // Mark any pending as done and show "Done" with brain badge + feedback.
-    // Don't auto-clear — let the user see the result, give feedback, then
-    // type a new query or press Escape. Input is re-enabled so typing works.
+    // 2026-05-03 — if Spotlight was dismissed mid-plan, fire a
+    // notification with the answer preview so the user knows the
+    // backgrounded work finished. They can reopen Spotlight to see
+    // the full result (planState is preserved across close/open).
+    if (!isOpen) {
+      const lastWithAnswer = [...(planState.steps || [])].reverse().find(s => s?.output?.answer || s?.output?.summary || s?.output?.text);
+      const text = lastWithAnswer?.output?.answer || lastWithAnswer?.output?.summary || lastWithAnswer?.output?.text || '';
+      try {
+        notifications.show({
+          title: '🤖 Astrion answered',
+          body: text ? (text.length > 200 ? text.slice(0, 200) + '…' : text) : 'Plan complete — open Spotlight to see the result.',
+          icon: '✓',
+          duration: 12000,
+        });
+      } catch {}
+      return; // don't reset planState — let open() restore the view
+    }
+    // Foreground: render Done card + reset state. User already sees it.
     renderPlanPanel({ completed: true });
     resetPlanState();
     activePlanId = null;
@@ -722,6 +737,18 @@ export function initSpotlight() {
     input.disabled = false;
     // Rotate tip in placeholder
     input.placeholder = SPOTLIGHT_TIPS[Math.floor(Math.random() * SPOTLIGHT_TIPS.length)];
+
+    // 2026-05-03 — if a plan is mid-flight from a previous open
+    // session (user dismissed Spotlight while it was running),
+    // restore the progress panel instead of the recent-apps view.
+    // close() preserved the state; renderPlanPanel paints what
+    // executor events have updated since.
+    if (activePlanId && Array.isArray(planState.steps) && planState.steps.length) {
+      isOpen = true;
+      renderPlanPanel();
+      input.focus();
+      return;
+    }
     // Show recent apps (if any), otherwise fall back to static suggestions
     const recents = getRecentApps();
     const allApps = processManager.getAllApps();
@@ -785,10 +812,21 @@ export function initSpotlight() {
     isOpen = false;
     input.value = '';
     input.disabled = false; // soak-test fix: reset disabled state on close
-    results.innerHTML = '';
-    activePlanId = null;
-    pendingConfirmPlanId = null;
-    resetPlanState();
+
+    // 2026-05-03 — if a plan is currently running, KEEP the planState
+    // alive so reopening Spotlight restores the live progress view.
+    // Without this, dismissing Spotlight mid-plan dropped the user's
+    // progress + answer even though the executor kept running. The
+    // plan:completed / plan:failed handlers still update the saved
+    // state in the background; open() picks it back up.
+    const planRunning = !!activePlanId && Array.isArray(planState.steps)
+      && planState.steps.some(s => s.status === 'running' || s.status === 'pending' || s.status === 'awaiting-confirm');
+    if (!planRunning) {
+      results.innerHTML = '';
+      activePlanId = null;
+      pendingConfirmPlanId = null;
+      resetPlanState();
+    }
     // Agent Core Sprint: let context-bundle drop the cached selection.
     eventBus.emit('spotlight:closed');
   }
