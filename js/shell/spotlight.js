@@ -1805,9 +1805,44 @@ Return ONLY the YAML content, no \`\`\` fences, no commentary.`;
       }
     }
 
-    // Ask AI
-    results.innerHTML = `<div class="spotlight-loading">Thinking...</div>`;
-    const response = await aiService.ask(query);
+    // Ask AI — streams tokens live so reasoning-model latency (30-90s
+    // on gpt-oss:20b for non-trivial prompts) doesn't feel like the
+    // OS hung. Thinking deltas paint into a muted strip above the
+    // answer; content deltas paint into the main answer area. When
+    // streaming completes the structured renderAiResponse card
+    // replaces the live view with the brain badge + feedback widgets.
+    results.innerHTML = `
+      <div class="spotlight-streaming" style="padding:14px 18px;">
+        <div class="spotlight-streaming-thinking" style="font-size:11px;color:rgba(255,255,255,0.35);font-style:italic;margin-bottom:10px;display:none;line-height:1.5;max-height:120px;overflow:auto;"></div>
+        <div class="spotlight-streaming-content" style="font-size:14px;line-height:1.6;color:rgba(255,255,255,0.9);min-height:1.4em;">
+          <span class="spotlight-streaming-text"></span><span class="spotlight-streaming-cursor" style="display:inline-block;width:7px;background:var(--accent);margin-left:2px;animation:spotlight-blink 1s infinite;">&nbsp;</span>
+        </div>
+      </div>
+      <style>@keyframes spotlight-blink { 50% { opacity: 0.3; } }</style>
+    `;
+    const thinkingEl = results.querySelector('.spotlight-streaming-thinking');
+    const textEl = results.querySelector('.spotlight-streaming-text');
+    let acc = '';
+    let thinkingAcc = '';
+    let response;
+    try {
+      const r = await aiService.askStream(
+        query,
+        {},
+        (delta) => { acc += delta; if (textEl) textEl.textContent = acc; },
+        (delta) => {
+          thinkingAcc += delta;
+          if (thinkingEl) {
+            thinkingEl.style.display = 'block';
+            thinkingEl.textContent = thinkingAcc;
+            thinkingEl.scrollTop = thinkingEl.scrollHeight;
+          }
+        },
+      );
+      response = r?.reply || acc;
+    } catch (err) {
+      response = acc || ('AI call failed: ' + (err?.message || String(err)));
+    }
 
     // Check if AI response mentions opening an app
     const lowerResp = response.toLowerCase();

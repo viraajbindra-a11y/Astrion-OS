@@ -706,9 +706,11 @@ function clearConversation() {
     .then(m => m.startFreshSession?.())
     .catch(() => {});
   // Same for ai-service's running conversationHistory (used as
-  // implicit context for askStream/askWithMeta when skipHistory=false)
+  // implicit context for askStream/askWithMeta when skipHistory=false).
+  // 2026-05-03: clearHistory() also wipes the persisted blob so the
+  // next page load doesn't restore the abandoned session.
   import('../kernel/ai-service.js')
-    .then(m => { if (m.aiService?.conversationHistory) m.aiService.conversationHistory = []; })
+    .then(m => { m.aiService?.clearHistory?.(); })
     .catch(() => {});
 }
 

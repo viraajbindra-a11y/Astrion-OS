@@ -17,11 +17,30 @@ import { shouldEscalate, capCategory as getCapCategory } from './calibration-tra
 const AI_PROVIDER_KEY = 'nova-ai-provider';   // 'ollama' | 'anthropic' | 'mock'
 const AI_OLLAMA_URL_KEY = 'nova-ai-ollama-url';
 const AI_OLLAMA_MODEL_KEY = 'nova-ai-ollama-model';
+// 2026-05-03 — persist last ~20 turns across reloads so the AI feels
+// like it has a memory instead of waking up amnesiac on every refresh.
+// Capped + auto-pruned in _addToHistory to keep localStorage small.
+const AI_HISTORY_KEY = 'nova-ai-history-v1';
 
 class AIService {
   constructor() {
     this.conversationHistory = [];
     this.context = {};
+    // Restore persisted history. Bounded retry: a corrupt blob just
+    // resets to empty rather than crashing boot.
+    try {
+      const raw = localStorage.getItem(AI_HISTORY_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          this.conversationHistory = parsed.filter(m =>
+            m && typeof m.role === 'string' && typeof m.content === 'string'
+          ).slice(-20);
+        }
+      }
+    } catch {
+      this.conversationHistory = [];
+    }
   }
 
   getProvider() {
@@ -156,9 +175,13 @@ class AIService {
    * @param {string} prompt
    * @param {object} [options]          same shape as askWithMeta
    * @param {(text:string) => void} onChunk  called per-token
+   * @param {(text:string) => void} [onThinking] reasoning-model
+   *   `thinking` channel deltas (gpt-oss, deepseek-r1, etc.). UIs that
+   *   want to show the model "thinking out loud" hook this; UIs that
+   *   want only the final answer omit it and the deltas are dropped.
    * @returns {Promise<{ reply, meta }>}
    */
-  async askStream(prompt, options = {}, onChunk) {
+  async askStream(prompt, options = {}, onChunk, onThinking) {
     const provider = this.getProvider();
     const sysCtx = this._buildSystemContext();
     const skip = !!options.skipHistory;
@@ -209,9 +232,13 @@ class AIService {
               try {
                 const obj = JSON.parse(line);
                 const delta = obj.message?.content || '';
+                const thinkingDelta = obj.message?.thinking || '';
                 if (delta) {
                   assembled += delta;
                   try { onChunk && onChunk(delta); } catch {}
+                }
+                if (thinkingDelta) {
+                  try { onThinking && onThinking(thinkingDelta); } catch {}
                 }
               } catch { /* malformed line, skip */ }
             }
@@ -301,6 +328,21 @@ class AIService {
     if (this.conversationHistory.length > 20) {
       this.conversationHistory = this.conversationHistory.slice(-12);
     }
+    // Persist to localStorage so the next page load restores the
+    // conversation. safe-storage already wraps Storage.prototype with
+    // try/catch (lesson #166) so a quota error here just no-ops.
+    localStorage.setItem(AI_HISTORY_KEY, JSON.stringify(this.conversationHistory));
+  }
+
+  /**
+   * Wipe persisted + in-memory conversation history. Hooks the chat
+   * panel's "fresh chat" button so users can reset the AI's memory
+   * deliberately. The persisted blob is removed too — next load
+   * starts clean.
+   */
+  clearHistory() {
+    this.conversationHistory = [];
+    localStorage.removeItem(AI_HISTORY_KEY);
   }
 
   _buildSystemContext() {
