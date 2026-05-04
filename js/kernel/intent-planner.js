@@ -124,7 +124,15 @@ RULES:
    capabilities (e.g. "delete everything" when no delete capability exists),
    respond with a CLARIFY status explaining what you can't do. NEVER force
    a plan that doesn't match the user's actual intent.
-9. Respond with JSON only. Nothing before, nothing after.`;
+9. **DEFAULT TO ai.ask FOR CHATTY QUERIES.** If the user is asking a
+   question, requesting an opinion, audit, summary, comparison,
+   explanation, or analysis of anything, use a single-step plan with
+   ai.ask (or ai.explain / ai.summarize as appropriate). DO NOT use
+   code.generate, files.createFile, terminal.exec, or any code-writing
+   capability unless the user EXPLICITLY asks you to write code, build
+   an app, or create a file. "Audit my OS" is ai.ask, not code.generate.
+   "Compare X to Y" is ai.ask, not code.generate. When in doubt, ai.ask.
+10. Respond with JSON only. Nothing before, nothing after.`;
 }
 
 // ---------- JSON parsing (tolerant) ----------
@@ -206,9 +214,46 @@ function validatePlan(plan) {
  *   raw?: string,
  * }>}
  */
+// Fast pre-classifier: if a query is clearly conversational (a
+// question, opinion ask, audit, explanation, etc.) skip the AI
+// planner entirely and return a single-step ai.ask plan. This both
+// (a) eliminates a 90s+ planner call for prompts the AI is just
+// going to mis-classify, and (b) prevents the planner from picking
+// code.generate / files.createFile / etc. for chatty queries.
+//
+// Verified failure case (2026-05-03): "do an adversarial audit of
+// my operating system" → planner picked code.generate as step 1 →
+// failed at step 0 in 117.7s with "suiteId required." Lesson #184.
+const CHATTY_LEAD = /^(?:what|who|when|where|why|how|which|is|are|am|do|does|did|can|could|would|should|will|may|might|tell|explain|describe|define|summari[sz]e|compare|contrast|review|audit|analy[sz]e|critique|recommend|suggest|opine|opinion|think|feel|imagine|consider)\b/i;
+const CHATTY_PHRASE = /\b(adversarial audit|opinion|recommend|recommendation|pros and cons|strengths? (and|&) weakness|weaknesses?|areas? of improvement|areas? to improve|am i ready|what.*think|your thoughts|what.*about)\b/i;
+const COMMAND_LEAD = /^(?:open|launch|create|make|new|delete|move|rename|copy|find|search|set|change|toggle|enable|disable|install|uninstall|build|generate|write|implement|fix|edit|update|run|start|stop|kill|quit|close|reboot|restart|shutdown|sleep|lock|unlock|upgrade|undo|redo|play|pause|skip)\b/i;
+
+function looksConversational(query) {
+  const q = query.trim();
+  if (q.length < 6) return false; // too short to confidently classify
+  // Explicit command verbs win — even if the query also has chatty words.
+  if (COMMAND_LEAD.test(q)) return false;
+  if (CHATTY_LEAD.test(q)) return true;
+  if (CHATTY_PHRASE.test(q)) return true;
+  // Question-mark heuristic: ends with "?" → almost certainly a chat.
+  if (q.endsWith('?')) return true;
+  return false;
+}
+
 export async function planIntent({ query, context, memory, parsedIntent }) {
   if (!query || typeof query !== 'string') {
     return { status: 'failed', error: 'empty query' };
+  }
+
+  // ─── Fast-path: conversational queries skip the planner ───
+  if (looksConversational(query)) {
+    return {
+      status: 'plan',
+      steps: [{ cap: 'ai.ask', args: { question: query }, binds: 'answer' }],
+      reasoning: 'conversational query — answering directly via ai.ask (skipped planner)',
+      raw: '(fast-path: looksConversational matched)',
+      meta: { brain: 'fast-path', confidence: 1, provider: 'heuristic' },
+    };
   }
 
   const prompt = buildPlannerPrompt({ query, context, memory, parsedIntent });
