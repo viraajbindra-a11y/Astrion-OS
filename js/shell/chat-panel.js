@@ -990,6 +990,22 @@ async function runPlan(plan, opts = {}) {
       error: result.error || null,
       capSummary: `plan (${plan.steps.length} steps)`,
     });
+    // 2026-05-03 — if the plan failed (e.g. planner picked the wrong
+    // capability + got rejected on a missing arg, like the
+    // code.generate/suiteId failure on adversarial-audit prompts),
+    // fall through to a basic chat answer. The user's question still
+    // deserves a reply — don't dead-end them on a planner mistake.
+    if (!result.ok && query) {
+      pushSystemMessage('Plan didn’t fit — answering directly instead.');
+      sendChat(query);
+    }
+  } catch (err) {
+    // Executor crashed entirely — fall through to chat so the user
+    // gets something rather than an empty void.
+    if (query) {
+      pushSystemMessage('Plan executor errored — answering directly.');
+      sendChat(query);
+    }
   } finally {
     if (bypass) bypassAutoConfirmOn = false;
   }
