@@ -1060,12 +1060,10 @@ async function runPlan(plan, opts = {}) {
     }
 
     // 2026-05-03 — when a plan succeeds, surface the actual ANSWER as
-    // a visible assistant message. Without this the user sees "✓ Done"
-    // and zero text, even when the plan was "ai.ask + ai.summarize"
-    // chains that did real work. Walk results in reverse, pluck the
-    // first non-empty answer/summary/text field, and push it. If
-    // multiple ai-* steps ran, take the last one's output (latest
-    // step is usually the user-facing summary).
+    // a visible assistant message. Each entry in result.results is a
+    // wrapper { index, cap, output, provenance } — the cap's actual
+    // payload lives under .output. Walk in reverse and pull the
+    // first non-empty answer/summary/text/reply.
     if (result.ok && Array.isArray(result.results)) {
       const findAnswer = (out) => {
         if (!out || typeof out !== 'object') return null;
@@ -1073,7 +1071,15 @@ async function runPlan(plan, opts = {}) {
         if (out.summary && typeof out.summary === 'string') return out.summary;
         if (out.text && typeof out.text === 'string') return out.text;
         if (out.reply && typeof out.reply === 'string') return out.reply;
-        if (out.result && typeof out.result === 'object') return findAnswer(out.result);
+        // Recurse into any nested object (e.g. wrapper.output, wrapper.result)
+        if (out.output && typeof out.output === 'object') {
+          const r = findAnswer(out.output);
+          if (r) return r;
+        }
+        if (out.result && typeof out.result === 'object') {
+          const r = findAnswer(out.result);
+          if (r) return r;
+        }
         return null;
       };
       let answer = null;
@@ -1086,6 +1092,10 @@ async function runPlan(plan, opts = {}) {
           kind: 'text',
           meta: { brain: 's1', model: 'plan-executor', provider: 'ollama' },
         });
+      } else {
+        // No textual output found — give the user a clear note so the
+        // plan doesn't dead-end on a silent "Done."
+        pushSystemMessage('Plan finished but produced no readable answer. Try asking again or switch to Chat mode.');
       }
     }
   } catch (err) {
