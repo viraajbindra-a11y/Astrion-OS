@@ -88,7 +88,7 @@ class AIService {
     const systemContext = this._buildSystemContext();
     const skip = !!options.skipHistory;
     const messages = [
-      ...(skip ? [] : this.conversationHistory.slice(-6)),
+      ...(skip ? [] : this.conversationHistory.slice(-12)),
       { role: 'user', content: prompt }
     ];
 
@@ -186,7 +186,7 @@ class AIService {
     const sysCtx = this._buildSystemContext();
     const skip = !!options.skipHistory;
     const messages = [
-      ...(skip ? [] : this.conversationHistory.slice(-6)),
+      ...(skip ? [] : this.conversationHistory.slice(-12)),
       { role: 'user', content: prompt }
     ];
 
@@ -244,6 +244,11 @@ class AIService {
             }
           }
           const meta = { brain: 's1', confidence: 0.85, provider: 'ollama', model, escalated: false };
+          // Persist the streamed turn to history (lesson #183 — askStream
+          // used to drop replies on the floor; chat-panel + Spotlight
+          // streaming both go through here, so without this the AI
+          // genuinely forgot every conversation as soon as it finished).
+          if (!skip && assembled) this._addToHistory(prompt, assembled);
           eventBus.emit('ai:response', meta);
           return { reply: assembled, meta };
         }

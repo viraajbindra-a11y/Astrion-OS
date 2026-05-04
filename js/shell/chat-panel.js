@@ -434,6 +434,14 @@ function updateMessage(id, mutator) {
   scrollToBottom();
 }
 
+function removeMessage(id) {
+  const idx = messages.findIndex(m => m.id === id);
+  if (idx === -1) return;
+  messages.splice(idx, 1);
+  const node = listEl?.querySelector(`[data-msg-id="${id}"]`);
+  if (node) node.remove();
+}
+
 function renderMessage(msg) {
   // If list currently shows the empty state, clear it first
   const empty = listEl.querySelector('.cp-empty');
@@ -453,8 +461,23 @@ function messageNode(msg) {
       <div class="cp-bubble user">
         ${dotCls ? `<span class="cp-mode-dot ${dotCls}" title="Sent in Bypass mode"></span>` : ''}
         <div class="cp-bubble-text">${escapeHtml(msg.text)}</div>
+        <div class="cp-bubble-actions">
+          <button class="cp-bubble-action cp-user-copy" data-msg-id="${msg.id}" title="Copy message">⎘</button>
+        </div>
       </div>
     `;
+    // Wire user-bubble copy after insertion (deferred so the DOM has
+    // the new node mounted before we attach the listener).
+    setTimeout(() => {
+      const btn = panelEl?.querySelector(`.cp-user-copy[data-msg-id="${msg.id}"]`);
+      btn?.addEventListener('click', async () => {
+        try {
+          await navigator.clipboard.writeText(msg.text || '');
+          btn.innerHTML = '✓';
+          setTimeout(() => { btn.innerHTML = '⎘'; }, 1200);
+        } catch {}
+      });
+    }, 0);
   } else if (msg.role === 'system') {
     row.innerHTML = `<div class="cp-sys">${escapeHtml(msg.text)}</div>`;
   } else {
@@ -880,10 +903,12 @@ async function sendPlan(query) {
       return;
     }
     if (plan.status !== 'plan') {
-      updateMessage(waitingMsg.id, m => {
-        m.kind = 'text';
-        m.text = 'Could not plan: ' + (plan.error || 'unknown error');
-      });
+      // No actionable plan — fall through to basic chat so the user
+      // gets a real reply instead of "Could not plan: unknown." 2026-
+      // 05-03 user request: "bypass mode and all the others should
+      // have basic chat without planning built into them."
+      removeMessage(waitingMsg.id);
+      sendChat(query);
       return;
     }
 
@@ -900,10 +925,10 @@ async function sendPlan(query) {
       };
     });
   } catch (err) {
-    updateMessage(waitingMsg.id, m => {
-      m.kind = 'text';
-      m.text = 'Planner error: ' + (err?.message || String(err));
-    });
+    // Planner threw — chat fallback rather than dead-ending the user.
+    removeMessage(waitingMsg.id);
+    pushSystemMessage('Planner unavailable — answering directly.');
+    sendChat(query);
   }
 }
 
@@ -929,10 +954,10 @@ async function sendBypass(query) {
       return;
     }
     if (plan.status !== 'plan') {
-      updateMessage(waitingMsg.id, m => {
-        m.kind = 'text';
-        m.text = 'Could not plan: ' + (plan.error || 'unknown error');
-      });
+      // No actionable plan \u2014 fall through to basic chat (same as
+      // PLAN mode; user wanted chat available regardless of mode).
+      removeMessage(waitingMsg.id);
+      sendChat(query);
       return;
     }
 
@@ -944,10 +969,9 @@ async function sendBypass(query) {
     });
     runPlan(plan, { query, sessionId, bypass: true });
   } catch (err) {
-    updateMessage(waitingMsg.id, m => {
-      m.kind = 'text';
-      m.text = 'Planner error: ' + (err?.message || String(err));
-    });
+    removeMessage(waitingMsg.id);
+    pushSystemMessage('Planner unavailable \u2014 answering directly.');
+    sendChat(query);
   }
 }
 
@@ -1433,6 +1457,12 @@ function injectStyles() {
       line-height: 1.45;
       word-wrap: break-word;
       white-space: pre-wrap;
+      /* Make sure text inside chat bubbles is always selectable —
+       * some platform CSS sets user-select:none on app shells which
+       * propagates here. Explicit here so highlight + copy works. */
+      user-select: text;
+      -webkit-user-select: text;
+      cursor: text;
     }
     .cp-bubble.user {
       background: rgba(90,200,250,0.22);
@@ -1460,7 +1490,8 @@ function injectStyles() {
       opacity: 0.55;
       transition: opacity 0.15s ease;
     }
-    .cp-bubble.assistant:hover .cp-bubble-actions { opacity: 1; }
+    .cp-bubble.assistant:hover .cp-bubble-actions,
+    .cp-bubble.user:hover .cp-bubble-actions { opacity: 1; }
     .cp-bubble-action {
       width: 22px; height: 22px;
       padding: 0;
@@ -1471,6 +1502,9 @@ function injectStyles() {
       font-size: 12px;
       cursor: pointer;
       font-family: inherit;
+    }
+    .cp-bubble-action {
+      cursor: pointer;
     }
     .cp-bubble-action:hover {
       background: rgba(255,255,255,0.1);

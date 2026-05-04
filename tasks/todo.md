@@ -1,3 +1,15 @@
+# Pending — chat interface cosmetics (filed 2026-05-03)
+
+User wants to work together on chat-panel cosmetics tomorrow or
+day after (collaborative, not autonomous). They feel the chat
+interface is ugly. Wait for their session before starting; bring
+fresh eyes to the visual design.
+
+Files: `js/shell/chat-panel.js` (UI + modes + streaming render),
+related CSS in `css/shell/chat-panel.css` if it exists.
+
+---
+
 # Session Plan — 2026-04-09 / 2026-04-10 overnight
 
 ## Status: COMPLETE (finished while user was sleeping)
