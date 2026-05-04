@@ -102,6 +102,43 @@ export async function applyProposal(id, opts = {}) {
   const passed = [];
   const failed = [];
 
+  // Defense-in-depth content scan (lesson #181). The high-level
+  // proposeUpgrade() in self-upgrader.js already calls checkContentSafe
+  // + validateSyntax before staging — but a caller that goes directly
+  // to proposeSelfMod() bypasses both. The pen-test suite (2026-05-03)
+  // caught this: eval / new Function / state-clear patterns staged via
+  // the lower-level path slipped past every gate. Re-running the same
+  // checks here closes the gap independent of how the proposal was
+  // staged. Adds a 6th gate: 'content-blocklist'.
+  if (typeof proposal.newContent === 'string' && proposal.newContent.length > 0) {
+    try {
+      const upgrader = await import('./self-upgrader.js');
+      const dangerous = [
+        { re: /\beval\s*\(/, reason: 'contains eval(' },
+        { re: /new\s+Function\s*\(/, reason: 'contains new Function(' },
+        { re: /localStorage\.removeItem\s*\(\s*['"]astrion-/, reason: 'clears Astrion state key' },
+        { re: /graphStore\.(deleteNode|removeEdge)\s*\(/, reason: 'direct graph mutation bypassing capabilities' },
+      ];
+      let contentBlocked = false;
+      for (const d of dangerous) {
+        if (d.re.test(proposal.newContent)) {
+          failed.push({ check: 'content-blocklist', reason: d.reason });
+          contentBlocked = true;
+          break;
+        }
+      }
+      if (!contentBlocked && proposal.target && upgrader.validateSyntax) {
+        const syn = upgrader.validateSyntax(proposal.target, proposal.newContent);
+        if (!syn.ok) failed.push({ check: 'content-blocklist', reason: 'syntax: ' + syn.reason });
+        else passed.push('content-blocklist');
+      } else if (!contentBlocked) {
+        passed.push('content-blocklist');
+      }
+    } catch (err) {
+      failed.push({ check: 'content-blocklist', reason: 'content-scan threw: ' + (err?.message || String(err)) });
+    }
+  }
+
   // 1. Golden-integrity: every locked file matches its blessed hash.
   try {
     const { verifyGolden } = await import('./golden-check.js');

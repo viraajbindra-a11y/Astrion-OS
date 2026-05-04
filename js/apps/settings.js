@@ -1540,7 +1540,25 @@ function initSettings(container) {
 
     main.innerHTML = `
       <div class="settings-section-title">Security & Privacy</div>
+
       <div class="settings-group">
+        <div style="padding:14px 16px;">
+          <div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:6px;">
+            <div style="font-size:14px;font-weight:600;">Red / Blue / Purple Team</div>
+            <div style="font-size:11px;color:rgba(255,255,255,0.4);" id="pen-test-stamp">never run</div>
+          </div>
+          <div style="font-size:12px;color:rgba(255,255,255,0.55);margin-bottom:14px;line-height:1.5;">
+            Synthetic adversarial test suite. Red-team tries actual attacks against the live OS substrate (typed-confirm bypass, path traversal, eval injection); blue-team checks integrity (golden lock, value lock, rubber-stamp tracker). A failed test means a real bug. Purple = the joint view.
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <button id="pen-test-run" style="padding:8px 16px;background:rgba(0,122,255,0.15);color:#7eb6ff;border:1px solid rgba(0,122,255,0.4);border-radius:6px;font-family:var(--font);font-size:12px;font-weight:600;cursor:pointer;">▶ Run Suite</button>
+            <span id="pen-test-summary" style="font-size:12px;color:rgba(255,255,255,0.5);"></span>
+          </div>
+          <div id="pen-test-results" style="margin-top:14px;display:flex;flex-direction:column;gap:6px;"></div>
+        </div>
+      </div>
+
+      <div class="settings-group" style="margin-top:16px;">
         <div style="padding:8px 0 12px;">
           <div class="settings-row-label">Capability Tier System</div>
           <div class="settings-row-desc">Every AI action is assigned a privilege level. Higher levels require your explicit permission.</div>
@@ -1557,6 +1575,7 @@ function initSettings(container) {
           </div>
         `).join('')}
       </div>
+
       <div class="settings-group" style="margin-top:16px;">
         <div style="padding:8px 0 12px;">
           <div class="settings-row-label">Active Safeguards</div>
@@ -1582,8 +1601,67 @@ function initSettings(container) {
           <div class="settings-row-label" style="flex:1;">VFS path restriction (sandbox roots only)</div>
           <span style="color:#50fa7b;font-size:12px;">Active</span>
         </div>
+        <div class="settings-row" style="padding:6px 0;">
+          <div class="settings-row-label" style="flex:1;">Self-mod content blocklist (eval, new Function, state clears)</div>
+          <span style="color:#50fa7b;font-size:12px;">Active</span>
+        </div>
       </div>
     `;
+
+    // ─── Wire the Run Suite button ───
+    const runBtn = main.querySelector('#pen-test-run');
+    const stamp = main.querySelector('#pen-test-stamp');
+    const summaryEl = main.querySelector('#pen-test-summary');
+    const resultsEl = main.querySelector('#pen-test-results');
+
+    function teamColor(team) {
+      return team === 'red' ? '#ff6b6b' : team === 'blue' ? '#7eb6ff' : '#cba6f7';
+    }
+    function renderResults(results, summary) {
+      resultsEl.innerHTML = results.map(r => `
+        <div style="display:flex;align-items:flex-start;gap:10px;padding:10px 12px;background:rgba(0,0,0,0.2);border-left:3px solid ${r.passed ? '#50fa7b' : '#ff5f57'};border-radius:6px;">
+          <div style="flex-shrink:0;">
+            <span style="display:inline-block;background:${teamColor(r.team)};color:#0a0a1a;padding:1px 6px;border-radius:4px;font-size:9px;font-weight:700;text-transform:uppercase;">${r.team}</span>
+          </div>
+          <div style="flex:1;min-width:0;">
+            <div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;">
+              <div style="font-size:12px;font-weight:600;color:${r.passed ? 'rgba(255,255,255,0.9)' : '#ff8a85'};">${r.passed ? '✓' : '✗'} ${escapeHtmlLocal(r.name || r.id)}</div>
+              <div style="font-size:10px;color:rgba(255,255,255,0.35);font-family:ui-monospace,monospace;">${r.durationMs ?? '?'} ms</div>
+            </div>
+            <div style="font-size:11px;color:rgba(255,255,255,0.55);margin-top:3px;">${escapeHtmlLocal(r.evidence || '')}</div>
+            ${r.blocker ? `<div style="font-size:11px;color:#ff8a85;margin-top:4px;background:rgba(255,95,87,0.08);padding:6px 8px;border-radius:4px;">⚠ ${escapeHtmlLocal(r.blocker)}</div>` : ''}
+          </div>
+        </div>
+      `).join('');
+      const failed = summary.failed;
+      summaryEl.style.color = failed === 0 ? '#50fa7b' : '#ff8a85';
+      summaryEl.textContent = failed === 0
+        ? `${summary.passed}/${summary.total} green — defenses holding`
+        : `${summary.failed} of ${summary.total} found a hole`;
+    }
+    function escapeHtmlLocal(s) {
+      return String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+    }
+
+    runBtn.addEventListener('click', async () => {
+      runBtn.disabled = true;
+      runBtn.textContent = 'Running…';
+      summaryEl.textContent = 'Firing synthetic attacks against live substrate…';
+      summaryEl.style.color = 'rgba(255,255,255,0.55)';
+      resultsEl.innerHTML = '';
+      try {
+        const mod = await import('../kernel/pen-test.js');
+        const { results, summary } = await mod.runAll();
+        renderResults(results, summary);
+        const t = new Date(summary.ranAt).toLocaleTimeString();
+        stamp.textContent = `last run ${t}`;
+      } catch (err) {
+        summaryEl.textContent = '✗ ' + escapeError(err);
+        summaryEl.style.color = '#ff8a85';
+      }
+      runBtn.disabled = false;
+      runBtn.textContent = '▶ Run Suite';
+    });
   }
 
   function renderAbout() {
