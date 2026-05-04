@@ -146,6 +146,11 @@
   border-top: 1px solid var(--border);
   white-space: pre-wrap;
   word-break: break-word;
+  /* Override the body-level user-select:none so the answer can be
+   * highlighted + copied. Same fix as chat-panel bubbles. */
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
 }
 
 .spotlight-ai-response code {
@@ -154,7 +159,44 @@
   border-radius: 4px;
   font-family: var(--mono);
   font-size: 12px;
+  user-select: text;
+  -webkit-user-select: text;
 }
+
+/* Live-stream UI (plan steps + ad-hoc AI fallback) — also selectable. */
+.spotlight-streaming-text,
+.spotlight-streaming-thinking {
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
+}
+
+/* Plan-step live output panel (the inline scrollback under a running
+ * step that shows tokens flowing). Inline-styled in spotlight.js but
+ * needs the same selection unlock as the rest. */
+.spotlight-result-item [style*="white-space:pre-wrap"] {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* Tiny copy button in the corner of the AI response card. */
+.spotlight-ai-copy {
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(255,255,255,0.12);
+  color: rgba(255,255,255,0.65);
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  cursor: pointer;
+  font-family: var(--font);
+  opacity: 0.6;
+  transition: opacity 0.15s ease;
+}
+.spotlight-ai-response-wrap:hover .spotlight-ai-copy { opacity: 1; }
+.spotlight-ai-copy:hover { background: rgba(255,255,255,0.12); color: white; }
 
 .spotlight-loading {
   padding: 16px;

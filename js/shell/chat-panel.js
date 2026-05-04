@@ -1056,6 +1056,37 @@ async function runPlan(plan, opts = {}) {
     if (!result.ok && query) {
       pushSystemMessage('Plan didn’t fit — answering directly instead.');
       sendChat(query);
+      return;
+    }
+
+    // 2026-05-03 — when a plan succeeds, surface the actual ANSWER as
+    // a visible assistant message. Without this the user sees "✓ Done"
+    // and zero text, even when the plan was "ai.ask + ai.summarize"
+    // chains that did real work. Walk results in reverse, pluck the
+    // first non-empty answer/summary/text field, and push it. If
+    // multiple ai-* steps ran, take the last one's output (latest
+    // step is usually the user-facing summary).
+    if (result.ok && Array.isArray(result.results)) {
+      const findAnswer = (out) => {
+        if (!out || typeof out !== 'object') return null;
+        if (out.answer && typeof out.answer === 'string') return out.answer;
+        if (out.summary && typeof out.summary === 'string') return out.summary;
+        if (out.text && typeof out.text === 'string') return out.text;
+        if (out.reply && typeof out.reply === 'string') return out.reply;
+        if (out.result && typeof out.result === 'object') return findAnswer(out.result);
+        return null;
+      };
+      let answer = null;
+      for (let i = result.results.length - 1; i >= 0; i--) {
+        const found = findAnswer(result.results[i]);
+        if (found) { answer = found; break; }
+      }
+      if (answer) {
+        pushAssistantMessage(answer, {
+          kind: 'text',
+          meta: { brain: 's1', model: 'plan-executor', provider: 'ollama' },
+        });
+      }
     }
   } catch (err) {
     // Executor crashed entirely — fall through to chat so the user

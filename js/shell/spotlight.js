@@ -1973,7 +1973,10 @@ Return ONLY the YAML content, no \`\`\` fences, no commentary.`;
     const timeStr = meta.responseTimeMs ? `${(meta.responseTimeMs / 1000).toFixed(1)}s` : '';
 
     container.innerHTML = `
-      <div class="spotlight-ai-response">${escapeHtml(text)}</div>
+      <div class="spotlight-ai-response-wrap" style="position:relative;">
+        <div class="spotlight-ai-response">${escapeHtml(text)}</div>
+        <button class="spotlight-ai-copy" title="Copy reply">⎘ Copy</button>
+      </div>
       <div class="spotlight-ai-meta">
         <span class="spotlight-brain-badge" data-brain="${meta.brain}" title="Click for details">
           ${brainLabel} · ${confPct}%${timeStr ? ' · ' + timeStr : ''}
@@ -1985,6 +1988,16 @@ Return ONLY the YAML content, no \`\`\` fences, no commentary.`;
       </div>
       <div class="spotlight-reasoning hidden"></div>
     `;
+
+    // Copy button — text is selectable, but for one-click copy too.
+    const copyBtn = container.querySelector('.spotlight-ai-copy');
+    copyBtn?.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(text || '');
+        copyBtn.textContent = '✓ Copied';
+        setTimeout(() => { copyBtn.textContent = '⎘ Copy'; }, 1200);
+      } catch {}
+    });
 
     // Badge click → toggle reasoning trace
     const badge = container.querySelector('.spotlight-brain-badge');
