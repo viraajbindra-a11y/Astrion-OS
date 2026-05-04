@@ -407,6 +407,24 @@ export function initSpotlight() {
     if (planState.steps[index]) {
       planState.steps[index].status = 'done';
       planState.steps[index].output = output;
+      // Clear the live-stream buffer once done so the renderer shows
+      // the final structured result, not the raw chunked text.
+      planState.steps[index].liveText = '';
+    }
+    renderPlanPanel();
+  });
+
+  // 2026-05-03 — chunked progress for streaming caps (currently
+  // ai.ask). Paints partial output into the running step so the user
+  // sees the model thinking out loud instead of staring at "▶".
+  eventBus.on('plan:step:chunk', ({ planId, stepIndex, kind, text, textDelta }) => {
+    if (planId !== activePlanId) return;
+    const s = planState.steps[stepIndex];
+    if (!s) return;
+    if (kind === 'content' && typeof text === 'string') {
+      s.liveText = text;
+    } else if (kind === 'thinking' && typeof textDelta === 'string') {
+      s.liveThinking = (s.liveThinking || '') + textDelta;
     }
     renderPlanPanel();
   });
@@ -468,14 +486,25 @@ export function initSpotlight() {
         'failed':           '#ff5f57',
         'awaiting-confirm': '#f1fa8c',
       };
-      return `<div class="spotlight-result-item" style="cursor:default;border-left:3px solid ${colors[s.status]};padding-left:13px;">
-        <div class="spotlight-result-icon" style="font-size:18px;color:${colors[s.status]};">${icons[s.status] || '·'}</div>
-        <div class="spotlight-result-text">
-          <div class="spotlight-result-title" style="color:${colors[s.status]};">${escapeHtml(s.summary)}</div>
-          <div class="spotlight-result-subtitle">${escapeHtml(s.cap)}${s.error ? ' · ' + escapeHtml(s.error) : ''}</div>
+      // Live streaming output (currently from ai.ask via
+      // plan:step:chunk). Shown only while the step is running and
+      // we have content; cleared when the step completes.
+      const liveBlock = s.status === 'running' && (s.liveText || s.liveThinking)
+        ? `<div style="margin-top:6px;padding:8px 10px;background:rgba(0,0,0,0.25);border-radius:6px;font-size:11px;line-height:1.5;color:rgba(255,255,255,0.85);max-height:140px;overflow:auto;white-space:pre-wrap;word-break:break-word;">${
+            s.liveThinking ? `<div style="color:rgba(255,255,255,0.4);font-style:italic;margin-bottom:6px;">${escapeHtml(s.liveThinking.slice(-400))}</div>` : ''
+          }${escapeHtml(s.liveText || '')}<span style="display:inline-block;width:6px;background:${colors[s.status]};margin-left:2px;animation:spotlight-stream-blink 1s infinite;">&nbsp;</span></div>`
+        : '';
+      return `<div class="spotlight-result-item" style="cursor:default;border-left:3px solid ${colors[s.status]};padding-left:13px;flex-direction:column;align-items:stretch;">
+        <div style="display:flex;align-items:flex-start;gap:10px;">
+          <div class="spotlight-result-icon" style="font-size:18px;color:${colors[s.status]};">${icons[s.status] || '·'}</div>
+          <div class="spotlight-result-text" style="flex:1;min-width:0;">
+            <div class="spotlight-result-title" style="color:${colors[s.status]};">${escapeHtml(s.summary)}</div>
+            <div class="spotlight-result-subtitle">${escapeHtml(s.cap)}${s.error ? ' · ' + escapeHtml(s.error) : ''}</div>
+          </div>
         </div>
+        ${liveBlock}
       </div>`;
-    }).join('');
+    }).join('') + `<style>@keyframes spotlight-stream-blink { 50% { opacity: 0.3; } }</style>`;
 
     let header;
     if (extra.failed) {

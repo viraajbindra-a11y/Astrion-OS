@@ -346,7 +346,41 @@ const aiAsk = {
     return runCapability(this, args, async () => {
       const prompt = args._intent?.raw || args.question || args._rawArgs || args.topic || '';
       if (!prompt) throw new Error('No question');
-      const answer = await aiService.ask(prompt);
+      // Stream tokens (lesson #185 — user wanted live plan progress
+      // in Spotlight). The executor passes planId + stepIndex via
+      // args._planContext so Spotlight can attribute chunks to the
+      // right step. If those aren't set we just don't emit and the
+      // call still works.
+      const planId = args._planContext?.planId;
+      const stepIndex = args._planContext?.stepIndex;
+      const emit = (type, payload) => {
+        if (planId == null) return;
+        try {
+          // Lazy-import event-bus to avoid circular dep at module load.
+          import('./event-bus.js').then(m => {
+            m.eventBus.emit(type, { planId, stepIndex, ...payload });
+          }).catch(() => {});
+        } catch {}
+      };
+      let assembled = '';
+      let answer;
+      try {
+        const r = await aiService.askStream(
+          prompt,
+          { skipHistory: true, capCategory: 'ai-ask-step', maxTokens: 800 },
+          (delta) => {
+            assembled += delta;
+            emit('plan:step:chunk', { kind: 'content', text: assembled });
+          },
+          (delta) => {
+            emit('plan:step:chunk', { kind: 'thinking', textDelta: delta });
+          },
+        );
+        answer = r?.reply || assembled;
+      } catch (err) {
+        // Fallback to non-streaming if the stream path errors.
+        answer = await aiService.ask(prompt);
+      }
       safeNotify({
         title: '🤖 Astrion',
         body: answer.length > 200 ? answer.slice(0, 200) + '…' : answer,

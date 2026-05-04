@@ -442,6 +442,9 @@ export async function executePlan(plan, opts = {}) {
     const resolvedArgs = {
       ...subbed,
       _intent: { raw: opts.query || '', args: step.args || {} },
+      // Plan context — lets the capability emit progress events
+      // (e.g. ai.ask streaming tokens) attributed to the right step.
+      _planContext: { planId, stepIndex: i },
     };
     eventBus.emit('plan:step:start', { planId, index: i, step, resolvedArgs });
 
