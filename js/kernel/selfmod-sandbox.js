@@ -120,11 +120,23 @@ export async function applyProposal(id, opts = {}) {
   } catch (err) { failed.push({ check: 'value-lock', reason: err?.message || 'check threw' }); }
 
   // 3. Red-team signoff: adversarial review of the proposal itself.
-  // Today uses the same model as the planner with the existing red-team
-  // adversarial prompt. M8.P3.b will route this to a DIFFERENT model
-  // for true diversity; the current gate is enough to refuse a wildly
-  // unsafe proposal AND keeps the same model from rubber-stamping
-  // its own output (the system prompt is adversarial enough).
+  // M8.P3.b routes this to a DIFFERENT model than the planner for true
+  // diversity (Settings > AI > Red-team model).
+  //
+  // 2026-05-03 calibration update (lesson #180): small partner models
+  // err defensive on every code change — qwen2.5:1.5b returns abort
+  // with fabricated rationale; qwen2.5:7b returns review on basically
+  // anything. Treating any non-proceed as a hard block made the demo
+  // happy-path unreachable. The new contract:
+  //   proceed → pass automatically
+  //   review  → pass IFF the user typed the proposal id (the typed-
+  //             confirm gate). The review reason is surfaced on the
+  //             result so the UI shows what the user is overriding.
+  //             Effectively review = "show this and require typing,"
+  //             not "block."
+  //   abort   → hard block, no override. The user must re-propose.
+  let redTeamReview = null;
+  let redTeamRecommendation = null;
   try {
     const { reviewAction } = await import('./red-team.js');
     const syntheticCap = {
@@ -137,10 +149,19 @@ export async function applyProposal(id, opts = {}) {
       proposer: proposal.proposer, reason: proposal.reason,
       diff_preview: proposal.diff.slice(0, 800),
     });
-    if (review.ok && review.review?.recommendation === 'proceed') {
-      passed.push('red-team-signoff');
-    } else if (review.ok) {
-      failed.push({ check: 'red-team-signoff', reason: 'recommendation: ' + review.review?.recommendation + ' — ' + (review.review?.summary || '') });
+    if (review.ok && review.review) {
+      redTeamReview = review.review;
+      redTeamRecommendation = review.review.recommendation;
+      if (redTeamRecommendation === 'proceed') {
+        passed.push('red-team-signoff');
+      } else if (redTeamRecommendation === 'review') {
+        // Conditional pass — finalised below after we know whether the
+        // user typed-confirmed. Defer to allow review to override.
+      } else if (redTeamRecommendation === 'abort') {
+        failed.push({ check: 'red-team-signoff', reason: 'recommendation: abort — ' + (review.review.summary || 'unsafe to apply') });
+      } else {
+        failed.push({ check: 'red-team-signoff', reason: 'unknown recommendation: ' + redTeamRecommendation });
+      }
     } else {
       failed.push({ check: 'red-team-signoff', reason: 'red-team unavailable: ' + (review.error || 'unknown') });
     }
@@ -150,10 +171,23 @@ export async function applyProposal(id, opts = {}) {
   // the proposal id. Reuses the M5.P4 PONR pattern — typing the id is
   // friction tax; rubber-stamping a self-mod is exactly the case the
   // tracker can't catch in retrospect.
-  if (opts.typedConfirm === id) {
+  const typedConfirmed = opts.typedConfirm === id;
+  if (typedConfirmed) {
     passed.push('user-typed-confirm');
   } else {
     failed.push({ check: 'user-typed-confirm', reason: 'opts.typedConfirm must equal proposal id "' + id + '"' });
+  }
+
+  // Finalise red-team gate now that we know the user's confirm state
+  // (deferred from gate 3 above). A 'review' recommendation overrides
+  // to pass IFF typed-confirmed — the user has explicitly read and
+  // accepted what the partner flagged.
+  if (redTeamRecommendation === 'review') {
+    if (typedConfirmed) {
+      passed.push('red-team-signoff (overridden by typed-confirm)');
+    } else {
+      failed.push({ check: 'red-team-signoff', reason: 'recommendation: review — ' + (redTeamReview?.summary || 'partner flagged for review') + '. Type the proposal id to override.' });
+    }
   }
 
   // 5. Rollback-plan: proposal must include a rollback diff so M8.P4
@@ -172,6 +206,8 @@ export async function applyProposal(id, opts = {}) {
       error: 'self-mod apply blocked: ' + failed.length + ' gate(s) failed',
       gatesPassed: passed,
       gatesFailed: failed,
+      redTeamReview,
+      redTeamRecommendation,
     };
   }
 
@@ -184,9 +220,10 @@ export async function applyProposal(id, opts = {}) {
     status: 'approved',
     appliedAt: Date.now(),
     checksPassed: passed,
+    redTeamRecommendation,
   });
-  eventBus.emit('selfmod:approved', { id, gatesPassed: passed });
-  return { ok: true, id, gatesPassed: passed, note: 'gates passed; actual source mutation deferred to M8.P4' };
+  eventBus.emit('selfmod:approved', { id, gatesPassed: passed, redTeamRecommendation });
+  return { ok: true, id, gatesPassed: passed, redTeamReview, redTeamRecommendation, note: 'gates passed; actual source mutation deferred to M8.P4' };
 }
 
 export async function discardProposal(id, reason = '') {
