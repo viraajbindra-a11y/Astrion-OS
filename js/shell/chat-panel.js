@@ -48,6 +48,13 @@ let banner = null;
 
 // Persist mode across reloads
 const MODE_KEY = 'astrion-chat-panel-mode';
+// Persist visible chat history across reloads. Different from the
+// ai-service conversationHistory key (that's the AI's context memory;
+// this is the user's visible scrollback). Only text/system messages
+// serialize — plan-preview/plan-progress cards have function refs in
+// meta that don't survive JSON.
+const MESSAGES_KEY = 'astrion-chat-panel-messages-v1';
+const MESSAGES_CAP = 60;
 
 function loadMode() {
   const saved = localStorage.getItem(MODE_KEY);
@@ -58,6 +65,39 @@ function loadMode() {
 
 function saveMode() {
   try { localStorage.setItem(MODE_KEY, currentMode); } catch {}
+}
+
+function saveMessages() {
+  // Keep only serializable kinds; drop ephemeral plan cards + clarify
+  // (their meta carries function refs we can't persist) + system
+  // toasts that wouldn't make sense replayed out of context.
+  const persistable = messages
+    .filter(m => m.kind === 'text' && (m.role === 'user' || m.role === 'assistant'))
+    .slice(-MESSAGES_CAP)
+    .map(m => ({
+      id: m.id, role: m.role, text: m.text, kind: m.kind, mode: m.mode,
+      meta: m.meta ? {
+        brain: m.meta.brain, model: m.meta.model, provider: m.meta.provider,
+      } : null,
+    }));
+  try { localStorage.setItem(MESSAGES_KEY, JSON.stringify(persistable)); } catch {}
+}
+
+function loadMessages() {
+  try {
+    const raw = localStorage.getItem(MESSAGES_KEY);
+    if (!raw) return;
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return;
+    messages = parsed.filter(m =>
+      m && typeof m.id === 'string' && typeof m.role === 'string' && typeof m.text === 'string'
+    );
+  } catch { messages = []; }
+}
+
+function clearMessages() {
+  messages = [];
+  try { localStorage.removeItem(MESSAGES_KEY); } catch {}
 }
 
 function newMsgId() {
@@ -75,12 +115,24 @@ export function initChatPanel() {
   // state pointing at the latest copy and old DOM nodes orphaned.
   if (panelEl && document.body.contains(panelEl)) return;
   loadMode();
+  loadMessages();
   injectStyles();
   buildToggleButton();
   buildPanel();
+  // Replay persisted messages into the freshly-built list. Done after
+  // buildPanel so listEl exists. If there's nothing to replay the
+  // empty-state UI in renderMessage still triggers correctly.
+  if (messages.length > 0 && listEl) {
+    const empty = listEl.querySelector('.cp-empty');
+    if (empty) empty.remove();
+    for (const m of messages) {
+      try { listEl.appendChild(messageNode(m)); } catch {}
+    }
+    scrollToBottom();
+  }
   subscribeEvents();
   subscribeKeyboard();
-  console.log('[chat-panel] ready — mode:', currentMode);
+  console.log('[chat-panel] ready — mode:', currentMode, '· restored messages:', messages.length);
 }
 
 export function openChatPanel() {
@@ -399,6 +451,7 @@ function pushUserMessage(text) {
   messages.push(msg);
   renderMessage(msg);
   scrollToBottom();
+  saveMessages();
   return msg;
 }
 
@@ -422,6 +475,7 @@ function pushAssistantMessage(text, opts = {}) {
   messages.push(msg);
   renderMessage(msg);
   scrollToBottom();
+  saveMessages();
   return msg;
 }
 
@@ -432,6 +486,10 @@ function updateMessage(id, mutator) {
   const node = listEl.querySelector(`[data-msg-id="${id}"]`);
   if (node) node.replaceWith(messageNode(msg));
   scrollToBottom();
+  // Persist the post-mutation state — important for streamed
+  // assistant messages that grow token-by-token. Save throttled
+  // by the JSON serialization cost (negligible at our sizes).
+  saveMessages();
 }
 
 function removeMessage(id) {
@@ -718,7 +776,7 @@ function startVoiceInput() {
 }
 
 function clearConversation() {
-  messages = [];
+  clearMessages(); // wipes both in-memory + persisted scrollback
   planGroups.clear();
   listEl.innerHTML = '';
   renderEmpty();
