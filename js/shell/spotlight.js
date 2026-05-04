@@ -10,6 +10,7 @@ import { eventBus } from '../kernel/event-bus.js';
 import { processManager } from '../kernel/process-manager.js';
 import { fileSystem } from '../kernel/file-system.js';
 import { aiService } from '../kernel/ai-service.js';
+import { notifications } from '../kernel/notifications.js';
 import { parseIntent, summarizeIntent, intentToNaturalLanguage } from '../kernel/intent-parser.js';
 // Agent Core Sprint — heuristic router + context snapshot for the planner.
 import { routeQuery } from '../kernel/intent-planner.js';
@@ -1807,57 +1808,131 @@ Return ONLY the YAML content, no \`\`\` fences, no commentary.`;
 
     // Ask AI — streams tokens live so reasoning-model latency (30-90s
     // on gpt-oss:20b for non-trivial prompts) doesn't feel like the
-    // OS hung. Thinking deltas paint into a muted strip above the
-    // answer; content deltas paint into the main answer area. When
-    // streaming completes the structured renderAiResponse card
-    // replaces the live view with the brain badge + feedback widgets.
+    // OS hung. The "→ Keep working" button lets the user dismiss
+    // Spotlight while the AI is still thinking; the call continues in
+    // the background and surfaces the answer via a notification when
+    // ready. Same flow if the user closes Spotlight mid-stream.
     results.innerHTML = `
       <div class="spotlight-streaming" style="padding:14px 18px;">
         <div class="spotlight-streaming-thinking" style="font-size:11px;color:rgba(255,255,255,0.35);font-style:italic;margin-bottom:10px;display:none;line-height:1.5;max-height:120px;overflow:auto;"></div>
         <div class="spotlight-streaming-content" style="font-size:14px;line-height:1.6;color:rgba(255,255,255,0.9);min-height:1.4em;">
           <span class="spotlight-streaming-text"></span><span class="spotlight-streaming-cursor" style="display:inline-block;width:7px;background:var(--accent);margin-left:2px;animation:spotlight-blink 1s infinite;">&nbsp;</span>
         </div>
+        <div style="display:flex;justify-content:flex-end;margin-top:12px;">
+          <button id="spotlight-bg-ai" style="background:rgba(255,255,255,0.06);color:rgba(255,255,255,0.7);border:1px solid rgba(255,255,255,0.12);padding:6px 12px;border-radius:6px;font-size:11px;font-family:var(--font);cursor:pointer;">→ Keep working (notify me)</button>
+        </div>
       </div>
       <style>@keyframes spotlight-blink { 50% { opacity: 0.3; } }</style>
     `;
     const thinkingEl = results.querySelector('.spotlight-streaming-thinking');
     const textEl = results.querySelector('.spotlight-streaming-text');
+    const bgBtn = results.querySelector('#spotlight-bg-ai');
+
+    // Background mode controller — flipped if the user clicks "Keep
+    // working" or closes Spotlight while streaming. Once true, the
+    // resolution path swaps from in-Spotlight render to a notification.
+    let backgrounded = false;
     let acc = '';
     let thinkingAcc = '';
-    let response;
-    try {
-      const r = await aiService.askStream(
-        query,
-        {},
-        (delta) => { acc += delta; if (textEl) textEl.textContent = acc; },
-        (delta) => {
-          thinkingAcc += delta;
-          if (thinkingEl) {
-            thinkingEl.style.display = 'block';
-            thinkingEl.textContent = thinkingAcc;
-            thinkingEl.scrollTop = thinkingEl.scrollHeight;
-          }
-        },
-      );
-      response = r?.reply || acc;
-    } catch (err) {
-      response = acc || ('AI call failed: ' + (err?.message || String(err)));
+    const startTs = Date.now();
+
+    if (bgBtn) {
+      bgBtn.addEventListener('click', () => {
+        backgrounded = true;
+        try {
+          notifications.show({
+            title: '🤖 Astrion is thinking…',
+            body: query.length > 80 ? query.slice(0, 80) + '…' : query,
+            icon: '💭',
+            duration: 3000,
+          });
+        } catch {}
+        close();
+      });
     }
 
-    // Check if AI response mentions opening an app
-    const lowerResp = response.toLowerCase();
-    if (lowerResp.includes('opening')) {
-      for (const [cmd, appId] of Object.entries(appCommands)) {
-        const appName = cmd.replace('open ', '');
-        if (lowerResp.includes(appName)) {
-          processManager.launch(appId);
-          close();
-          return;
+    // Also background the call if the user closes Spotlight any other
+    // way (Escape, click-outside, focus loss). The OS shouldn't lose
+    // the answer just because the panel went away.
+    const onSpotlightClosed = () => {
+      if (backgrounded) return;
+      backgrounded = true;
+      try {
+        notifications.show({
+          title: '🤖 Astrion is thinking…',
+          body: query.length > 80 ? query.slice(0, 80) + '…' : query,
+          icon: '💭',
+          duration: 3000,
+        });
+      } catch {}
+      eventBus.off?.('spotlight:closed', onSpotlightClosed);
+    };
+    eventBus.on('spotlight:closed', onSpotlightClosed);
+
+    // Fire the stream. If the user backgrounds, the streaming UI is
+    // gone and we route the resolution to a notification instead.
+    aiService.askStream(
+      query,
+      {},
+      (delta) => {
+        acc += delta;
+        if (!backgrounded && textEl) textEl.textContent = acc;
+      },
+      (delta) => {
+        thinkingAcc += delta;
+        if (!backgrounded && thinkingEl) {
+          thinkingEl.style.display = 'block';
+          thinkingEl.textContent = thinkingAcc;
+          thinkingEl.scrollTop = thinkingEl.scrollHeight;
+        }
+      },
+    ).then((r) => {
+      // Stop listening once the call resolves — listener is single-use.
+      eventBus.off?.('spotlight:closed', onSpotlightClosed);
+      const response = r?.reply || acc;
+      const elapsedMs = Date.now() - startTs;
+
+      if (backgrounded) {
+        // Background path: deliver via notification. Keep the body
+        // short — full text waits in chat-panel history (persisted
+        // since lesson #182).
+        const preview = response.length > 240 ? response.slice(0, 240) + '…' : response;
+        try {
+          notifications.show({
+            title: '🤖 Astrion answered',
+            body: preview,
+            icon: '💡',
+            duration: 12000,
+          });
+        } catch {}
+        return;
+      }
+
+      // Foreground path: the existing app-launch heuristic + render
+      // the structured response card.
+      const lowerResp = response.toLowerCase();
+      if (lowerResp.includes('opening')) {
+        for (const [cmd, appId] of Object.entries(appCommands)) {
+          const appName = cmd.replace('open ', '');
+          if (lowerResp.includes(appName)) {
+            processManager.launch(appId);
+            close();
+            return;
+          }
         }
       }
-    }
-
-    renderAiResponse(results, response);
+      renderAiResponse(results, response);
+    }).catch((err) => {
+      eventBus.off?.('spotlight:closed', onSpotlightClosed);
+      const msg = 'AI call failed: ' + (err?.message || String(err));
+      if (backgrounded) {
+        try {
+          notifications.show({ title: '🤖 Astrion', body: msg, icon: '⚠️', duration: 8000 });
+        } catch {}
+      } else {
+        renderAiResponse(results, acc || msg);
+      }
+    });
   }
 
   // ─── M3 — AI response with brain badge, feedback, reasoning trace ───
