@@ -88,12 +88,18 @@ jobs:
           ASSET_NAME="astrion-os-${VERSION}-amd64.iso"
           mv nova-os.iso "$ASSET_NAME"
 
-          # Safety check: GitHub release asset limit is 2 GiB
+          # GitHub release assets cap at 2 GiB. Slim builds fit; full
+          # builds (LibreOffice + Chromium + VLC + Ollama bundled) run
+          # ~4 GiB and can't be attached to a release. Treat it as a
+          # warning, not an error — the 30-day artifact uploaded in
+          # the previous step is still downloadable from the run page,
+          # so the build is usable even when the publish step skips.
           SIZE_BYTES=$(stat -c%s "$ASSET_NAME")
           MAX_BYTES=$((2 * 1024 * 1024 * 1024))
           if [ "$SIZE_BYTES" -gt "$MAX_BYTES" ]; then
-            echo "::error::ISO is $SIZE_BYTES bytes, exceeds 2 GiB release asset limit"
-            exit 1
+            ARTIFACT_URL="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo "::warning::ISO is $SIZE_BYTES bytes (>2 GiB release asset limit) — skipping release upload. Download from artifacts: $ARTIFACT_URL"
+            exit 0
           fi
           echo "ISO size OK: $SIZE_BYTES bytes"
 
