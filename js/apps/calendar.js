@@ -26,7 +26,7 @@ function initCalendar(container) {
   const events = [
     { title: 'Team Standup', day: today.getDate(), hour: 9, duration: 1, color: '#007aff' },
     { title: 'Lunch Break', day: today.getDate(), hour: 12, duration: 1, color: '#34c759' },
-    { title: 'NOVA OS Dev', day: today.getDate(), hour: 14, duration: 3, color: '#5856d6' },
+    { title: 'Astrion OS Dev', day: today.getDate(), hour: 14, duration: 3, color: '#5856d6' },
     { title: 'Code Review', day: today.getDate() + 1, hour: 10, duration: 2, color: '#ff9500' },
     { title: 'Design Session', day: today.getDate() + 2, hour: 11, duration: 1.5, color: '#ff2d55' },
   ];

@@ -147,7 +147,7 @@ function initAppStore(container) {
         <div class="appstore-featured-card" style="background:linear-gradient(135deg, #1a237e, #4a148c)">
           <div class="appstore-featured-label">Featured</div>
           <div class="appstore-featured-title">AI Skills Marketplace</div>
-          <div class="appstore-featured-desc">Discover AI-powered skills that supercharge your NOVA OS experience</div>
+          <div class="appstore-featured-desc">Discover AI-powered skills that supercharge your Astrion OS experience</div>
         </div>
         <div class="appstore-featured-card" style="background:linear-gradient(135deg, #004d40, #00695c)">
           <div class="appstore-featured-label">New & Notable</div>
