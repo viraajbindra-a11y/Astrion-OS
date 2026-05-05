@@ -25,6 +25,8 @@
 
 import { eventBus } from '../kernel/event-bus.js';
 import { renderMarkdown, MARKDOWN_STYLES } from '../lib/render-md.js';
+import { processManager } from '../kernel/process-manager.js';
+import { listSkills } from '../kernel/skill-registry.js';
 
 const MODE = {
   NORMAL: 'normal',
@@ -142,6 +144,11 @@ export function openChatPanel() {
   isOpen = true;
   panelEl.classList.add('open');
   toggleBtnEl?.classList.add('hidden');
+  // Re-render the empty state on open. initChatPanel runs before
+  // skill-registry.loadSkillRegistry() finishes, so the first paint
+  // misses the "Get it done" section. Cheap to re-render — only
+  // touches DOM when messages.length === 0.
+  renderEmpty();
   setTimeout(() => inputEl?.focus(), 50);
   eventBus.emit('chat-panel:opened', { mode: currentMode });
 }
@@ -424,27 +431,85 @@ function labelFor(mode) {
 // MESSAGE RENDERING
 // ═══════════════════════════════════════════════════════════════
 
+// Onboarding-style empty state (2026-05-04, "Cowork-style" pivot).
+// Pulls live skill + app names from the registries so the suggestions
+// match the actual installed surface — and so they keep working when
+// the user installs more skills / apps later. Three categories:
+//
+//   Get it done  — top skills from skill-registry (phrase shortcuts)
+//   Open an app  — picks from the user's docked / common apps
+//   Ask Astrion  — grounding queries that exercise the new system
+//                  prompt (the AI now knows what it can do)
+//
+// The full "what can you do" answer streams from the AI itself —
+// cheaper than hardcoding a help doc here AND it keeps drifting in
+// sync with reality as new caps land.
 function renderEmpty() {
-  if (messages.length === 0) {
-    listEl.innerHTML = `
-      <div class="cp-empty">
-        <div class="cp-empty-icon">\u{1F4AC}</div>
-        <div class="cp-empty-text">Ask anything. Try:</div>
-        <div class="cp-empty-examples">
-          <button class="cp-example" data-q="Create a folder called demo in Documents">Create a folder in Documents</button>
-          <button class="cp-example" data-q="Show me my recent notes">Show my recent notes</button>
-          <button class="cp-example" data-q="What can Astrion do?">What can you do?</button>
-        </div>
+  if (messages.length !== 0) return;
+
+  const COMMON_APPS = ['Calculator', 'Notes', 'Calendar', 'Music', 'Maps', 'Weather'];
+  const SKILL_PICKS = ['organize-downloads', 'whats-on-my-calendar', 'quick-timer', 'new-reminder', 'toggle-dark-mode'];
+
+  let appButtons = [];
+  try {
+    const apps = processManager.getAllApps();
+    appButtons = COMMON_APPS
+      .filter(name => apps.some(a => a.name === name))
+      .slice(0, 3)
+      .map(name => ({ q: `open ${name}`, label: `Open ${name}` }));
+  } catch {}
+
+  let skillButtons = [];
+  try {
+    const skills = listSkills().filter(s => s.enabled);
+    skillButtons = SKILL_PICKS
+      .map(n => skills.find(s => s.name === n))
+      .filter(Boolean)
+      .slice(0, 3)
+      .map(s => ({ q: s.phrases?.[0] || s.name, label: s.phrases?.[0] || s.name }));
+  } catch {}
+
+  const askButtons = [
+    { q: 'What can you do?', label: 'What can you do?' },
+    { q: 'List my installed apps', label: 'List my installed apps' },
+    { q: 'Explain the Astrion safety triple', label: 'How does Astrion stay safe?' },
+  ];
+
+  const section = (label, btns) => btns.length === 0 ? '' : `
+    <div class="cp-empty-section">
+      <div class="cp-empty-section-label">${label}</div>
+      <div class="cp-empty-examples">
+        ${btns.map(b => `<button class="cp-example" data-q="${escapeAttr(b.q)}">${escapeAttr(b.label)}</button>`).join('')}
       </div>
-    `;
-    listEl.querySelectorAll('.cp-example').forEach(el => {
-      el.addEventListener('click', () => {
-        inputEl.value = el.dataset.q;
-        inputEl.focus();
-        handleSend();
-      });
+    </div>
+  `;
+
+  listEl.innerHTML = `
+    <div class="cp-empty">
+      <div class="cp-empty-icon">\u{1F4AC}</div>
+      <div class="cp-empty-text"><strong>Hey, I'm Astrion.</strong></div>
+      <div class="cp-empty-subtext">I know every app and skill on this OS — try one, or ask me anything.</div>
+      ${section('Get it done', skillButtons)}
+      ${section('Open an app', appButtons)}
+      ${section('Ask Astrion', askButtons)}
+      <div class="cp-empty-tip">Tip: press <kbd>Cmd</kbd>+<kbd>Space</kbd> for Spotlight, or type <kbd>?</kbd> there for the full command list.</div>
+    </div>
+  `;
+  listEl.querySelectorAll('.cp-example').forEach(el => {
+    el.addEventListener('click', () => {
+      inputEl.value = el.dataset.q;
+      inputEl.focus();
+      handleSend();
     });
-  }
+  });
+}
+
+function escapeAttr(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }
 
 function pushUserMessage(text) {
@@ -1542,34 +1607,74 @@ function injectStyles() {
       display: flex;
       flex-direction: column;
       align-items: center;
-      justify-content: center;
-      gap: 10px;
-      padding: 30px 18px;
-      color: rgba(255,255,255,0.5);
+      justify-content: flex-start;
+      gap: 14px;
+      padding: 22px 18px;
+      color: rgba(255,255,255,0.55);
       text-align: center;
       height: 100%;
+      overflow-y: auto;
     }
-    .cp-empty-icon { font-size: 34px; opacity: 0.5; }
-    .cp-empty-text { font-size: 12px; }
-    .cp-empty-examples {
+    .cp-empty-icon { font-size: 30px; opacity: 0.55; margin-bottom: 0; }
+    .cp-empty-text { font-size: 14px; color: rgba(255,255,255,0.92); margin-top: -4px; }
+    .cp-empty-text strong { font-weight: 600; }
+    .cp-empty-subtext { font-size: 11px; color: rgba(255,255,255,0.5); max-width: 260px; line-height: 1.5; }
+
+    .cp-empty-section {
       display: flex;
       flex-direction: column;
       gap: 6px;
       width: 100%;
       max-width: 280px;
+      align-items: stretch;
+      text-align: left;
+    }
+    .cp-empty-section-label {
+      font-size: 10px;
+      letter-spacing: 0.6px;
+      text-transform: uppercase;
+      color: rgba(255,255,255,0.35);
+      font-weight: 600;
+      padding: 0 2px;
+    }
+    .cp-empty-examples {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      width: 100%;
     }
     .cp-example {
-      padding: 8px 12px;
+      padding: 8px 11px;
       border: 1px solid rgba(255,255,255,0.08);
       background: rgba(255,255,255,0.04);
-      color: rgba(255,255,255,0.75);
+      color: rgba(255,255,255,0.78);
       border-radius: 8px;
-      font-size: 11px;
+      font-size: 12px;
       cursor: pointer;
       font-family: inherit;
       text-align: left;
+      transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
     }
-    .cp-example:hover { background: rgba(255,255,255,0.08); color: white; }
+    .cp-example:hover {
+      background: rgba(90,200,250,0.10);
+      color: white;
+      border-color: rgba(90,200,250,0.28);
+    }
+    .cp-empty-tip {
+      margin-top: 4px;
+      font-size: 10px;
+      color: rgba(255,255,255,0.35);
+      max-width: 280px;
+      line-height: 1.5;
+    }
+    .cp-empty-tip kbd {
+      background: rgba(255,255,255,0.08);
+      padding: 1px 4px;
+      border-radius: 3px;
+      font-size: 10px;
+      font-family: ui-monospace, Menlo, monospace;
+      color: rgba(255,255,255,0.7);
+    }
 
     .cp-msg { display: flex; flex-direction: column; }
     .cp-msg-user { align-items: flex-end; }

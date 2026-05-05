@@ -13,6 +13,9 @@
 import { eventBus } from './event-bus.js';
 import { checkBudget, recordS2Call, getPerIntentCap } from './budget-manager.js';
 import { shouldEscalate, capCategory as getCapCategory } from './calibration-tracker.js';
+import { processManager } from './process-manager.js';
+import { listCapabilities } from './capability-api.js';
+import { listSkills } from './skill-registry.js';
 
 const AI_PROVIDER_KEY = 'nova-ai-provider';   // 'ollama' | 'anthropic' | 'mock'
 const AI_OLLAMA_URL_KEY = 'nova-ai-ollama-url';
@@ -353,12 +356,77 @@ class AIService {
   _buildSystemContext() {
     let ctx = `You are Astrion, the built-in AI assistant for Astrion OS — an AI-native desktop operating system. You are helpful, concise, and knowledgeable. Keep responses short unless asked for detail.\n`;
 
+    // 2026-05-04 — "tutorial for the AI" so the model is well-versed in
+    // what Astrion can actually do. Built lazily from the live app /
+    // capability / skill registries so it stays in sync as the OS
+    // grows. The chat path doesn't invoke capabilities directly — when
+    // a user asks "what can you do?", the AI tells them what to type
+    // and Astrion's planner runs the matching intent.
+    ctx += '\n' + this._buildToolsetTutorial();
+
     if (this.context.activeApp) ctx += `\nUser is using: ${this.context.activeApp}`;
     if (this.context.activeFile) ctx += `\nActive file: ${this.context.activeFile}`;
     if (this.context.selectedText) ctx += `\nSelected text: ${this.context.selectedText}`;
     if (this.context.terminalOutput) ctx += `\nTerminal output: ${this.context.terminalOutput}`;
 
     return ctx;
+  }
+
+  // The tutorial half of the system prompt. Three live registries get
+  // flattened into a compact reference: 76 apps (names only), ~39
+  // capabilities (id + one-line "what it does" tag), 20 skills (name
+  // + best phrase trigger). Total weight ~1.8KB / ~500 tokens — well
+  // inside the 4096-token budget on Ollama and prompt-cache-friendly
+  // for the Anthropic path.
+  //
+  // Imports happen inside the method (not at module scope) because
+  // ai-service.js is loaded before the app/skill registries are
+  // populated; pulling them at call time guarantees we read the
+  // current state.
+  _buildToolsetTutorial() {
+    let apps = [], caps = [], skills = [];
+    try { apps = processManager.getAllApps(); } catch {}
+    try { caps = listCapabilities(); } catch {}
+    try { skills = listSkills(); } catch {}
+
+    if (!apps.length && !caps.length && !skills.length) {
+      // Pre-boot or test harness — return a one-liner so the prompt
+      // still parses.
+      return 'Astrion ships with apps, capabilities, and skills the user can drive with natural language.';
+    }
+
+    const lines = ['## Astrion toolset (what you can help the user do)'];
+
+    if (apps.length) {
+      const names = apps.map(a => a.name).filter(Boolean).sort();
+      lines.push(`\nApps (${names.length}): ${names.join(', ')}.`);
+      lines.push(`To open one, the user says: "open <app name>" — Spotlight (Cmd+Space) or chat both work.`);
+    }
+
+    if (caps.length) {
+      // Group capabilities by their level so the AI knows which need
+      // user confirmation (L2+) vs which are silent (L0/L1).
+      const safe = caps.filter(c => (c.level ?? 2) <= 1).map(c => c.id);
+      const real = caps.filter(c => (c.level ?? 2) === 2).map(c => c.id);
+      const selfMod = caps.filter(c => (c.level ?? 2) === 3).map(c => c.id);
+      lines.push(`\nCapabilities (${caps.length} total) — Astrion's planner picks one when the user types an action:`);
+      if (safe.length)    lines.push(`• Read-only/sandbox: ${safe.join(', ')}`);
+      if (real.length)    lines.push(`• Touches user data (asks for confirm): ${real.join(', ')}`);
+      if (selfMod.length) lines.push(`• Self-modify (5-gate review): ${selfMod.join(', ')}`);
+    }
+
+    if (skills.length) {
+      const enabled = skills.filter(s => s.enabled);
+      lines.push(`\nSkills (${enabled.length} active) — natural-language shortcuts:`);
+      for (const s of enabled.slice(0, 25)) {
+        const phrase = s.phrases?.[0] || s.name;
+        lines.push(`• ${s.name}: "${phrase}"`);
+      }
+    }
+
+    lines.push(`\nWhen a user asks "what can you do" or "help me," ground your answer in this real toolset — name actual apps and skills the user can try, with the exact phrase to type. Don't invent capabilities. If unsure whether something is supported, say so and suggest a close match from the lists above.`);
+
+    return lines.join('\n');
   }
 
   _mockResponse(prompt) {
