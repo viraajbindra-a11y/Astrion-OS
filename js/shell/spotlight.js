@@ -11,6 +11,7 @@ import { processManager } from '../kernel/process-manager.js';
 import { fileSystem } from '../kernel/file-system.js';
 import { aiService } from '../kernel/ai-service.js';
 import { notifications } from '../kernel/notifications.js';
+import { renderMarkdown, MARKDOWN_STYLES } from '../lib/render-md.js';
 import { parseIntent, summarizeIntent, intentToNaturalLanguage } from '../kernel/intent-parser.js';
 // Agent Core Sprint — heuristic router + context snapshot for the planner.
 import { routeQuery } from '../kernel/intent-planner.js';
@@ -2004,7 +2005,18 @@ Return ONLY the YAML content, no \`\`\` fences, no commentary.`;
 
   // ─── M3 — AI response with brain badge, feedback, reasoning trace ───
 
+  // Inject markdown styles once. Idempotent — first AI render hits
+  // it; subsequent renders are no-ops because the style id is unique.
+  function ensureMarkdownStyles() {
+    if (document.getElementById('astrion-md-styles')) return;
+    const s = document.createElement('style');
+    s.id = 'astrion-md-styles';
+    s.textContent = MARKDOWN_STYLES;
+    document.head.appendChild(s);
+  }
+
   function renderAiResponse(container, text) {
+    ensureMarkdownStyles();
     const meta = lastAiMeta || { brain: 'offline', confidence: 0.3, provider: 'mock' };
     const brainLabel = meta.brain === 'offline' ? 'OFF' : meta.brain.toUpperCase();
     const confPct = meta.confidence != null ? Math.round(meta.confidence * 100) : '?';
@@ -2012,7 +2024,7 @@ Return ONLY the YAML content, no \`\`\` fences, no commentary.`;
 
     container.innerHTML = `
       <div class="spotlight-ai-response-wrap" style="position:relative;">
-        <div class="spotlight-ai-response">${escapeHtml(text)}</div>
+        <div class="spotlight-ai-response">${renderMarkdown(text)}</div>
         <button class="spotlight-ai-copy" title="Copy reply">⎘ Copy</button>
       </div>
       <div class="spotlight-ai-meta">

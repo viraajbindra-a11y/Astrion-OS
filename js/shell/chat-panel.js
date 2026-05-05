@@ -24,6 +24,7 @@
 //             interception:confirm, interception:abort
 
 import { eventBus } from '../kernel/event-bus.js';
+import { renderMarkdown, MARKDOWN_STYLES } from '../lib/render-md.js';
 
 const MODE = {
   NORMAL: 'normal',
@@ -559,9 +560,16 @@ function messageNode(msg) {
       const hasText = msg.text && msg.text.length > 2;  /* skip "…" placeholder */
       const copyId = `cpcopy-${msg.id}`;
       const regenId = `cpregen-${msg.id}`;
+      // While streaming, show plain (escaped) text so partial markdown
+      // tokens don't render half-broken (e.g. "**hel" mid-bold). Once
+      // complete, re-render through the markdown pipeline so headers /
+      // bold / lists / code actually look like what they are.
+      const bodyHtml = isStreaming
+        ? escapeHtml(msg.text)
+        : renderMarkdown(msg.text);
       row.innerHTML = `
         <div class="cp-bubble assistant">
-          <div class="cp-bubble-text">${escapeHtml(msg.text)}</div>
+          <div class="cp-bubble-text">${bodyHtml}</div>
           ${meta}
           ${hasText && !isStreaming ? `
             <div class="cp-bubble-actions">
@@ -1338,7 +1346,7 @@ function injectStyles() {
   if (document.getElementById('chat-panel-styles')) return;
   const style = document.createElement('style');
   style.id = 'chat-panel-styles';
-  style.textContent = `
+  style.textContent = MARKDOWN_STYLES + `
     #chat-panel-toggle {
       position: fixed;
       right: 16px;
