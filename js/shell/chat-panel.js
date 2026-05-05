@@ -871,7 +871,11 @@ async function sendChat(query) {
     const result = await aiMod.aiService.askStream(query, {
       skipHistory: false,
       capCategory: 'chat',
-      maxTokens: 800,
+      // 4096 not 800 — structured answers (audit reports, plans,
+      // multi-section comparisons) routinely run 1500-3000 tokens
+      // and 800 truncated them mid-paragraph. 4096 gives headroom
+      // without exhausting most local-model context budgets.
+      maxTokens: 4096,
       signal: chatAbortController.signal,
     }, (delta) => {
       if (firstChunk) { assembled = ''; firstChunk = false; }

@@ -367,7 +367,7 @@ const aiAsk = {
       try {
         const r = await aiService.askStream(
           prompt,
-          { skipHistory: true, capCategory: 'ai-ask-step', maxTokens: 800 },
+          { skipHistory: true, capCategory: 'ai-ask-step', maxTokens: 4096 },
           (delta) => {
             assembled += delta;
             emit('plan:step:chunk', { kind: 'content', text: assembled });
