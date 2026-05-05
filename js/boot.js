@@ -277,31 +277,38 @@ function __bootFlush(reason) {
   const desktop = document.getElementById('desktop');
   const progressBar = bootScreen.querySelector('.boot-progress-bar');
 
-  // Phase 1: Boot animation
-  await animate(progressBar, 30, 400);
+  // Phase 2 (2026-05-04): boot used to await fixed-duration animations
+  // between every phase mark — `await animate(bar, %, 400ms)` × 4 plus
+  // a sleep(400) and a 500ms fade. ~1.8s of pure cosmetic gating that
+  // ran in serial with real work even when there was nothing to mask.
+  // Replaced with setProgress(): the CSS transition animates the bar
+  // in parallel with the actual phase work, so the bar reads real
+  // progress instead of artificial waits.
+  setProgress(progressBar, 15);
 
   // Init file system + hypergraph store (M2.P1) + run one-shot migration (M2.P3)
   await fileSystem.init();
   await graphStore.init();
   await migrateLocalStorageToGraph();
   __bootMark('storage:ready');
-  await animate(progressBar, 60, 300);
+  setProgress(progressBar, 50);
 
   // Register all apps
   registerAllApps();
   __bootMark('apps:registered');
-  await animate(progressBar, 85, 200);
+  setProgress(progressBar, 80);
 
   // Init kernel
   windowManager.init();
   __bootMark('kernel:ready');
-  await animate(progressBar, 100, 300);
+  setProgress(progressBar, 100);
 
-  // Phase 2: Fade out boot screen
-  await sleep(400);
-  bootScreen.style.transition = 'opacity 0.5s ease';
+  // Phase 2: Fade out boot screen. Give the bar a beat at 100% so
+  // users see the fill complete, then a snappy fade.
+  await sleep(120);
+  bootScreen.style.transition = 'opacity 0.25s ease';
   bootScreen.style.opacity = '0';
-  await sleep(500);
+  await sleep(250);
   bootScreen.classList.add('hidden');
 
   // Phase 2.5: If first boot, show setup wizard BEFORE login
@@ -489,8 +496,9 @@ function __bootFlush(reason) {
   // Boot chime (disabled — users found it annoying)
   // setTimeout(() => sounds.boot(), 100);
 
-  // Desktop ready
-  await sleep(300);
+  // Desktop ready — the 300ms wait used to live here for "feel," but
+  // nothing subscribes to desktop:ready and the welcome notification
+  // benefits from firing immediately.
   eventBus.emit('desktop:ready');
 
   // Welcome notification
@@ -510,12 +518,13 @@ function __bootFlush(reason) {
   console.log('Astrion OS booted successfully.');
 })();
 
-function animate(bar, targetWidth, duration) {
-  return new Promise(resolve => {
-    bar.style.transition = `width ${duration}ms ease`;
-    bar.style.width = targetWidth + '%';
-    setTimeout(resolve, duration);
-  });
+// Non-blocking progress setter. The bar's CSS transition runs in
+// parallel with the real boot work, so the bar reads actual phase
+// progress instead of gating boot on a fixed-duration animation.
+function setProgress(bar, percent) {
+  if (!bar) return;
+  bar.style.transition = 'width 250ms ease';
+  bar.style.width = percent + '%';
 }
 
 function sleep(ms) {
