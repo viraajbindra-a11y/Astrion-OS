@@ -614,6 +614,23 @@ echo "astrion ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers.d/astrion
 echo "nova ALL=(ALL) NOPASSWD: /usr/bin/nova-update, /usr/bin/nova-install" >> /etc/sudoers.d/astrion
 chmod 0440 /etc/sudoers.d/astrion
 
+# Polkit rule: let astrion manage NetworkManager without an active
+# graphical session. The web server runs as the astrion user (non-
+# graphical context per polkit), so without this rule `nmcli device
+# wifi connect` returns "Not authorized to control networking" even
+# though astrion is in the netdev group. This was the 2026-05-05
+# Surface Pro 6 first-boot blocker.
+mkdir -p /etc/polkit-1/localauthority/50-local.d
+cat > /etc/polkit-1/localauthority/50-local.d/10-astrion-network.pkla << 'PKLA'
+[Allow astrion full NetworkManager access]
+Identity=unix-user:astrion
+Action=org.freedesktop.NetworkManager.*
+ResultAny=yes
+ResultInactive=yes
+ResultActive=yes
+PKLA
+chmod 0644 /etc/polkit-1/localauthority/50-local.d/10-astrion-network.pkla
+
 # Install NOVA OS node modules
 if [ -f /opt/nova-os/package.json ]; then
   cd /opt/nova-os && npm install --production --no-optional 2>/dev/null || true

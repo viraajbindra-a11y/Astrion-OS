@@ -279,6 +279,7 @@ static gboolean dock_contains(const char *id)
 
 /* Forward declarations */
 static void nova_launch_app(NovaApp *app);
+static void nova_launch_chromium_browser(void);
 static void nova_close_window(NovaWindow *nwin);
 static void nova_focus_window(NovaWindow *nwin);
 static void nova_minimize_window(NovaWindow *nwin);
@@ -2685,9 +2686,9 @@ static void on_dock_icon_clicked(GtkWidget *widget, gpointer data)
 {
     NovaApp *app = (NovaApp *)data;
 
-    /* Browser: launch Chromium instead of web app */
+    /* Browser: launch Chromium with Astrion integration flags */
     if (strcmp(app->id, "browser") == 0) {
-        g_spawn_command_line_async("chromium --no-first-run --disable-default-apps", NULL);
+        nova_launch_chromium_browser();
         return;
     }
 
@@ -2992,7 +2993,7 @@ static gboolean on_launcher_result_clicked(GtkWidget *widget, GdkEventButton *ev
     NovaApp *app = (NovaApp *)data;
     nova_hide_launcher();
     if (strcmp(app->id, "browser") == 0) {
-        g_spawn_command_line_async("chromium --no-first-run --disable-default-apps", NULL);
+        nova_launch_chromium_browser();
     } else {
         nova_launch_app(app);
     }
@@ -3019,7 +3020,7 @@ static void on_launcher_entry_activate(GtkEntry *entry, gpointer data)
         if (strstr(app_lower, lower) || strstr(app_registry[i].id, lower)) {
             nova_hide_launcher();
             if (strcmp(app_registry[i].id, "browser") == 0) {
-                g_spawn_command_line_async("chromium --no-first-run --disable-default-apps", NULL);
+                nova_launch_chromium_browser();
             } else {
                 nova_launch_app(&app_registry[i]);
             }
@@ -3318,6 +3319,29 @@ static void on_app_load_changed(WebKitWebView *view, WebKitLoadEvent event, gpoi
             "document.documentElement.classList.add('astrion-native');",
             NULL, NULL, NULL);
     }
+}
+
+/* Browser launch helper — keeps the full Chromium UI (tabs, address
+ * bar, bookmarks, devtools, extensions all preserved) but launches it
+ * with flags that make it sit inside Astrion's window flow:
+ *   --class=AstrionBrowser  → X11 wmclass so the WM groups it as ours
+ *   --new-window            → fresh window every dock click
+ *   --start-maximized       → fills the screen, no random tiny window
+ *   --user-data-dir         → Astrion-branded profile under astrion's home
+ *   --no-first-run / --no-default-browser-check → kill chromium nags
+ */
+static void nova_launch_chromium_browser(void)
+{
+    g_spawn_command_line_async(
+        "chromium "
+        "--class=AstrionBrowser "
+        "--new-window "
+        "--start-maximized "
+        "--user-data-dir=/home/astrion/.config/astrion-browser "
+        "--no-first-run "
+        "--no-default-browser-check "
+        "--disable-default-apps",
+        NULL);
 }
 
 static void nova_launch_app(NovaApp *app)
