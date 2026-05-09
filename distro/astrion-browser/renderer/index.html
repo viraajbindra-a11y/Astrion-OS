@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:;">
+  <title>Astrion Browser</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="chrome">
+    <!-- Tab strip -->
+    <div id="tab-strip">
+      <div id="tabs"></div>
+      <button id="new-tab-btn" title="New tab (Ctrl+T)" aria-label="New tab">+</button>
+    </div>
+
+    <!-- Toolbar: nav buttons + URL bar + AI -->
+    <div id="toolbar">
+      <button id="back-btn" title="Back (Alt+←)" aria-label="Back" disabled>←</button>
+      <button id="forward-btn" title="Forward (Alt+→)" aria-label="Forward" disabled>→</button>
+      <button id="reload-btn" title="Reload (Ctrl+R)" aria-label="Reload">↻</button>
+      <div id="url-wrap">
+        <span id="url-icon">🔒</span>
+        <input id="url-bar" type="text" autocomplete="off" spellcheck="false"
+               placeholder="Search the web or ask Astrion AI">
+      </div>
+      <button id="ai-btn" title="Ask Astrion about this page" aria-label="Ask Astrion">✨</button>
+    </div>
+  </div>
+
+  <script src="browser.js"></script>
+</body>
+</html>

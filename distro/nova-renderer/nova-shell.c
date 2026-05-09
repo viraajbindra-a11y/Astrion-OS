@@ -3321,17 +3321,27 @@ static void on_app_load_changed(WebKitWebView *view, WebKitLoadEvent event, gpoi
     }
 }
 
-/* Browser launch helper — keeps the full Chromium UI (tabs, address
- * bar, bookmarks, devtools, extensions all preserved) but launches it
- * with flags that make it sit inside Astrion's window flow:
- *   --class=AstrionBrowser  → X11 wmclass so the WM groups it as ours
- *   --new-window            → fresh window every dock click
- *   --start-maximized       → fills the screen, no random tiny window
- *   --user-data-dir         → Astrion-branded profile under astrion's home
- *   --no-first-run / --no-default-browser-check → kill chromium nags
+/* Browser launch helper — runs Astrion's own Electron-based browser
+ * (Chromium engine inside, custom UI on top). Replaces the previous
+ * vanilla `chromium` spawn so users see Astrion-branded chrome — tab
+ * strip, URL bar, newtab page — instead of stock Chromium chrome.
+ *
+ * The astrion-browser binary lives at /usr/bin/astrion-browser; see
+ * distro/astrion-browser/main.js for the Electron app and
+ * distro/build.sh for how it's bundled.
+ *
+ * On systems where astrion-browser hasn't been installed (dev/test),
+ * we fall back to vanilla chromium with the same Astrion-aware flags
+ * so users still get a working browser.
  */
 static void nova_launch_chromium_browser(void)
 {
+    /* Prefer our own browser if installed. */
+    if (g_file_test("/usr/bin/astrion-browser", G_FILE_TEST_IS_EXECUTABLE)) {
+        g_spawn_command_line_async("/usr/bin/astrion-browser", NULL);
+        return;
+    }
+    /* Fallback: vanilla chromium with Astrion-aware flags. */
     g_spawn_command_line_async(
         "chromium "
         "--class=AstrionBrowser "

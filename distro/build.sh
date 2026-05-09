@@ -326,11 +326,48 @@ echo "  Compiling NOVA native renderer..."
 mkdir -p "$CHROOT/opt/nova-os/renderer"
 cp "$SCRIPT_DIR/nova-renderer/nova-shell.c" "$CHROOT/opt/nova-os/renderer/"
 cp "$SCRIPT_DIR/nova-renderer/nova-renderer.c" "$CHROOT/opt/nova-os/renderer/"
-# astrion-browser removed — using Chromium instead
 cp "$SCRIPT_DIR/nova-renderer/Makefile" "$CHROOT/opt/nova-os/renderer/"
 cp "$SCRIPT_DIR/nova-renderer/nova-start.sh" "$CHROOT/opt/nova-os/renderer/"
 cp "$SCRIPT_DIR/nova-renderer/nova-first-boot.sh" "$CHROOT/opt/nova-os/renderer/"
 install -m 755 "$SCRIPT_DIR/nova-renderer/nova-first-boot.sh" "$CHROOT/usr/bin/nova-first-boot"
+
+# ── Astrion Browser (Electron-based, Chromium engine inside) ──
+# Replaces vanilla Chromium spawn from the dock. Custom UI: Astrion
+# tab strip, URL bar, newtab page, theme. Uses Electron's bundled
+# Chromium for actual page rendering, so tabs/devtools/extensions all
+# work — but the chrome surrounding them is ours.
+echo "  Bundling Astrion Browser (Electron)..."
+mkdir -p "$CHROOT/opt/astrion-browser"
+cp -r "$SCRIPT_DIR/astrion-browser/." "$CHROOT/opt/astrion-browser/"
+cat > "$CHROOT/tmp/install-browser.sh" << 'BROWSER_INSTALL'
+#!/bin/bash
+set -e
+cd /opt/astrion-browser
+# Pull Electron locally — it's the engine. Use cached prebuilts when
+# possible to keep build time reasonable. Production install (no
+# devDependencies of our own; only the electron binary).
+npm install --no-audit --no-fund --prefer-offline 2>&1 | tail -10 || \
+  npm install --no-audit --no-fund 2>&1 | tail -10 || true
+# Strip docs/source-maps to keep ISO size sane (~150 MB → ~80 MB).
+find node_modules -type d \( -name 'man' -o -name 'docs' -o -name 'doc' -o -name 'examples' -o -name 'test' -o -name 'tests' -o -name '__tests__' \) -prune -exec rm -rf {} + 2>/dev/null || true
+find node_modules -type f \( -name '*.md' -o -name '*.markdown' -o -name 'CHANGELOG*' -o -name 'README*' -o -name '*.map' \) -delete 2>/dev/null || true
+echo "Astrion Browser bundled. Electron at: $(ls node_modules/.bin/electron 2>/dev/null || echo MISSING)"
+BROWSER_INSTALL
+chmod +x "$CHROOT/tmp/install-browser.sh"
+chroot "$CHROOT" /tmp/install-browser.sh
+
+# Launcher script — what nova-shell and the dock actually exec.
+cat > "$CHROOT/usr/bin/astrion-browser" << 'BROWSER_LAUNCHER'
+#!/bin/bash
+# Astrion Browser launcher. Exec'd by nova-shell when the user clicks
+# Browser. Runs Electron with our app dir; passes any URL arg through
+# as the initial tab.
+exec /opt/astrion-browser/node_modules/.bin/electron \
+  --no-sandbox \
+  /opt/astrion-browser \
+  "$@"
+BROWSER_LAUNCHER
+chmod 755 "$CHROOT/usr/bin/astrion-browser"
 
 # Compile inside chroot (has access to GTK/WebKitGTK headers)
 cat > "$CHROOT/tmp/build-renderer.sh" << 'BUILD_RENDERER'

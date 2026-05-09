@@ -1,0 +1,236 @@
+/* Astrion Browser — chrome styles
+ *
+ * Total chrome height MUST equal CHROME_HEIGHT in main.js (80px).
+ *   tab-strip:  36px
+ *   toolbar:    44px
+ *   ─────────────────
+ *   total:      80px
+ */
+
+:root {
+  --bg-deep: #0e0e1a;
+  --bg-chrome: #1a1a2e;
+  --bg-tab: #232337;
+  --bg-tab-active: #0e0e1a;
+  --bg-input: rgba(255, 255, 255, 0.08);
+  --bg-input-focus: rgba(255, 255, 255, 0.12);
+  --fg: rgba(255, 255, 255, 0.92);
+  --fg-muted: rgba(255, 255, 255, 0.55);
+  --fg-faint: rgba(255, 255, 255, 0.35);
+  --accent: #5ac8fa;
+  --border: rgba(255, 255, 255, 0.08);
+  --shadow: 0 1px 0 rgba(255, 255, 255, 0.04) inset, 0 -1px 0 rgba(0, 0, 0, 0.4) inset;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  font-size: 13px;
+  color: var(--fg);
+  background: var(--bg-deep);
+  user-select: none;
+  -webkit-user-select: none;
+  overflow: hidden;
+}
+
+#chrome {
+  display: flex;
+  flex-direction: column;
+  height: 80px;
+  background: var(--bg-chrome);
+  border-bottom: 1px solid var(--border);
+  -webkit-app-region: drag; /* allow window drag from chrome */
+}
+
+#chrome button, #chrome input, #chrome #tabs > * {
+  -webkit-app-region: no-drag;
+}
+
+/* ── Tab strip ───────────────────────────────────── */
+#tab-strip {
+  display: flex;
+  align-items: flex-end;
+  height: 36px;
+  padding: 0 8px;
+  gap: 2px;
+  background: var(--bg-deep);
+  overflow: hidden;
+}
+
+#tabs {
+  display: flex;
+  flex: 1;
+  gap: 2px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+#tabs::-webkit-scrollbar { display: none; }
+
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 80px;
+  max-width: 220px;
+  height: 30px;
+  padding: 0 8px 0 12px;
+  background: var(--bg-tab);
+  border-radius: 8px 8px 0 0;
+  cursor: pointer;
+  flex: 1 1 200px;
+  position: relative;
+  transition: background 0.12s ease;
+  color: var(--fg-muted);
+  font-size: 12px;
+}
+
+.tab:hover { background: rgba(255, 255, 255, 0.06); color: var(--fg); }
+
+.tab.active {
+  background: var(--bg-tab-active);
+  color: var(--fg);
+  border-top: 1px solid var(--accent);
+}
+
+.tab-favicon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 3px;
+  background-size: contain;
+  background-repeat: no-repeat;
+  background-position: center;
+}
+
+.tab-title {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tab-close {
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 3px;
+  font-size: 14px;
+  color: var(--fg-faint);
+  flex-shrink: 0;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+}
+.tab-close:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--fg);
+}
+
+.tab.loading .tab-favicon {
+  background: linear-gradient(90deg, transparent, var(--accent), transparent);
+  background-size: 200% 100%;
+  animation: tab-loading 1.2s linear infinite;
+}
+@keyframes tab-loading {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+#new-tab-btn {
+  width: 28px;
+  height: 28px;
+  margin-bottom: 1px;
+  background: transparent;
+  border: none;
+  color: var(--fg-muted);
+  font-size: 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+#new-tab-btn:hover { background: rgba(255, 255, 255, 0.08); color: var(--fg); }
+
+/* ── Toolbar ─────────────────────────────────────── */
+#toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 44px;
+  padding: 0 12px;
+}
+
+#toolbar button {
+  width: 32px;
+  height: 30px;
+  background: transparent;
+  border: none;
+  color: var(--fg-muted);
+  font-size: 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+#toolbar button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--fg);
+}
+#toolbar button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+#url-wrap {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 30px;
+  padding: 0 12px;
+  background: var(--bg-input);
+  border-radius: 8px;
+  border: 1px solid transparent;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+#url-wrap:focus-within {
+  background: var(--bg-input-focus);
+  border-color: var(--accent);
+}
+
+#url-icon {
+  font-size: 11px;
+  color: var(--fg-muted);
+  flex-shrink: 0;
+}
+
+#url-bar {
+  flex: 1;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--fg);
+  font-size: 13px;
+  font-family: inherit;
+  padding: 0;
+  user-select: text;
+  -webkit-user-select: text;
+}
+#url-bar::placeholder { color: var(--fg-faint); }
+
+#ai-btn {
+  font-size: 14px;
+  background: linear-gradient(135deg, rgba(90, 200, 250, 0.18), rgba(90, 200, 250, 0.06));
+  color: var(--accent);
+}
+#ai-btn:hover {
+  background: linear-gradient(135deg, rgba(90, 200, 250, 0.3), rgba(90, 200, 250, 0.12));
+}

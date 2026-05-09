@@ -1,0 +1,16 @@
+{
+  "name": "astrion-browser",
+  "version": "0.1.0",
+  "description": "Astrion Browser — Chromium-engine browser built into Astrion OS",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron ."
+  },
+  "author": "Astrion OS",
+  "license": "MIT",
+  "dependencies": {},
+  "devDependencies": {
+    "electron": "^32.0.0"
+  }
+}
