@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-05-09T19:08:30.795Z",
+  "generated_at": "2026-05-09T19:47:54.814Z",
   "files": {
     "js/kernel/capability-api.js": "85a4c950586c902da27fb6a9a5c417db6a1ad0267e3b8cb88a76f5823cc52eaa",
     "js/kernel/operation-interceptor.js": "8cb583c547779556b1d8aacab1cc50d9e8156de1cf4cf25040570ffbf5222d6b",
@@ -20,6 +20,6 @@
     "js/kernel/skill-scheduler.js": "935e40f8722cca8e5ccd78f89e4ed20d6276e67952f22ae20f7d388d5b3a8656",
     "js/kernel/self-upgrader.js": "844c61f14c70d326fb13408214aea5677e4bc3fb0ca8eb034f7c3768332f0bb3",
     "js/kernel/api-surface.lock.js": "14aa8b207a41caf6ac78b1992034cec1cffd855ee0a3ef1c276e0bb85b05f1db",
-    "test/v03-verification.html": "75168bd1c835207ab20aca6f5127f6e5c5eb79cdac5d60b5657c26ed638cd560"
+    "test/v03-verification.html": "7424d401a821d1ce39e7dbd1c8c46db126f5e12a198a473b057916eb5c53bb9c"
   }
 }

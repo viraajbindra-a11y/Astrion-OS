@@ -265,6 +265,14 @@ function __bootFlush(reason) {
     // what these do.
     (await import('./kernel/sequence-observer.js')).initSequenceObserver();
     (await import('./kernel/skill-proposer.js')).initSkillProposer();
+    (await import('./kernel/usage-tracker.js')).initUsageTracker();
+    (await import('./kernel/intent-miss-proposer.js')).initIntentMissProposer();
+    (await import('./kernel/dock-usage-proposer.js')).initDockUsageProposer();
+    (await import('./kernel/text-learner.js')).initTextLearner();
+    (await import('./kernel/graph-learner.js')).initGraphLearner();
+    (await import('./kernel/verb-aliaser.js')).initVerbAliaser();
+    (await import('./kernel/time-routine-detector.js')).initTimeRoutineDetector();
+    (await import('./kernel/generation-bridge.js')).initGenerationBridge();
 
     // Phase 0: kill mock provider trap in native path too (lesson #72)
     if (localStorage.getItem('nova-ai-provider') === 'mock') {
@@ -472,6 +480,15 @@ function __bootFlush(reason) {
   //   for log + revert + per-category daily budget.
   (await import('./kernel/sequence-observer.js')).initSequenceObserver();
   (await import('./kernel/skill-proposer.js')).initSkillProposer();
+  // 2026-05-09 round 2 — full auto-evolution suite:
+  (await import('./kernel/usage-tracker.js')).initUsageTracker();
+  (await import('./kernel/intent-miss-proposer.js')).initIntentMissProposer();
+  (await import('./kernel/dock-usage-proposer.js')).initDockUsageProposer();
+  (await import('./kernel/text-learner.js')).initTextLearner();
+  (await import('./kernel/graph-learner.js')).initGraphLearner();
+  (await import('./kernel/verb-aliaser.js')).initVerbAliaser();
+  (await import('./kernel/time-routine-detector.js')).initTimeRoutineDetector();
+  (await import('./kernel/generation-bridge.js')).initGenerationBridge();
   // AI audio cues — soft beeps for thinking/response/gate/applied.
   (await import('./kernel/ai-audio-cues.js')).initAIAudioCues();
 

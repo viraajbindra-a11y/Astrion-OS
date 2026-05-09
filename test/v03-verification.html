@@ -1739,6 +1739,247 @@ await test('re-init does not duplicate subscriptions (one notification, not thre
 
 toastMod._resetForTests();
 
+// ═══ 23. Auto-evolution feature suite (2026-05-09 round 2) ═══
+// Smoke tests for #3-#19. Each module is detection + adaptation log
+// + revert handler. v03 covers the detection + revert round-trip;
+// the actual UI integration (Spotlight intent miss inline hint, dock
+// auto-pin animation) is exercised in the live OS preview.
+section('23. Auto-evolution suite (#3-#19)');
+
+// ── #3, #4 intent-miss-proposer ──────────────────────────────────
+const im = await import('/js/kernel/intent-miss-proposer.js');
+adapt._resetForTests();
+im._resetForTests();
+im.initIntentMissProposer();
+
+await test('isWishPhrase detects "I wish I had X"',
+  () => im._internal.isWishPhrase('I wish I had a recipe randomizer') === 'a recipe randomizer');
+await test('isWishPhrase detects "I want a X"',
+  () => im._internal.isWishPhrase('I want a budget tracker') === 'budget tracker');
+await test('isWishPhrase rejects normal queries',
+  () => im._internal.isWishPhrase('open notes') === null);
+
+const inspect1 = im.inspectQuery('I wish I had a screenshot annotator');
+await test('inspectQuery returns wish proposal for wish phrase',
+  () => inspect1?.kind === 'wish' && inspect1.description === 'a screenshot annotator');
+
+await test('repeat-miss not triggered on first occurrence',
+  () => im.inspectQuery('frobnicate the widget') === null);
+// REPEAT_THRESHOLD is 2 — the 2nd time the same query comes in,
+// recordMiss increments count to 2 and the proposer fires.
+const inspect2 = im.inspectQuery('frobnicate the widget');
+await test('repeat-miss triggers proposal at threshold (2nd occurrence)',
+  () => inspect2?.kind === 'repeat');
+// Already-proposed: 3rd call should NOT re-emit.
+const inspect3 = im.inspectQuery('frobnicate the widget');
+await test('repeat-miss does not re-emit for already-proposed',
+  () => inspect3 === null);
+
+const acceptIntentMiss = await im.accept(inspect1.proposal);
+await test('intent-miss accept records adaptation',
+  () => acceptIntentMiss.ok && typeof acceptIntentMiss.adaptationId === 'string');
+
+// ── #16 dock-usage-proposer ──────────────────────────────────────
+const dock = await import('/js/kernel/dock-usage-proposer.js');
+const usage = await import('/js/kernel/usage-tracker.js');
+adapt._resetForTests();
+dock._resetForTests();
+usage._resetForTests();
+dock.initDockUsageProposer();
+usage.initUsageTracker();
+
+// UI category default is HIGH boldness (auto-adapt). Drop to MEDIUM
+// to exercise the proposal path (rather than the silent auto-pin path).
+adapt.setBoldness(adapt.CATEGORY.UI, 'medium');
+
+// Use 'kanban' — an app NOT in DEFAULT_PINNED, so evaluatePin won't
+// short-circuit on isPinned(). Music etc are pinned by default.
+for (let i = 0; i < dock._internal.PIN_THRESHOLD; i++) usage._record('app-launch', 'kanban');
+
+let dockProposal = null;
+ebMod.eventBus.on('dock-usage:proposal', (p) => { dockProposal = p; });
+await dock._internal.evaluatePin('kanban');
+await test('dock-usage emits pin proposal at threshold (boldness=medium)',
+  () => dockProposal?.kind === 'pin' && dockProposal?.appId === 'kanban');
+
+const dockAccept = await dock.acceptProposal(dockProposal);
+await test('dock-usage accept records adaptation',
+  () => dockAccept.ok === true);
+
+// Reset boldness to default for downstream tests.
+adapt.setBoldness(adapt.CATEGORY.UI, 'high');
+
+// ── #7 text-learner: undo→preference ─────────────────────────────
+const tl = await import('/js/kernel/text-learner.js');
+adapt._resetForTests();
+tl._resetForTests();
+tl.initTextLearner();
+
+let prefProposal = null;
+ebMod.eventBus.on('text-learner:preference-proposal', (p) => { prefProposal = p; });
+tl._internal.noteRevert('terminal.exec');
+tl._internal.noteRevert('terminal.exec');
+tl._internal.noteRevert('terminal.exec');
+await test('preference proposal fires at REVERT_THRESHOLD',
+  () => prefProposal?.capId === 'terminal.exec' && prefProposal?.count >= 3);
+
+const prefAccept = await tl.acceptPreferenceProposal(prefProposal);
+await test('preference accept stores rule + records adaptation',
+  () => prefAccept.ok === true && tl.isAlwaysConfirm('terminal.exec') === true);
+
+// ── #8 text-learner: correction→autocorrect ──────────────────────
+let autoProposal = null;
+ebMod.eventBus.on('text-learner:autocorrect-proposal', (p) => { autoProposal = p; });
+tl._internal.noteCorrection('teh', 'the');
+tl._internal.noteCorrection('teh', 'the');
+tl._internal.noteCorrection('teh', 'the');
+await test('autocorrect proposal fires at CORRECTION_THRESHOLD',
+  () => autoProposal?.from === 'teh' && autoProposal?.to === 'the' && autoProposal?.count >= 3);
+
+const autoAccept = await tl.acceptAutocorrectProposal(autoProposal);
+await test('autocorrect accept stores rule', () => autoAccept.ok === true);
+await test('applyAutocorrect transforms text',
+  () => tl.applyAutocorrect('teh quick brown fox') === 'the quick brown fox');
+
+// ── #5, #6, #10, #12, #15 graph-learner ──────────────────────────
+const gl = await import('/js/kernel/graph-learner.js');
+adapt._resetForTests();
+gl._resetForTests();
+gl.initGraphLearner();
+
+const bind1 = await gl.bindNoun('the monday meeting', 'cal:event-42');
+await test('bindNoun records adaptation',
+  () => bind1.ok && typeof bind1.entry?.id === 'string');
+await test('resolveNoun returns the bound ref',
+  () => gl.resolveNoun('the monday meeting') === 'cal:event-42');
+await test('resolveNoun is case-insensitive',
+  () => gl.resolveNoun('The Monday Meeting') === 'cal:event-42');
+
+await test('extractTags returns frequent terms',
+  () => gl._internal.extractTags('astrion learning patterns. learning is key. astrion learns from astrion users.', 5).length >= 1);
+await test('extractTags excludes stopwords',
+  () => !gl._internal.extractTags('the the the and and and', 5).includes('the'));
+
+const keywords = gl._internal.extractKeywords('Project Astrion roadmap milestones');
+await test('extractKeywords returns lowercase content words',
+  () => keywords.has('project') && keywords.has('astrion') && !keywords.has('the'));
+
+const cluster = await gl.recomputeProjectClusters([
+  { id: 'todo-1', title: 'Astrion roadmap review' },
+  { id: 'todo-2', title: 'Astrion launch prep' },
+  { id: 'note-1', content: 'Notes on Astrion testing strategy' },
+  { id: 'todo-3', title: 'Buy groceries' },
+]);
+await test('recomputeProjectClusters groups items by shared keyword',
+  () => cluster.ok === true && Object.values(cluster.clusters).flat().includes('todo-1'));
+
+// Auto-tag via internal helper directly.
+await gl._internal.maybeAutoTag('note-test', 'astrion testing astrion learning patterns testing patterns');
+await test('auto-tag records and stores tags',
+  () => gl.getAutoTags('note-test').length > 0);
+
+// ── #11 verb-aliaser ─────────────────────────────────────────────
+const va = await import('/js/kernel/verb-aliaser.js');
+adapt._resetForTests();
+va._resetForTests();
+va.initVerbAliaser();
+
+const aliasResult = await va.bindVerbAlias('mail', 'messages');
+await test('bindVerbAlias records adaptation',
+  () => aliasResult.ok === true);
+await test('resolveVerbAlias returns target',
+  () => va.resolveVerbAlias('mail') === 'messages');
+await test('suggestAlias finds close fuzzy matches (typo)',
+  () => va.suggestAlias('termnal', ['terminal', 'browser'])?.suggestion === 'terminal');
+await test('suggestAlias returns null for exact matches (zero-distance ignored)',
+  () => va.suggestAlias('terminal', ['terminal', 'browser']) === null);
+await test('suggestAlias returns null for far misses',
+  () => va.suggestAlias('xyz', ['terminal', 'browser']) === null);
+
+// ── #9 time-routine-detector ─────────────────────────────────────
+const tr = await import('/js/kernel/time-routine-detector.js');
+adapt._resetForTests();
+tr._resetForTests();
+tr.initTimeRoutineDetector();
+
+let routineProposal = null;
+ebMod.eventBus.on('time-routine:proposal', (p) => { routineProposal = p; });
+// Seed with same 2-cap sequence at hour 9 across 3 different days.
+const dayMs = 24 * 60 * 60 * 1000;
+const baseTs = new Date('2026-04-01T09:00:00').getTime();
+for (let day = 0; day < 3; day++) {
+  tr._recordEvent('mail.check',  baseTs + day * dayMs);
+  tr._recordEvent('cal.review',  baseTs + day * dayMs + 60_000);
+}
+await test('time-routine emits proposal for hour-anchored repeat',
+  () => routineProposal?.sequence?.join('→') === 'mail.check→cal.review' && routineProposal?.days >= 3);
+
+const routineAccept = await tr.acceptProposal(routineProposal);
+await test('time-routine accept records adaptation',
+  () => routineAccept.ok === true);
+
+// ── #17, #18, #19 spotlight-defaults ─────────────────────────────
+// Reset the tracker so the fallback path isn't poisoned by earlier
+// app-launch records from other sections.
+usage._resetForTests();
+usage.initUsageTracker();
+const sd = await import('/js/kernel/spotlight-defaults.js');
+const fakeApps = [
+  { id: 'notes',     name: 'Notes' },
+  { id: 'browser',   name: 'Browser' },
+  { id: 'music',     name: 'Music' },
+  { id: 'terminal',  name: 'Terminal' },
+  { id: 'messages',  name: 'Messages' },
+  { id: 'weather',   name: 'Weather' },
+  { id: 'calculator',name: 'Calculator' },
+];
+const ranked = sd.rankSuggestedApps(fakeApps);
+await test('rankSuggestedApps returns from fallback when no history',
+  () => Array.isArray(ranked) && ranked.length > 0);
+
+const sections = [
+  { id: 'general', label: 'General' },
+  { id: 'privacy', label: 'Privacy' },
+  { id: 'ai',      label: 'AI' },
+];
+usage._record('settings-open', 'privacy');
+usage._record('settings-open', 'privacy');
+usage._record('settings-open', 'general');
+const sortedSections = sd.rankSettingsSections(sections);
+await test('rankSettingsSections sorts by recent open count',
+  () => sortedSections[0].id === 'privacy' && sortedSections[1].id === 'general');
+
+// ── #13, #14 generation-bridge ───────────────────────────────────
+const gb = await import('/js/kernel/generation-bridge.js');
+adapt._resetForTests();
+gb._resetForTests();
+gb.initGenerationBridge();
+
+const wfPropose = await gb.proposeWorkflow('email check then calendar review');
+await test('proposeWorkflow returns ok+proposal',
+  () => wfPropose.ok && wfPropose.proposal?.id);
+const wfAccept = await gb.acceptWorkflow(wfPropose.proposal);
+await test('acceptWorkflow records adaptation',
+  () => wfAccept.ok === true);
+
+const fmtPropose = await gb.proposeFormatConversion('a,b,c\n1,2,3', 'json');
+await test('proposeFormatConversion returns ok+proposal',
+  () => fmtPropose.ok && fmtPropose.proposal?.id);
+const fmtAccept = await gb.acceptFormatConversion(fmtPropose.proposal);
+await test('acceptFormatConversion records adaptation',
+  () => fmtAccept.ok === true);
+
+// Cleanup
+adapt._resetForTests();
+im._resetForTests();
+dock._resetForTests();
+usage._resetForTests();
+tl._resetForTests();
+gl._resetForTests();
+va._resetForTests();
+tr._resetForTests();
+gb._resetForTests();
+
 // ═══ Summary ═══
 const total = passCount + failCount;
 const summary = document.getElementById('summary');
