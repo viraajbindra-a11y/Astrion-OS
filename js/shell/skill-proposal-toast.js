@@ -64,9 +64,16 @@ async function acceptProposal(proposal) {
   if (result.ok) {
     notifications.show({
       title: 'Skill saved',
-      body: `"${result.skill}" is now bound. You can revert this from the Adaptations panel.`,
+      body: `"${result.skill}" is now bound. Open the Adaptations app to revert.`,
       icon: '✓',
       duration: 5000,
+      actions: [
+        { label: 'Open Adaptations', onClick: () => {
+            try {
+              import('../kernel/process-manager.js').then(m => m.processManager.launch('adaptations'));
+            } catch {}
+          } },
+      ],
     });
   } else {
     notifications.show({

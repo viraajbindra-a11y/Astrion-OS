@@ -127,6 +127,7 @@ import { registerRockPaperScissors } from './apps/rock-paper-scissors.js';
 import { registerTicTacToe } from './apps/tic-tac-toe.js';
 import { registerRandomFacts } from './apps/random-facts.js';
 import { registerBmiCalc } from './apps/bmi-calc.js';
+import { registerAdaptations } from './apps/adaptations.js';
 import { verifyPassword } from './kernel/crypto.js';
 import { sounds } from './kernel/sound.js';
 import { initVolumeHud } from './shell/volume-hud.js';
@@ -164,6 +165,7 @@ function registerAllApps() {
   registerSoundboard(); registerCountdown(); registerReactionTest();
   registerColorPalette(); registerRockPaperScissors(); registerTicTacToe();
   registerRandomFacts(); registerBmiCalc();
+  registerAdaptations();
 }
 
 // Phase 1 hardening (2026-05-02): boot timeline instrumentation. The

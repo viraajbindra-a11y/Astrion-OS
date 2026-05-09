@@ -46,7 +46,7 @@ explains self-modification's 5-gate flow, and includes an honest
 - **Self-hosted AI on first boot.** Wizard reads your free RAM, picks a
   model size (Tiny / Standard / Big / Remote / Skip), pulls it via the
   bundled Ollama runtime. Cloud is optional.
-- **60 real apps + 16 toys.** Toys live in their own folder so real apps
+- **61 real apps + 16 toys.** Toys live in their own folder so real apps
   surface first.
 - **Astrion Browser** — Electron-based, Chromium engine, custom chrome.
   Tabs (pin/mute/duplicate), AI sidebar, reader mode, command palette,
@@ -69,7 +69,7 @@ explains self-modification's 5-gate flow, and includes an honest
 
 ## Apps
 
-60 real apps (3 primitives + 57 templates) plus 16 toys.
+61 real apps (3 primitives + 58 templates) plus 16 toys.
 
 | Group | Apps |
 |---|---|
@@ -78,7 +78,7 @@ explains self-modification's 5-gate flow, and includes an honest
 | **Comms** | Messages (AI chat), Contacts, Live Chat |
 | **Media** | Music, Photos, Video Player, Video Editor, Draw, Whiteboard, Pixel Art, Animate, Beat Studio, Screen Recorder, Voice Memos, AI Art, AI Writer, YouTube |
 | **Utilities** | Calculator, Clock, Stopwatch, Timer, Countdown, Weather, Maps, Translator, Unit Converter, Color Picker, Color Palette, Dictionary, QR Code, Password Generator, BMI Calculator, Speed Test, Recipe Book, Typing Test, Meditation, Budget |
-| **System** | Finder, Settings, Activity Monitor, System Info, Vault, Trash, Installer, Appstore, PDF Viewer |
+| **System** | Finder, Settings, Activity Monitor, System Info, Vault, Trash, Installer, Appstore, PDF Viewer, Adaptations |
 | **Toys** (separate folder) | 2048, Chess, Snake, Tetris, Minesweeper, Sudoku, Wordle, Tic-Tac-Toe, Rock-Paper-Scissors, Matrix Rain, Neon Void, Emoji Kitchen, Soundboard, Reaction Test, Random Facts, Quotes |
 
 ## Status — verified vs not
