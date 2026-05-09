@@ -1076,7 +1076,11 @@ function pushDownloads() {
   try { mainWindow.webContents.send('downloads:list', downloads); } catch {}
 }
 
-session.defaultSession?.on?.('will-download', (event, item, webContents) => {
+// will-download must be registered AFTER app.whenReady — session.defaultSession
+// is undefined before then. Hoist into a setup function and call from the
+// whenReady block. Was silently a no-op until 2026-05-09 audit caught this.
+function installDownloadsListener() {
+  session.defaultSession.on('will-download', (event, item, webContents) => {
   // We don't pre-set savePath — let Electron prompt the user.
   const id = nextDownloadId++;
   const entry = {
@@ -1106,7 +1110,8 @@ session.defaultSession?.on?.('will-download', (event, item, webContents) => {
     entry.savePath = item.getSavePath();
     pushDownloads();
   });
-});
+  });
+}
 
 ipcMain.handle('downloads:list', () => downloads);
 ipcMain.handle('downloads:open', (_, id) => {
@@ -1236,6 +1241,7 @@ app.whenReady().then(() => {
   loadHistory();
   loadBookmarks();
   installAdBlocker();
+  installDownloadsListener();
   createMainWindow();
 
   app.on('activate', () => {

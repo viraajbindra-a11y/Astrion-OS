@@ -118,4 +118,9 @@ contextBridge.exposeInMainWorld('astrion', {
     ipcRenderer.on('downloads:list', listener);
     return () => ipcRenderer.off('downloads:list', listener);
   },
+  onReadingList: (cb) => {
+    const listener = (_e, list) => cb(list);
+    ipcRenderer.on('reading-list:list', listener);
+    return () => ipcRenderer.off('reading-list:list', listener);
+  },
 });
