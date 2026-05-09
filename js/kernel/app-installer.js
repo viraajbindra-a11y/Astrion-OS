@@ -5,6 +5,7 @@
 import { processManager } from './process-manager.js';
 import { windowManager } from './window-manager.js';
 import { notifications } from './notifications.js';
+import { eventBus } from './event-bus.js';
 
 const STORAGE_KEY = 'nova-installed-apps';
 
@@ -229,11 +230,13 @@ class AppInstaller {
       this.installed.add(appId);
       localStorage.setItem(STORAGE_KEY, JSON.stringify([...this.installed]));
 
-      notifications.show({
-        title: `${app.name} Installed`,
-        body: 'Open it from Search or App Grid.',
+      // Tell the dock — it owns the pin/unpin UX (auto-pin for first
+      // few installs, then prompt). The notification used to fire
+      // here lives in dock.js now so we don't double-toast.
+      eventBus.emit('app:installed', {
+        appId,
+        name: app.name,
         icon: app.icon,
-        duration: 3000,
       });
 
       resolve(true);
