@@ -36,6 +36,11 @@ suite tests against:
 The point isn't "we have lots of files." The point is: **every L2+ action
 runs through this stack**. There is no path that bypasses it.
 
+→ **Full walkthrough with citations:** [docs/SAFETY.md](docs/SAFETY.md) —
+traces a real `terminal.exec` from intent parse through every gate,
+explains self-modification's 5-gate flow, and includes an honest
+"what this doesn't protect against" threat model.
+
 ## What's there
 
 - **Self-hosted AI on first boot.** Wizard reads your free RAM, picks a
