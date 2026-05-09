@@ -37,6 +37,12 @@ contextBridge.exposeInMainWorld('astrion', {
   askAi: (prompt) => ipcRenderer.invoke('sidebar:ask', prompt),
   pageContext: () => ipcRenderer.invoke('sidebar:page-context'),
 
+  // History + settings
+  listHistory: () => ipcRenderer.invoke('history:list'),
+  clearHistory: () => ipcRenderer.invoke('history:clear'),
+  getSettings: () => ipcRenderer.invoke('settings:get'),
+  setSettings: (partial) => ipcRenderer.invoke('settings:set', partial),
+
   // Bookmarks
   listBookmarks: () => ipcRenderer.invoke('bookmarks:list'),
   addBookmark: (b) => ipcRenderer.invoke('bookmarks:add', b),
@@ -71,5 +77,15 @@ contextBridge.exposeInMainWorld('astrion', {
     const listener = (_e, list) => cb(list);
     ipcRenderer.on('bookmarks:list', listener);
     return () => ipcRenderer.off('bookmarks:list', listener);
+  },
+  onSidebarOpened: (cb) => {
+    const listener = () => cb();
+    ipcRenderer.on('sidebar:opened', listener);
+    return () => ipcRenderer.off('sidebar:opened', listener);
+  },
+  onSidebarAskWithPrompt: (cb) => {
+    const listener = (_e, prompt) => cb(prompt);
+    ipcRenderer.on('sidebar:ask-with-prompt', listener);
+    return () => ipcRenderer.off('sidebar:ask-with-prompt', listener);
   },
 });

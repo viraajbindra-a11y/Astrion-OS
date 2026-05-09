@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Settings — Astrion</title>
+  <style>
+    :root {
+      --bg: #0e0e1a;
+      --bg-card: rgba(255,255,255,0.04);
+      --bg-card-hover: rgba(255,255,255,0.08);
+      --fg: rgba(255,255,255,0.92);
+      --fg-muted: rgba(255,255,255,0.55);
+      --fg-faint: rgba(255,255,255,0.35);
+      --accent: #5ac8fa;
+      --border: rgba(255,255,255,0.08);
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; padding: 0; height: 100%;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      color: var(--fg);
+      background:
+        radial-gradient(ellipse at 70% 20%, rgba(120,90,250,0.08) 0%, transparent 60%),
+        var(--bg);
+    }
+    .wrap {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 48px 24px;
+    }
+    h1 {
+      font-size: 22px;
+      font-weight: 700;
+      margin: 0 0 8px;
+    }
+    .subtitle {
+      font-size: 12px;
+      color: var(--fg-muted);
+      margin-bottom: 28px;
+    }
+    .section {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 18px 22px;
+      margin-bottom: 18px;
+    }
+    .section-title {
+      font-size: 13px;
+      font-weight: 600;
+      margin: 0 0 14px;
+      color: var(--fg);
+    }
+    .row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .row:last-child { border-bottom: none; }
+    .row-info {
+      flex: 1;
+      min-width: 0;
+      padding-right: 16px;
+    }
+    .row-label {
+      font-size: 12px;
+      color: var(--fg);
+      font-weight: 500;
+    }
+    .row-help {
+      font-size: 11px;
+      color: var(--fg-faint);
+      margin-top: 2px;
+      line-height: 1.4;
+    }
+    select, input[type="text"], input[type="number"] {
+      background: rgba(0,0,0,0.3);
+      border: 1px solid var(--border);
+      color: var(--fg);
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-family: inherit;
+      outline: none;
+      min-width: 160px;
+    }
+    select:focus, input:focus { border-color: var(--accent); }
+    .toggle {
+      position: relative;
+      width: 36px;
+      height: 20px;
+      flex-shrink: 0;
+    }
+    .toggle input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+    .toggle-track {
+      position: absolute;
+      inset: 0;
+      background: rgba(255,255,255,0.12);
+      border-radius: 10px;
+      cursor: pointer;
+      transition: background 0.15s ease;
+    }
+    .toggle-track::before {
+      content: '';
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      width: 14px;
+      height: 14px;
+      background: white;
+      border-radius: 50%;
+      transition: transform 0.15s ease;
+    }
+    .toggle input:checked + .toggle-track {
+      background: var(--accent);
+    }
+    .toggle input:checked + .toggle-track::before {
+      transform: translateX(16px);
+    }
+    .saved {
+      font-size: 11px;
+      color: var(--accent);
+      opacity: 0;
+      transition: opacity 0.2s ease;
+    }
+    .saved.show { opacity: 1; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Settings</h1>
+    <p class="subtitle">Configure Astrion Browser. Changes save automatically. <span class="saved" id="saved-indicator">Saved ✓</span></p>
+
+    <div class="section">
+      <div class="section-title">Search</div>
+      <div class="row">
+        <div class="row-info">
+          <div class="row-label">Default search engine</div>
+          <div class="row-help">Used when you type something that isn't a URL into the address bar.</div>
+        </div>
+        <select id="search-engine">
+          <option value="google">Google</option>
+          <option value="duckduckgo">DuckDuckGo</option>
+          <option value="brave">Brave Search</option>
+          <option value="bing">Bing</option>
+        </select>
+      </div>
+      <div class="row">
+        <div class="row-info">
+          <div class="row-label">Homepage</div>
+          <div class="row-help">Page that opens for new tabs. Use astrion://newtab for the Astrion start page.</div>
+        </div>
+        <input type="text" id="homepage" placeholder="astrion://newtab">
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">AI</div>
+      <div class="row">
+        <div class="row-info">
+          <div class="row-label">Astrion AI model</div>
+          <div class="row-help">The Ollama model the AI sidebar uses. Match what you picked in the Astrion setup wizard.</div>
+        </div>
+        <input type="text" id="ai-model" placeholder="qwen2.5:7b">
+      </div>
+      <div class="row">
+        <div class="row-info">
+          <div class="row-label">Ollama server URL</div>
+          <div class="row-help">Where Ollama is running. Default is the local instance bundled with Astrion OS.</div>
+        </div>
+        <input type="text" id="ai-url" placeholder="http://localhost:11434">
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Performance</div>
+      <div class="row">
+        <div class="row-info">
+          <div class="row-label">Sleeping tabs</div>
+          <div class="row-help">Unload background tabs after this many minutes to save memory. 0 disables.</div>
+        </div>
+        <input type="number" id="sleeping-tabs" min="0" max="240" step="5" placeholder="30">
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-title">Privacy</div>
+      <div class="row">
+        <div class="row-info">
+          <div class="row-label">Block trackers</div>
+          <div class="row-help">Strip third-party tracker requests. Doesn't break most sites; ad blocking is in a follow-up.</div>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="block-trackers">
+          <span class="toggle-track"></span>
+        </label>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let savedTimer = null;
+    function flashSaved() {
+      const el = document.getElementById('saved-indicator');
+      el.classList.add('show');
+      clearTimeout(savedTimer);
+      savedTimer = setTimeout(() => el.classList.remove('show'), 1500);
+    }
+
+    async function load() {
+      if (!window.astrionPage) return;
+      const s = await window.astrionPage.getSettings();
+      document.getElementById('search-engine').value = s.searchEngine || 'google';
+      document.getElementById('homepage').value = s.homepage || 'astrion://newtab';
+      document.getElementById('ai-model').value = s.aiModel || 'qwen2.5:7b';
+      document.getElementById('ai-url').value = s.aiUrl || 'http://localhost:11434';
+      document.getElementById('sleeping-tabs').value = s.sleepingTabsMinutes ?? 30;
+      document.getElementById('block-trackers').checked = !!s.blockTrackers;
+    }
+
+    function bind(id, key, getValue) {
+      const el = document.getElementById(id);
+      const handler = async () => {
+        if (!window.astrionPage) return;
+        const partial = {};
+        partial[key] = getValue(el);
+        await window.astrionPage.setSettings(partial);
+        flashSaved();
+      };
+      el.addEventListener('change', handler);
+      // Text inputs also save on blur for immediacy.
+      if (el.tagName === 'INPUT' && (el.type === 'text' || el.type === 'number')) {
+        el.addEventListener('blur', handler);
+      }
+    }
+
+    bind('search-engine', 'searchEngine', el => el.value);
+    bind('homepage', 'homepage', el => el.value.trim() || 'astrion://newtab');
+    bind('ai-model', 'aiModel', el => el.value.trim() || 'qwen2.5:7b');
+    bind('ai-url', 'aiUrl', el => el.value.trim() || 'http://localhost:11434');
+    bind('sleeping-tabs', 'sleepingTabsMinutes', el => parseInt(el.value, 10) || 0);
+    bind('block-trackers', 'blockTrackers', el => el.checked);
+
+    load();
+  </script>
+</body>
+</html>

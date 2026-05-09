@@ -131,6 +131,8 @@ document.addEventListener('keydown', (e) => {
   else if (ctrl && e.key === 'r') { e.preventDefault(); if (activeId !== null) window.astrion.reload(activeId); }
   else if (ctrl && e.key === 'd') { e.preventDefault(); toggleBookmarkActive(); }
   else if (ctrl && e.key === 'f') { e.preventDefault(); openFindBar(); }
+  else if (ctrl && e.key === 'h') { e.preventDefault(); window.astrion.newTab('astrion://history'); }
+  else if (ctrl && e.key === ',') { e.preventDefault(); window.astrion.newTab('astrion://settings'); }
   else if (ctrl && e.shiftKey && (e.key === 'a' || e.key === 'A')) { e.preventDefault(); toggleSidebar(); }
   else if (ctrl && (e.key === '+' || e.key === '=')) { e.preventDefault(); window.astrion.zoomIn(); }
   else if (ctrl && e.key === '-') { e.preventDefault(); window.astrion.zoomOut(); }
@@ -191,7 +193,11 @@ let sidebarOpen = false;
 
 async function toggleSidebar() {
   const newState = await window.astrion.toggleSidebar();
-  sidebarOpen = newState;
+  setSidebarVisible(newState);
+}
+
+function setSidebarVisible(open) {
+  sidebarOpen = open;
   sidebar.hidden = !sidebarOpen;
   aiBtn.classList.toggle('active', sidebarOpen);
   if (sidebarOpen) {
@@ -199,6 +205,20 @@ async function toggleSidebar() {
     setTimeout(() => sidebarInput.focus(), 50);
   }
 }
+
+// Main process opens the sidebar in response to a context-menu click.
+window.astrion.onSidebarOpened?.(() => {
+  setSidebarVisible(true);
+});
+
+// Main process asks us to send a specific prompt (e.g. "Summarize this
+// page" from the right-click menu). Open + ask + scroll.
+window.astrion.onSidebarAskWithPrompt?.((prompt) => {
+  setSidebarVisible(true);
+  // Defer slightly so the layout/focus settle before sendAiMessage
+  // mutates the DOM.
+  setTimeout(() => sendAiMessage(prompt), 100);
+});
 
 async function refreshSidebarContext() {
   try {

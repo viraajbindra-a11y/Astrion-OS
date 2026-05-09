@@ -10,8 +10,9 @@
 // features (graph-store bookmarks, AI on-page actions) come in via IPC
 // and are layered on top of that vanilla Chromium behaviour.
 
-const { app, BrowserWindow, BrowserView, ipcMain, shell, session } = require('electron');
+const { app, BrowserWindow, BrowserView, ipcMain, shell, session, Menu, clipboard } = require('electron');
 const path = require('path');
+const fs = require('fs');
 
 // ─── Constants ─────────────────────────────────────────────────────
 // Height of the chrome (tab strip + URL bar). BrowserViews are
@@ -22,6 +23,8 @@ const CHROME_HEIGHT = 80;
 // through on the right edge.
 const SIDEBAR_WIDTH = 360;
 const ASTRION_NEWTAB = `file://${path.join(__dirname, 'renderer', 'newtab.html')}`;
+const ASTRION_HISTORY = `file://${path.join(__dirname, 'renderer', 'history.html')}`;
+const ASTRION_SETTINGS = `file://${path.join(__dirname, 'renderer', 'settings.html')}`;
 // Astrion's web server (web app, /api endpoints). The browser's AI
 // sidebar talks to it; bookmarks may sync to it.
 const ASTRION_SERVER = process.env.ASTRION_SERVER || 'http://localhost:3000';
@@ -88,9 +91,10 @@ function createTab(url) {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
-      // Each tab gets its own session so we can wire per-tab features
-      // (per-site cookie isolation, etc.) later. For now, all tabs
-      // share the default partition.
+      // Per-tab preload that activates only on our internal file://
+      // pages (history, settings, newtab). External pages see no
+      // privileged API.
+      preload: path.join(__dirname, 'page-preload.js'),
     },
   });
 
@@ -113,6 +117,16 @@ function createTab(url) {
     // inside our browser, never spawn an external chromium.
     createTab(openUrl);
     return { action: 'deny' };
+  });
+
+  // Intercept astrion:// navigation. Chromium doesn't know the scheme,
+  // so a click on <a href="astrion://history"> would 404. We catch it
+  // and redirect to the corresponding file:// URL.
+  wc.on('will-navigate', (e, navUrl) => {
+    if (/^astrion:/.test(navUrl)) {
+      e.preventDefault();
+      wc.loadURL(normalizeInput(navUrl));
+    }
   });
 
   wc.on('did-start-loading', () => {
@@ -151,6 +165,20 @@ function createTab(url) {
     }
   });
 
+  // Context menu — universal browser bits + Astrion's "Ask Astrion"
+  // hooks. Built per-tab so the menu can access the live selection /
+  // link / image at click time.
+  wc.on('context-menu', (_, params) => {
+    showPageContextMenu(tab, params);
+  });
+
+  // History recording on each main-frame navigation.
+  wc.on('did-navigate', (_, navUrl) => {
+    if (navUrl && !navUrl.startsWith('file://') && !navUrl.includes('newtab.html')) {
+      pushHistoryEntry(navUrl, tab.title);
+    }
+  });
+
   wc.loadURL(tab.url);
 
   setActiveTab(id);
@@ -174,6 +202,8 @@ function setActiveTab(id) {
     layoutActiveView();
     tab.view.webContents.focus();
   }
+  // Mark active for sleeping-tab tracking; reload if it was sleeping.
+  markTabActive(id);
   pushActive();
 }
 
@@ -229,15 +259,34 @@ function stopTab(id) {
 function normalizeInput(raw) {
   const trimmed = raw.trim();
   if (!trimmed) return ASTRION_NEWTAB;
+  // astrion:// internal pages — resolve to local renderer files.
+  if (/^astrion:\/?\/?/.test(trimmed)) {
+    const id = trimmed.replace(/^astrion:\/?\/?/, '').toLowerCase();
+    if (id === 'newtab' || id === '') return ASTRION_NEWTAB;
+    if (id === 'history') return ASTRION_HISTORY;
+    if (id === 'settings') return ASTRION_SETTINGS;
+    return ASTRION_NEWTAB;
+  }
+  // view-source: passthrough
+  if (trimmed.startsWith('view-source:')) return trimmed;
   // Already a URL with scheme.
   if (/^[a-zA-Z][a-zA-Z0-9+\-.]*:\/\//.test(trimmed)) return trimmed;
   if (trimmed.startsWith('about:') || trimmed.startsWith('chrome://')) return trimmed;
-  // Special: "astrion://newtab" → file URL of our newtab.
-  if (trimmed === 'astrion://newtab' || trimmed === 'astrion:newtab') return ASTRION_NEWTAB;
-  // Looks like a domain or has slashes? Assume HTTPS.
+  // Looks like a domain (has a dot, no spaces) → assume HTTPS.
   if (!/\s/.test(trimmed) && /[.]/.test(trimmed)) return `https://${trimmed}`;
-  // Otherwise → search.
-  return `https://www.google.com/search?q=${encodeURIComponent(trimmed)}`;
+  // Otherwise → search using the configured search engine.
+  return searchUrlFor(trimmed);
+}
+
+function searchUrlFor(query) {
+  const q = encodeURIComponent(query);
+  const engine = (settings && settings.searchEngine) || 'google';
+  switch (engine) {
+    case 'duckduckgo': return `https://duckduckgo.com/?q=${q}`;
+    case 'brave':      return `https://search.brave.com/search?q=${q}`;
+    case 'bing':       return `https://www.bing.com/search?q=${q}`;
+    default:           return `https://www.google.com/search?q=${q}`;
+  }
 }
 
 function layoutActiveView() {
@@ -404,7 +453,6 @@ async function ipcMainInvoke(channel, ...args) {
 // ─── Bookmarks ─────────────────────────────────────────────────────
 function loadBookmarks() {
   try {
-    const fs = require('fs');
     if (fs.existsSync(BOOKMARKS_PATH)) {
       const raw = fs.readFileSync(BOOKMARKS_PATH, 'utf8');
       const parsed = JSON.parse(raw);
@@ -416,7 +464,6 @@ function loadBookmarks() {
 }
 function saveBookmarks() {
   try {
-    const fs = require('fs');
     fs.writeFileSync(BOOKMARKS_PATH, JSON.stringify(bookmarks, null, 2));
   } catch (err) {
     console.warn('[astrion-browser] failed to save bookmarks:', err?.message);
@@ -483,6 +530,242 @@ ipcMain.handle('zoom:reset', () => {
   if (tab) tab.view.webContents.setZoomFactor(1);
 });
 
+// ─── Page context menu ─────────────────────────────────────────────
+function showPageContextMenu(tab, params) {
+  const wc = tab.view.webContents;
+  const hasSelection = !!params.selectionText;
+  const hasLink = !!params.linkURL;
+  const hasImage = !!params.srcURL;
+  const isEditable = !!params.isEditable;
+
+  const items = [];
+
+  // Astrion AI items first — that's the differentiator.
+  if (hasSelection) {
+    const sel = params.selectionText.trim().slice(0, 1000);
+    items.push({
+      label: '✨ Ask Astrion about this',
+      click: () => askAstrionWithPrompt(`Explain or expand on: "${sel}"`),
+    });
+    items.push({
+      label: '✨ Translate to English',
+      click: () => askAstrionWithPrompt(`Translate this to English (or paraphrase if already English):\n"${sel}"`),
+    });
+    items.push({ type: 'separator' });
+  } else {
+    items.push({
+      label: '✨ Summarize this page',
+      click: () => askAstrionWithPrompt('Summarize this page in 5 bullet points.'),
+    });
+    items.push({
+      label: '✨ Ask Astrion...',
+      click: () => openAiSidebar(),
+    });
+    items.push({ type: 'separator' });
+  }
+
+  // Selection / clipboard
+  if (hasSelection) {
+    items.push({
+      label: 'Copy',
+      role: 'copy',
+    });
+    items.push({
+      label: 'Search Google for "' + params.selectionText.trim().slice(0, 30) + '"',
+      click: () => createTab(`https://www.google.com/search?q=${encodeURIComponent(params.selectionText)}`),
+    });
+    items.push({ type: 'separator' });
+  } else if (isEditable) {
+    items.push({ label: 'Cut', role: 'cut' });
+    items.push({ label: 'Copy', role: 'copy' });
+    items.push({ label: 'Paste', role: 'paste' });
+    items.push({ type: 'separator' });
+  }
+
+  // Links
+  if (hasLink) {
+    items.push({
+      label: 'Open link in new tab',
+      click: () => createTab(params.linkURL),
+    });
+    items.push({
+      label: 'Copy link address',
+      click: () => clipboard.writeText(params.linkURL),
+    });
+    items.push({ type: 'separator' });
+  }
+
+  // Images
+  if (hasImage) {
+    items.push({
+      label: 'Open image in new tab',
+      click: () => createTab(params.srcURL),
+    });
+    items.push({
+      label: 'Copy image address',
+      click: () => clipboard.writeText(params.srcURL),
+    });
+    items.push({
+      label: 'Save image as...',
+      click: () => wc.downloadURL(params.srcURL),
+    });
+    items.push({ type: 'separator' });
+  }
+
+  // Navigation
+  items.push({
+    label: 'Back',
+    enabled: wc.canGoBack(),
+    accelerator: 'Alt+Left',
+    click: () => wc.goBack(),
+  });
+  items.push({
+    label: 'Forward',
+    enabled: wc.canGoForward(),
+    accelerator: 'Alt+Right',
+    click: () => wc.goForward(),
+  });
+  items.push({
+    label: 'Reload',
+    accelerator: 'Ctrl+R',
+    click: () => wc.reload(),
+  });
+  items.push({ type: 'separator' });
+
+  // View source / inspect
+  items.push({
+    label: 'View page source',
+    click: () => createTab(`view-source:${tab.url}`),
+  });
+  items.push({
+    label: 'Inspect element',
+    accelerator: 'Ctrl+Shift+I',
+    click: () => wc.inspectElement(params.x, params.y),
+  });
+
+  Menu.buildFromTemplate(items).popup({ window: mainWindow });
+}
+
+function openAiSidebar() {
+  if (!sidebarOpen) {
+    sidebarOpen = true;
+    layoutActiveView();
+  }
+  if (mainWindow) {
+    try { mainWindow.webContents.send('sidebar:opened'); } catch {}
+  }
+}
+
+function askAstrionWithPrompt(prompt) {
+  openAiSidebar();
+  if (mainWindow) {
+    try { mainWindow.webContents.send('sidebar:ask-with-prompt', prompt); } catch {}
+  }
+}
+
+// ─── History ───────────────────────────────────────────────────────
+const HISTORY_PATH = path.join(app.getPath('userData'), 'history.json');
+const HISTORY_CAP = 1000;
+let history = [];
+
+function loadHistory() {
+  try {
+    if (fs.existsSync(HISTORY_PATH)) {
+      const raw = fs.readFileSync(HISTORY_PATH, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) history = parsed.slice(0, HISTORY_CAP);
+    }
+  } catch {}
+}
+function saveHistory() {
+  try { fs.writeFileSync(HISTORY_PATH, JSON.stringify(history)); } catch {}
+}
+function pushHistoryEntry(url, title) {
+  // Dedup: if the most recent entry is the same URL, just bump time.
+  if (history.length > 0 && history[0].url === url) {
+    history[0].at = Date.now();
+    if (title) history[0].title = title;
+  } else {
+    history.unshift({ url, title: title || url, at: Date.now() });
+    if (history.length > HISTORY_CAP) history.length = HISTORY_CAP;
+  }
+  saveHistory();
+}
+
+ipcMain.handle('history:list', () => history);
+ipcMain.handle('history:clear', () => {
+  history = [];
+  saveHistory();
+});
+
+// ─── Settings ──────────────────────────────────────────────────────
+const SETTINGS_PATH = path.join(app.getPath('userData'), 'settings.json');
+const DEFAULT_SETTINGS = {
+  searchEngine: 'google',           // google | duckduckgo | brave | bing | astrion
+  homepage: 'astrion://newtab',
+  aiModel: 'qwen2.5:7b',
+  aiUrl: 'http://localhost:11434',
+  sleepingTabsMinutes: 30,
+  blockTrackers: true,
+};
+let settings = { ...DEFAULT_SETTINGS };
+
+function loadSettings() {
+  try {
+    if (fs.existsSync(SETTINGS_PATH)) {
+      const raw = fs.readFileSync(SETTINGS_PATH, 'utf8');
+      const parsed = JSON.parse(raw);
+      settings = { ...DEFAULT_SETTINGS, ...parsed };
+    }
+  } catch {}
+}
+function saveSettings() {
+  try { fs.writeFileSync(SETTINGS_PATH, JSON.stringify(settings, null, 2)); } catch {}
+}
+ipcMain.handle('settings:get', () => settings);
+ipcMain.handle('settings:set', (_, partial) => {
+  settings = { ...settings, ...partial };
+  saveSettings();
+  return settings;
+});
+
+// ─── Sleeping tabs ─────────────────────────────────────────────────
+// Tabs that haven't been the active tab for N minutes get unloaded
+// (replaced with about:blank) to claw back memory. The tab title and
+// URL stay in our state so re-clicking the tab reloads it.
+const sleepingTabs = new Set();
+let sleepingTabIdleSince = new Map(); // id → timestamp of last activate
+const SLEEP_CHECK_INTERVAL_MS = 60_000;
+
+function markTabActive(id) {
+  sleepingTabIdleSince.set(id, Date.now());
+  if (sleepingTabs.has(id)) {
+    const tab = tabs.get(id);
+    if (tab) {
+      sleepingTabs.delete(id);
+      tab.view.webContents.loadURL(tab.url);
+    }
+  }
+}
+
+function sweepSleepingTabs() {
+  const minutes = settings.sleepingTabsMinutes;
+  if (!minutes || minutes <= 0) return;
+  const cutoff = Date.now() - minutes * 60_000;
+  for (const [id, lastActive] of sleepingTabIdleSince.entries()) {
+    if (id === activeTabId) continue;
+    if (sleepingTabs.has(id)) continue;
+    if (lastActive > cutoff) continue;
+    const tab = tabs.get(id);
+    if (!tab) continue;
+    sleepingTabs.add(id);
+    // Don't blow up the URL bar / history — just unload the renderer.
+    try { tab.view.webContents.loadURL('about:blank'); } catch {}
+  }
+}
+
+setInterval(sweepSleepingTabs, SLEEP_CHECK_INTERVAL_MS);
+
 // ─── Tab management extras ─────────────────────────────────────────
 ipcMain.handle('tabs:duplicate', (_, id) => {
   const tab = tabs.get(id);
@@ -524,6 +807,8 @@ app.whenReady().then(() => {
     });
   } catch {}
 
+  loadSettings();
+  loadHistory();
   loadBookmarks();
   createMainWindow();
 
