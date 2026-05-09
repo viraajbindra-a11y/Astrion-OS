@@ -25,6 +25,7 @@
                placeholder="Search the web or ask Astrion AI">
         <button id="bookmark-btn" title="Bookmark (Ctrl+D)" aria-label="Bookmark page">☆</button>
       </div>
+      <button id="reader-btn" title="Reader mode" aria-label="Reader mode">📖</button>
       <button id="find-btn" title="Find in page (Ctrl+F)" aria-label="Find in page">⌕</button>
       <button id="ai-btn" title="Ask Astrion about this page (Ctrl+Shift+A)" aria-label="AI sidebar">✨</button>
     </div>
@@ -69,12 +70,22 @@
   <div id="tab-menu" hidden>
     <button data-action="reload">Reload</button>
     <button data-action="duplicate">Duplicate</button>
+    <button data-action="pin">Pin tab</button>
+    <button data-action="unpin" hidden>Unpin tab</button>
     <button data-action="mute">Mute</button>
     <button data-action="unmute" hidden>Unmute</button>
     <hr>
     <button data-action="close">Close tab</button>
     <button data-action="close-others">Close other tabs</button>
     <button data-action="close-right">Close tabs to the right</button>
+  </div>
+
+  <!-- Downloads bar — slides up from the bottom when a download starts -->
+  <div id="downloads-bar" hidden>
+    <span class="downloads-label">Downloads</span>
+    <div id="downloads-items"></div>
+    <button id="downloads-clear" title="Clear completed">Clear</button>
+    <button id="downloads-close" title="Hide" aria-label="Close">×</button>
   </div>
 
   <script src="browser.js"></script>

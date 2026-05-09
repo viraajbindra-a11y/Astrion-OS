@@ -43,6 +43,20 @@ contextBridge.exposeInMainWorld('astrion', {
   getSettings: () => ipcRenderer.invoke('settings:get'),
   setSettings: (partial) => ipcRenderer.invoke('settings:set', partial),
 
+  // Reading mode
+  openReader: () => ipcRenderer.invoke('reader:extract-and-open'),
+
+  // Downloads
+  listDownloads: () => ipcRenderer.invoke('downloads:list'),
+  openDownload: (id) => ipcRenderer.invoke('downloads:open', id),
+  showDownload: (id) => ipcRenderer.invoke('downloads:show', id),
+  clearDownloads: () => ipcRenderer.invoke('downloads:clear'),
+
+  // Fullscreen + pinning
+  toggleFullscreen: () => ipcRenderer.invoke('fullscreen:toggle'),
+  fullscreenState: () => ipcRenderer.invoke('fullscreen:state'),
+  pinTab: (id, pinned) => ipcRenderer.invoke('tabs:pin', id, pinned),
+
   // Bookmarks
   listBookmarks: () => ipcRenderer.invoke('bookmarks:list'),
   addBookmark: (b) => ipcRenderer.invoke('bookmarks:add', b),
@@ -87,5 +101,10 @@ contextBridge.exposeInMainWorld('astrion', {
     const listener = (_e, prompt) => cb(prompt);
     ipcRenderer.on('sidebar:ask-with-prompt', listener);
     return () => ipcRenderer.off('sidebar:ask-with-prompt', listener);
+  },
+  onDownloads: (cb) => {
+    const listener = (_e, list) => cb(list);
+    ipcRenderer.on('downloads:list', listener);
+    return () => ipcRenderer.off('downloads:list', listener);
   },
 });

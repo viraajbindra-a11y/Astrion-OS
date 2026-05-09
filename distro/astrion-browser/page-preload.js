@@ -18,7 +18,7 @@ function isInternalPage() {
   // file:// URL containing our renderer/ path with one of our known files.
   if (!href.startsWith('file://')) return false;
   // Allow only specific page names to be safe.
-  return /\/renderer\/(history|settings|newtab)\.html(\?|#|$)/.test(href);
+  return /\/renderer\/(history|settings|newtab|reader|downloads)\.html(\?|#|$)/.test(href);
 }
 
 if (isInternalPage()) {
@@ -29,6 +29,11 @@ if (isInternalPage()) {
     setSettings: (partial) => ipcRenderer.invoke('settings:set', partial),
     listBookmarks: () => ipcRenderer.invoke('bookmarks:list'),
     removeBookmark: (url) => ipcRenderer.invoke('bookmarks:remove', url),
+    getReaderContent: () => ipcRenderer.invoke('reader:get-content'),
+    listDownloads: () => ipcRenderer.invoke('downloads:list'),
+    openDownload: (id) => ipcRenderer.invoke('downloads:open', id),
+    showDownload: (id) => ipcRenderer.invoke('downloads:show', id),
+    clearDownloads: () => ipcRenderer.invoke('downloads:clear'),
     // Navigation helpers — internal pages can ask the chrome to navigate
     // the current tab, or open a new tab.
     navigate: (url) => {

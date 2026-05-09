@@ -11,6 +11,7 @@ const reloadBtn = document.getElementById('reload-btn');
 const urlBar = document.getElementById('url-bar');
 const urlIcon = document.getElementById('url-icon');
 const aiBtn = document.getElementById('ai-btn');
+const readerBtn = document.getElementById('reader-btn');
 
 // Local mirror of main-process tab list, kept in sync via push events.
 let tabState = []; // [{ id, url, title, favicon, isLoading, canGoBack, canGoForward }]
@@ -20,9 +21,17 @@ let urlBarFocused = false;
 // ─── Tab strip rendering ────────────────────────────────
 function renderTabs() {
   tabsEl.innerHTML = '';
-  for (const t of tabState) {
+  // Sort: pinned first (in their original order), then unpinned.
+  const sorted = [
+    ...tabState.filter(t => t.pinned),
+    ...tabState.filter(t => !t.pinned),
+  ];
+  for (const t of sorted) {
     const tab = document.createElement('div');
-    tab.className = 'tab' + (t.id === activeId ? ' active' : '') + (t.isLoading ? ' loading' : '');
+    tab.className = 'tab'
+      + (t.id === activeId ? ' active' : '')
+      + (t.isLoading ? ' loading' : '')
+      + (t.pinned ? ' pinned' : '');
     tab.dataset.id = t.id;
 
     const fav = document.createElement('span');
@@ -102,6 +111,7 @@ forwardBtn.addEventListener('click', () => activeId !== null && window.astrion.f
 reloadBtn.addEventListener('click', () => activeId !== null && window.astrion.reload(activeId));
 
 aiBtn.addEventListener('click', () => toggleSidebar());
+readerBtn.addEventListener('click', () => window.astrion.openReader());
 
 urlBar.addEventListener('focus', () => {
   urlBarFocused = true;
@@ -133,7 +143,10 @@ document.addEventListener('keydown', (e) => {
   else if (ctrl && e.key === 'f') { e.preventDefault(); openFindBar(); }
   else if (ctrl && e.key === 'h') { e.preventDefault(); window.astrion.newTab('astrion://history'); }
   else if (ctrl && e.key === ',') { e.preventDefault(); window.astrion.newTab('astrion://settings'); }
+  else if (ctrl && e.key === 'j') { e.preventDefault(); toggleDownloadsBar(); }
   else if (ctrl && e.shiftKey && (e.key === 'a' || e.key === 'A')) { e.preventDefault(); toggleSidebar(); }
+  else if (ctrl && e.shiftKey && (e.key === 'r' || e.key === 'R')) { e.preventDefault(); window.astrion.openReader(); }
+  else if (e.key === 'F11') { e.preventDefault(); window.astrion.toggleFullscreen(); }
   else if (ctrl && (e.key === '+' || e.key === '=')) { e.preventDefault(); window.astrion.zoomIn(); }
   else if (ctrl && e.key === '-') { e.preventDefault(); window.astrion.zoomOut(); }
   else if (ctrl && e.key === '0') { e.preventDefault(); window.astrion.zoomReset(); }
@@ -450,6 +463,12 @@ document.addEventListener('contextmenu', (e) => {
 });
 
 function showTabMenu(x, y) {
+  // Show pin or unpin depending on the target tab's state.
+  const target = tabState.find(t => t.id === tabMenuTargetId);
+  const pinned = !!(target && target.pinned);
+  tabMenu.querySelector('button[data-action="pin"]').hidden = pinned;
+  tabMenu.querySelector('button[data-action="unpin"]').hidden = !pinned;
+
   tabMenu.hidden = false;
   // Clamp to viewport
   const rect = tabMenu.getBoundingClientRect();
@@ -476,6 +495,8 @@ tabMenu.querySelectorAll('button[data-action]').forEach(btn => {
     switch (action) {
       case 'reload': window.astrion.reload(id); break;
       case 'duplicate': window.astrion.duplicateTab(id); break;
+      case 'pin': window.astrion.pinTab(id, true); break;
+      case 'unpin': window.astrion.pinTab(id, false); break;
       case 'mute': window.astrion.muteTab(id, true); break;
       case 'unmute': window.astrion.muteTab(id, false); break;
       case 'close': window.astrion.closeTab(id); break;
@@ -484,4 +505,113 @@ tabMenu.querySelectorAll('button[data-action]').forEach(btn => {
     }
     hideTabMenu();
   });
+});
+
+// ═══════════════════════════════════════════════════════
+// DOWNLOADS BAR
+// ═══════════════════════════════════════════════════════
+const downloadsBar = document.getElementById('downloads-bar');
+const downloadsItems = document.getElementById('downloads-items');
+const downloadsClear = document.getElementById('downloads-clear');
+const downloadsClose = document.getElementById('downloads-close');
+
+let lastDownloads = [];
+let downloadsBarManuallyHidden = false;
+
+function fmtBytes(bytes) {
+  if (!bytes) return '0';
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  if (bytes < 1024 * 1024 * 1024) return (bytes / 1024 / 1024).toFixed(1) + ' MB';
+  return (bytes / 1024 / 1024 / 1024).toFixed(2) + ' GB';
+}
+
+function renderDownloads(list) {
+  lastDownloads = list || [];
+  downloadsItems.innerHTML = '';
+  // Show only the most recent 5 in the bar.
+  for (const d of lastDownloads.slice(0, 5)) {
+    const row = document.createElement('div');
+    row.className = `dl-item ${d.state}`;
+
+    const name = document.createElement('span');
+    name.className = 'dl-item-name';
+    name.textContent = d.filename;
+    name.title = d.savePath || d.filename;
+    row.appendChild(name);
+
+    if (d.state === 'progressing') {
+      const bar = document.createElement('div');
+      bar.className = 'dl-item-bar';
+      const fill = document.createElement('div');
+      fill.className = 'dl-item-bar-fill';
+      const pct = d.totalBytes > 0 ? (d.receivedBytes / d.totalBytes) * 100 : 0;
+      fill.style.width = pct + '%';
+      bar.appendChild(fill);
+      row.appendChild(bar);
+
+      const prog = document.createElement('span');
+      prog.className = 'dl-item-progress';
+      prog.textContent = d.totalBytes
+        ? `${fmtBytes(d.receivedBytes)}/${fmtBytes(d.totalBytes)}`
+        : fmtBytes(d.receivedBytes);
+      row.appendChild(prog);
+    } else if (d.state === 'completed') {
+      const open = document.createElement('button');
+      open.className = 'dl-item-action';
+      open.textContent = 'Open';
+      open.addEventListener('click', () => window.astrion.openDownload(d.id));
+      row.appendChild(open);
+
+      const show = document.createElement('button');
+      show.className = 'dl-item-action';
+      show.textContent = 'Show';
+      show.addEventListener('click', () => window.astrion.showDownload(d.id));
+      row.appendChild(show);
+    } else {
+      const status = document.createElement('span');
+      status.className = 'dl-item-progress';
+      status.textContent = d.state;
+      row.appendChild(status);
+    }
+
+    downloadsItems.appendChild(row);
+  }
+}
+
+function toggleDownloadsBar() {
+  if (downloadsBar.hidden) {
+    downloadsBarManuallyHidden = false;
+    downloadsBar.hidden = false;
+    window.astrion.listDownloads().then(renderDownloads);
+  } else {
+    downloadsBarManuallyHidden = true;
+    downloadsBar.hidden = true;
+  }
+}
+
+downloadsClear.addEventListener('click', () => {
+  window.astrion.clearDownloads();
+});
+downloadsClose.addEventListener('click', () => {
+  downloadsBarManuallyHidden = true;
+  downloadsBar.hidden = true;
+});
+
+window.astrion.onDownloads?.((list) => {
+  const wasHidden = downloadsBar.hidden;
+  renderDownloads(list);
+  // Auto-show when something starts. Don't pop back up if user
+  // explicitly closed it.
+  if (list && list.length > 0 && !downloadsBarManuallyHidden) {
+    downloadsBar.hidden = false;
+  }
+});
+
+// Initial pull.
+window.astrion.listDownloads?.().then(list => {
+  if (list && list.length > 0 && !downloadsBarManuallyHidden) {
+    downloadsBar.hidden = false;
+  }
+  renderDownloads(list || []);
 });

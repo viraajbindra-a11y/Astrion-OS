@@ -25,6 +25,7 @@ const SIDEBAR_WIDTH = 360;
 const ASTRION_NEWTAB = `file://${path.join(__dirname, 'renderer', 'newtab.html')}`;
 const ASTRION_HISTORY = `file://${path.join(__dirname, 'renderer', 'history.html')}`;
 const ASTRION_SETTINGS = `file://${path.join(__dirname, 'renderer', 'settings.html')}`;
+const ASTRION_READER = `file://${path.join(__dirname, 'renderer', 'reader.html')}`;
 // Astrion's web server (web app, /api endpoints). The browser's AI
 // sidebar talks to it; bookmarks may sync to it.
 const ASTRION_SERVER = process.env.ASTRION_SERVER || 'http://localhost:3000';
@@ -265,6 +266,7 @@ function normalizeInput(raw) {
     if (id === 'newtab' || id === '') return ASTRION_NEWTAB;
     if (id === 'history') return ASTRION_HISTORY;
     if (id === 'settings') return ASTRION_SETTINGS;
+    if (id === 'reader') return ASTRION_READER;
     return ASTRION_NEWTAB;
   }
   // view-source: passthrough
@@ -309,6 +311,7 @@ function tabSummary(tab) {
     isLoading: tab.isLoading,
     canGoBack: tab.canGoBack,
     canGoForward: tab.canGoForward,
+    pinned: !!tab.pinned,
   };
 }
 
@@ -727,6 +730,186 @@ ipcMain.handle('settings:set', (_, partial) => {
   settings = { ...settings, ...partial };
   saveSettings();
   return settings;
+});
+
+// ─── Reading mode ──────────────────────────────────────────────────
+// In-memory store. The reader extracts the active tab's content via
+// JS injection, stashes it here, then opens reader.html which pulls
+// it back via IPC. Cap at one entry — only the most recent extraction
+// is kept (re-extracting overwrites).
+let lastReaderContent = null;
+
+ipcMain.handle('reader:extract-and-open', async () => {
+  if (activeTabId === null) return null;
+  const tab = tabs.get(activeTabId);
+  if (!tab) return null;
+  const wc = tab.view.webContents;
+
+  try {
+    const extracted = await wc.executeJavaScript(`
+      (() => {
+        // Simple Readability-style extraction. Find the densest text
+        // container, clone it, strip non-content noise, return HTML.
+        const candidates = [
+          document.querySelector('article'),
+          document.querySelector('[role="article"]'),
+          document.querySelector('main'),
+          document.querySelector('[role="main"]'),
+          document.querySelector('.post, .article, .entry, .content'),
+          document.body,
+        ].filter(Boolean);
+
+        let best = candidates[0];
+        let bestLen = 0;
+        for (const el of candidates) {
+          const len = (el.innerText || '').length;
+          if (len > bestLen) { best = el; bestLen = len; }
+        }
+        if (!best) return null;
+
+        const clone = best.cloneNode(true);
+        const stripSelectors = [
+          'script', 'style', 'nav', 'header', 'footer', 'aside',
+          'iframe', 'noscript', 'form', 'button', 'svg',
+          '.ad', '.ads', '.advertisement', '[class*="sponsored"]',
+          '[class*="newsletter"]', '[class*="popup"]',
+          '[role="navigation"]', '[role="complementary"]', '[role="banner"]',
+          '[aria-hidden="true"]',
+        ];
+        clone.querySelectorAll(stripSelectors.join(',')).forEach(el => el.remove());
+
+        // Title
+        const h1 = best.querySelector('h1') || document.querySelector('h1');
+        const title = (h1 ? h1.innerText : document.title || '').trim();
+
+        // Byline / author
+        const bylineEl = document.querySelector(
+          '[rel="author"], .author, .byline, [itemprop="author"], meta[name="author"]'
+        );
+        let byline = '';
+        if (bylineEl) {
+          byline = bylineEl.tagName === 'META' ? bylineEl.content : bylineEl.innerText;
+          byline = (byline || '').trim().slice(0, 200);
+        }
+
+        // Date
+        const dateEl = document.querySelector(
+          'time, [itemprop="datePublished"], meta[property="article:published_time"]'
+        );
+        let date = '';
+        if (dateEl) {
+          date = dateEl.tagName === 'META' ? dateEl.content :
+                 (dateEl.getAttribute('datetime') || dateEl.innerText || '').trim();
+        }
+
+        return {
+          title,
+          byline,
+          date,
+          content: clone.innerHTML,
+          url: location.href,
+          extractedAt: Date.now(),
+        };
+      })()
+    `, true);
+
+    if (!extracted) return null;
+    lastReaderContent = extracted;
+    createTab(ASTRION_READER);
+    return true;
+  } catch (err) {
+    console.warn('[astrion-browser] reader extract failed:', err?.message);
+    return null;
+  }
+});
+
+ipcMain.handle('reader:get-content', () => lastReaderContent);
+
+// ─── Downloads ─────────────────────────────────────────────────────
+const downloads = []; // { id, filename, savePath, totalBytes, receivedBytes, state }
+let nextDownloadId = 1;
+
+function pushDownloads() {
+  if (!mainWindow) return;
+  try { mainWindow.webContents.send('downloads:list', downloads); } catch {}
+}
+
+session.defaultSession?.on?.('will-download', (event, item, webContents) => {
+  // We don't pre-set savePath — let Electron prompt the user.
+  const id = nextDownloadId++;
+  const entry = {
+    id,
+    filename: item.getFilename(),
+    savePath: '',
+    totalBytes: item.getTotalBytes(),
+    receivedBytes: 0,
+    state: 'progressing',
+    startedAt: Date.now(),
+  };
+  downloads.unshift(entry);
+  if (downloads.length > 100) downloads.length = 100;
+  pushDownloads();
+
+  item.on('updated', (_, state) => {
+    entry.state = state;
+    entry.receivedBytes = item.getReceivedBytes();
+    entry.totalBytes = item.getTotalBytes();
+    entry.savePath = item.getSavePath();
+    pushDownloads();
+  });
+  item.once('done', (_, state) => {
+    entry.state = state;
+    entry.receivedBytes = item.getReceivedBytes();
+    entry.totalBytes = item.getTotalBytes();
+    entry.savePath = item.getSavePath();
+    pushDownloads();
+  });
+});
+
+ipcMain.handle('downloads:list', () => downloads);
+ipcMain.handle('downloads:open', (_, id) => {
+  const dl = downloads.find(d => d.id === id);
+  if (dl && dl.savePath && dl.state === 'completed') {
+    shell.openPath(dl.savePath);
+  }
+});
+ipcMain.handle('downloads:show', (_, id) => {
+  const dl = downloads.find(d => d.id === id);
+  if (dl && dl.savePath) {
+    shell.showItemInFolder(dl.savePath);
+  }
+});
+ipcMain.handle('downloads:clear', () => {
+  // Drop completed/cancelled entries; keep in-progress ones.
+  for (let i = downloads.length - 1; i >= 0; i--) {
+    if (downloads[i].state !== 'progressing') downloads.splice(i, 1);
+  }
+  pushDownloads();
+});
+
+// ─── Fullscreen ────────────────────────────────────────────────────
+ipcMain.handle('fullscreen:toggle', () => {
+  if (!mainWindow) return false;
+  const next = !mainWindow.isFullScreen();
+  mainWindow.setFullScreen(next);
+  return next;
+});
+ipcMain.handle('fullscreen:state', () => mainWindow ? mainWindow.isFullScreen() : false);
+
+// ─── Tab pinning ───────────────────────────────────────────────────
+// Pinned tabs sit at the leftmost positions, render narrower in the
+// strip, and the close button is hidden in their context menu. The
+// pin state persists across browser restarts via the `pins` array
+// in settings.
+ipcMain.handle('tabs:pin', (_, id, pinned) => {
+  const tab = tabs.get(id);
+  if (!tab) return;
+  tab.pinned = !!pinned;
+  // Persist the URL so we can restore on next launch.
+  const pinnedUrls = [...tabs.values()].filter(t => t.pinned).map(t => t.url);
+  settings.pinnedTabs = pinnedUrls;
+  saveSettings();
+  pushTabList();
 });
 
 // ─── Sleeping tabs ─────────────────────────────────────────────────

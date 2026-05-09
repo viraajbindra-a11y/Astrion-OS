@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Reader — Astrion</title>
+  <style>
+    :root {
+      --bg: #18181f;
+      --bg-elevated: #1f1f29;
+      --fg: #e8e8ec;
+      --fg-muted: rgba(232,232,236,0.62);
+      --fg-faint: rgba(232,232,236,0.36);
+      --accent: #5ac8fa;
+      --border: rgba(255,255,255,0.08);
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; padding: 0;
+      font-family: 'Iowan Old Style', 'Palatino', Georgia, serif;
+      color: var(--fg);
+      background: var(--bg);
+      line-height: 1.7;
+      font-size: 18px;
+    }
+    .reader-toolbar {
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      padding: 10px 18px;
+      background: rgba(24, 24, 31, 0.92);
+      backdrop-filter: blur(8px);
+      border-bottom: 1px solid var(--border);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      font-size: 12px;
+    }
+    .reader-toolbar .label {
+      color: var(--fg-faint);
+      flex: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .reader-toolbar button, .reader-toolbar select {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      color: var(--fg);
+      padding: 5px 10px;
+      border-radius: 6px;
+      font-size: 12px;
+      font-family: inherit;
+      cursor: pointer;
+    }
+    .reader-toolbar button:hover { border-color: var(--accent); }
+    .reader-toolbar select { padding-right: 24px; }
+    .reader-content {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 48px 28px 80px;
+    }
+    .reader-content h1 {
+      font-size: 32px;
+      line-height: 1.25;
+      font-weight: 700;
+      margin: 0 0 12px;
+      color: white;
+      letter-spacing: -0.5px;
+    }
+    .reader-meta {
+      display: flex;
+      gap: 12px;
+      font-size: 13px;
+      color: var(--fg-muted);
+      font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+      margin-bottom: 32px;
+      padding-bottom: 24px;
+      border-bottom: 1px solid var(--border);
+      flex-wrap: wrap;
+    }
+    .reader-meta a { color: var(--accent); text-decoration: none; }
+    .reader-meta a:hover { text-decoration: underline; }
+    .reader-content article {
+      font-size: 18px;
+    }
+    .reader-content h1, .reader-content h2, .reader-content h3 {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      letter-spacing: -0.3px;
+    }
+    .reader-content h2 {
+      font-size: 24px;
+      margin-top: 36px;
+      color: white;
+    }
+    .reader-content h3 { font-size: 20px; margin-top: 28px; color: white; }
+    .reader-content p { margin: 0 0 18px; }
+    .reader-content a { color: var(--accent); text-decoration: underline; text-decoration-color: rgba(90,200,250,0.4); text-underline-offset: 2px; }
+    .reader-content img, .reader-content figure {
+      max-width: 100%;
+      height: auto;
+      border-radius: 8px;
+      margin: 24px auto;
+      display: block;
+    }
+    .reader-content figcaption {
+      font-size: 13px;
+      color: var(--fg-muted);
+      text-align: center;
+      margin-top: 6px;
+      font-family: -apple-system, system-ui, sans-serif;
+    }
+    .reader-content blockquote {
+      border-left: 3px solid var(--accent);
+      padding: 0 0 0 18px;
+      margin: 24px 0;
+      color: var(--fg-muted);
+      font-style: italic;
+    }
+    .reader-content code {
+      background: rgba(255,255,255,0.06);
+      padding: 1px 6px;
+      border-radius: 3px;
+      font-family: ui-monospace, Menlo, Consolas, monospace;
+      font-size: 0.9em;
+    }
+    .reader-content pre {
+      background: var(--bg-elevated);
+      border: 1px solid var(--border);
+      padding: 14px 18px;
+      border-radius: 8px;
+      overflow-x: auto;
+      font-family: ui-monospace, Menlo, Consolas, monospace;
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    .reader-content pre code { background: transparent; padding: 0; }
+    .reader-content ul, .reader-content ol { padding-left: 28px; margin: 0 0 18px; }
+    .reader-content li { margin-bottom: 4px; }
+    .empty {
+      max-width: 480px;
+      margin: 100px auto;
+      text-align: center;
+      color: var(--fg-muted);
+      font-family: -apple-system, system-ui, sans-serif;
+    }
+    .empty h2 { color: white; margin-bottom: 12px; }
+    /* Theme variants */
+    body.theme-light { --bg: #faf8f4; --bg-elevated: #fff; --fg: #1c1c1e; --fg-muted: rgba(28,28,30,0.62); --fg-faint: rgba(28,28,30,0.36); --border: rgba(0,0,0,0.08); }
+    body.theme-light .reader-content h1, body.theme-light .reader-content h2, body.theme-light .reader-content h3 { color: #000; }
+    body.theme-sepia { --bg: #f3eed7; --bg-elevated: #ebe4c5; --fg: #3a2f15; --fg-muted: rgba(58,47,21,0.62); --fg-faint: rgba(58,47,21,0.4); --border: rgba(58,47,21,0.12); }
+    body.theme-sepia .reader-content h1, body.theme-sepia .reader-content h2, body.theme-sepia .reader-content h3 { color: #1f1808; }
+  </style>
+</head>
+<body class="theme-dark">
+  <div class="reader-toolbar">
+    <span class="label" id="src-link"></span>
+    <select id="theme-select" title="Reader theme">
+      <option value="theme-dark">Dark</option>
+      <option value="theme-light">Light</option>
+      <option value="theme-sepia">Sepia</option>
+    </select>
+    <select id="size-select" title="Font size">
+      <option value="16">Small</option>
+      <option value="18" selected>Medium</option>
+      <option value="20">Large</option>
+      <option value="22">XL</option>
+    </select>
+    <button id="back-btn" title="Back to original page">← Original</button>
+  </div>
+
+  <div class="reader-content" id="content">
+    <div class="empty">
+      <h2>Loading reader…</h2>
+      <p>Extracting the article from the page you were on.</p>
+    </div>
+  </div>
+
+  <script>
+    async function load() {
+      if (!window.astrionPage) {
+        renderEmpty('Reader API not available.', 'This page only works inside Astrion Browser.');
+        return;
+      }
+      const data = await window.astrionPage.getReaderContent();
+      if (!data || !data.content) {
+        renderEmpty('No article found.', 'This page didn\\'t look like an article. Reader works best on news, blog posts, and documentation.');
+        return;
+      }
+      render(data);
+    }
+
+    function renderEmpty(title, body) {
+      document.getElementById('content').innerHTML = `
+        <div class="empty">
+          <h2>${escapeHtml(title)}</h2>
+          <p>${escapeHtml(body)}</p>
+        </div>
+      `;
+    }
+
+    function render(data) {
+      // Source link in toolbar
+      const src = document.getElementById('src-link');
+      if (data.url) {
+        try {
+          const u = new URL(data.url);
+          src.innerHTML = `From <a href="${escapeAttr(data.url)}">${escapeHtml(u.hostname)}</a>`;
+        } catch {
+          src.textContent = data.url;
+        }
+      }
+
+      const meta = [];
+      if (data.byline) meta.push(escapeHtml(data.byline));
+      if (data.date) {
+        try {
+          const d = new Date(data.date);
+          if (!isNaN(d.getTime())) meta.push(d.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' }));
+          else meta.push(escapeHtml(data.date));
+        } catch { meta.push(escapeHtml(data.date)); }
+      }
+
+      const wrapper = document.getElementById('content');
+      wrapper.innerHTML = `
+        <h1>${escapeHtml(data.title || 'Untitled')}</h1>
+        <div class="reader-meta">${meta.join(' · ')}</div>
+        <article id="article"></article>
+      `;
+      // Inject the extracted HTML directly. The original page's CSS
+      // doesn't follow, so layout is whatever inline attrs survived.
+      // Most articles are well-structured enough that this works.
+      document.getElementById('article').innerHTML = data.content || '';
+    }
+
+    document.getElementById('back-btn').addEventListener('click', () => {
+      // Use chrome's window.history.back via location? We can just
+      // navigate to the original URL which lives in data.url.
+      window.astrionPage.getReaderContent().then(d => {
+        if (d && d.url) location.href = d.url;
+      });
+    });
+
+    document.getElementById('theme-select').addEventListener('change', (e) => {
+      document.body.className = e.target.value;
+    });
+
+    document.getElementById('size-select').addEventListener('change', (e) => {
+      document.querySelector('.reader-content').style.fontSize = e.target.value + 'px';
+      const article = document.querySelector('#article');
+      if (article) article.style.fontSize = e.target.value + 'px';
+    });
+
+    function escapeHtml(s) {
+      return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      })[c]);
+    }
+    function escapeAttr(s) { return escapeHtml(s); }
+
+    load();
+  </script>
+</body>
+</html>
