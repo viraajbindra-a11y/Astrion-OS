@@ -171,6 +171,16 @@ class NotificationManager {
     if (this.history.length > MAX_HISTORY) this.history.shift();
     this._persistHistory();
 
+    // No DOM host yet — happens in test pages (v03 verification) and during
+    // very-early boot before init() has run. Record + emit, skip the visible
+    // banner. Used to crash with "Cannot read properties of null (reading
+    // 'appendChild')" 24 times during v03 because capabilities trigger
+    // safeNotify on every action.
+    if (!this.container) {
+      eventBus.emit('notification:shown', { id, title, count: this.history.length });
+      return id;
+    }
+
     // Suppress visible banner if Focus mode is on (unless marked urgent)
     if (!urgent) {
       try {

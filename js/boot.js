@@ -217,7 +217,7 @@ function __bootFlush(reason) {
     await graphStore.init();
     await migrateLocalStorageToGraph();
 
-    // Register ALL 76 apps so any of them can launch in native mode.
+    // Register every known app so any of them can launch in native mode.
     // M0.P3 history: was previously only registering the first 16, so
     // launching Chess/Kanban/Beat Studio from nova-shell failed silently.
     registerAllApps();

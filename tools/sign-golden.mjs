@@ -47,6 +47,11 @@ const GOLDEN = [
   // across runs. Any change to this file MUST go through a human
   // bumping the golden lock manually.
   'js/kernel/self-upgrader.js',
+  // 2026-05-09: the API surface lock is the tripwire that keeps
+  // capability/IPC/skill-export drift out. If the AI could rewrite the
+  // lock manifest, it could "drift legally" by editing the locked Set.
+  // Lock the lock-file's own bytes so that bypass is closed.
+  'js/kernel/api-surface.lock.js',
   'test/v03-verification.html',
 ];
 
