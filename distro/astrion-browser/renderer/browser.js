@@ -191,6 +191,32 @@ window.astrion.activeTab().then((id) => {
   refreshChromeForActive();
 });
 
+// ─── Theme + chrome settings ────────────────────────────
+async function applyChromeSettings() {
+  if (!window.astrion.getSettings) return;
+  const s = await window.astrion.getSettings();
+  // Theme: dark (default) | light | sepia
+  const theme = s.theme || 'dark';
+  document.body.classList.remove('theme-dark', 'theme-light', 'theme-sepia');
+  document.body.classList.add(`theme-${theme}`);
+  // Accent: any hex; reset back to default if missing/invalid
+  const accent = (s.accent && /^#([0-9a-f]{3,8})$/i.test(s.accent)) ? s.accent : '#5ac8fa';
+  document.documentElement.style.setProperty('--accent', accent);
+  // Vertical tabs layout
+  document.body.classList.toggle('vertical-tabs', !!s.verticalTabs);
+}
+
+applyChromeSettings();
+// Live update on settings change (user toggles theme on settings page).
+window.astrion.onSettingsChanged?.((s) => {
+  const theme = s.theme || 'dark';
+  document.body.classList.remove('theme-dark', 'theme-light', 'theme-sepia');
+  document.body.classList.add(`theme-${theme}`);
+  const accent = (s.accent && /^#([0-9a-f]{3,8})$/i.test(s.accent)) ? s.accent : '#5ac8fa';
+  document.documentElement.style.setProperty('--accent', accent);
+  document.body.classList.toggle('vertical-tabs', !!s.verticalTabs);
+});
+
 // ═══════════════════════════════════════════════════════
 // AI SIDEBAR
 // ═══════════════════════════════════════════════════════

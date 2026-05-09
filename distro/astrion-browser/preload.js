@@ -97,6 +97,11 @@ contextBridge.exposeInMainWorld('astrion', {
     ipcRenderer.on('sidebar:opened', listener);
     return () => ipcRenderer.off('sidebar:opened', listener);
   },
+  onSettingsChanged: (cb) => {
+    const listener = (_e, s) => cb(s);
+    ipcRenderer.on('settings:changed', listener);
+    return () => ipcRenderer.off('settings:changed', listener);
+  },
   onSidebarAskWithPrompt: (cb) => {
     const listener = (_e, prompt) => cb(prompt);
     ipcRenderer.on('sidebar:ask-with-prompt', listener);

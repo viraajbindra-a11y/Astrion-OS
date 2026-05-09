@@ -138,6 +138,41 @@
     <p class="subtitle">Configure Astrion Browser. Changes save automatically. <span class="saved" id="saved-indicator">Saved ✓</span></p>
 
     <div class="section">
+      <div class="section-title">Appearance</div>
+      <div class="row">
+        <div class="row-info">
+          <div class="row-label">Theme</div>
+          <div class="row-help">Color theme for the browser chrome (tab strip, URL bar, settings).</div>
+        </div>
+        <select id="theme">
+          <option value="dark">Dark</option>
+          <option value="light">Light</option>
+          <option value="sepia">Sepia</option>
+        </select>
+      </div>
+      <div class="row">
+        <div class="row-info">
+          <div class="row-label">Accent color</div>
+          <div class="row-help">Highlight color for buttons, selection, links, focus rings.</div>
+        </div>
+        <div style="display:flex;gap:6px;align-items:center;">
+          <span id="accent-swatch" style="width:24px;height:24px;border-radius:50%;border:1px solid var(--border);background:#5ac8fa;flex-shrink:0;"></span>
+          <input type="color" id="accent" value="#5ac8fa" style="width:48px;height:30px;padding:0;border-radius:6px;border:1px solid var(--border);background:transparent;cursor:pointer;">
+        </div>
+      </div>
+      <div class="row">
+        <div class="row-info">
+          <div class="row-label">Vertical tabs</div>
+          <div class="row-help">Show tabs as a sidebar on the left instead of a strip on top. Better for many tabs.</div>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="vertical-tabs">
+          <span class="toggle-track"></span>
+        </label>
+      </div>
+    </div>
+
+    <div class="section">
       <div class="section-title">Search</div>
       <div class="row">
         <div class="row-info">
@@ -237,6 +272,10 @@
       document.getElementById('sleeping-tabs').value = s.sleepingTabsMinutes ?? 30;
       document.getElementById('block-trackers').checked = !!s.blockTrackers;
       document.getElementById('restore-last-session').checked = s.restoreLastSession !== false;
+      document.getElementById('theme').value = s.theme || 'dark';
+      document.getElementById('accent').value = s.accent || '#5ac8fa';
+      document.getElementById('accent-swatch').style.background = s.accent || '#5ac8fa';
+      document.getElementById('vertical-tabs').checked = !!s.verticalTabs;
     }
 
     function bind(id, key, getValue) {
@@ -262,6 +301,14 @@
     bind('sleeping-tabs', 'sleepingTabsMinutes', el => parseInt(el.value, 10) || 0);
     bind('block-trackers', 'blockTrackers', el => el.checked);
     bind('restore-last-session', 'restoreLastSession', el => el.checked);
+    bind('theme', 'theme', el => el.value);
+    bind('accent', 'accent', el => el.value);
+    bind('vertical-tabs', 'verticalTabs', el => el.checked);
+
+    // Live preview of the accent color in the swatch.
+    document.getElementById('accent').addEventListener('input', (e) => {
+      document.getElementById('accent-swatch').style.background = e.target.value;
+    });
 
     load();
   </script>

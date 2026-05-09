@@ -15,9 +15,14 @@ const path = require('path');
 const fs = require('fs');
 
 // ─── Constants ─────────────────────────────────────────────────────
-// Height of the chrome (tab strip + URL bar). BrowserViews are
-// positioned starting at this y offset. Keep in sync with style.css.
+// Layout dimensions. BrowserViews are positioned beneath / beside the
+// chrome HTML based on the active layout mode. Horizontal mode (default):
+// chrome is 80px tall across the top. Vertical-tabs mode: tab strip is
+// 220px wide on the left + a 44px toolbar across the rest of the top.
+// Keep these in sync with renderer/style.css.
 const CHROME_HEIGHT = 80;
+const TOOLBAR_HEIGHT = 44;
+const VERTICAL_TAB_WIDTH = 220;
 // Width of the AI sidebar when open. Page BrowserView shrinks by
 // this amount horizontally so the sidebar HTML in the chrome shows
 // through on the right edge.
@@ -164,6 +169,7 @@ function createTab(url) {
     tab.url = navUrl;
     tab.canGoBack = wc.canGoBack();
     tab.canGoForward = wc.canGoForward();
+    applyPerSiteZoom(tab);
     pushTabState(id);
   });
   wc.on('did-navigate-in-page', (_, navUrl) => {
@@ -316,9 +322,26 @@ function layoutActiveView() {
   const tab = tabs.get(activeTabId);
   if (!tab) return;
   const [w, h] = mainWindow.getContentSize();
-  const pageWidth = sidebarOpen ? Math.max(0, w - SIDEBAR_WIDTH) : w;
+
+  // Vertical tabs mode: tab strip is on the left, only the toolbar
+  // sits above the page. Horizontal mode: full 80px chrome on top.
+  const vertical = !!(settings && settings.verticalTabs);
+  const xOffset = vertical ? VERTICAL_TAB_WIDTH : 0;
+  const yOffset = vertical ? TOOLBAR_HEIGHT : CHROME_HEIGHT;
+  // Bookmarks bar adds another row when visible — we don't wire that
+  // back through main yet, so always reserve the full chrome height.
+  // (Bookmarks bar is rendered in the chrome HTML; if it's hidden the
+  // layout has empty space which is fine.)
+
+  const baseWidth = w - xOffset;
+  const pageWidth = sidebarOpen ? Math.max(0, baseWidth - SIDEBAR_WIDTH) : baseWidth;
   try {
-    tab.view.setBounds({ x: 0, y: CHROME_HEIGHT, width: pageWidth, height: Math.max(0, h - CHROME_HEIGHT) });
+    tab.view.setBounds({
+      x: xOffset,
+      y: yOffset,
+      width: pageWidth,
+      height: Math.max(0, h - yOffset),
+    });
   } catch {}
 }
 
@@ -533,25 +556,55 @@ ipcMain.handle('find:stop', (_, action) => {
 });
 
 // ─── Page zoom ─────────────────────────────────────────────────────
+function persistZoom(tab, factor) {
+  try {
+    const host = new URL(tab.url).hostname;
+    if (!host) return;
+    if (!settings.perSiteZoom) settings.perSiteZoom = {};
+    if (Math.abs(factor - 1.0) < 0.001) {
+      delete settings.perSiteZoom[host];
+    } else {
+      settings.perSiteZoom[host] = +factor.toFixed(2);
+    }
+    saveSettings();
+  } catch {}
+}
 ipcMain.handle('zoom:in', () => {
   if (activeTabId === null) return;
   const tab = tabs.get(activeTabId);
   if (!tab) return;
   const wc = tab.view.webContents;
-  wc.setZoomFactor(Math.min(3, wc.getZoomFactor() + 0.1));
+  const next = Math.min(3, wc.getZoomFactor() + 0.1);
+  wc.setZoomFactor(next);
+  persistZoom(tab, next);
 });
 ipcMain.handle('zoom:out', () => {
   if (activeTabId === null) return;
   const tab = tabs.get(activeTabId);
   if (!tab) return;
   const wc = tab.view.webContents;
-  wc.setZoomFactor(Math.max(0.25, wc.getZoomFactor() - 0.1));
+  const next = Math.max(0.25, wc.getZoomFactor() - 0.1);
+  wc.setZoomFactor(next);
+  persistZoom(tab, next);
 });
 ipcMain.handle('zoom:reset', () => {
   if (activeTabId === null) return;
   const tab = tabs.get(activeTabId);
-  if (tab) tab.view.webContents.setZoomFactor(1);
+  if (!tab) return;
+  tab.view.webContents.setZoomFactor(1);
+  persistZoom(tab, 1);
 });
+
+// Apply persisted zoom when a tab navigates to a domain we have a
+// preference for. Hooked from the createTab event flow below.
+function applyPerSiteZoom(tab) {
+  try {
+    const host = new URL(tab.url).hostname;
+    if (!host || !settings.perSiteZoom) return;
+    const z = settings.perSiteZoom[host];
+    if (z && z > 0) tab.view.webContents.setZoomFactor(z);
+  } catch {}
+}
 
 // ─── Page context menu ─────────────────────────────────────────────
 function showPageContextMenu(tab, params) {
@@ -632,6 +685,41 @@ function showPageContextMenu(tab, params) {
       label: 'Save image as...',
       click: () => wc.downloadURL(params.srcURL),
     });
+    items.push({ type: 'separator' });
+  }
+
+  // Video → Picture-in-picture
+  if (params.mediaType === 'video') {
+    items.push({
+      label: 'Picture in picture',
+      click: () => {
+        // Find the video element under the click point (or any video)
+        // and toggle PiP on it.
+        wc.executeJavaScript(`
+          (() => {
+            const candidates = document.querySelectorAll('video');
+            let target = null;
+            for (const v of candidates) {
+              if (!v.paused && !v.ended) { target = v; break; }
+            }
+            if (!target && candidates.length) target = candidates[0];
+            if (!target) return false;
+            if (document.pictureInPictureElement === target) {
+              document.exitPictureInPicture().catch(() => {});
+            } else {
+              target.requestPictureInPicture().catch(() => {});
+            }
+            return true;
+          })()
+        `, true).catch(() => {});
+      },
+    });
+    if (params.srcURL) {
+      items.push({
+        label: 'Save video as...',
+        click: () => wc.downloadURL(params.srcURL),
+      });
+    }
     items.push({ type: 'separator' });
   }
 
@@ -733,6 +821,10 @@ const DEFAULT_SETTINGS = {
   restoreLastSession: true,
   pinnedTabs: [],
   lastSessionTabs: [],
+  theme: 'dark',                    // dark | light | sepia
+  accent: '#5ac8fa',
+  verticalTabs: false,
+  perSiteZoom: {},                  // { hostname: zoomFactor }
 };
 let settings = { ...DEFAULT_SETTINGS };
 
@@ -752,6 +844,12 @@ ipcMain.handle('settings:get', () => settings);
 ipcMain.handle('settings:set', (_, partial) => {
   settings = { ...settings, ...partial };
   saveSettings();
+  if (mainWindow) {
+    try { mainWindow.webContents.send('settings:changed', settings); } catch {}
+  }
+  // Some changes need an immediate effect — relayout for vertical
+  // tabs toggle, fresh layout for accent/theme via CSS.
+  layoutActiveView();
   return settings;
 });
 
