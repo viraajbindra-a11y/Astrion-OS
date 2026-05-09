@@ -1691,6 +1691,54 @@ ebMod.eventBus.off('sequence:repeated', onSeqRepeated);
 adapt._resetForTests();
 seqObs._resetForTests();
 
+// ═══ 22. Skill proposal toast wiring (2026-05-09) ═══
+// Verifies the UI surface subscribes correctly. End-to-end UX (the
+// actual visible banner with action buttons) is exercised in browser
+// preview, not here.
+section('22. Skill proposal toast');
+
+const toastMod = await import('/js/shell/skill-proposal-toast.js');
+const notifMod = await import('/js/kernel/notifications.js');
+toastMod._resetForTests();
+toastMod.initSkillProposalToast();
+
+const toastHistBefore = notifMod.notifications.history.length;
+ebMod.eventBus.emit('skill:proposal', {
+  id: 'auto-test-1',
+  sequence: ['notes.create', 'todo.create', 'reminder.create'],
+  count: 3,
+  summary: 'Run "notes.create → todo.create → reminder.create"',
+  phrases: ['notes todo reminder', 'do my notes routine'],
+  trigger: 'You ran this sequence 3 times recently',
+});
+// notifications.show pushes synchronously into history before any
+// async work, so we can read it back immediately.
+await test('toast subscribes to skill:proposal and calls notifications.show',
+  () => notifMod.notifications.history.length === toastHistBefore + 1);
+
+const lastNotif = notifMod.notifications.history[notifMod.notifications.history.length - 1];
+await test('toast title mentions Astrion noticing',
+  () => /noticed/i.test(lastNotif.title || ''));
+await test('toast body includes the trigger reason',
+  () => /3 times/i.test(lastNotif.body || ''));
+
+// Re-init must be idempotent — only one subscription, not duplicates.
+toastMod.initSkillProposalToast();
+toastMod.initSkillProposalToast();
+const toastHistBefore2 = notifMod.notifications.history.length;
+ebMod.eventBus.emit('skill:proposal', {
+  id: 'auto-test-2',
+  sequence: ['a', 'b', 'c'],
+  count: 3,
+  summary: 'Test idempotent',
+  phrases: ['a b c'],
+  trigger: 'Test trigger',
+});
+await test('re-init does not duplicate subscriptions (one notification, not three)',
+  () => notifMod.notifications.history.length === toastHistBefore2 + 1);
+
+toastMod._resetForTests();
+
 // ═══ Summary ═══
 const total = passCount + failCount;
 const summary = document.getElementById('summary');

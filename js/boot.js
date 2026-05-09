@@ -483,6 +483,12 @@ function __bootFlush(reason) {
   initControlCenter();
   initLaunchpad();
   notifications.init();
+  // 2026-05-09: surface for the auto-evolution loop. Subscribes to
+  // skill:proposal (emitted by skill-proposer when sequence-observer
+  // detects a repeated workflow) and shows the "Save as skill?" toast
+  // with action buttons. Must come after notifications.init() so the
+  // banner host exists.
+  (await import('./shell/skill-proposal-toast.js')).initSkillProposalToast();
   initShortcuts();
   initLockScreen();
   initScreenshot();
