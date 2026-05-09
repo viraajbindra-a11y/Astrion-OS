@@ -259,6 +259,10 @@ function __bootFlush(reason) {
     (await import('./kernel/value-lock.js')).initValueLock();
     (await import('./kernel/drift-detector.js')).initDriftDetector();
     (await import('./kernel/skill-scheduler.js')).startSkillScheduler();
+    // Auto-evolution loop — see comment in the desktop boot path for
+    // what these do.
+    (await import('./kernel/sequence-observer.js')).initSequenceObserver();
+    (await import('./kernel/skill-proposer.js')).initSkillProposer();
 
     // Phase 0: kill mock provider trap in native path too (lesson #72)
     if (localStorage.getItem('nova-ai-provider') === 'mock') {
@@ -458,6 +462,14 @@ function __bootFlush(reason) {
   (await import('./kernel/skill-registry.js')).loadSkillRegistry();
   // M8.P1 golden file integrity check.
   (await import('./kernel/golden-check.js')).initGoldenCheck();
+  // 2026-05-09 auto-evolution loop:
+  //   sequence-observer watches intent:completed and emits
+  //   sequence:repeated when a 3-step sequence has happened ≥3 times.
+  //   skill-proposer subscribes to that and asks the user (or auto-
+  //   binds at HIGH boldness). Both go through the Adaptation Engine
+  //   for log + revert + per-category daily budget.
+  (await import('./kernel/sequence-observer.js')).initSequenceObserver();
+  (await import('./kernel/skill-proposer.js')).initSkillProposer();
   // AI audio cues — soft beeps for thinking/response/gate/applied.
   (await import('./kernel/ai-audio-cues.js')).initAIAudioCues();
 

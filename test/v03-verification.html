@@ -1555,6 +1555,142 @@ ebMod.eventBus.off('adaptation:settings-changed', onSettingsChanged);
 ebMod.eventBus.off('adaptation:recorded', onRecorded);
 adapt._resetForTests();
 
+// ═══ 21. Sequence Observer + Skill Proposer (2026-05-09) ═══
+// First feature using the Adaptation Engine. Watches intent:completed
+// for repeated 3-step sequences and proposes binding them as skills.
+section('21. Sequence observer + skill proposer (auto-evolution loop)');
+
+const seqObs = await import('/js/kernel/sequence-observer.js');
+const proposer = await import('/js/kernel/skill-proposer.js');
+adapt._resetForTests();
+seqObs._resetForTests();
+// Register the revert handler (also safe to call repeatedly).
+proposer.initSkillProposer();
+
+await test('sequence-observer constants are sane',
+  () => seqObs._internal.SEQUENCE_LEN === 3 && seqObs._internal.REPEAT_THRESHOLD === 3);
+
+// Drive deterministic events via _recordEvent. Use explicit timestamps
+// with gaps > MAX_GAP_MS between batches: the observer's gap check
+// invalidates any tuple that spans a gap, so only the in-batch (a,b,c)
+// tuple ever reaches the threshold. Without the gap, cyclic sub-tuples
+// (b,c,X), (c,X,a), (X,a,b) all hit 3 too and we'd emit junk.
+let emitted = [];
+const onSeqRepeated = (e) => { emitted.push(e); };
+ebMod.eventBus.on('sequence:repeated', onSeqRepeated);
+
+const GAP = seqObs._internal.MAX_GAP_MS + 60_000;
+let tt = 1_700_000_000_000;
+
+seqObs._recordEvent('a', tt); seqObs._recordEvent('b', tt + 100); seqObs._recordEvent('c', tt + 200);
+tt += GAP;
+seqObs._recordEvent('a', tt); seqObs._recordEvent('b', tt + 100); seqObs._recordEvent('c', tt + 200);
+await test('two repeats below threshold do not emit', () => emitted.length === 0);
+
+tt += GAP;
+seqObs._recordEvent('a', tt); seqObs._recordEvent('b', tt + 100); seqObs._recordEvent('c', tt + 200);
+await test('three repeats emit sequence:repeated once', () => emitted.length === 1);
+await test('emitted payload includes the 3-step sequence',
+  () => emitted[0]?.sequence?.join(',') === 'a,b,c' && emitted[0]?.count >= 3);
+
+tt += GAP;
+seqObs._recordEvent('a', tt); seqObs._recordEvent('b', tt + 100); seqObs._recordEvent('c', tt + 200);
+await test('already-proposed sequence does not re-emit', () => emitted.length === 1);
+
+// Different sequence — same gap-separated pattern.
+for (let k = 0; k < 3; k++) {
+  tt += GAP;
+  seqObs._recordEvent('x', tt); seqObs._recordEvent('y', tt + 100); seqObs._recordEvent('z', tt + 200);
+}
+await test('different sequence emits independently',
+  () => emitted.length === 2 && emitted[1]?.sequence?.join(',') === 'x,y,z');
+
+// Gap > MAX_GAP_MS breaks a sequence.
+seqObs._resetForTests();
+emitted = [];
+const t0 = Date.now();
+const longGap = seqObs._internal.MAX_GAP_MS + 1;
+seqObs._recordEvent('p', t0);
+seqObs._recordEvent('q', t0 + 1000);
+seqObs._recordEvent('r', t0 + 2000);
+seqObs._recordEvent('p', t0 + 3000);
+seqObs._recordEvent('q', t0 + 4000);
+seqObs._recordEvent('r', t0 + 4000 + longGap);
+seqObs._recordEvent('p', t0 + 5000 + longGap);
+seqObs._recordEvent('q', t0 + 6000 + longGap);
+seqObs._recordEvent('r', t0 + 7000 + longGap);
+// Only [p,q,r] segments where ALL gaps < MAX_GAP — that's 2 contiguous + the post-gap one = need to verify.
+// Actually after the gap, the new (p,q,r) is its own contiguous tuple. So we have:
+// tuple-1: (p,q,r) at t0..t0+2000   ✓
+// tuple-2: (p,q,r) at t0+3000..t0+4000+gap  ✗ (the q→r jump exceeds MAX_GAP)
+// tuple-3: (p,q,r) at t0+5000+gap..t0+7000+gap  ✓
+// So count = 2, below threshold of 3. No emit.
+await test('long gap between events breaks the sequence (no emit when only 2 contiguous)',
+  () => emitted.length === 0);
+
+// Test the proposer's accept flow against the real skill-registry.
+seqObs._resetForTests();
+adapt._resetForTests();
+// adapt._resetForTests wipes the revert-handler map. Re-init the
+// proposer so it re-registers 'skill:remove' before we exercise revert.
+proposer.initSkillProposer();
+emitted = [];
+
+const proposal = proposer._internal.buildProposal(['notes.create', 'todo.create', 'reminder.create'], 3);
+await test('buildProposal returns sequence + count + phrases + trigger',
+  () => Array.isArray(proposal.sequence) && proposal.count === 3 && Array.isArray(proposal.phrases) && proposal.phrases.length >= 1 && typeof proposal.trigger === 'string');
+await test('buildProposal id starts with auto-',
+  () => proposal.id.startsWith('auto-'));
+
+const skillSrc = proposer._internal.buildSkillSource(proposal);
+await test('buildSkillSource includes goal:', () => /^goal:\s+auto-/m.test(skillSrc));
+await test('buildSkillSource includes trigger list', () => /trigger:\n\s+-\s+phrase:/.test(skillSrc));
+await test('buildSkillSource includes do:', () => /^do:\s+Run my/m.test(skillSrc));
+
+// End-to-end: propose, accept, verify adaptation logged + skill installed.
+const skillRegMod = await import('/js/kernel/skill-registry.js');
+// Make sure the registry is loaded so installUserSkill doesn't no-op.
+await skillRegMod.loadSkillRegistry();
+const beforeCount = skillRegMod.listSkills().length;
+
+const proposeAccept = await proposer.accept(proposal);
+await test('proposer.accept returns ok+skill+adaptationId',
+  () => proposeAccept.ok === true && typeof proposeAccept.skill === 'string' && typeof proposeAccept.adaptationId === 'string');
+await test('skill-registry has one more skill after accept',
+  () => skillRegMod.listSkills().length === beforeCount + 1);
+await test('adaptation engine recorded the install',
+  () => adapt.listAdaptations({ category: adapt.CATEGORY.SKILL }).length === 1);
+
+// Revert via the engine — should uninstall the skill.
+const proposerAdaptId = proposeAccept.adaptationId;
+const proposerRevert = await adapt.revertAdaptation(proposerAdaptId);
+await test('revertAdaptation succeeds for the skill install',
+  () => proposerRevert.ok === true);
+await test('skill uninstalled after revert',
+  () => skillRegMod.listSkills().length === beforeCount);
+
+// Budget enforcement — proposer should NOT install when budget exhausted.
+adapt._resetForTests();
+seqObs._resetForTests();
+adapt.setDailyBudget(adapt.CATEGORY.SKILL, 0);
+emitted = [];
+seqObs._recordEvent('q1'); seqObs._recordEvent('q2'); seqObs._recordEvent('q3');
+seqObs._recordEvent('q1'); seqObs._recordEvent('q2'); seqObs._recordEvent('q3');
+seqObs._recordEvent('q1'); seqObs._recordEvent('q2'); seqObs._recordEvent('q3');
+await test('observer still emits even when proposer budget = 0',
+  () => emitted.length === 1);
+// The proposer's onRepeated subscriber sees this too, but the budget
+// check inside should prevent any skill:proposal emission. We can't
+// directly observe "didn't emit" easily; instead, verify the side
+// effect: zero adaptations recorded.
+await new Promise(r => setTimeout(r, 50));
+await test('no adaptation recorded when budget exhausted',
+  () => adapt.listAdaptations({ category: adapt.CATEGORY.SKILL }).length === 0);
+
+ebMod.eventBus.off('sequence:repeated', onSeqRepeated);
+adapt._resetForTests();
+seqObs._resetForTests();
+
 // ═══ Summary ═══
 const total = passCount + failCount;
 const summary = document.getElementById('summary');
