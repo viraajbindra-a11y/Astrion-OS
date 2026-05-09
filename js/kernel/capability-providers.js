@@ -1,5 +1,18 @@
 // Astrion OS — Core Capability Providers (M1.P2)
 //
+// ╔════════════════════════════════════════════════════════════════════╗
+// ║ CAPABILITY ID SURFACE LOCKED — 41 IDs as of 2026-05-09             ║
+// ║                                                                    ║
+// ║ The set of registered capability IDs is locked in                  ║
+// ║ js/kernel/api-surface.lock.js (LOCKED_CAPABILITIES). The v03       ║
+// ║ verification suite re-runs the live registry against that set      ║
+// ║ and fails if anything was added or removed without updating the    ║
+// ║ lock. Don't slip in `foo.bar` because it seemed harmless — every   ║
+// ║ new ID is a permanent commitment with hallucination + maintenance  ║
+// ║ debt. Update the lock on purpose, with a commit message that       ║
+// ║ explains why.                                                      ║
+// ╚════════════════════════════════════════════════════════════════════╝
+//
 // The first batch of real capabilities that the Intent Kernel can dispatch to.
 // Each provider handles one verb+target combo and calls into existing OS
 // primitives (processManager, fileSystem, aiService) to do the actual work.
@@ -11,6 +24,7 @@
 import {
   registerCapability,
   runCapability,
+  listCapabilities,
   LEVEL,
   REVERSIBILITY,
   BLAST_RADIUS,
@@ -1541,48 +1555,14 @@ registerCapability(gameAutoplay);
  * Import this file at boot time to register all core capabilities.
  * boot.js should `import './kernel/capability-providers.js'`
  * and that's enough — the registrations happen as side effects.
+ *
+ * The canonical list of registered IDs lives in
+ * js/kernel/api-surface.lock.js (LOCKED_CAPABILITIES) and is enforced
+ * by v03 section 19. There used to be a hand-maintained CORE_CAPABILITIES
+ * array here — it had drifted (claimed 39 while 41 were registered,
+ * with names that didn't even exist in the file) which is the exact
+ * pattern the lock now prevents. Don't add a second list.
  */
-export const CORE_CAPABILITIES = [
-  'app.open',
-  'notes.create',
-  'todo.create',
-  'reminder.create',
-  'compute.calculate',
-  'ai.ask',
-  'spec.generate',
-  'spec.freeze',
-  'tests.generate',
-  'tests.run',
-  'code.generate',
-  'app.bundle',
-  'app.promote',
-  'app.archive',
-  'branch.create',
-  'branch.merge',
-  'branch.discard',
-  'branch.rewind',
-  'browser.navigate',
-  'volume.set',
-  'volume.decrease',
-  'volume.mute',
-  'volume.unmute',
-  'translate.text',
-  'screenshot.take',
-  'files.createFolder',
-  'files.createFile',
-  'chat.sendAsAgent',
-  'code.readFile',
-  'code.listDir',
-  'code.search',
-  'code.writeFile',
-  'game.getState',
-  'game.makeMove',
-  'game.autoplay',
-  'system.lock',
-  'system.shutdown',
-  'system.restart',
-  'system.sleep',
-];
 
 // Path-resolution sanity check — runs only on localhost, at import time.
 // Catches regressions in the alias map + isPathWithinRoots guard.
@@ -1621,4 +1601,6 @@ if (typeof window !== 'undefined' && window.location?.hostname === 'localhost') 
   }
 }
 
-console.log(`[capability-providers] Registered ${CORE_CAPABILITIES.length} core capabilities`);
+// Reads the live registry size after every registerCapability() call has
+// run, so this can't lie like CORE_CAPABILITIES did.
+console.log(`[capability-providers] Registered ${listCapabilities().length} core capabilities`);

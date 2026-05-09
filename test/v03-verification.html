@@ -1351,6 +1351,81 @@ await test('rejectRehearsal records the reason on the branch',
 await test('acceptRehearsal refuses when branchId missing',
   async () => (await rh.acceptRehearsal(null)).ok === false);
 
+// ═══ 19. API surface lock (2026-05-09) ═══
+// Tripwire that fails if anyone slips a new capability ID, IPC channel,
+// or skill-registry export in without updating api-surface.lock.js.
+// Real enforcement of the "no scope creep" discipline that comments
+// alone wouldn't keep honest.
+section('19. API surface lock');
+
+const lock = await import('/js/kernel/api-surface.lock.js');
+
+await test('lock manifest exposes LOCK_DATE',
+  () => typeof lock.LOCK_DATE === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(lock.LOCK_DATE));
+
+// Force capability-providers to register everything, then compare.
+await import('/js/kernel/capability-providers.js');
+const capApi = await import('/js/kernel/capability-api.js');
+const liveCaps = new Set(capApi.listCapabilities().map(c => c.id));
+
+await test(`live capability count matches lock (${lock.LOCKED_CAPABILITIES.size})`,
+  () => liveCaps.size === lock.LOCKED_CAPABILITIES.size);
+
+await test('every locked capability is live (none removed silently)', () => {
+  const missing = [...lock.LOCKED_CAPABILITIES].filter(id => !liveCaps.has(id));
+  if (missing.length) throw new Error('removed without lock update: ' + missing.join(', '));
+  return true;
+});
+
+await test('every live capability is locked (none added silently)', () => {
+  const added = [...liveCaps].filter(id => !lock.LOCKED_CAPABILITIES.has(id));
+  if (added.length) throw new Error('added without lock update: ' + added.join(', '));
+  return true;
+});
+
+// Skill-registry: check the public export shape.
+const skillReg = await import('/js/kernel/skill-registry.js');
+const liveSkillExports = new Set(Object.keys(skillReg));
+
+await test(`skill-registry export count matches lock (${lock.LOCKED_SKILL_REGISTRY_EXPORTS.size})`,
+  () => liveSkillExports.size === lock.LOCKED_SKILL_REGISTRY_EXPORTS.size);
+
+await test('every locked skill-registry export is present', () => {
+  const missing = [...lock.LOCKED_SKILL_REGISTRY_EXPORTS].filter(name => !liveSkillExports.has(name));
+  if (missing.length) throw new Error('removed without lock update: ' + missing.join(', '));
+  return true;
+});
+
+await test('no extra skill-registry exports', () => {
+  const extra = [...liveSkillExports].filter(name => !lock.LOCKED_SKILL_REGISTRY_EXPORTS.has(name));
+  if (extra.length) throw new Error('added without lock update: ' + extra.join(', '));
+  return true;
+});
+
+// Browser IPC: fetch source + regex-parse. Browser main.js doesn't run in
+// the web preview (it's Electron-only), so source-text inspection is the
+// only honest check we can do from this harness.
+const browserMainSrc = await fetch('/distro/astrion-browser/main.js').then(r => r.text());
+const ipcMatches = [...browserMainSrc.matchAll(/ipcMain\.handle\(['"]([^'"]+)['"]/g)].map(m => m[1]);
+const liveIpc = new Set(ipcMatches);
+
+await test('browser main.js source loaded', () => browserMainSrc.length > 1000);
+
+await test(`browser IPC channel count matches lock (${lock.LOCKED_BROWSER_IPC.size})`,
+  () => liveIpc.size === lock.LOCKED_BROWSER_IPC.size);
+
+await test('every locked browser IPC channel is registered', () => {
+  const missing = [...lock.LOCKED_BROWSER_IPC].filter(ch => !liveIpc.has(ch));
+  if (missing.length) throw new Error('removed without lock update: ' + missing.join(', '));
+  return true;
+});
+
+await test('no unlocked browser IPC channels', () => {
+  const extra = [...liveIpc].filter(ch => !lock.LOCKED_BROWSER_IPC.has(ch));
+  if (extra.length) throw new Error('added without lock update: ' + extra.join(', '));
+  return true;
+});
+
 // ═══ Summary ═══
 const total = passCount + failCount;
 const summary = document.getElementById('summary');

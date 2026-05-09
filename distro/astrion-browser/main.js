@@ -1,5 +1,20 @@
 // Astrion Browser — main (Electron main process)
 //
+// ╔════════════════════════════════════════════════════════════════════╗
+// ║ IPC CHANNEL SURFACE LOCKED — 47 channels as of 2026-05-09          ║
+// ║                                                                    ║
+// ║ The set of ipcMain.handle channels is locked in                    ║
+// ║ js/kernel/api-surface.lock.js (LOCKED_BROWSER_IPC). The v03 suite  ║
+// ║ fetches this file's source and regex-parses the channel names,     ║
+// ║ then asserts the set matches. Adding a new ipcMain.handle without  ║
+// ║ updating the lock will fail v03.                                   ║
+// ║                                                                    ║
+// ║ Channel naming convention is `domain:verb` (sometimes              ║
+// ║ `domain:noun`). Don't introduce a brand-new domain (i.e. left of   ║
+// ║ the colon) without a real reason — bookmarks, history, settings,   ║
+// ║ tabs, etc. already cover most things. Reuse > add.                 ║
+// ╚════════════════════════════════════════════════════════════════════╝
+//
 // The chrome (tab strip, URL bar, sidebar) is a regular Electron
 // BrowserWindow loading renderer/index.html. Each tab is a separate
 // BrowserView attached to the same window, positioned below the chrome.

@@ -1,5 +1,16 @@
 // Astrion OS — Skill registry + runner (M7.P2b)
 //
+// ╔════════════════════════════════════════════════════════════════════╗
+// ║ PUBLIC EXPORT SURFACE LOCKED — 11 exports as of 2026-05-09         ║
+// ║                                                                    ║
+// ║ The named exports of this module are locked in                     ║
+// ║ js/kernel/api-surface.lock.js (LOCKED_SKILL_REGISTRY_EXPORTS).     ║
+// ║ The v03 suite imports the module and asserts the export keys       ║
+// ║ match. Internal helpers can change freely — they're not exported.  ║
+// ║ Adding/removing an export is a real architectural change; update   ║
+// ║ the lock on purpose.                                               ║
+// ╚════════════════════════════════════════════════════════════════════╝
+//
 // Loads .skill files via the server (/skills/manifest.json lists the
 // examples). Parses each with skill-parser. Indexes phrase triggers
 // to a case-insensitive lookup map so Spotlight can translate a user

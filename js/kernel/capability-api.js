@@ -1,5 +1,15 @@
 // Astrion OS — Capability Provider API (M1.P2)
 //
+// ╔════════════════════════════════════════════════════════════════════╗
+// ║ API SURFACE LOCKED — see js/kernel/api-surface.lock.js (2026-05-09) ║
+// ║                                                                    ║
+// ║ The shapes here (LEVEL, REVERSIBILITY, BLAST_RADIUS, registerCapa- ║
+// ║ bility, runCapability, etc.) are part of the locked surface. New   ║
+// ║ exports require updating the lock or the v03 suite fails. Don't    ║
+// ║ slip new shapes in just because the file is the most "natural"     ║
+// ║ place for them — the lock is what stops scope creep.               ║
+// ╚════════════════════════════════════════════════════════════════════╝
+//
 // The typed capability layer that sits between the Intent Kernel and
 // the actual work. Every capability declares:
 //
