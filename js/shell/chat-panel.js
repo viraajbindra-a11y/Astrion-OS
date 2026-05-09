@@ -189,6 +189,7 @@ function buildPanel() {
       <div class="cp-title">
         <span class="cp-title-dot" id="cp-title-dot"></span>
         <span>Astrion Chat</span>
+        <span class="cp-feedback-score" id="cp-feedback-score" title="Your feedback score on Astrion's replies"></span>
       </div>
       <div class="cp-header-actions">
         <button class="cp-iconbtn" id="cp-autospeak-btn" title="Auto-speak Chat replies">\u{1F509}</button>
@@ -641,6 +642,8 @@ function messageNode(msg) {
               <button class="cp-bubble-action" id="${copyId}" title="Copy reply">\u2398</button>
               <button class="cp-bubble-action" id="${regenId}" title="Regenerate">\u21BB</button>
               <button class="cp-bubble-action cp-speak-btn" data-msg-id="${msg.id}" title="Read aloud">\u{1F509}</button>
+              <button class="cp-bubble-action cp-feedback-btn cp-feedback-up${msg.feedback === 'good' ? ' active' : ''}" data-msg-id="${msg.id}" data-verdict="good" title="Helpful (+1)">\u{1F44D}</button>
+              <button class="cp-bubble-action cp-feedback-btn cp-feedback-down${msg.feedback === 'bad' ? ' active' : ''}" data-msg-id="${msg.id}" data-verdict="bad" title="Not helpful (-1)">\u{1F44E}</button>
             </div>
           ` : ''}
         </div>
@@ -669,6 +672,50 @@ function messageNode(msg) {
         });
         const speakBtn = panelEl?.querySelector(`.cp-speak-btn[data-msg-id="${msg.id}"]`);
         speakBtn?.addEventListener('click', () => speakText(msg.text));
+        // Feedback (👍 / 👎) — records a verdict, persists, and shows
+        // the active state. Re-clicking the same button toggles off
+        // (clears the verdict). Clicking the opposite verdict swaps.
+        const upBtn = panelEl?.querySelector(`.cp-feedback-up[data-msg-id="${msg.id}"]`);
+        const downBtn = panelEl?.querySelector(`.cp-feedback-down[data-msg-id="${msg.id}"]`);
+        const wireFeedback = (btn, verdict) => {
+          btn?.addEventListener('click', async () => {
+            const userPrompt = (() => {
+              const idx = messages.indexOf(msg);
+              for (let i = idx - 1; i >= 0; i--) {
+                if (messages[i].role === 'user') return messages[i].text;
+              }
+              return '';
+            })();
+            // Toggle off if user clicks the already-active verdict.
+            if (msg.feedback === verdict) {
+              msg.feedback = null;
+              btn.classList.remove('active');
+              saveMessages();
+              return;
+            }
+            const note = verdict === 'bad'
+              ? (prompt('Optional: what was off? (Esc to skip)') || '')
+              : '';
+            try {
+              const m = await import('../kernel/ai-service.js');
+              m.aiService.recordFeedback({
+                messageId: msg.id,
+                prompt: userPrompt,
+                reply: msg.text,
+                verdict,
+                note: note || '',
+              });
+            } catch {}
+            msg.feedback = verdict;
+            // Visually toggle: the active class lives on whichever
+            // verdict matches msg.feedback. Update both buttons.
+            upBtn?.classList.toggle('active', verdict === 'good');
+            downBtn?.classList.toggle('active', verdict === 'bad');
+            saveMessages();
+          });
+        };
+        wireFeedback(upBtn, 'good');
+        wireFeedback(downBtn, 'bad');
       }, 0);
     }
   }
@@ -1213,6 +1260,33 @@ function subscribeEvents() {
   eventBus.on('plan:step:start', ({ index, step }) => setPhase(`\u2699 Running step ${index + 1}: ${step?.cap || '?'}`));
   eventBus.on('plan:completed', () => setPhase('\u2713 Done', 3000));
   eventBus.on('plan:failed', ({ error }) => setPhase(`\u2717 ${error || 'failed'}`, 4000));
+
+  // Feedback score badge \u2014 refreshes whenever a \ud83d\udc4d/\ud83d\udc4e lands.
+  eventBus.on('ai:feedback', ({ score }) => updateFeedbackBadge(score));
+  // Initial paint on panel open.
+  setTimeout(refreshFeedbackBadge, 0);
+}
+
+async function refreshFeedbackBadge() {
+  try {
+    const m = await import('../kernel/ai-service.js');
+    updateFeedbackBadge(m.aiService.getFeedbackScore());
+  } catch {}
+}
+
+function updateFeedbackBadge(score) {
+  const el = panelEl?.querySelector('#cp-feedback-score');
+  if (!el || !score) return;
+  if (score.total === 0) {
+    el.textContent = '';
+    el.style.display = 'none';
+    return;
+  }
+  el.style.display = '';
+  const sign = score.net >= 0 ? '+' : '';
+  el.textContent = `${sign}${score.net}`;
+  el.dataset.tone = score.net >= 0 ? 'pos' : 'neg';
+  el.title = `Astrion's score with you: ${score.good} \ud83d\udc4d / ${score.bad} \ud83d\udc4e (${sign}${score.net})`;
 }
 
 let phaseTimeout = null;
@@ -1741,6 +1815,43 @@ function injectStyles() {
     .cp-bubble-action:hover {
       background: rgba(255,255,255,0.1);
       color: white;
+    }
+    .cp-feedback-up.active {
+      background: rgba(105, 224, 126, 0.18);
+      border-color: rgba(105, 224, 126, 0.4);
+      color: #69e07e;
+    }
+    .cp-feedback-down.active {
+      background: rgba(255, 110, 110, 0.18);
+      border-color: rgba(255, 110, 110, 0.4);
+      color: #ff6e6e;
+    }
+    .cp-feedback-score {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 32px;
+      height: 18px;
+      padding: 0 8px;
+      margin-left: 6px;
+      font-size: 10px;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+      letter-spacing: 0.2px;
+      border-radius: 9px;
+      background: rgba(255,255,255,0.06);
+      color: rgba(255,255,255,0.6);
+      border: 1px solid rgba(255,255,255,0.08);
+    }
+    .cp-feedback-score[data-tone="pos"] {
+      background: rgba(105, 224, 126, 0.14);
+      color: #69e07e;
+      border-color: rgba(105, 224, 126, 0.28);
+    }
+    .cp-feedback-score[data-tone="neg"] {
+      background: rgba(255, 110, 110, 0.14);
+      color: #ff6e6e;
+      border-color: rgba(255, 110, 110, 0.28);
     }
     .cp-mode-dot {
       display: inline-block;

@@ -25,6 +25,16 @@ const AI_OLLAMA_MODEL_KEY = 'nova-ai-ollama-model';
 // Capped + auto-pruned in _addToHistory to keep localStorage small.
 const AI_HISTORY_KEY = 'nova-ai-history-v1';
 
+// 2026-05-09 — point system. Users grade replies 👍/👎; verdicts get
+// stored, the score persists, and the most recent N verdicts get
+// injected into every system prompt as concrete examples of what
+// worked / didn't with THIS user. The model's weights can't change
+// at runtime; the CONTEXT does, which gives the same observed effect.
+const AI_FEEDBACK_KEY = 'nova-ai-feedback-v1';
+const FEEDBACK_CAP = 50;                  // total feedback retained
+const FEEDBACK_INJECT = 8;                // most-recent N injected into prompt
+const FEEDBACK_SNIPPET_LEN = 220;         // per-entry trimmed length
+
 class AIService {
   constructor() {
     this.conversationHistory = [];
@@ -44,6 +54,117 @@ class AIService {
     } catch {
       this.conversationHistory = [];
     }
+    // Feedback ledger — see AI_FEEDBACK_KEY notes above.
+    this.feedback = this._loadFeedback();
+  }
+
+  // ─── Point system / feedback ledger ───────────────────────────────
+  _loadFeedback() {
+    try {
+      const raw = localStorage.getItem(AI_FEEDBACK_KEY);
+      if (!raw) return [];
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return [];
+      return parsed.filter(e =>
+        e && typeof e.verdict === 'string' &&
+        (e.verdict === 'good' || e.verdict === 'bad') &&
+        typeof e.snippet === 'string'
+      ).slice(-FEEDBACK_CAP);
+    } catch {
+      return [];
+    }
+  }
+
+  _saveFeedback() {
+    try {
+      localStorage.setItem(AI_FEEDBACK_KEY, JSON.stringify(this.feedback.slice(-FEEDBACK_CAP)));
+    } catch {}
+  }
+
+  /**
+   * Record a 👍/👎 verdict on a specific assistant reply. Updates the
+   * persisted ledger and emits `ai:feedback` so any UI surface can
+   * react (refresh score badge, toast, etc.).
+   *
+   * @param {object} entry { messageId, prompt, reply, verdict, note }
+   * @returns {object} the stored entry with timestamp filled in
+   */
+  recordFeedback({ messageId, prompt, reply, verdict, note }) {
+    if (verdict !== 'good' && verdict !== 'bad') return null;
+    const trim = (s, n = FEEDBACK_SNIPPET_LEN) =>
+      String(s == null ? '' : s).replace(/\s+/g, ' ').trim().slice(0, n);
+    const entry = {
+      messageId: messageId || null,
+      verdict,
+      // We store snippets, not full text — keeps localStorage small and
+      // keeps individual replies under the per-entry inject budget.
+      promptSnippet: trim(prompt),
+      snippet: trim(reply),
+      note: note ? trim(note, 160) : '',
+      at: Date.now(),
+    };
+    // Replace prior verdict on the same messageId if present (user
+    // changed their mind), otherwise append.
+    const idx = entry.messageId
+      ? this.feedback.findIndex(e => e.messageId === entry.messageId)
+      : -1;
+    if (idx >= 0) this.feedback[idx] = entry;
+    else this.feedback.push(entry);
+    if (this.feedback.length > FEEDBACK_CAP) {
+      this.feedback = this.feedback.slice(-FEEDBACK_CAP);
+    }
+    this._saveFeedback();
+    eventBus.emit('ai:feedback', { score: this.getFeedbackScore(), entry });
+    return entry;
+  }
+
+  /**
+   * Score = #good − #bad across the retained ledger. Simple, visible,
+   * doesn't need to be clever — the value is communicating "this
+   * user has given me N net thumbs."
+   */
+  getFeedbackScore() {
+    let good = 0, bad = 0;
+    for (const e of this.feedback) {
+      if (e.verdict === 'good') good++;
+      else if (e.verdict === 'bad') bad++;
+    }
+    return { good, bad, total: good + bad, net: good - bad };
+  }
+
+  getRecentFeedback(n = FEEDBACK_INJECT) {
+    return this.feedback.slice(-n);
+  }
+
+  clearFeedback() {
+    this.feedback = [];
+    try { localStorage.removeItem(AI_FEEDBACK_KEY); } catch {}
+    eventBus.emit('ai:feedback', { score: this.getFeedbackScore(), entry: null });
+  }
+
+  /**
+   * Build the feedback section appended to the system prompt. Most-
+   * recent verdicts are concrete examples of what landed (✓) and
+   * what missed (✗) for THIS user. The model is told to mirror
+   * the wins and avoid the misses.
+   */
+  _buildFeedbackContext() {
+    const recent = this.getRecentFeedback(FEEDBACK_INJECT);
+    if (recent.length === 0) return '';
+    const lines = recent.map(e => {
+      const tag = e.verdict === 'good' ? '✓' : '✗';
+      const note = e.note ? `   note: ${e.note}` : '';
+      const promptHint = e.promptSnippet ? `   user: ${e.promptSnippet}` : '';
+      return `${tag} reply: ${e.snippet}${promptHint ? '\n' + promptHint : ''}${note ? '\n' + note : ''}`;
+    });
+    const score = this.getFeedbackScore();
+    return [
+      '\n## Feedback from this user — score: ' +
+        `${score.net >= 0 ? '+' : ''}${score.net} (${score.good}👍 / ${score.bad}👎)`,
+      'Past replies the user graded. Mirror what worked (✓), avoid what missed (✗):',
+      ...lines,
+      'Calibrate tone, length, and approach to match the ✓ examples.',
+    ].join('\n');
   }
 
   getProvider() {
@@ -363,6 +484,13 @@ class AIService {
     // a user asks "what can you do?", the AI tells them what to type
     // and Astrion's planner runs the matching intent.
     ctx += '\n' + this._buildToolsetTutorial();
+
+    // 2026-05-09 — point-system feedback context. Recent 👍/👎
+    // verdicts get injected so the model sees concrete examples of
+    // what landed and what missed with this user. Replaces what would
+    // otherwise need fine-tuning with runtime context steering.
+    const feedbackCtx = this._buildFeedbackContext();
+    if (feedbackCtx) ctx += feedbackCtx;
 
     if (this.context.activeApp) ctx += `\nUser is using: ${this.context.activeApp}`;
     if (this.context.activeFile) ctx += `\nActive file: ${this.context.activeFile}`;
