@@ -22,6 +22,9 @@ import { query as graphQuery } from '../kernel/graph-query.js';
 import { getRecentApps } from './recent-apps.js';
 import { getSmartAnswer } from '../lib/smart-answers.js';
 import { safeMathEval } from '../lib/safe-math.js';
+// 2026-05-09 toys split — used to push minigames to the bottom of match
+// results so real apps surface first. See app-categories.js.
+import { isToy } from '../kernel/app-categories.js';
 
 let isOpen = false;
 // Search history — persisted to localStorage
@@ -1536,6 +1539,14 @@ Return ONLY the YAML content, no \`\`\` fences, no commentary.`;
         return j >= lower.length * 0.7; // 70%+ chars match in order
       }).slice(0, 3);
     }
+    // Toys split: keep toys in results (so "snake" still finds Snake) but
+    // push them to the bottom so real apps surface first when the query
+    // matches both kinds (e.g. "match" matches Matrix Rain + nothing else;
+    // but "c" hits Calculator, Calendar, Chess — chess goes last).
+    matchedApps = [
+      ...matchedApps.filter(a => !isToy(a.id)),
+      ...matchedApps.filter(a => isToy(a.id)),
+    ];
 
     // App descriptions for richer search results
     const APP_DESC = {

@@ -2,6 +2,7 @@
 // Fullscreen, animated, multi-step onboarding
 
 import { hashPassword } from '../kernel/crypto.js';
+import { counts as appCounts } from '../kernel/app-categories.js';
 import {
   BRAIN_OPTIONS,
   recommendBrain,
@@ -140,8 +141,8 @@ export function showSetupWizard() {
                 </div>
                 <div style="background:rgba(255,255,255,0.05);border-radius:16px;padding:24px 12px;">
                   <div style="font-size:32px;margin-bottom:8px;">&#x1F4BB;</div>
-                  <div style="font-size:13px;font-weight:600;margin-bottom:4px;">76 Apps</div>
-                  <div style="font-size:11px;color:rgba(255,255,255,0.4);">Everything you need</div>
+                  <div style="font-size:13px;font-weight:600;margin-bottom:4px;">${appCounts().apps} Apps</div>
+                  <div style="font-size:11px;color:rgba(255,255,255,0.4);">+ ${appCounts().toys} toys included</div>
                 </div>
                 <div style="background:rgba(255,255,255,0.05);border-radius:16px;padding:24px 12px;">
                   <div style="font-size:32px;margin-bottom:8px;">&#x1F6CD;&#xFE0F;</div>
@@ -347,7 +348,7 @@ export function showSetupWizard() {
                   <span style="color:var(--accent);">&#x2713;</span> Accent color applied
                 </div>
                 <div style="display:flex;align-items:center;gap:10px;font-size:14px;color:rgba(255,255,255,0.6);">
-                  <span style="color:var(--accent);">&#x2713;</span> 76 apps ready to use
+                  <span style="color:var(--accent);">&#x2713;</span> ${appCounts().apps} apps + ${appCounts().toys} toys ready to use
                 </div>
                 <div style="display:flex;align-items:center;gap:10px;font-size:14px;color:rgba(255,255,255,0.6);">
                   <span style="color:var(--accent);">&#x2713;</span> ${(() => {

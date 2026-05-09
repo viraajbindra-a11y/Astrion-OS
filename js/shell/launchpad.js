@@ -2,8 +2,10 @@
 
 import { processManager } from '../kernel/process-manager.js';
 import { eventBus } from '../kernel/event-bus.js';
+import { isToy } from '../kernel/app-categories.js';
 
 let isOpen = false;
+let toysFolderOpen = false;
 
 const appColors = {
   finder: 'linear-gradient(145deg, #1e88e5, #1565c0)',
@@ -37,10 +39,14 @@ function toggle() {
 }
 
 function open() {
+  toysFolderOpen = false;
   const el = document.createElement('div');
   el.id = 'launchpad';
 
   const apps = processManager.getAllApps();
+  const realApps = apps.filter(a => !isToy(a.id));
+  const toyApps = apps.filter(a => isToy(a.id));
+
   const searchInput = document.createElement('input');
   searchInput.className = 'launchpad-search';
   searchInput.placeholder = 'Search apps...';
@@ -51,27 +57,98 @@ function open() {
   const grid = document.createElement('div');
   grid.className = 'launchpad-grid';
 
+  function appTileHtml(app) {
+    return `
+      <div class="launchpad-app-icon">
+        <img src="assets/icons/${app.id}.svg" alt="${app.name}" draggable="false" style="width:100%;height:100%;border-radius:15px;object-fit:cover;">
+      </div>
+      <div class="launchpad-app-name">${app.name}</div>
+    `;
+  }
+
   function renderApps(filter = '') {
     grid.innerHTML = '';
-    const filtered = filter
-      ? apps.filter(a => a.name.toLowerCase().includes(filter.toLowerCase()))
-      : apps;
+    const filterLower = filter.toLowerCase();
 
-    filtered.forEach(app => {
+    if (filter) {
+      // When searching, flatten everything — toys included — so users can find
+      // them. Real apps come first so the search bias matches the folder layout.
+      const matchedReal = realApps.filter(a => a.name.toLowerCase().includes(filterLower));
+      const matchedToys = toyApps.filter(a => a.name.toLowerCase().includes(filterLower));
+
+      [...matchedReal, ...matchedToys].forEach(app => {
+        const appEl = document.createElement('div');
+        appEl.className = 'launchpad-app';
+        appEl.innerHTML = appTileHtml(app);
+        appEl.addEventListener('click', () => {
+          processManager.launch(app.id);
+          close();
+        });
+        grid.appendChild(appEl);
+      });
+      return;
+    }
+
+    if (toysFolderOpen) {
+      // Folder-open view: a back tile + every toy.
+      const back = document.createElement('div');
+      back.className = 'launchpad-app';
+      back.title = 'Back to apps';
+      back.innerHTML = `
+        <div class="launchpad-app-icon" style="background:linear-gradient(145deg,#444,#222);display:flex;align-items:center;justify-content:center;font-size:48px;color:rgba(255,255,255,0.85);">&larr;</div>
+        <div class="launchpad-app-name">Back</div>
+      `;
+      back.addEventListener('click', () => {
+        toysFolderOpen = false;
+        renderApps('');
+      });
+      grid.appendChild(back);
+
+      toyApps.forEach(app => {
+        const appEl = document.createElement('div');
+        appEl.className = 'launchpad-app';
+        appEl.innerHTML = appTileHtml(app);
+        appEl.addEventListener('click', () => {
+          processManager.launch(app.id);
+          close();
+        });
+        grid.appendChild(appEl);
+      });
+      return;
+    }
+
+    // Default view: real apps, then a single Toys folder tile.
+    realApps.forEach(app => {
       const appEl = document.createElement('div');
       appEl.className = 'launchpad-app';
-      appEl.innerHTML = `
-        <div class="launchpad-app-icon">
-          <img src="assets/icons/${app.id}.svg" alt="${app.name}" draggable="false" style="width:100%;height:100%;border-radius:15px;object-fit:cover;">
-        </div>
-        <div class="launchpad-app-name">${app.name}</div>
-      `;
+      appEl.innerHTML = appTileHtml(app);
       appEl.addEventListener('click', () => {
         processManager.launch(app.id);
         close();
       });
       grid.appendChild(appEl);
     });
+
+    if (toyApps.length > 0) {
+      const folder = document.createElement('div');
+      folder.className = 'launchpad-app launchpad-folder';
+      folder.title = 'Toys';
+      // Mini grid of up to four toy icons inside the folder tile, like macOS folders.
+      const previews = toyApps.slice(0, 4).map(t =>
+        `<img src="assets/icons/${t.id}.svg" alt="" draggable="false" style="width:28px;height:28px;border-radius:6px;object-fit:cover;">`
+      ).join('');
+      folder.innerHTML = `
+        <div class="launchpad-app-icon" style="background:rgba(255,255,255,0.08);backdrop-filter:blur(10px);display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:8px;box-sizing:border-box;align-items:center;justify-items:center;">
+          ${previews}
+        </div>
+        <div class="launchpad-app-name">Toys</div>
+      `;
+      folder.addEventListener('click', () => {
+        toysFolderOpen = true;
+        renderApps('');
+      });
+      grid.appendChild(folder);
+    }
   }
 
   searchInput.addEventListener('input', () => renderApps(searchInput.value));
@@ -84,9 +161,16 @@ function open() {
     if (e.target === el) close(escHandler);
   });
 
-  // Escape to close
+  // Escape closes the toys folder if open, otherwise closes Launchpad.
   const escHandler = (e) => {
-    if (e.key === 'Escape') close(escHandler);
+    if (e.key === 'Escape') {
+      if (toysFolderOpen) {
+        toysFolderOpen = false;
+        renderApps(searchInput.value);
+        return;
+      }
+      close(escHandler);
+    }
   };
   document.addEventListener('keydown', escHandler);
 
@@ -104,4 +188,5 @@ function close(escHandler) {
   }
   if (escHandler) document.removeEventListener('keydown', escHandler);
   isOpen = false;
+  toysFolderOpen = false;
 }
