@@ -1426,6 +1426,135 @@ await test('no unlocked browser IPC channels', () => {
   return true;
 });
 
+// ═══ 20. Adaptation Engine (2026-05-09) ═══
+// The substrate every "Astrion learned something" feature plugs into.
+// Tests: record/list/revert, daily budget enforcement, boldness setting,
+// revert handler dispatch.
+section('20. Adaptation Engine');
+
+const adapt = await import('/js/kernel/adaptation-engine.js');
+adapt._resetForTests();
+
+await test('CATEGORY exposes 7 adaptation kinds',
+  () => Object.keys(adapt.CATEGORY).length === 7);
+await test('BOLDNESS exposes low/medium/high',
+  () => adapt.BOLDNESS.LOW === 'low' && adapt.BOLDNESS.MEDIUM === 'medium' && adapt.BOLDNESS.HIGH === 'high');
+
+// Defaults applied when nothing's been set.
+await test('skill default boldness is medium',
+  () => adapt.getBoldness(adapt.CATEGORY.SKILL) === 'medium');
+await test('ui default boldness is high',
+  () => adapt.getBoldness(adapt.CATEGORY.UI) === 'high');
+await test('skill default daily budget is 3',
+  () => adapt.getDailyBudget(adapt.CATEGORY.SKILL) === 3);
+
+// Setters persist + emit.
+const ebMod = await import('/js/kernel/event-bus.js');
+let lastSettingsEvent = null;
+const onSettingsChanged = (e) => { lastSettingsEvent = e; };
+ebMod.eventBus.on('adaptation:settings-changed', onSettingsChanged);
+
+adapt.setBoldness(adapt.CATEGORY.SKILL, 'low');
+await test('setBoldness persists', () => adapt.getBoldness(adapt.CATEGORY.SKILL) === 'low');
+await test('setBoldness emits adaptation:settings-changed',
+  () => lastSettingsEvent?.kind === 'boldness' && lastSettingsEvent.value === 'low');
+
+adapt.setDailyBudget(adapt.CATEGORY.SKILL, 1);
+await test('setDailyBudget persists', () => adapt.getDailyBudget(adapt.CATEGORY.SKILL) === 1);
+
+// Recording.
+let recordedEvent = null;
+const onRecorded = (e) => { recordedEvent = e; };
+ebMod.eventBus.on('adaptation:recorded', onRecorded);
+
+const adaptR1 = adapt.recordAdaptation({
+  category: adapt.CATEGORY.SKILL,
+  summary: 'Bound 3-step sequence to "weather-and-mail"',
+  trigger: 'You ran this sequence 3 times this week',
+  revert: { kind: 'skill:remove', args: { name: 'weather-and-mail' } },
+});
+await test('recordAdaptation returns ok+entry on valid input',
+  () => adaptR1.ok === true && adaptR1.entry?.id);
+await test('recorded event fires with the entry',
+  () => recordedEvent?.id === adaptR1.entry.id);
+
+await test('recordAdaptation rejects invalid category',
+  () => adapt.recordAdaptation({ category: 'nope', summary: 's', trigger: 't', revert: { kind: 'k' } }).ok === false);
+await test('recordAdaptation rejects empty summary',
+  () => adapt.recordAdaptation({ category: adapt.CATEGORY.SKILL, summary: '', trigger: 't', revert: { kind: 'k' } }).ok === false);
+await test('recordAdaptation rejects missing revert.kind',
+  () => adapt.recordAdaptation({ category: adapt.CATEGORY.SKILL, summary: 's', trigger: 't', revert: {} }).ok === false);
+
+// Budget enforcement — we set skill budget to 1 and already used 1,
+// so the next record should fail.
+await test('recordAdaptation rejects when daily budget exhausted', () => {
+  const r = adapt.recordAdaptation({
+    category: adapt.CATEGORY.SKILL,
+    summary: 'second skill',
+    trigger: 'budget test',
+    revert: { kind: 'skill:remove', args: {} },
+  });
+  return r.ok === false && /budget/.test(r.reason || '');
+});
+
+await test('getBudgetRemaining reflects today\'s usage',
+  () => adapt.getBudgetRemaining(adapt.CATEGORY.SKILL) === 0);
+
+// Listing.
+const adaptList1 = adapt.listAdaptations();
+await test('listAdaptations returns the recorded entry', () => adaptList1.length === 1 && adaptList1[0].id === adaptR1.entry.id);
+await test('listAdaptations filters by category', () => {
+  const filtered = adapt.listAdaptations({ category: adapt.CATEGORY.SKILL });
+  return filtered.length === 1;
+});
+await test('listAdaptations excludes other categories',
+  () => adapt.listAdaptations({ category: adapt.CATEGORY.UI }).length === 0);
+
+// Revert dispatch.
+let revertCalled = null;
+adapt.registerRevertHandler('skill:remove', (args, entry) => {
+  revertCalled = { args, entryId: entry.id };
+});
+const adaptRev1 = await adapt.revertAdaptation(adaptR1.entry.id);
+await test('revertAdaptation invokes the registered handler',
+  () => adaptRev1.ok === true && revertCalled?.entryId === adaptR1.entry.id);
+await test('revert marks entry reverted (hidden by default)',
+  () => adapt.listAdaptations().length === 0);
+await test('reverted entry still visible with includeReverted',
+  () => adapt.listAdaptations({ includeReverted: true }).length === 1);
+
+await test('revertAdaptation refuses already-reverted',
+  async () => (await adapt.revertAdaptation(adaptR1.entry.id)).ok === false);
+await test('revertAdaptation refuses unknown id',
+  async () => (await adapt.revertAdaptation('does-not-exist')).ok === false);
+
+// Recording with no handler registered for the kind — should record fine,
+// only revert refuses.
+adapt._resetForTests();
+const adaptR2 = adapt.recordAdaptation({
+  category: adapt.CATEGORY.UI,
+  summary: 'Pinned Music to dock',
+  trigger: 'You opened Music 7 times today',
+  silent: true,
+  revert: { kind: 'dock:unpin', args: { id: 'music' } },
+});
+await test('recordAdaptation accepts silent=true', () => adaptR2.ok && adaptR2.entry.silent === true);
+const adaptRev2 = await adapt.revertAdaptation(adaptR2.entry.id);
+await test('revertAdaptation fails with no registered handler',
+  () => adaptRev2.ok === false && /handler/.test(adaptRev2.error || ''));
+
+// getTodaysCount.
+adapt._resetForTests();
+adapt.recordAdaptation({ category: 'skill',  summary: 's1', trigger: 't', revert: { kind: 'k' } });
+adapt.recordAdaptation({ category: 'ui',     summary: 's2', trigger: 't', revert: { kind: 'k' } });
+adapt.recordAdaptation({ category: 'graph',  summary: 's3', trigger: 't', revert: { kind: 'k' } });
+await test('getTodaysCount counts all categories', () => adapt.getTodaysCount() === 3);
+
+// Cleanup test subscriptions.
+ebMod.eventBus.off('adaptation:settings-changed', onSettingsChanged);
+ebMod.eventBus.off('adaptation:recorded', onRecorded);
+adapt._resetForTests();
+
 // ═══ Summary ═══
 const total = passCount + failCount;
 const summary = document.getElementById('summary');
