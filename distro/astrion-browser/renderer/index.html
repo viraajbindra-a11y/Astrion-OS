@@ -88,6 +88,17 @@
     <button id="downloads-close" title="Hide" aria-label="Close">×</button>
   </div>
 
+  <!-- Command palette — Ctrl+P search across tabs, bookmarks, history, actions -->
+  <div id="palette-overlay" hidden>
+    <div id="palette">
+      <input id="palette-input" type="text" placeholder="Switch tabs, search bookmarks, history, or run an action…" autocomplete="off">
+      <div id="palette-results"></div>
+      <div id="palette-hint">
+        <kbd>↑</kbd><kbd>↓</kbd> navigate · <kbd>Enter</kbd> select · <kbd>Esc</kbd> close
+      </div>
+    </div>
+  </div>
+
   <script src="browser.js"></script>
 </body>
 </html>

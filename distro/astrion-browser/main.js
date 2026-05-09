@@ -76,9 +76,29 @@ function createMainWindow() {
     tabs.clear();
   });
 
-  // Spawn an initial tab once the chrome is ready.
+  // Spawn initial tabs once the chrome is ready.
+  // Restore order: pinned tabs first (always), then last session if
+  // the user has restoreLastSession enabled. Falls back to a single
+  // newtab if there's nothing to restore.
   mainWindow.webContents.on('did-finish-load', () => {
-    if (tabs.size === 0) createTab(ASTRION_NEWTAB);
+    if (tabs.size > 0) return;
+    const pinnedUrls = Array.isArray(settings.pinnedTabs) ? settings.pinnedTabs : [];
+    const sessionUrls = (settings.restoreLastSession !== false && Array.isArray(settings.lastSessionTabs))
+      ? settings.lastSessionTabs : [];
+
+    let firstId = null;
+    for (const url of pinnedUrls) {
+      const id = createTab(url);
+      const t = tabs.get(id);
+      if (t) t.pinned = true;
+      if (firstId === null) firstId = id;
+    }
+    for (const url of sessionUrls) {
+      const id = createTab(url);
+      if (firstId === null) firstId = id;
+    }
+    if (firstId === null) createTab(ASTRION_NEWTAB);
+    pushTabList();
   });
 }
 
@@ -710,6 +730,9 @@ const DEFAULT_SETTINGS = {
   aiUrl: 'http://localhost:11434',
   sleepingTabsMinutes: 30,
   blockTrackers: true,
+  restoreLastSession: true,
+  pinnedTabs: [],
+  lastSessionTabs: [],
 };
 let settings = { ...DEFAULT_SETTINGS };
 
@@ -731,6 +754,43 @@ ipcMain.handle('settings:set', (_, partial) => {
   saveSettings();
   return settings;
 });
+
+// ─── Ad / tracker blocker ──────────────────────────────────────────
+// Built-in blocklist — see blocklist.js. Active when settings.blockTrackers
+// is true (default). Matches by hostname suffix so foo.doubleclick.net
+// blocks but unrelated.doubleclick-net.com does NOT.
+const blocklist = require('./blocklist');
+const blockSet = new Set(blocklist);
+let blockedCount = 0;
+
+function isBlockedHost(host) {
+  if (!host) return false;
+  if (blockSet.has(host)) return true;
+  // Suffix match — pop the leftmost label and try again.
+  const idx = host.indexOf('.');
+  if (idx < 0) return false;
+  return isBlockedHost(host.slice(idx + 1));
+}
+
+function installAdBlocker() {
+  try {
+    session.defaultSession.webRequest.onBeforeRequest((details, callback) => {
+      if (!settings.blockTrackers) return callback({ cancel: false });
+      try {
+        const host = new URL(details.url).hostname;
+        if (isBlockedHost(host)) {
+          blockedCount++;
+          return callback({ cancel: true });
+        }
+      } catch {}
+      callback({ cancel: false });
+    });
+  } catch (err) {
+    console.warn('[astrion-browser] failed to install ad blocker:', err?.message);
+  }
+}
+
+ipcMain.handle('blocker:stats', () => ({ blockedCount, listSize: blocklist.length }));
 
 // ─── Reading mode ──────────────────────────────────────────────────
 // In-memory store. The reader extracts the active tab's content via
@@ -993,6 +1053,7 @@ app.whenReady().then(() => {
   loadSettings();
   loadHistory();
   loadBookmarks();
+  installAdBlocker();
   createMainWindow();
 
   app.on('activate', () => {
@@ -1000,6 +1061,18 @@ app.whenReady().then(() => {
   });
 });
 
+// Save the last-session tab URLs (excluding pinned ones, which save
+// separately). Triggers on close so restartLastSession can replay them.
+function snapshotSession() {
+  const sessionUrls = [...tabs.values()]
+    .filter(t => !t.pinned && t.url && !t.url.includes('newtab.html'))
+    .map(t => t.url);
+  settings.lastSessionTabs = sessionUrls;
+  saveSettings();
+}
+
+app.on('before-quit', () => snapshotSession());
 app.on('window-all-closed', () => {
+  snapshotSession();
   if (process.platform !== 'darwin') app.quit();
 });

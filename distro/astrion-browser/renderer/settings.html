@@ -190,6 +190,20 @@
     </div>
 
     <div class="section">
+      <div class="section-title">Startup</div>
+      <div class="row">
+        <div class="row-info">
+          <div class="row-label">Restore last session</div>
+          <div class="row-help">Reopen the tabs you had open the last time you closed the browser. Pinned tabs are always restored.</div>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="restore-last-session">
+          <span class="toggle-track"></span>
+        </label>
+      </div>
+    </div>
+
+    <div class="section">
       <div class="section-title">Privacy</div>
       <div class="row">
         <div class="row-info">
@@ -222,6 +236,7 @@
       document.getElementById('ai-url').value = s.aiUrl || 'http://localhost:11434';
       document.getElementById('sleeping-tabs').value = s.sleepingTabsMinutes ?? 30;
       document.getElementById('block-trackers').checked = !!s.blockTrackers;
+      document.getElementById('restore-last-session').checked = s.restoreLastSession !== false;
     }
 
     function bind(id, key, getValue) {
@@ -246,6 +261,7 @@
     bind('ai-url', 'aiUrl', el => el.value.trim() || 'http://localhost:11434');
     bind('sleeping-tabs', 'sleepingTabsMinutes', el => parseInt(el.value, 10) || 0);
     bind('block-trackers', 'blockTrackers', el => el.checked);
+    bind('restore-last-session', 'restoreLastSession', el => el.checked);
 
     load();
   </script>

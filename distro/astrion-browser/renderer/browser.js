@@ -144,6 +144,7 @@ document.addEventListener('keydown', (e) => {
   else if (ctrl && e.key === 'h') { e.preventDefault(); window.astrion.newTab('astrion://history'); }
   else if (ctrl && e.key === ',') { e.preventDefault(); window.astrion.newTab('astrion://settings'); }
   else if (ctrl && e.key === 'j') { e.preventDefault(); toggleDownloadsBar(); }
+  else if (ctrl && (e.key === 'p' || e.key === 'P')) { e.preventDefault(); openPalette(); }
   else if (ctrl && e.shiftKey && (e.key === 'a' || e.key === 'A')) { e.preventDefault(); toggleSidebar(); }
   else if (ctrl && e.shiftKey && (e.key === 'r' || e.key === 'R')) { e.preventDefault(); window.astrion.openReader(); }
   else if (e.key === 'F11') { e.preventDefault(); window.astrion.toggleFullscreen(); }
@@ -615,3 +616,204 @@ window.astrion.listDownloads?.().then(list => {
   }
   renderDownloads(list || []);
 });
+
+// ═══════════════════════════════════════════════════════
+// COMMAND PALETTE (Ctrl+P)
+// ═══════════════════════════════════════════════════════
+const paletteOverlay = document.getElementById('palette-overlay');
+const paletteInput = document.getElementById('palette-input');
+const paletteResults = document.getElementById('palette-results');
+
+let paletteCandidates = [];
+let paletteFiltered = [];
+let paletteSelected = 0;
+
+const PALETTE_ACTIONS = [
+  { kind: 'action', title: 'New tab', sub: 'Ctrl+T', icon: '➕', exec: () => window.astrion.newTab() },
+  { kind: 'action', title: 'New tab — Astrion newtab', sub: 'astrion://newtab', icon: '✨', exec: () => window.astrion.newTab('astrion://newtab') },
+  { kind: 'action', title: 'Toggle AI sidebar', sub: 'Ctrl+Shift+A', icon: '✨', exec: () => toggleSidebar() },
+  { kind: 'action', title: 'Reader mode', sub: 'Ctrl+Shift+R', icon: '📖', exec: () => window.astrion.openReader() },
+  { kind: 'action', title: 'Find in page', sub: 'Ctrl+F', icon: '⌕', exec: () => openFindBar() },
+  { kind: 'action', title: 'Show downloads', sub: 'Ctrl+J', icon: '⬇', exec: () => toggleDownloadsBar() },
+  { kind: 'action', title: 'Toggle fullscreen', sub: 'F11', icon: '⛶', exec: () => window.astrion.toggleFullscreen() },
+  { kind: 'action', title: 'Open History', sub: 'Ctrl+H · astrion://history', icon: '🕒', exec: () => window.astrion.newTab('astrion://history') },
+  { kind: 'action', title: 'Open Settings', sub: 'Ctrl+, · astrion://settings', icon: '⚙', exec: () => window.astrion.newTab('astrion://settings') },
+  { kind: 'action', title: 'Bookmark current page', sub: 'Ctrl+D', icon: '☆', exec: () => toggleBookmarkActive() },
+  { kind: 'action', title: 'Reload', sub: 'Ctrl+R', icon: '↻', exec: () => activeId !== null && window.astrion.reload(activeId) },
+];
+
+async function openPalette() {
+  // Refresh candidates from live state.
+  paletteCandidates = await buildPaletteCandidates();
+  paletteFiltered = paletteCandidates.slice(0, 50);
+  paletteSelected = 0;
+  paletteOverlay.hidden = false;
+  paletteInput.value = '';
+  setTimeout(() => paletteInput.focus(), 0);
+  renderPaletteResults();
+}
+
+function closePalette() {
+  paletteOverlay.hidden = true;
+}
+
+async function buildPaletteCandidates() {
+  const out = [];
+
+  // Tabs: switching beats opening new ones, list first.
+  for (const t of tabState) {
+    out.push({
+      kind: 'tab',
+      title: t.title || displayUrl(t.url) || 'Untitled',
+      sub: displayUrl(t.url),
+      icon: '🗂',
+      favicon: t.favicon || null,
+      exec: () => window.astrion.switchTab(t.id),
+    });
+  }
+
+  // Bookmarks
+  for (const b of bookmarks) {
+    out.push({
+      kind: 'bookmark',
+      title: b.title || displayUrl(b.url),
+      sub: displayUrl(b.url),
+      icon: '★',
+      favicon: b.favicon || null,
+      exec: () => activeId !== null && window.astrion.navigate(activeId, b.url),
+    });
+  }
+
+  // Recent history (cap to last 100 for the palette)
+  try {
+    const hist = await window.astrion.listHistory();
+    for (const h of hist.slice(0, 100)) {
+      out.push({
+        kind: 'history',
+        title: h.title || displayUrl(h.url),
+        sub: displayUrl(h.url),
+        icon: '🕒',
+        exec: () => activeId !== null && window.astrion.navigate(activeId, h.url),
+      });
+    }
+  } catch {}
+
+  // Actions last so quick keystrokes prioritize tabs/bookmarks.
+  for (const a of PALETTE_ACTIONS) out.push(a);
+
+  return out;
+}
+
+function paletteFilter(query) {
+  const q = (query || '').trim().toLowerCase();
+  if (!q) return paletteCandidates.slice(0, 50);
+  // Score: exact substring in title beats sub-substring beats neither.
+  const scored = [];
+  for (const c of paletteCandidates) {
+    const title = (c.title || '').toLowerCase();
+    const sub = (c.sub || '').toLowerCase();
+    let score = 0;
+    if (title.startsWith(q)) score = 100;
+    else if (title.includes(q)) score = 50;
+    else if (sub.includes(q)) score = 20;
+    else continue;
+    // Penalize history a bit — they tend to be noisy
+    if (c.kind === 'history') score -= 5;
+    scored.push({ c, score });
+  }
+  scored.sort((a, b) => b.score - a.score);
+  return scored.slice(0, 50).map(x => x.c);
+}
+
+function renderPaletteResults() {
+  paletteResults.innerHTML = '';
+  if (paletteFiltered.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'palette-empty';
+    empty.textContent = 'No matches.';
+    paletteResults.appendChild(empty);
+    return;
+  }
+  paletteFiltered.forEach((item, idx) => {
+    const row = document.createElement('div');
+    row.className = 'palette-item' + (idx === paletteSelected ? ' selected' : '');
+
+    const icon = document.createElement('span');
+    icon.className = 'palette-item-icon';
+    if (item.favicon) {
+      icon.style.background = `url("${cssEscape(item.favicon)}") center/contain no-repeat`;
+    } else {
+      icon.textContent = item.icon || '·';
+    }
+    row.appendChild(icon);
+
+    const info = document.createElement('div');
+    info.className = 'palette-item-info';
+    const t = document.createElement('div');
+    t.className = 'palette-item-title';
+    t.textContent = item.title;
+    info.appendChild(t);
+    if (item.sub) {
+      const s = document.createElement('div');
+      s.className = 'palette-item-sub';
+      s.textContent = item.sub;
+      info.appendChild(s);
+    }
+    row.appendChild(info);
+
+    const kindLabel = document.createElement('span');
+    kindLabel.className = 'palette-item-kind';
+    kindLabel.textContent = item.kind;
+    row.appendChild(kindLabel);
+
+    row.addEventListener('mouseenter', () => {
+      paletteSelected = idx;
+      renderPaletteResults();
+    });
+    row.addEventListener('click', () => executePaletteSelected(idx));
+
+    paletteResults.appendChild(row);
+  });
+}
+
+function executePaletteSelected(idx) {
+  const item = paletteFiltered[idx];
+  if (!item) return;
+  closePalette();
+  try { item.exec(); } catch {}
+}
+
+paletteInput.addEventListener('input', () => {
+  paletteFiltered = paletteFilter(paletteInput.value);
+  paletteSelected = 0;
+  renderPaletteResults();
+});
+
+paletteInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    closePalette();
+  } else if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    paletteSelected = Math.min(paletteFiltered.length - 1, paletteSelected + 1);
+    renderPaletteResults();
+    scrollSelectedIntoView();
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    paletteSelected = Math.max(0, paletteSelected - 1);
+    renderPaletteResults();
+    scrollSelectedIntoView();
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    executePaletteSelected(paletteSelected);
+  }
+});
+
+paletteOverlay.addEventListener('click', (e) => {
+  if (e.target === paletteOverlay) closePalette();
+});
+
+function scrollSelectedIntoView() {
+  const el = paletteResults.querySelector('.palette-item.selected');
+  if (el) el.scrollIntoView({ block: 'nearest' });
+}
