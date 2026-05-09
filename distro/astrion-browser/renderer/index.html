@@ -23,9 +23,58 @@
         <span id="url-icon">🔒</span>
         <input id="url-bar" type="text" autocomplete="off" spellcheck="false"
                placeholder="Search the web or ask Astrion AI">
+        <button id="bookmark-btn" title="Bookmark (Ctrl+D)" aria-label="Bookmark page">☆</button>
       </div>
-      <button id="ai-btn" title="Ask Astrion about this page" aria-label="Ask Astrion">✨</button>
+      <button id="find-btn" title="Find in page (Ctrl+F)" aria-label="Find in page">⌕</button>
+      <button id="ai-btn" title="Ask Astrion about this page (Ctrl+Shift+A)" aria-label="AI sidebar">✨</button>
     </div>
+  </div>
+
+  <!-- Bookmarks bar — shown only when bookmarks exist -->
+  <div id="bookmarks-bar" hidden></div>
+
+  <!-- Find-in-page overlay -->
+  <div id="find-bar" hidden>
+    <input id="find-input" type="text" placeholder="Find in page" autocomplete="off">
+    <span id="find-count">0/0</span>
+    <button id="find-prev" title="Previous (Shift+Enter)" aria-label="Previous match">↑</button>
+    <button id="find-next" title="Next (Enter)" aria-label="Next match">↓</button>
+    <button id="find-close" title="Close (Esc)" aria-label="Close">×</button>
+  </div>
+
+  <!-- AI sidebar — slides in from the right when toggled -->
+  <aside id="sidebar" hidden>
+    <header class="sidebar-header">
+      <span class="sidebar-title">✨ Ask Astrion</span>
+      <button id="sidebar-close" title="Close (Ctrl+Shift+A)" aria-label="Close sidebar">×</button>
+    </header>
+
+    <div id="sidebar-context" class="sidebar-context"></div>
+
+    <div id="sidebar-messages" class="sidebar-messages"></div>
+
+    <div class="sidebar-suggestions">
+      <button class="sidebar-suggestion" data-q="Summarize this page">Summarize this page</button>
+      <button class="sidebar-suggestion" data-q="Explain this in simpler terms">Explain simply</button>
+      <button class="sidebar-suggestion" data-q="What are the key takeaways?">Key takeaways</button>
+    </div>
+
+    <form id="sidebar-form" class="sidebar-form">
+      <textarea id="sidebar-input" rows="2" placeholder="Ask anything about this page..."></textarea>
+      <button type="submit" id="sidebar-send" title="Send (Enter)" aria-label="Send">↑</button>
+    </form>
+  </aside>
+
+  <!-- Tab right-click menu -->
+  <div id="tab-menu" hidden>
+    <button data-action="reload">Reload</button>
+    <button data-action="duplicate">Duplicate</button>
+    <button data-action="mute">Mute</button>
+    <button data-action="unmute" hidden>Unmute</button>
+    <hr>
+    <button data-action="close">Close tab</button>
+    <button data-action="close-others">Close other tabs</button>
+    <button data-action="close-right">Close tabs to the right</button>
   </div>
 
   <script src="browser.js"></script>

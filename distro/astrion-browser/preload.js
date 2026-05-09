@@ -14,6 +14,10 @@ contextBridge.exposeInMainWorld('astrion', {
   switchTab: (id) => ipcRenderer.invoke('tabs:switch', id),
   listTabs: () => ipcRenderer.invoke('tabs:list'),
   activeTab: () => ipcRenderer.invoke('tabs:active'),
+  duplicateTab: (id) => ipcRenderer.invoke('tabs:duplicate', id),
+  closeOtherTabs: (id) => ipcRenderer.invoke('tabs:close-others', id),
+  closeTabsRight: (id) => ipcRenderer.invoke('tabs:close-right', id),
+  muteTab: (id, muted) => ipcRenderer.invoke('tabs:mute', id, muted),
 
   // Per-tab navigation
   navigate: (id, url) => ipcRenderer.invoke('tab:navigate', id, url),
@@ -26,6 +30,26 @@ contextBridge.exposeInMainWorld('astrion', {
   serverUrl: () => ipcRenderer.invoke('astrion:server'),
   newtabUrl: () => ipcRenderer.invoke('astrion:newtab-url'),
   openExternal: (url) => ipcRenderer.invoke('astrion:open-external', url),
+
+  // AI sidebar
+  toggleSidebar: () => ipcRenderer.invoke('sidebar:toggle'),
+  sidebarState: () => ipcRenderer.invoke('sidebar:state'),
+  askAi: (prompt) => ipcRenderer.invoke('sidebar:ask', prompt),
+  pageContext: () => ipcRenderer.invoke('sidebar:page-context'),
+
+  // Bookmarks
+  listBookmarks: () => ipcRenderer.invoke('bookmarks:list'),
+  addBookmark: (b) => ipcRenderer.invoke('bookmarks:add', b),
+  removeBookmark: (url) => ipcRenderer.invoke('bookmarks:remove', url),
+
+  // Find in page
+  findStart: (text, opts) => ipcRenderer.invoke('find:start', text, opts),
+  findStop: (action) => ipcRenderer.invoke('find:stop', action),
+
+  // Zoom
+  zoomIn: () => ipcRenderer.invoke('zoom:in'),
+  zoomOut: () => ipcRenderer.invoke('zoom:out'),
+  zoomReset: () => ipcRenderer.invoke('zoom:reset'),
 
   // Push channels (main → renderer)
   onTabUpdate: (cb) => {
@@ -42,5 +66,10 @@ contextBridge.exposeInMainWorld('astrion', {
     const listener = (_e, id) => cb(id);
     ipcRenderer.on('tabs:active', listener);
     return () => ipcRenderer.off('tabs:active', listener);
+  },
+  onBookmarks: (cb) => {
+    const listener = (_e, list) => cb(list);
+    ipcRenderer.on('bookmarks:list', listener);
+    return () => ipcRenderer.off('bookmarks:list', listener);
   },
 });

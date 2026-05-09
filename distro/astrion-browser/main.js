@@ -17,6 +17,10 @@ const path = require('path');
 // Height of the chrome (tab strip + URL bar). BrowserViews are
 // positioned starting at this y offset. Keep in sync with style.css.
 const CHROME_HEIGHT = 80;
+// Width of the AI sidebar when open. Page BrowserView shrinks by
+// this amount horizontally so the sidebar HTML in the chrome shows
+// through on the right edge.
+const SIDEBAR_WIDTH = 360;
 const ASTRION_NEWTAB = `file://${path.join(__dirname, 'renderer', 'newtab.html')}`;
 // Astrion's web server (web app, /api endpoints). The browser's AI
 // sidebar talks to it; bookmarks may sync to it.
@@ -27,6 +31,12 @@ let mainWindow = null;
 const tabs = new Map(); // id → { id, view, url, title, favicon, isLoading }
 let activeTabId = null;
 let nextTabId = 1;
+// AI sidebar visibility — when true, page BrowserView shrinks to leave
+// room for the sidebar HTML on the right edge of the window.
+let sidebarOpen = false;
+// Persisted bookmarks. Loaded from disk on launch, saved on change.
+let bookmarks = [];
+const BOOKMARKS_PATH = path.join(app.getPath('userData'), 'bookmarks.json');
 
 // ─── Window setup ──────────────────────────────────────────────────
 function createMainWindow() {
@@ -235,8 +245,9 @@ function layoutActiveView() {
   const tab = tabs.get(activeTabId);
   if (!tab) return;
   const [w, h] = mainWindow.getContentSize();
+  const pageWidth = sidebarOpen ? Math.max(0, w - SIDEBAR_WIDTH) : w;
   try {
-    tab.view.setBounds({ x: 0, y: CHROME_HEIGHT, width: w, height: Math.max(0, h - CHROME_HEIGHT) });
+    tab.view.setBounds({ x: 0, y: CHROME_HEIGHT, width: pageWidth, height: Math.max(0, h - CHROME_HEIGHT) });
   } catch {}
 }
 
@@ -295,6 +306,203 @@ ipcMain.handle('astrion:open-external', (_, url) => {
   }
 });
 
+// ─── AI sidebar ────────────────────────────────────────────────────
+ipcMain.handle('sidebar:toggle', () => {
+  sidebarOpen = !sidebarOpen;
+  layoutActiveView();
+  return sidebarOpen;
+});
+ipcMain.handle('sidebar:state', () => sidebarOpen);
+
+// Pull a usable text snapshot from the active tab so the AI has page
+// context to reason about. Capped at ~6000 chars (≈1500 tokens) so we
+// don't blow the chat budget on a long article.
+ipcMain.handle('sidebar:page-context', async () => {
+  if (activeTabId === null) return { url: '', title: '', text: '' };
+  const tab = tabs.get(activeTabId);
+  if (!tab) return { url: '', title: '', text: '' };
+  try {
+    const text = await tab.view.webContents.executeJavaScript(`
+      (() => {
+        const main = document.querySelector('main, article, [role="main"]') || document.body;
+        return (main.innerText || '').replace(/\\s+/g, ' ').trim().slice(0, 6000);
+      })()
+    `, true).catch(() => '');
+    return {
+      url: tab.url,
+      title: tab.title,
+      text: text || '',
+    };
+  } catch {
+    return { url: tab.url, title: tab.title, text: '' };
+  }
+});
+
+// Forward the AI ask to Astrion's web server. We do this from main so
+// the file:// chrome doesn't hit CORS, and so we can attach the page
+// context without exposing fetch() to the renderer. Calls Astrion's
+// existing /api/ai/ollama endpoint (local model, no key needed) —
+// matches what the JS chat panel uses. Future: pull the user-chosen
+// model from a shared config endpoint instead of hardcoding.
+ipcMain.handle('sidebar:ask', async (_, prompt) => {
+  try {
+    const ctx = await ipcMainInvoke('sidebar:page-context');
+    const baseSystem =
+      'You are Astrion, the built-in AI inside Astrion Browser. ' +
+      'You help the user understand, summarize, and reason about the page they are reading. ' +
+      'Be concise. Use markdown sparingly.';
+    const pageSystem = ctx.url && !ctx.url.includes('newtab.html')
+      ? `\n\nThe user is currently viewing:\nTitle: ${ctx.title}\nURL: ${ctx.url}\n\nPage excerpt (truncated):\n${ctx.text}`
+      : '';
+    const body = {
+      url: process.env.ASTRION_OLLAMA_URL || 'http://localhost:11434',
+      model: process.env.ASTRION_OLLAMA_MODEL || 'qwen2.5:7b',
+      system: baseSystem + pageSystem,
+      messages: [{ role: 'user', content: prompt }],
+      max_tokens: 1024,
+    };
+    const res = await fetch(`${ASTRION_SERVER}/api/ai/ollama`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      return { ok: false, error: `Astrion AI returned ${res.status}${errText ? ': ' + errText.slice(0, 200) : ''}` };
+    }
+    const data = await res.json();
+    if (data.error) return { ok: false, error: data.error };
+    return { ok: true, reply: data.reply || '(empty response)' };
+  } catch (err) {
+    return { ok: false, error: err?.message || 'AI request failed' };
+  }
+});
+
+// ipcMain.handle returns a function we can't directly invoke; this
+// helper invokes one of our own handlers from inside another so we
+// can compose page-context + ask without duplicating logic.
+async function ipcMainInvoke(channel, ...args) {
+  if (channel === 'sidebar:page-context') {
+    if (activeTabId === null) return { url: '', title: '', text: '' };
+    const tab = tabs.get(activeTabId);
+    if (!tab) return { url: '', title: '', text: '' };
+    try {
+      const text = await tab.view.webContents.executeJavaScript(`
+        (() => {
+          const main = document.querySelector('main, article, [role="main"]') || document.body;
+          return (main.innerText || '').replace(/\\s+/g, ' ').trim().slice(0, 6000);
+        })()
+      `, true).catch(() => '');
+      return { url: tab.url, title: tab.title, text: text || '' };
+    } catch {
+      return { url: tab.url, title: tab.title, text: '' };
+    }
+  }
+  return null;
+}
+
+// ─── Bookmarks ─────────────────────────────────────────────────────
+function loadBookmarks() {
+  try {
+    const fs = require('fs');
+    if (fs.existsSync(BOOKMARKS_PATH)) {
+      const raw = fs.readFileSync(BOOKMARKS_PATH, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) bookmarks = parsed;
+    }
+  } catch (err) {
+    console.warn('[astrion-browser] failed to load bookmarks:', err?.message);
+  }
+}
+function saveBookmarks() {
+  try {
+    const fs = require('fs');
+    fs.writeFileSync(BOOKMARKS_PATH, JSON.stringify(bookmarks, null, 2));
+  } catch (err) {
+    console.warn('[astrion-browser] failed to save bookmarks:', err?.message);
+  }
+}
+function pushBookmarks() {
+  if (mainWindow) {
+    try { mainWindow.webContents.send('bookmarks:list', bookmarks); } catch {}
+  }
+}
+ipcMain.handle('bookmarks:list', () => bookmarks);
+ipcMain.handle('bookmarks:add', (_, b) => {
+  if (!b || !b.url) return false;
+  // Dedup by URL — re-bookmarking just updates the title.
+  const existing = bookmarks.findIndex(x => x.url === b.url);
+  const entry = { url: b.url, title: b.title || b.url, favicon: b.favicon || null, addedAt: Date.now() };
+  if (existing >= 0) bookmarks[existing] = { ...bookmarks[existing], ...entry };
+  else bookmarks.unshift(entry);
+  saveBookmarks();
+  pushBookmarks();
+  return true;
+});
+ipcMain.handle('bookmarks:remove', (_, url) => {
+  const before = bookmarks.length;
+  bookmarks = bookmarks.filter(b => b.url !== url);
+  if (bookmarks.length !== before) {
+    saveBookmarks();
+    pushBookmarks();
+  }
+  return true;
+});
+
+// ─── Find in page ──────────────────────────────────────────────────
+ipcMain.handle('find:start', (_, text, opts) => {
+  if (activeTabId === null || !text) return;
+  const tab = tabs.get(activeTabId);
+  if (tab) tab.view.webContents.findInPage(text, opts || {});
+});
+ipcMain.handle('find:stop', (_, action) => {
+  if (activeTabId === null) return;
+  const tab = tabs.get(activeTabId);
+  // action: 'clearSelection' | 'keepSelection' | 'activateSelection'
+  if (tab) tab.view.webContents.stopFindInPage(action || 'clearSelection');
+});
+
+// ─── Page zoom ─────────────────────────────────────────────────────
+ipcMain.handle('zoom:in', () => {
+  if (activeTabId === null) return;
+  const tab = tabs.get(activeTabId);
+  if (!tab) return;
+  const wc = tab.view.webContents;
+  wc.setZoomFactor(Math.min(3, wc.getZoomFactor() + 0.1));
+});
+ipcMain.handle('zoom:out', () => {
+  if (activeTabId === null) return;
+  const tab = tabs.get(activeTabId);
+  if (!tab) return;
+  const wc = tab.view.webContents;
+  wc.setZoomFactor(Math.max(0.25, wc.getZoomFactor() - 0.1));
+});
+ipcMain.handle('zoom:reset', () => {
+  if (activeTabId === null) return;
+  const tab = tabs.get(activeTabId);
+  if (tab) tab.view.webContents.setZoomFactor(1);
+});
+
+// ─── Tab management extras ─────────────────────────────────────────
+ipcMain.handle('tabs:duplicate', (_, id) => {
+  const tab = tabs.get(id);
+  if (tab) createTab(tab.url);
+});
+ipcMain.handle('tabs:close-others', (_, keepId) => {
+  const ids = [...tabs.keys()].filter(id => id !== keepId);
+  for (const id of ids) closeTab(id);
+});
+ipcMain.handle('tabs:close-right', (_, fromId) => {
+  const ids = [...tabs.keys()];
+  const idx = ids.indexOf(fromId);
+  if (idx < 0) return;
+  for (const id of ids.slice(idx + 1)) closeTab(id);
+});
+ipcMain.handle('tabs:mute', (_, id, muted) => {
+  const tab = tabs.get(id);
+  if (tab) tab.view.webContents.setAudioMuted(!!muted);
+});
+
 // ─── Lifecycle ─────────────────────────────────────────────────────
 // Astrion-specific Chromium hardening: disable the default search engine
 // pings and the metrics reporting Electron inherits from upstream.
@@ -316,6 +524,7 @@ app.whenReady().then(() => {
     });
   } catch {}
 
+  loadBookmarks();
   createMainWindow();
 
   app.on('activate', () => {
