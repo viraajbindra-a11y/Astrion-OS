@@ -118,6 +118,38 @@ urlBar.addEventListener('focus', () => {
   // Select all on focus — universal address-bar UX.
   setTimeout(() => urlBar.select(), 0);
 });
+
+// URL bar right-click menu — text editing + paste-and-go (Chrome-style).
+urlBar.addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  const hasValue = !!urlBar.value;
+  showFloatingMenu(e.pageX, e.pageY, [
+    { label: 'Copy', disabled: !hasValue, click: () => {
+      navigator.clipboard.writeText(urlBar.value).catch(() => {});
+    }},
+    { label: 'Cut', disabled: !hasValue, click: () => {
+      navigator.clipboard.writeText(urlBar.value).catch(() => {});
+      urlBar.value = '';
+    }},
+    { label: 'Paste', click: async () => {
+      try {
+        const t = await navigator.clipboard.readText();
+        const start = urlBar.selectionStart || 0;
+        const end = urlBar.selectionEnd || 0;
+        urlBar.value = urlBar.value.slice(0, start) + t + urlBar.value.slice(end);
+        urlBar.focus();
+      } catch {}
+    }},
+    { label: 'Paste and go', click: async () => {
+      try {
+        const t = (await navigator.clipboard.readText()).trim();
+        if (t && activeId !== null) window.astrion.navigate(activeId, t);
+      } catch {}
+    }},
+    { divider: true },
+    { label: 'Select all', click: () => urlBar.select() },
+  ]);
+});
 urlBar.addEventListener('blur', () => {
   urlBarFocused = false;
   refreshChromeForActive();
@@ -145,6 +177,7 @@ document.addEventListener('keydown', (e) => {
   else if (ctrl && e.key === ',') { e.preventDefault(); window.astrion.newTab('astrion://settings'); }
   else if (ctrl && e.key === 'j') { e.preventDefault(); toggleDownloadsBar(); }
   else if (ctrl && (e.key === 'p' || e.key === 'P')) { e.preventDefault(); openPalette(); }
+  else if (ctrl && e.shiftKey && (e.key === 'd' || e.key === 'D')) { e.preventDefault(); window.astrion.addCurrentToReadingList(); }
   else if (ctrl && e.shiftKey && (e.key === 'a' || e.key === 'A')) { e.preventDefault(); toggleSidebar(); }
   else if (ctrl && e.shiftKey && (e.key === 'r' || e.key === 'R')) { e.preventDefault(); window.astrion.openReader(); }
   else if (e.key === 'F11') { e.preventDefault(); window.astrion.toggleFullscreen(); }
@@ -481,23 +514,28 @@ findNext.addEventListener('click', () => {
 const tabMenu = document.getElementById('tab-menu');
 let tabMenuTargetId = null;
 
-document.addEventListener('contextmenu', (e) => {
-  const tabEl = e.target.closest?.('.tab');
-  if (!tabEl) return;
-  e.preventDefault();
-  tabMenuTargetId = parseInt(tabEl.dataset.id, 10);
-  showTabMenu(e.pageX, e.pageY);
-});
-
-function showTabMenu(x, y) {
-  // Show pin or unpin depending on the target tab's state.
-  const target = tabState.find(t => t.id === tabMenuTargetId);
-  const pinned = !!(target && target.pinned);
-  tabMenu.querySelector('button[data-action="pin"]').hidden = pinned;
-  tabMenu.querySelector('button[data-action="unpin"]').hidden = !pinned;
-
+// Generic floating menu — reused for tab right-click and URL-bar
+// right-click. Each call passes a list of { label, click, disabled,
+// divider } items; we rebuild the menu DOM each time so handlers and
+// state stay in sync.
+function showFloatingMenu(x, y, items) {
+  tabMenu.innerHTML = '';
+  for (const item of items) {
+    if (item.divider) {
+      const hr = document.createElement('hr');
+      tabMenu.appendChild(hr);
+      continue;
+    }
+    const btn = document.createElement('button');
+    btn.textContent = item.label;
+    if (item.disabled) btn.disabled = true;
+    btn.addEventListener('click', () => {
+      hideTabMenu();
+      try { item.click(); } catch {}
+    });
+    tabMenu.appendChild(btn);
+  }
   tabMenu.hidden = false;
-  // Clamp to viewport
   const rect = tabMenu.getBoundingClientRect();
   const mx = Math.min(x, window.innerWidth - rect.width - 8);
   const my = Math.min(y, window.innerHeight - rect.height - 8);
@@ -514,24 +552,26 @@ document.addEventListener('click', (e) => {
   if (!tabMenu.hidden && !tabMenu.contains(e.target)) hideTabMenu();
 });
 
-tabMenu.querySelectorAll('button[data-action]').forEach(btn => {
-  btn.addEventListener('click', () => {
-    const id = tabMenuTargetId;
-    if (id === null) { hideTabMenu(); return; }
-    const action = btn.dataset.action;
-    switch (action) {
-      case 'reload': window.astrion.reload(id); break;
-      case 'duplicate': window.astrion.duplicateTab(id); break;
-      case 'pin': window.astrion.pinTab(id, true); break;
-      case 'unpin': window.astrion.pinTab(id, false); break;
-      case 'mute': window.astrion.muteTab(id, true); break;
-      case 'unmute': window.astrion.muteTab(id, false); break;
-      case 'close': window.astrion.closeTab(id); break;
-      case 'close-others': window.astrion.closeOtherTabs(id); break;
-      case 'close-right': window.astrion.closeTabsRight(id); break;
-    }
-    hideTabMenu();
-  });
+document.addEventListener('contextmenu', (e) => {
+  const tabEl = e.target.closest?.('.tab');
+  if (!tabEl) return;
+  e.preventDefault();
+  const id = parseInt(tabEl.dataset.id, 10);
+  tabMenuTargetId = id;
+  const target = tabState.find(t => t.id === id);
+  const pinned = !!(target && target.pinned);
+  showFloatingMenu(e.pageX, e.pageY, [
+    { label: 'Reload', click: () => window.astrion.reload(id) },
+    { label: 'Duplicate', click: () => window.astrion.duplicateTab(id) },
+    pinned
+      ? { label: 'Unpin tab', click: () => window.astrion.pinTab(id, false) }
+      : { label: 'Pin tab',   click: () => window.astrion.pinTab(id, true) },
+    { label: 'Mute',   click: () => window.astrion.muteTab(id, true) },
+    { divider: true },
+    { label: 'Close tab', click: () => window.astrion.closeTab(id), disabled: pinned },
+    { label: 'Close other tabs', click: () => window.astrion.closeOtherTabs(id) },
+    { label: 'Close tabs to the right', click: () => window.astrion.closeTabsRight(id) },
+  ]);
 });
 
 // ═══════════════════════════════════════════════════════
@@ -663,8 +703,10 @@ const PALETTE_ACTIONS = [
   { kind: 'action', title: 'Show downloads', sub: 'Ctrl+J', icon: '⬇', exec: () => toggleDownloadsBar() },
   { kind: 'action', title: 'Toggle fullscreen', sub: 'F11', icon: '⛶', exec: () => window.astrion.toggleFullscreen() },
   { kind: 'action', title: 'Open History', sub: 'Ctrl+H · astrion://history', icon: '🕒', exec: () => window.astrion.newTab('astrion://history') },
+  { kind: 'action', title: 'Open Reading list', sub: 'astrion://reading-list', icon: '📚', exec: () => window.astrion.newTab('astrion://reading-list') },
   { kind: 'action', title: 'Open Settings', sub: 'Ctrl+, · astrion://settings', icon: '⚙', exec: () => window.astrion.newTab('astrion://settings') },
   { kind: 'action', title: 'Bookmark current page', sub: 'Ctrl+D', icon: '☆', exec: () => toggleBookmarkActive() },
+  { kind: 'action', title: 'Add to reading list', sub: 'Ctrl+Shift+D', icon: '📚', exec: () => window.astrion.addCurrentToReadingList() },
   { kind: 'action', title: 'Reload', sub: 'Ctrl+R', icon: '↻', exec: () => activeId !== null && window.astrion.reload(activeId) },
 ];
 

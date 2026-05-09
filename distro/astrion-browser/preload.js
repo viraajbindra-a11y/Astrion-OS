@@ -62,6 +62,12 @@ contextBridge.exposeInMainWorld('astrion', {
   addBookmark: (b) => ipcRenderer.invoke('bookmarks:add', b),
   removeBookmark: (url) => ipcRenderer.invoke('bookmarks:remove', url),
 
+  // Reading list
+  listReadingList: () => ipcRenderer.invoke('reading-list:list'),
+  addToReadingList: (e) => ipcRenderer.invoke('reading-list:add', e),
+  removeFromReadingList: (url) => ipcRenderer.invoke('reading-list:remove', url),
+  addCurrentToReadingList: () => ipcRenderer.invoke('reading-list:add-current'),
+
   // Find in page
   findStart: (text, opts) => ipcRenderer.invoke('find:start', text, opts),
   findStop: (action) => ipcRenderer.invoke('find:stop', action),

@@ -1,0 +1,213 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Reading list — Astrion</title>
+  <style>
+    :root {
+      --bg: #0e0e1a;
+      --bg-card: rgba(255,255,255,0.04);
+      --bg-card-hover: rgba(255,255,255,0.08);
+      --fg: rgba(255,255,255,0.92);
+      --fg-muted: rgba(255,255,255,0.55);
+      --fg-faint: rgba(255,255,255,0.35);
+      --accent: #5ac8fa;
+      --border: rgba(255,255,255,0.08);
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; padding: 0; height: 100%;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+      color: var(--fg);
+      background:
+        radial-gradient(ellipse at 30% 20%, rgba(120,90,250,0.08) 0%, transparent 60%),
+        var(--bg);
+    }
+    .wrap {
+      max-width: 760px;
+      margin: 0 auto;
+      padding: 48px 24px;
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      margin-bottom: 32px;
+    }
+    h1 {
+      font-size: 24px;
+      font-weight: 700;
+      margin: 0 0 4px;
+    }
+    .subtitle {
+      font-size: 12px;
+      color: var(--fg-muted);
+      margin: 0;
+    }
+    .entry {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      padding: 14px 16px;
+      background: var(--bg-card);
+      border: 1px solid transparent;
+      border-radius: 10px;
+      margin-bottom: 8px;
+      transition: background 0.12s ease, border-color 0.12s ease, transform 0.12s ease;
+    }
+    .entry:hover {
+      background: var(--bg-card-hover);
+      border-color: rgba(90,200,250,0.25);
+      transform: translateY(-1px);
+    }
+    .entry-info { flex: 1; min-width: 0; cursor: pointer; }
+    .entry-title {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--fg);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-bottom: 4px;
+    }
+    .entry-url {
+      font-size: 11px;
+      color: var(--fg-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .entry-time {
+      font-size: 10px;
+      color: var(--fg-faint);
+      margin-top: 4px;
+    }
+    .remove-btn {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--fg-muted);
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 11px;
+      cursor: pointer;
+      font-family: inherit;
+      flex-shrink: 0;
+    }
+    .remove-btn:hover { background: rgba(255,107,107,0.08); border-color: rgba(255,107,107,0.4); color: #ff6e6e; }
+    .empty {
+      text-align: center;
+      padding: 80px 20px;
+      color: var(--fg-faint);
+    }
+    .empty h2 {
+      color: var(--fg);
+      margin: 0 0 8px;
+      font-weight: 500;
+    }
+    .empty p {
+      font-size: 13px;
+      margin: 0;
+      max-width: 340px;
+      margin-left: auto;
+      margin-right: auto;
+      line-height: 1.6;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div>
+        <h1>Reading list</h1>
+        <p class="subtitle">Save articles for later. Click any entry to open it.</p>
+      </div>
+    </header>
+    <div id="list"></div>
+  </div>
+
+  <script>
+    function relativeTime(ts) {
+      const s = Math.floor((Date.now() - ts) / 1000);
+      if (s < 60) return 'just now';
+      if (s < 3600) return Math.floor(s / 60) + ' min ago';
+      if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+      const days = Math.floor(s / 86400);
+      if (days < 30) return days + 'd ago';
+      const months = Math.floor(days / 30);
+      if (months < 12) return months + 'mo ago';
+      return Math.floor(months / 12) + 'y ago';
+    }
+
+    async function load() {
+      if (!window.astrionPage) {
+        renderEmpty('Not available', 'This page only works inside Astrion Browser.');
+        return;
+      }
+      const list = await window.astrionPage.listReadingList();
+      render(list);
+    }
+
+    function render(list) {
+      const root = document.getElementById('list');
+      if (!list || list.length === 0) {
+        renderEmpty('Nothing saved yet', 'Press Ctrl+Shift+D on any page to add it. Reading list is for "I want to read this later" — bookmarks are for "I always want quick access."');
+        return;
+      }
+      root.innerHTML = '';
+      for (const e of list) {
+        const row = document.createElement('div');
+        row.className = 'entry';
+
+        const info = document.createElement('div');
+        info.className = 'entry-info';
+
+        const title = document.createElement('div');
+        title.className = 'entry-title';
+        title.textContent = e.title || e.url;
+        info.appendChild(title);
+
+        const url = document.createElement('div');
+        url.className = 'entry-url';
+        url.textContent = e.url;
+        info.appendChild(url);
+
+        const t = document.createElement('div');
+        t.className = 'entry-time';
+        t.textContent = 'Saved ' + relativeTime(e.addedAt);
+        info.appendChild(t);
+
+        info.addEventListener('click', () => { location.href = e.url; });
+        row.appendChild(info);
+
+        const remove = document.createElement('button');
+        remove.className = 'remove-btn';
+        remove.textContent = 'Remove';
+        remove.addEventListener('click', async () => {
+          await window.astrionPage.removeFromReadingList(e.url);
+          load();
+        });
+        row.appendChild(remove);
+
+        root.appendChild(row);
+      }
+    }
+
+    function renderEmpty(h, p) {
+      document.getElementById('list').innerHTML = `
+        <div class="empty">
+          <h2>${escapeHtml(h)}</h2>
+          <p>${escapeHtml(p)}</p>
+        </div>
+      `;
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"']/g, (c) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      })[c]);
+    }
+
+    load();
+  </script>
+</body>
+</html>

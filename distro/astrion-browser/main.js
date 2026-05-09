@@ -31,6 +31,7 @@ const ASTRION_NEWTAB = `file://${path.join(__dirname, 'renderer', 'newtab.html')
 const ASTRION_HISTORY = `file://${path.join(__dirname, 'renderer', 'history.html')}`;
 const ASTRION_SETTINGS = `file://${path.join(__dirname, 'renderer', 'settings.html')}`;
 const ASTRION_READER = `file://${path.join(__dirname, 'renderer', 'reader.html')}`;
+const ASTRION_READING_LIST = `file://${path.join(__dirname, 'renderer', 'reading-list.html')}`;
 // Astrion's web server (web app, /api endpoints). The browser's AI
 // sidebar talks to it; bookmarks may sync to it.
 const ASTRION_SERVER = process.env.ASTRION_SERVER || 'http://localhost:3000';
@@ -293,6 +294,7 @@ function normalizeInput(raw) {
     if (id === 'history') return ASTRION_HISTORY;
     if (id === 'settings') return ASTRION_SETTINGS;
     if (id === 'reader') return ASTRION_READER;
+    if (id === 'reading-list' || id === 'readinglist') return ASTRION_READING_LIST;
     return ASTRION_NEWTAB;
   }
   // view-source: passthrough
@@ -302,6 +304,17 @@ function normalizeInput(raw) {
   if (trimmed.startsWith('about:') || trimmed.startsWith('chrome://')) return trimmed;
   // Looks like a domain (has a dot, no spaces) → assume HTTPS.
   if (!/\s/.test(trimmed) && /[.]/.test(trimmed)) return `https://${trimmed}`;
+  // Search keyword expansion: "yt cats" → YouTube, "wiki ramen" → Wikipedia.
+  // Splits on first space; first token is the keyword, rest is the query.
+  const spaceIdx = trimmed.indexOf(' ');
+  if (spaceIdx > 0) {
+    const keyword = trimmed.slice(0, spaceIdx).toLowerCase();
+    const rest = trimmed.slice(spaceIdx + 1).trim();
+    const map = settings.searchKeywords || {};
+    if (rest && map[keyword]) {
+      return map[keyword].replace(/%s/g, encodeURIComponent(rest));
+    }
+  }
   // Otherwise → search using the configured search engine.
   return searchUrlFor(trimmed);
 }
@@ -825,6 +838,22 @@ const DEFAULT_SETTINGS = {
   accent: '#5ac8fa',
   verticalTabs: false,
   perSiteZoom: {},                  // { hostname: zoomFactor }
+  // Search keyword expansion. Type "yt cats" → YouTube. The %s
+  // placeholder gets the URL-encoded query. Users can add/remove
+  // keywords from the Settings page.
+  searchKeywords: {
+    yt:    'https://www.youtube.com/results?search_query=%s',
+    wiki:  'https://en.wikipedia.org/wiki/Special:Search?search=%s',
+    gh:    'https://github.com/search?q=%s',
+    amzn:  'https://www.amazon.com/s?k=%s',
+    map:   'https://www.google.com/maps/search/%s',
+    mdn:   'https://developer.mozilla.org/en-US/search?q=%s',
+    so:    'https://stackoverflow.com/search?q=%s',
+    rd:    'https://www.reddit.com/search/?q=%s',
+    ddg:   'https://duckduckgo.com/?q=%s',
+    img:   'https://www.google.com/search?tbm=isch&q=%s',
+  },
+  readingList: [],                  // [{ url, title, addedAt }]
 };
 let settings = { ...DEFAULT_SETTINGS };
 
@@ -889,6 +918,61 @@ function installAdBlocker() {
 }
 
 ipcMain.handle('blocker:stats', () => ({ blockedCount, listSize: blocklist.length }));
+
+// ─── Reading list ──────────────────────────────────────────────────
+// Separate from bookmarks by intent: "I want to read this later" vs
+// "I want this saved permanently for quick access." Stored in
+// settings.readingList — entries can be removed when read.
+ipcMain.handle('reading-list:list', () => settings.readingList || []);
+ipcMain.handle('reading-list:add', (_, entry) => {
+  if (!entry || !entry.url) return false;
+  if (!settings.readingList) settings.readingList = [];
+  // Dedup by URL — re-adding bumps to the top.
+  settings.readingList = settings.readingList.filter(e => e.url !== entry.url);
+  settings.readingList.unshift({
+    url: entry.url,
+    title: entry.title || entry.url,
+    addedAt: Date.now(),
+  });
+  if (settings.readingList.length > 500) settings.readingList.length = 500;
+  saveSettings();
+  if (mainWindow) {
+    try { mainWindow.webContents.send('reading-list:list', settings.readingList); } catch {}
+  }
+  return true;
+});
+ipcMain.handle('reading-list:remove', (_, url) => {
+  if (!settings.readingList) return false;
+  const before = settings.readingList.length;
+  settings.readingList = settings.readingList.filter(e => e.url !== url);
+  if (settings.readingList.length !== before) {
+    saveSettings();
+    if (mainWindow) {
+      try { mainWindow.webContents.send('reading-list:list', settings.readingList); } catch {}
+    }
+  }
+  return true;
+});
+ipcMain.handle('reading-list:add-current', () => {
+  if (activeTabId === null) return false;
+  const tab = tabs.get(activeTabId);
+  if (!tab) return false;
+  return ipcMainInvokeReading(tab);
+});
+function ipcMainInvokeReading(tab) {
+  if (!settings.readingList) settings.readingList = [];
+  settings.readingList = settings.readingList.filter(e => e.url !== tab.url);
+  settings.readingList.unshift({
+    url: tab.url,
+    title: tab.title || tab.url,
+    addedAt: Date.now(),
+  });
+  saveSettings();
+  if (mainWindow) {
+    try { mainWindow.webContents.send('reading-list:list', settings.readingList); } catch {}
+  }
+  return true;
+}
 
 // ─── Reading mode ──────────────────────────────────────────────────
 // In-memory store. The reader extracts the active tab's content via
