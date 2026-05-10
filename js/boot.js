@@ -513,6 +513,15 @@ function __bootFlush(reason) {
   // with action buttons. Must come after notifications.init() so the
   // banner host exists.
   (await import('./shell/skill-proposal-toast.js')).initSkillProposalToast();
+  // 2026-05-09 round 3 — surfaces for the silent-detection adaptations:
+  //   text-learner: preference rule + autocorrect rule
+  //   dock-usage:  pin/unpin proposals at boldness < HIGH
+  //   time-routine: hour-anchored routine
+  // Without these, detection events fire silently — the rule never
+  // lands because no surface accepts.
+  (await import('./shell/text-learner-toast.js')).initTextLearnerToast();
+  (await import('./shell/dock-usage-toast.js')).initDockUsageToast();
+  (await import('./shell/time-routine-toast.js')).initTimeRoutineToast();
   initShortcuts();
   initLockScreen();
   initScreenshot();

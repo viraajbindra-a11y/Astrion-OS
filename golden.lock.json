@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-05-10T03:55:49.873Z",
+  "generated_at": "2026-05-10T04:06:48.059Z",
   "files": {
     "js/kernel/capability-api.js": "85a4c950586c902da27fb6a9a5c417db6a1ad0267e3b8cb88a76f5823cc52eaa",
     "js/kernel/operation-interceptor.js": "8cb583c547779556b1d8aacab1cc50d9e8156de1cf4cf25040570ffbf5222d6b",

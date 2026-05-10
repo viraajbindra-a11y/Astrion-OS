@@ -32,7 +32,10 @@ import { isToy } from '../kernel/app-categories.js';
 import { rankSuggestedApps } from '../kernel/spotlight-defaults.js';
 import { inspectQuery as inspectIntentMiss, accept as acceptIntentMiss }
   from '../kernel/intent-miss-proposer.js';
-import { resolveVerbAlias } from '../kernel/verb-aliaser.js';
+import { resolveVerbAlias, bindVerbAlias } from '../kernel/verb-aliaser.js';
+import { bindNoun, recomputeProjectClusters } from '../kernel/graph-learner.js';
+import { proposeWorkflow, acceptWorkflow, proposeFormatConversion, acceptFormatConversion }
+  from '../kernel/generation-bridge.js';
 
 let isOpen = false;
 // Search history — persisted to localStorage
@@ -863,6 +866,30 @@ export function initSpotlight() {
 
     const lower = query.toLowerCase();
     let html = '';
+
+    // ─── Slash commands for explicit auto-evolution actions ────────
+    // These are user-typed verbs for the API-only features so they're
+    // discoverable + tab-completable instead of DevTools-only.
+    //
+    //   /bind "the monday meeting" → cal:event-42
+    //   /alias mail = messages
+    //   /cluster
+    //   /workflow every monday morning, check email then calendar
+    //   /convert {data} to {format}
+    if (query.startsWith('/')) {
+      const slashHtml = await renderSlashHint(query);
+      if (slashHtml) {
+        html += slashHtml;
+        results.innerHTML = html;
+        results.querySelectorAll('[data-action="slash-run"]').forEach(item => {
+          item.addEventListener('click', () => runSlashCommand(query));
+        });
+        results.dataset.pendingSlashCommand = query;
+        return;
+      }
+    } else {
+      delete results.dataset.pendingSlashCommand;
+    }
 
     // ─── Intent-miss banner (#3 + #4) ──────────────────────────────
     // Inspect for "I wish I had…" wishes or repeat-misses (same query
@@ -1741,6 +1768,18 @@ Return ONLY the YAML content, no \`\`\` fences, no commentary.`;
     // Record search history
     addToSearchHistory(query);
 
+    // Slash command short-circuit — handles /bind, /alias, /cluster,
+    // /workflow, /convert. Each goes through the engine APIs that
+    // record an adaptation.
+    if (query && query.startsWith('/')) {
+      const known = SLASH_COMMANDS.find(c => query.toLowerCase().startsWith(c.prefix));
+      if (known) {
+        await runSlashCommand(query);
+        close();
+        return;
+      }
+    }
+
     // M5.P2.c — interception preview takes priority over plan preview
     // (rare but possible if a plan-step fires a single-shot L2 cap that
     // hits the interceptor mid-plan).
@@ -2349,6 +2388,113 @@ function getIntentIcon(verb) {
     unmute:    '🔊',
   };
   return ICONS[verb] || '⚡';
+}
+
+// ─── Slash command helpers ────────────────────────────────────────
+// Hint card rendered inline in Spotlight when the user types a /slash
+// command. Pressing Enter fires runSlashCommand() with the same query.
+// All actions go through the engine APIs that record adaptations, so
+// every slash command is reversible from the Adaptations panel.
+
+const SLASH_COMMANDS = [
+  { prefix: '/bind ',     hint: 'Bind a noun phrase. Format: /bind "the monday meeting" → cal:event-42' },
+  { prefix: '/alias ',    hint: 'Teach a Spotlight alias. Format: /alias mail = messages' },
+  { prefix: '/cluster',   hint: 'Recompute project clusters from your notes + todos' },
+  { prefix: '/workflow ', hint: 'Generate a workflow plan with AI. Format: /workflow check email then calendar' },
+  { prefix: '/convert ',  hint: 'Convert pasted data with AI. Format: /convert <data> to <format>' },
+];
+
+async function renderSlashHint(query) {
+  const cmd = SLASH_COMMANDS.find(c => query.toLowerCase().startsWith(c.prefix));
+  if (!cmd) return null;
+  return `<div class="spotlight-result-group">
+    <div class="spotlight-result-label">Slash command</div>
+    <div class="spotlight-result-item" data-action="slash-run" style="background:rgba(139,233,253,0.08);border-left:3px solid #8be9fd;padding-left:13px;">
+      <div class="spotlight-result-icon">⌘</div>
+      <div class="spotlight-result-text">
+        <div class="spotlight-result-title">${escapeHtml(query)}</div>
+        <div class="spotlight-result-subtitle">${escapeHtml(cmd.hint)} — Press Enter</div>
+      </div>
+    </div>
+  </div>`;
+}
+
+async function runSlashCommand(query) {
+  const lower = query.toLowerCase();
+  try {
+    if (lower.startsWith('/bind ')) {
+      // /bind "phrase" → ref-id
+      const rest = query.slice('/bind '.length).trim();
+      const m = rest.match(/^"([^"]+)"\s*(?:→|->|=>|=|:)\s*(.+)$/);
+      if (!m) {
+        notifications.show({ title: '/bind format', body: 'Usage: /bind "phrase" → ref-id', icon: '⚠️', duration: 4500 });
+        return;
+      }
+      const r = await bindNoun(m[1].trim(), m[2].trim(), { trigger: 'Slash command' });
+      notifications.show({
+        title: r.ok ? 'Noun bound' : 'Bind failed',
+        body: r.ok ? `"${m[1]}" → ${m[2]}. Revert from Adaptations.` : (r.error || 'Unknown error'),
+        icon: r.ok ? '✓' : '⚠️', duration: 5000,
+      });
+      return;
+    }
+    if (lower.startsWith('/alias ')) {
+      // /alias phrase = capId
+      const rest = query.slice('/alias '.length).trim();
+      const m = rest.match(/^(\S+)\s*(?:=|→|->)\s*(.+)$/);
+      if (!m) {
+        notifications.show({ title: '/alias format', body: 'Usage: /alias mail = messages', icon: '⚠️', duration: 4500 });
+        return;
+      }
+      const r = await bindVerbAlias(m[1].trim(), m[2].trim(), { trigger: 'Slash command' });
+      notifications.show({
+        title: r.ok ? 'Alias bound' : 'Alias failed',
+        body: r.ok ? `"${m[1]}" → "${m[2]}". Revert from Adaptations.` : (r.error || 'Unknown error'),
+        icon: r.ok ? '✓' : '⚠️', duration: 5000,
+      });
+      return;
+    }
+    if (lower.startsWith('/cluster')) {
+      // Pull every note + todo from the graph, recompute clusters.
+      const notes = await graphQuery(graphStore, { type: 'select', from: 'note', limit: 1000 });
+      const todos = await graphQuery(graphStore, { type: 'select', from: 'todo', limit: 1000 });
+      const items = [
+        ...notes.map(n => ({ id: n.id, title: n.props.title, content: n.props.content })),
+        ...todos.map(t => ({ id: t.id, title: t.props.title, content: t.props.notes })),
+      ];
+      const r = await recomputeProjectClusters(items);
+      notifications.show({
+        title: r.ok ? 'Clusters recomputed' : 'Cluster failed',
+        body: r.ok
+          ? `${Object.keys(r.clusters).length} cluster${Object.keys(r.clusters).length === 1 ? '' : 's'} from ${items.length} items. Revert from Adaptations.`
+          : (r.error || 'Unknown error'),
+        icon: r.ok ? '✓' : '⚠️', duration: 5000,
+      });
+      return;
+    }
+    if (lower.startsWith('/workflow ')) {
+      const description = query.slice('/workflow '.length).trim();
+      if (!description) return;
+      const p = await proposeWorkflow(description);
+      if (p.ok) await acceptWorkflow(p.proposal);
+      // generation-runner picks up workflow:generate and surfaces a notification
+      return;
+    }
+    if (lower.startsWith('/convert ')) {
+      // /convert {data} to {format}
+      const rest = query.slice('/convert '.length).trim();
+      const m = rest.match(/^([\s\S]+)\s+to\s+(\w[\w-]*)$/i);
+      if (!m) {
+        notifications.show({ title: '/convert format', body: 'Usage: /convert <data> to <format>', icon: '⚠️', duration: 4500 });
+        return;
+      }
+      const p = await proposeFormatConversion(m[1].trim(), m[2].trim());
+      if (p.ok) await acceptFormatConversion(p.proposal);
+      return;
+    }
+  } catch (err) {
+    notifications.show({ title: 'Slash command failed', body: err?.message || String(err), icon: '⚠️', duration: 5000 });
+  }
 }
 
 function escapeHtml(text) {
