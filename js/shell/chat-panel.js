@@ -1406,11 +1406,25 @@ function refreshGroup(group) {
 
 function summarizeResults(results) {
   if (!Array.isArray(results) || results.length === 0) return '';
-  // Pull any `path` or `id` fields for a compact summary
+  // Walk every step's output and surface the most-useful field. AI
+  // capabilities (ai.ask, ai.explain, ai.summarize, translate.text)
+  // return { question, answer } / { reply } / { text }; if we don't
+  // pull the answer here, the chat just shows "\u2713 Done" and the user
+  // sees the real AI reply only via the notification surface \u2014 the
+  // exact bug the user reported on 2026-05-10.
+  for (const step of results) {
+    const out = step?.output;
+    if (out == null) continue;
+    if (typeof out === 'string' && out.trim()) return out;
+    if (out.answer && typeof out.answer === 'string') return out.answer;
+    if (out.reply  && typeof out.reply  === 'string') return out.reply;
+    if (out.text   && typeof out.text   === 'string') return out.text;
+    if (out.translated && typeof out.translated === 'string') return out.translated;
+  }
+  // Structural results \u2014 fall through to compact-summary heuristics.
   const firstOutput = results[0]?.output;
   if (firstOutput?.path) return '\u2713 ' + firstOutput.path;
-  if (firstOutput?.id) return '\u2713 ' + firstOutput.id;
-  if (typeof firstOutput === 'string') return '\u2713 ' + firstOutput;
+  if (firstOutput?.id)   return '\u2713 ' + firstOutput.id;
   return '\u2713 Done';
 }
 
