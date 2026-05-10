@@ -88,28 +88,82 @@ jobs:
           ASSET_NAME="astrion-os-${VERSION}-amd64.iso"
           mv nova-os.iso "$ASSET_NAME"
 
-          # GitHub release assets cap at 2 GiB. Slim builds fit; full
-          # builds (LibreOffice + Chromium + VLC + Ollama bundled) run
-          # ~4 GiB and can't be attached to a release. Treat it as a
-          # warning, not an error — the 30-day artifact uploaded in
-          # the previous step is still downloadable from the run page,
-          # so the build is usable even when the publish step skips.
+          # GitHub release assets cap at 2 GiB. The build already strips
+          # docs/man/info/locales, but slim ISOs still run ~3.3 GiB once
+          # firmware blobs + Waydroid + Ollama runtime + WebKit are in.
+          # Rather than gating Phase A on shrinking past the cap, split
+          # oversize ISOs into 1.9 GiB chunks and upload all parts. The
+          # release page lists each chunk; a tester reassembles with one
+          # `cat` (or `Get-Content -Raw` on Windows). The whole-file
+          # SHA256 lets them verify the assembled ISO is byte-identical
+          # to the build artifact.
           SIZE_BYTES=$(stat -c%s "$ASSET_NAME")
-          MAX_BYTES=$((2 * 1024 * 1024 * 1024))
-          if [ "$SIZE_BYTES" -gt "$MAX_BYTES" ]; then
-            ARTIFACT_URL="https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
-            echo "::warning::ISO is $SIZE_BYTES bytes (>2 GiB release asset limit) — skipping release upload. Download from artifacts: $ARTIFACT_URL"
-            exit 0
+          MAX_BYTES=$((2 * 1024 * 1024 * 1024 - 100 * 1024 * 1024))  # 1.9 GiB chunks, safe under the 2 GiB asset cap
+          WHOLE_SHA=$(sha256sum "$ASSET_NAME" | awk '{print $1}')
+
+          if [ "$SIZE_BYTES" -le "$MAX_BYTES" ]; then
+            echo "ISO fits ($SIZE_BYTES bytes) — single-asset upload"
+            sha256sum "$ASSET_NAME" > "${ASSET_NAME}.sha256"
+            cat "${ASSET_NAME}.sha256"
+            echo "Uploading to release $LATEST_TAG"
+            gh release upload "$LATEST_TAG" "$ASSET_NAME" "${ASSET_NAME}.sha256" --clobber --repo "$GITHUB_REPOSITORY"
+            echo "Released: https://github.com/$GITHUB_REPOSITORY/releases/tag/$LATEST_TAG"
+            echo "ISO: https://github.com/$GITHUB_REPOSITORY/releases/download/$LATEST_TAG/$ASSET_NAME"
+          else
+            echo "ISO is $SIZE_BYTES bytes (>1.9 GiB) — splitting into chunks"
+            # split: 2-letter alpha suffix, 1.9 GiB chunks, additional
+            # suffix preserves the .iso extension on the first chunk so
+            # ASSET_NAME.partaa, ASSET_NAME.partab, … is the final shape.
+            split -b "$MAX_BYTES" -a 2 --additional-suffix=.part "$ASSET_NAME" "${ASSET_NAME}."
+            # Rename split's `aa`/`ab`/… into `part01`/`part02`/… for clarity.
+            i=1
+            for f in "${ASSET_NAME}."*.part; do
+              new=$(printf "%s.part%02d" "$ASSET_NAME" "$i")
+              mv "$f" "$new"
+              i=$((i + 1))
+            done
+            CHUNK_COUNT=$((i - 1))
+            ls -lh "${ASSET_NAME}.part"*
+
+            # Single sha256 for the WHOLE ISO so the user can verify
+            # after reassembly. Per-chunk sha256s for download integrity.
+            echo "$WHOLE_SHA  $ASSET_NAME" > "${ASSET_NAME}.sha256"
+            for f in "${ASSET_NAME}.part"*; do
+              sha256sum "$f" >> "${ASSET_NAME}.sha256"
+            done
+            cat "${ASSET_NAME}.sha256"
+
+            # Reassembly instructions live alongside the chunks. Built
+            # line-by-line (not a heredoc) because YAML's run: | block
+            # interprets dedented lines as YAML again.
+            README="${ASSET_NAME}.README.txt"
+            : > "$README"
+            printf 'ISO is split into %d chunks because GitHub release assets cap at 2 GiB.\n\n' "$CHUNK_COUNT" >> "$README"
+            printf 'Download every "%s.part*" file plus this README and the .sha256\n' "$ASSET_NAME" >> "$README"
+            printf 'file, then reassemble:\n\n' >> "$README"
+            printf '  Linux / macOS:\n' >> "$README"
+            printf '    cat %s.part* > %s\n' "$ASSET_NAME" "$ASSET_NAME" >> "$README"
+            printf '    sha256sum -c %s.sha256\n\n' "$ASSET_NAME" >> "$README"
+            printf '  Windows (run from the directory you downloaded into):\n' >> "$README"
+            printf '    cmd /c "copy /b %s.part01' "$ASSET_NAME" >> "$README"
+            j=2
+            while [ "$j" -le "$CHUNK_COUNT" ]; do
+              printf ' + %s.part%02d' "$ASSET_NAME" "$j" >> "$README"
+              j=$((j + 1))
+            done
+            printf ' %s"\n' "$ASSET_NAME" >> "$README"
+            printf '    Get-FileHash %s -Algorithm SHA256\n\n' "$ASSET_NAME" >> "$README"
+            printf 'The whole-file SHA256 (top line of .sha256) is:\n' >> "$README"
+            printf '  %s\n\n' "$WHOLE_SHA" >> "$README"
+            printf 'Then flash to USB with Balena Etcher / Rufus / dd.\n' >> "$README"
+
+            echo "Uploading ${CHUNK_COUNT} chunks to release $LATEST_TAG"
+            gh release upload "$LATEST_TAG" \
+              "${ASSET_NAME}.part"* \
+              "${ASSET_NAME}.sha256" \
+              "${ASSET_NAME}.README.txt" \
+              --clobber --repo "$GITHUB_REPOSITORY"
+            echo "Released: https://github.com/$GITHUB_REPOSITORY/releases/tag/$LATEST_TAG"
+            echo "Reassembly README: https://github.com/$GITHUB_REPOSITORY/releases/download/$LATEST_TAG/${ASSET_NAME}.README.txt"
           fi
-          echo "ISO size OK: $SIZE_BYTES bytes"
-
-          # Generate SHA256 checksum
-          sha256sum "$ASSET_NAME" > "${ASSET_NAME}.sha256"
-          cat "${ASSET_NAME}.sha256"
-
-          echo "Uploading to release $LATEST_TAG"
-          gh release upload "$LATEST_TAG" "$ASSET_NAME" "${ASSET_NAME}.sha256" --clobber --repo "$GITHUB_REPOSITORY"
-
-          echo "Released: https://github.com/$GITHUB_REPOSITORY/releases/tag/$LATEST_TAG"
-          echo "ISO: https://github.com/$GITHUB_REPOSITORY/releases/download/$LATEST_TAG/$ASSET_NAME"
           echo "Build commit: $GITHUB_SHA"
