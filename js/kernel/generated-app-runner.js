@@ -73,16 +73,49 @@ function buildSrcdoc(codeBlob) {
 <body>
 <div id="app"></div>
 <script>
+// 2026-05-11: removed the IIFE wrapper that previously surrounded
+// safeCode. \`const App = (function(){ ${'safeCode'} })()\` returned
+// the IIFE's value, which is undefined when safeCode is just a class
+// or function declaration (declarations don't form an expression).
+// Result: \`App\` was always undefined, the render call below never
+// fired, and the user saw an iframe whose status bar said "Running"
+// over an empty #app div. Inlining safeCode at script scope makes
+// \`class App\` / \`function App\` / \`const App = …\` all reachable.
 try {
-  const App = (function() {
-    ${safeCode}
-  })();
+  ${safeCode}
 
-  // If the code exports a function or class, try to call it
+  const root = document.getElementById('app');
+  let rendered = false;
+
   if (typeof App === 'function') {
-    const result = App(document.getElementById('app'));
-    // If it returns a cleanup function, store it
-    if (typeof result === 'function') window.__cleanup = result;
+    if (App.prototype && typeof App.prototype.render === 'function') {
+      // class App { render(root) {} } — instantiate + render.
+      const app = new App();
+      app.render(root);
+      window.__app = app;
+      rendered = root.children.length > 0;
+    } else {
+      // function App(root) {} — call as plain function.
+      try {
+        const result = App(root);
+        if (typeof result === 'function') window.__cleanup = result;
+        rendered = root.children.length > 0;
+      } catch {
+        // App is a logic-only class with no render — fall through.
+      }
+    }
+  }
+
+  if (!rendered) {
+    // Code loaded successfully but exposed no UI. Show a minimal
+    // placeholder so the user sees acknowledgement instead of an
+    // empty window.
+    root.innerHTML =
+      '<div style="color:#888;text-align:center;font-size:13px;line-height:1.6;">' +
+      '<div style="font-size:32px;margin-bottom:8px;">✨</div>' +
+      'Generated logic loaded.<br>' +
+      '<span style="font-size:11px;color:#666;">No render() method exposed by this app.</span>' +
+      '</div>';
   }
 
   parent.postMessage({ type: 'app-ready' }, '*');
