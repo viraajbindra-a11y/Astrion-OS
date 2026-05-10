@@ -125,7 +125,15 @@ function validateCode(payload) {
   // a few timer-style escape hatches. Defense in depth: the iframe
   // sandbox already blocks the network ones; we still reject them so
   // a buggy plan fails up-front instead of later.
-  const FORBIDDEN = /\b(import|require|fetch|XMLHttpRequest|WebSocket|eval|Function|setTimeout|setInterval|setImmediate|importScripts|document|window\.parent|window\.top)\b/i;
+  //
+  // 2026-05-10 BUG FIX: previously this used /i (case-insensitive)
+  // which made `\bFunction\b` match the lowercase `function` keyword.
+  // Result: ANY code that declared a function via `function foo() {}`
+  // got rejected. The validator was supposed to block `new Function()`
+  // (the dynamic-eval constructor), not function declarations. Removed
+  // the /i flag and pinned `new\s+Function` so legitimate function
+  // declarations pass.
+  const FORBIDDEN = /\b(import|require|fetch|XMLHttpRequest|WebSocket|eval|setTimeout|setInterval|setImmediate|importScripts|document|window\.parent|window\.top)\b|\bnew\s+Function\b/;
   if (FORBIDDEN.test(payload.code)) {
     return { ok: false, error: 'code contains forbidden token (no imports/eval/network/timers/DOM)' };
   }

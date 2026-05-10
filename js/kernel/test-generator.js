@@ -129,8 +129,12 @@ function validateSuite(suite, spec) {
     if (blob.length > 400) {
       return { ok: false, error: `tests[${i}] code blob too long (${blob.length} > 400)` };
     }
-    // Reject obvious syscalls / injection attempts inside the test body
-    if (/\b(import|require|fetch|XMLHttpRequest|WebSocket|eval|Function)\s*\(?/i.test(blob)) {
+    // Reject obvious syscalls / injection attempts inside the test body.
+    // 2026-05-10: same bug as code-generator — case-insensitive `Function`
+    // matched lowercase `function`, blocking `function() {}`. Pinned to
+    // `new\s+Function` and dropped the /i flag. Test bodies rarely use
+    // function declarations, but kept consistent with code-generator.
+    if (/\b(import|require|fetch|XMLHttpRequest|WebSocket|eval)\s*\(|\bnew\s+Function\b/.test(blob)) {
       return { ok: false, error: `tests[${i}] contains forbidden token (no imports/eval/network in tests)` };
     }
     // Reject tests whose `assert` is just a commented-out expect call.

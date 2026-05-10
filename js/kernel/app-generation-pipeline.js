@@ -83,12 +83,29 @@ async function archiveApp(appId) {
 /**
  * Run the full chain for `description`. Returns { ok, appId?, ... }.
  * Each stage emits a "Building…" notification with the stage label.
+ *
+ * On small local models (qwen2.5:7b and below) the chain is fragile —
+ * the spec's 3-7 criteria default exceeds the model's working memory
+ * and tests.generate / code.generate fail. The pipeline biases the
+ * description toward a 1-2 criterion spec by default, which makes
+ * the chain reach completion on smaller models. Set opts.minimal=false
+ * to use the original prompts (recommended only for gpt-oss:16b or
+ * Anthropic).
  */
 export async function runAppGenerationPipeline(description, opts = {}) {
   const t0 = Date.now();
+  const minimal = opts.minimal !== false;
   if (!description || typeof description !== 'string') {
     return { ok: false, errorAt: 'input', error: 'description required', durationMs: 0 };
   }
+  // Bias the spec generator toward a tiny spec on small models. The
+  // preamble runs through spec-generator's prompt verbatim and the
+  // model honors it.
+  const biasedDescription = minimal
+    ? `${description}\n\nKEEP IT MINIMAL: 1 acceptance criterion only. ` +
+      `One core feature, one test. Skip non_goals beyond one entry. ` +
+      `Smaller is faster + more reliable on a small local model.`
+    : description;
   notifications.show({
     title: '✨ Building your app',
     body: `Step 1/${STAGES.length}: ${STAGES[0].emoji} ${STAGES[0].label}…\n"${description}"`,
@@ -98,7 +115,7 @@ export async function runAppGenerationPipeline(description, opts = {}) {
   let specId, suiteId, codeId, appId;
   try {
     // 1. spec.generate
-    const spec = await runStage('spec.generate', { intent: description, query: description, topic: description });
+    const spec = await runStage('spec.generate', { intent: biasedDescription, query: biasedDescription, topic: biasedDescription });
     specId = spec.specId;
 
     // 2. spec.freeze (auto-confirmed)
@@ -110,13 +127,15 @@ export async function runAppGenerationPipeline(description, opts = {}) {
     const suite = await runStage('tests.generate', { specId });
     suiteId = suite.suiteId;
 
-    // 4. code.generate (iterative — slowest)
+    // 4. code.generate (iterative — slowest). Default to 5 attempts:
+    //    small models often need an extra pass or two to fix typos
+    //    that turn up in the second test run.
     notifications.show({
       title: '✨ Building your app',
       body: `Step 4/${STAGES.length}: 🛠 Writing code (iterates until tests pass)…`,
-      icon: '🛠', duration: 60000,
+      icon: '🛠', duration: 90000,
     });
-    const code = await runStage('code.generate', { suiteId, maxAttempts: opts.maxAttempts || 3 });
+    const code = await runStage('code.generate', { suiteId, maxAttempts: opts.maxAttempts || 5 });
     if (code.status !== 'ok') {
       throw new Error(`code didn't pass tests (${code.attempts} attempts)`);
     }
