@@ -149,12 +149,33 @@ export async function executeIntent(intent) {
   // The intent path can opt out via intent.skipInterception (used by
   // the planner's compound flow which runs its own L2+ gate at the
   // plan level, not the per-step level).
+  // 2026-05-09 — text-learner exposes isAlwaysConfirm(capId): when the
+  // user has reverted this cap N+ times, force the gate even at L0/L1.
+  // The proposal flow logs an adaptation; the rule applies until the
+  // user revokes it from the Adaptations panel.
+  let alwaysConfirm = false;
+  try {
+    const tl = await import('./text-learner.js');
+    alwaysConfirm = tl.isAlwaysConfirm(cap.id);
+  } catch {}
   let result;
   try {
-    const { interceptedExecute } = await import('./operation-interceptor.js');
-    result = await interceptedExecute(cap, args, {
-      skipInterception: !!intent.skipInterception,
-    });
+    const { interceptedExecute, requestConfirmation } = await import('./operation-interceptor.js');
+    if (alwaysConfirm && cap.level < LEVEL.REAL && !intent.skipInterception) {
+      // Force-elevate just this call: open the gate even though the cap
+      // would normally run directly. If user confirms, run; on abort
+      // bail with the same shape interceptedExecute would.
+      const conf = await requestConfirmation(cap, args, {});
+      if (!conf.ok) {
+        result = { ok: false, error: 'aborted: ' + (conf.reason || 'user cancelled') };
+      } else {
+        result = await cap.execute(args);
+      }
+    } else {
+      result = await interceptedExecute(cap, args, {
+        skipInterception: !!intent.skipInterception,
+      });
+    }
   } catch (err) {
     const error = err?.message || String(err);
     eventBus.emit('intent:completed', { intent, success: false, error });

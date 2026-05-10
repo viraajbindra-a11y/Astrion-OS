@@ -32,6 +32,7 @@
 
 import { graphStore } from './graph-store.js';
 import { query as graphQuery } from './graph-query.js';
+import { eventBus } from './event-bus.js';
 
 const BRANCH_TYPE = 'branch';
 
@@ -308,6 +309,17 @@ export async function rewindBranch(branchId) {
     rewoundAt: Date.now(),
     rewoundResults: { rewound, skipped, errorCount: errors.length },
   });
+  // 2026-05-09 — fire branch:reverted so listeners (text-learner →
+  // "always-confirm" preference proposals) can count which capability
+  // the user keeps undoing. createdBy was tagged at branch creation;
+  // its capabilityId is the original cap that produced the change.
+  try {
+    eventBus.emit('branch:reverted', {
+      branchId,
+      capabilityId: branch.createdBy?.capabilityId || null,
+      rewound, skipped, errorCount: errors.length,
+    });
+  } catch {}
   return { ok: true, rewound, skipped, errors, totalMutations: ours.length };
 }
 

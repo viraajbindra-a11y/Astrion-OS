@@ -25,6 +25,14 @@ import { safeMathEval } from '../lib/safe-math.js';
 // 2026-05-09 toys split — used to push minigames to the bottom of match
 // results so real apps surface first. See app-categories.js.
 import { isToy } from '../kernel/app-categories.js';
+// 2026-05-09 round 2 — auto-evolution wiring:
+//   rankSuggestedApps:    usage-aware Suggested fallback (#17)
+//   inspectQuery:         repeat-miss + "I wish…" detection (#3 + #4)
+//   resolveVerbAlias:     learned aliases like "mail" → "messages" (#11)
+import { rankSuggestedApps } from '../kernel/spotlight-defaults.js';
+import { inspectQuery as inspectIntentMiss, accept as acceptIntentMiss }
+  from '../kernel/intent-miss-proposer.js';
+import { resolveVerbAlias } from '../kernel/verb-aliaser.js';
 
 let isOpen = false;
 // Search history — persisted to localStorage
@@ -644,13 +652,14 @@ export function initSpotlight() {
     clearTimeout(debounceTimer);
     const query = input.value.trim();
     if (!query) {
-      // Re-show recent/suggested when query is cleared
+      // Re-show recent/suggested when query is cleared. Suggested ranks
+      // by hour-of-day usage (#17) and falls back to a static list when
+      // there's no history yet.
       const recents = getRecentApps();
       const allApps = processManager.getAllApps();
-      const fallbackNames = ['Notes', 'Terminal', 'Messages', 'Browser', 'Music', 'Weather', 'Calculator', 'Beat Studio'];
       const appItems = recents.length >= 3
         ? recents.slice(0, 8).map(r => allApps.find(a => a.id === r.appId)).filter(Boolean)
-        : fallbackNames.map(name => allApps.find(a => a.name === name)).filter(Boolean);
+        : rankSuggestedApps(allApps, { limit: 8 });
       const sectionLabel = recents.length >= 3 ? 'Recent' : 'Suggested';
       results.innerHTML = `
         <div class="spotlight-result-group">
@@ -753,13 +762,14 @@ export function initSpotlight() {
       input.focus();
       return;
     }
-    // Show recent apps (if any), otherwise fall back to static suggestions
+    // Show recent apps (if any), otherwise rank by hour-of-day usage
+    // (#17 spotlight-defaults). Falls back to a static list internally
+    // when there's no usage history yet.
     const recents = getRecentApps();
     const allApps = processManager.getAllApps();
-    const fallbackNames = ['Notes', 'Terminal', 'Messages', 'Browser', 'Music', 'Weather', 'Calculator', 'Beat Studio'];
     const appItems = recents.length >= 3
       ? recents.slice(0, 8).map(r => allApps.find(a => a.id === r.appId)).filter(Boolean)
-      : fallbackNames.map(name => allApps.find(a => a.name === name)).filter(Boolean);
+      : rankSuggestedApps(allApps, { limit: 8 });
     const sectionLabel = recents.length >= 3 ? 'Recent' : 'Suggested';
     results.innerHTML = `
       <div class="spotlight-result-group">
@@ -853,6 +863,38 @@ export function initSpotlight() {
 
     const lower = query.toLowerCase();
     let html = '';
+
+    // ─── Intent-miss banner (#3 + #4) ──────────────────────────────
+    // Inspect for "I wish I had…" wishes or repeat-misses (same query
+    // typed N+ times in the rolling window). When triggered, show a
+    // banner at the top with a "Try generating an app" action.
+    let intentMissProposal = null;
+    try {
+      const result = inspectIntentMiss(query);
+      if (result && result.proposal) intentMissProposal = result.proposal;
+    } catch (err) {
+      console.warn('[intent-miss-proposer] error:', err);
+    }
+    if (intentMissProposal) {
+      html += `<div class="spotlight-result-group">
+        <div class="spotlight-result-label">✨ Astrion noticed</div>
+        <div class="spotlight-result-item" data-action="generate-app" data-proposal-id="${intentMissProposal.id}">
+          <div class="spotlight-result-icon">✨</div>
+          <div class="spotlight-result-text">
+            <div class="spotlight-result-title">${escapeHtml(intentMissProposal.summary)}</div>
+            <div class="spotlight-result-subtitle">${escapeHtml(intentMissProposal.trigger)} · Press Enter</div>
+          </div>
+        </div>
+      </div>`;
+      // Stash the proposal so the click/Enter handler can pick it up.
+      results.dataset.pendingIntentMissId = intentMissProposal.id;
+      results.dataset.pendingIntentMissDesc = intentMissProposal.description;
+      results.dataset.pendingIntentMissSource = intentMissProposal.source;
+    } else {
+      delete results.dataset.pendingIntentMissId;
+      delete results.dataset.pendingIntentMissDesc;
+      delete results.dataset.pendingIntentMissSource;
+    }
 
     // ─── "help" / "?" / "commands" — list every Spotlight command ───
     // Discoverability: users shouldn't need to read source to find
@@ -1521,7 +1563,14 @@ Return ONLY the YAML content, no \`\`\` fences, no commentary.`;
       facts: 'random-facts', trivia: 'random-facts', bmi: 'bmi-calc',
       health: 'bmi-calc', weight: 'bmi-calc',
     };
-    const aliasMatch = APP_ALIASES[lower];
+    // Resolve learned verb aliases (#11): "mail" → "messages" if the
+    // user has taught Astrion that mapping. Falls back to the static
+    // APP_ALIASES list for the long tail of common abbreviations.
+    let aliasMatch = APP_ALIASES[lower];
+    try {
+      const learnedTarget = resolveVerbAlias(lower);
+      if (learnedTarget) aliasMatch = learnedTarget;
+    } catch {}
     const apps = processManager.getAllApps();
     // Exact + substring match first, then fuzzy fallback for typos
     let matchedApps = apps.filter(a =>
@@ -2141,6 +2190,33 @@ Return ONLY the YAML content, no \`\`\` fences, no commentary.`;
     } else if (action === 'event') {
       const evt = item.dataset.event;
       if (evt) eventBus.emit(evt);
+      close();
+    } else if (action === 'generate-app') {
+      // Intent-miss accept (#3 + #4). Pull the proposal data off the
+      // results host's dataset, log an adaptation via the proposer's
+      // accept(), and fire intent-miss:generate so the spec/test/code
+      // pipeline can pick it up. We surface a notification toast so
+      // the user knows the request was queued (the actual generation
+      // is async).
+      const desc = results.dataset.pendingIntentMissDesc;
+      const source = results.dataset.pendingIntentMissSource;
+      const id = results.dataset.pendingIntentMissId;
+      if (desc) {
+        acceptIntentMiss({ id, description: desc, source, trigger: 'You asked Spotlight' }).then(r => {
+          if (r.ok) {
+            notifications.show({
+              title: 'Generation queued',
+              body: `Astrion will try to build something for "${desc}". You can revert this from Adaptations.`,
+              icon: '✨', duration: 5000,
+            });
+          } else {
+            notifications.show({
+              title: 'Couldn\'t queue generation',
+              body: r.error || 'Unknown error', icon: '⚠️', duration: 4500,
+            });
+          }
+        }).catch(() => {});
+      }
       close();
     } else if (action === 'web-search') {
       const q = item.dataset.query;

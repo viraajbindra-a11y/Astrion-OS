@@ -3,6 +3,9 @@
 import { processManager } from '../kernel/process-manager.js';
 import { eventBus } from '../kernel/event-bus.js';
 import { isToy } from '../kernel/app-categories.js';
+// 2026-05-09 round 2 — toys you actually play surface first (#19).
+// Pure cosmetic ordering, no removal.
+import { rankToys } from '../kernel/spotlight-defaults.js';
 
 let isOpen = false;
 let toysFolderOpen = false;
@@ -90,7 +93,8 @@ function open() {
     }
 
     if (toysFolderOpen) {
-      // Folder-open view: a back tile + every toy.
+      // Folder-open view: a back tile + every toy. Usage-ordered so
+      // the toys you actually play are at the front (#19).
       const back = document.createElement('div');
       back.className = 'launchpad-app';
       back.title = 'Back to apps';
@@ -104,7 +108,8 @@ function open() {
       });
       grid.appendChild(back);
 
-      toyApps.forEach(app => {
+      const orderedToys = rankToys(toyApps);
+      orderedToys.forEach(app => {
         const appEl = document.createElement('div');
         appEl.className = 'launchpad-app';
         appEl.innerHTML = appTileHtml(app);

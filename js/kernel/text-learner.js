@@ -170,15 +170,52 @@ export function initTextLearner() {
   registerRevertHandler('autocorrect:remove', revertAutocorrect);
   if (initialized) return;
   initialized = true;
-  // Branch rewinds = "undo this".
+  // Branch rewinds = "undo this". branch-manager emits branch:reverted
+  // when discardBranch / rewind runs; the createdBy.capabilityId carries
+  // the cap that originally produced the change.
   eventBus.on('branch:reverted', ({ capabilityId }) => noteRevert(capabilityId));
   eventBus.on('adaptation:reverted', (entry) => {
     // If the user kept reverting a particular cap that came from skill
     // or generation flows, capture that signal too.
     if (entry?.revert?.kind === 'skill:remove') noteRevert('skill:' + (entry.revert.args?.name || ''));
   });
-  // Live text corrections from note-style apps.
+  // Detect text corrections from note-style apps. Two paths:
+  //  1) Apps that emit a clean text-edit:replace event (preferred).
+  //  2) Generic graph:node:updated for type='note' — diff old/new content
+  //     for single-word substitutions (the common autocorrect case).
   eventBus.on('text-edit:replace', ({ from, to }) => noteCorrection(from, to));
+  eventBus.on('graph:node:updated', ({ node, prevProps }) => {
+    if (!node || node.type !== 'note') return;
+    const oldContent = prevProps?.content;
+    const newContent = node.props?.content;
+    if (typeof oldContent !== 'string' || typeof newContent !== 'string') return;
+    detectInlineSubstitution(oldContent, newContent);
+  });
+}
+
+// Best-effort single-substitution detection. We only care about the
+// common case: user typed wrong → replaced with right. Anything more
+// complex (multi-word edit, big paragraph rewrite) gets ignored —
+// false-positive autocorrect rules are worse than missed ones.
+function detectInlineSubstitution(oldText, newText) {
+  if (!oldText || !newText || oldText === newText) return;
+  if (Math.abs(oldText.length - newText.length) > 30) return;
+  // Find the first divergence + last divergence; the slices in between
+  // are the substitution candidates.
+  let start = 0;
+  const max = Math.min(oldText.length, newText.length);
+  while (start < max && oldText[start] === newText[start]) start++;
+  let endOld = oldText.length, endNew = newText.length;
+  while (endOld > start && endNew > start && oldText[endOld - 1] === newText[endNew - 1]) {
+    endOld--; endNew--;
+  }
+  const from = oldText.slice(start, endOld).trim();
+  const to = newText.slice(start, endNew).trim();
+  if (!from || !to || from === to) return;
+  // Only single-word-ish substitutions.
+  if (from.length > 30 || to.length > 30) return;
+  if (/\s/.test(from) || /\s/.test(to)) return;
+  noteCorrection(from, to);
 }
 
 // ─── Test helpers ─────────────────────────────────────────────────

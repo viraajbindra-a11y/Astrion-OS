@@ -273,15 +273,21 @@ export function initGraphLearner() {
   registerRevertHandler('projects:clear', revertProjects);
   if (initialized) return;
   initialized = true;
-  // note:created and note:updated are emitted by note-style apps.
-  const onNote = ({ id, content }) => {
-    if (!id) return;
+  // graph-store emits these — filter for note nodes. We deliberately
+  // watch the canonical graph events instead of asking each note-style
+  // app to emit a custom 'note:created' (which would mean N integration
+  // points instead of one).
+  const onGraphNode = ({ node }) => {
+    if (!node || node.type !== 'note') return;
+    const id = node.id;
+    const content = (node.props && node.props.content) || '';
+    if (!id || !content) return;
     maybeAutoTag(id, content).catch(() => {});
     maybeExtractVocab(id, content).catch(() => {});
     maybeAutoLink(id, content).catch(() => {});
   };
-  eventBus.on('note:created', onNote);
-  eventBus.on('note:updated', onNote);
+  eventBus.on('graph:node:created', onGraphNode);
+  eventBus.on('graph:node:updated', onGraphNode);
 }
 
 // ─── Test helpers ─────────────────────────────────────────────────

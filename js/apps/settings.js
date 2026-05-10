@@ -6,6 +6,9 @@ import { eventBus } from '../kernel/event-bus.js';
 import { getTodaySummary, getDailyCap, setDailyCap, resetBudget } from '../kernel/budget-manager.js';
 import { getAllAccuracy, getEscalatedCategories } from '../kernel/calibration-tracker.js';
 import { escapeError } from '../lib/safe-html.js';
+// 2026-05-09 round 2 — usage-aware sidebar ordering (#18). Sections
+// you actually use float to the top; never-opened ones sink.
+import { rankSettingsSections } from '../kernel/spotlight-defaults.js';
 
 export function registerSettings() {
   processManager.register('settings', {
@@ -68,12 +71,21 @@ function initSettings(container) {
   const sidebar = container.querySelector('#settings-sidebar');
   const main = container.querySelector('#settings-main');
 
-  // Render sidebar
-  sidebar.innerHTML = Object.entries(sections).map(([id, s]) => `
-    <div class="settings-sidebar-item${id === activeSection ? ' active' : ''}" data-section="${id}">
-      <span class="settings-sidebar-icon">${s.icon}</span> ${s.name}
-    </div>
-  `).join('');
+  // Render sidebar — usage-aware ordering. We feed every section to
+  // rankSettingsSections; sections the user has opened recently float
+  // up. The ranker falls back to alphabetical for sections with no
+  // usage history yet, so first-launch UX is still predictable.
+  function renderSidebar() {
+    const ranked = rankSettingsSections(
+      Object.entries(sections).map(([id, s]) => ({ id, label: s.name, icon: s.icon }))
+    );
+    sidebar.innerHTML = ranked.map(({ id, label, icon }) => `
+      <div class="settings-sidebar-item${id === activeSection ? ' active' : ''}" data-section="${id}">
+        <span class="settings-sidebar-icon">${icon}</span> ${label}
+      </div>
+    `).join('');
+  }
+  renderSidebar();
 
   sidebar.addEventListener('click', (e) => {
     const item = e.target.closest('.settings-sidebar-item');
@@ -81,6 +93,9 @@ function initSettings(container) {
     activeSection = item.dataset.section;
     sidebar.querySelectorAll('.settings-sidebar-item').forEach(i => i.classList.remove('active'));
     item.classList.add('active');
+    // 2026-05-09 — usage-tracker subscribes to settings:opened to
+    // power #18 (recent sections float up next time).
+    try { eventBus.emit('settings:opened', { section: activeSection }); } catch {}
     renderSection();
   });
 
