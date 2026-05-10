@@ -274,6 +274,7 @@ function __bootFlush(reason) {
     (await import('./kernel/time-routine-detector.js')).initTimeRoutineDetector();
     (await import('./kernel/generation-bridge.js')).initGenerationBridge();
     (await import('./kernel/generation-runner.js')).initGenerationRunner();
+    (await import('./kernel/app-generation-pipeline.js')).initAppGenerationPipeline();
 
     // Phase 0: kill mock provider trap in native path too (lesson #72)
     if (localStorage.getItem('nova-ai-provider') === 'mock') {
@@ -490,10 +491,11 @@ function __bootFlush(reason) {
   (await import('./kernel/verb-aliaser.js')).initVerbAliaser();
   (await import('./kernel/time-routine-detector.js')).initTimeRoutineDetector();
   (await import('./kernel/generation-bridge.js')).initGenerationBridge();
-  // The runner is what turns intent-miss/workflow/format-convert
-  // proposals from "logged" into "AI ran + result surfaced." Without
-  // this, the user accepts a proposal and nothing visible happens.
+  // The runner handles workflow + format-convert proposals via AI.
+  // intent-miss is owned by app-generation-pipeline (real spec→tests→
+  // code→bundle→promote chain that ends with an installed app).
   (await import('./kernel/generation-runner.js')).initGenerationRunner();
+  (await import('./kernel/app-generation-pipeline.js')).initAppGenerationPipeline();
   // AI audio cues — soft beeps for thinking/response/gate/applied.
   (await import('./kernel/ai-audio-cues.js')).initAIAudioCues();
 

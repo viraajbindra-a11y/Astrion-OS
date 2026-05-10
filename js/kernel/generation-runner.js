@@ -89,11 +89,15 @@ export function initGenerationRunner() {
   if (initialized) return;
   initialized = true;
 
-  eventBus.on('intent-miss:generate', ({ description, source }) => {
-    if (!description) return;
-    const tag = source === 'wish' ? 'Astrion sketched what you wanted' : 'Astrion thought about what to build';
-    runWithAI(PROMPT_FOR_INTENT_MISS(description), 'intent-miss', tag).catch(() => {});
-  });
+  // 2026-05-10 — intent-miss:generate is now handled by
+  // app-generation-pipeline.js, which runs the real spec→tests→code→
+  // bundle→promote chain and ends with an installed app the user can
+  // open from the dock. The previous "Astrion sketched" path here was
+  // useful for an MVP demo but turned the user-clicks-Generate flow
+  // into a free-text reply instead of an actual built app — the bug
+  // user hit on 2026-05-10. Pipeline owns this event now; runner only
+  // handles workflow + format-convert (which don't have a dedicated
+  // builder yet).
 
   eventBus.on('workflow:generate', ({ description }) => {
     if (!description) return;
