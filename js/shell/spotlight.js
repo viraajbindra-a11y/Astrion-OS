@@ -36,6 +36,10 @@ import { resolveVerbAlias, bindVerbAlias } from '../kernel/verb-aliaser.js';
 import { bindNoun, recomputeProjectClusters } from '../kernel/graph-learner.js';
 import { proposeWorkflow, acceptWorkflow, proposeFormatConversion, acceptFormatConversion }
   from '../kernel/generation-bridge.js';
+import {
+  startRecording as macroStart, stopRecording as macroStop,
+  saveAsSkill as macroSaveAsSkill, getState as macroGetState, listMacros,
+} from '../kernel/macro-recorder.js';
 
 let isOpen = false;
 // Search history — persisted to localStorage
@@ -2402,6 +2406,8 @@ const SLASH_COMMANDS = [
   { prefix: '/cluster',   hint: 'Recompute project clusters from your notes + todos' },
   { prefix: '/workflow ', hint: 'Generate a workflow plan with AI. Format: /workflow check email then calendar' },
   { prefix: '/convert ',  hint: 'Convert pasted data with AI. Format: /convert <data> to <format>' },
+  { prefix: '/record',    hint: 'Macro recorder. /record start to begin, /record stop "name" "phrase" to save' },
+  { prefix: '/macros',    hint: 'List your saved macros' },
 ];
 
 async function renderSlashHint(query) {
@@ -2490,6 +2496,71 @@ async function runSlashCommand(query) {
       }
       const p = await proposeFormatConversion(m[1].trim(), m[2].trim());
       if (p.ok) await acceptFormatConversion(p.proposal);
+      return;
+    }
+    if (lower.startsWith('/record')) {
+      const rest = query.slice('/record'.length).trim();
+      // /record start
+      if (rest === '' || rest.startsWith('start')) {
+        const r = macroStart();
+        notifications.show({
+          title: r.ok ? '⏺ Recording macro' : 'Already recording',
+          body: r.ok
+            ? 'Run the steps you want to save. Then type /record stop "name" "phrase".'
+            : `Captured ${macroGetState().captured} step(s) so far.`,
+          icon: r.ok ? '⏺' : 'ℹ️',
+          duration: 6000,
+        });
+        return;
+      }
+      // /record stop OR /record stop "name" "phrase"
+      if (rest.startsWith('stop')) {
+        const argText = rest.slice('stop'.length).trim();
+        const r = macroStop();
+        if (!r.ok) {
+          notifications.show({ title: 'Not recording', body: 'Type /record start first.', icon: '⚠️', duration: 4000 });
+          return;
+        }
+        if (r.captured === 0) {
+          notifications.show({ title: 'Macro discarded', body: 'No steps captured. Run a few intents next time.', icon: 'ℹ️', duration: 5000 });
+          return;
+        }
+        // Parse `name` `phrase` if both quoted strings present.
+        const m = argText.match(/^"([^"]+)"\s+"([^"]+)"$/);
+        if (m) {
+          const saved = await macroSaveAsSkill({ sequence: r.sequence, name: m[1], phrase: m[2] });
+          notifications.show({
+            title: saved.ok ? `✓ Macro "${m[1]}" saved` : 'Save failed',
+            body: saved.ok
+              ? `${r.captured} steps. Trigger phrase: "${m[2]}". Revert from Adaptations.`
+              : (saved.error || 'Unknown error'),
+            icon: saved.ok ? '✓' : '⚠️', duration: 6000,
+          });
+        } else {
+          // Stopped without name + phrase — keep the buffer in localStorage
+          // for later? Simpler: inform user they need to provide both.
+          notifications.show({
+            title: '⏹ Stopped — needs name + phrase to save',
+            body: `Captured ${r.captured} step(s). Use: /record stop "name" "trigger phrase"`,
+            icon: '⏹', duration: 8000,
+          });
+        }
+        return;
+      }
+      notifications.show({ title: '/record', body: 'Usage: /record start  |  /record stop "name" "phrase"', icon: 'ℹ️', duration: 4500 });
+      return;
+    }
+    if (lower.startsWith('/macros')) {
+      const list = listMacros();
+      if (list.length === 0) {
+        notifications.show({ title: '0 macros', body: 'Type /record start to record one.', icon: 'ℹ️', duration: 4000 });
+      } else {
+        notifications.show({
+          title: `${list.length} macro${list.length === 1 ? '' : 's'}`,
+          body: list.slice(0, 5).map(m => `• "${m.phrase}" → ${m.steps?.length || m.sequence?.length || 0} steps`).join('\n'),
+          icon: '🎬', duration: 8000,
+        });
+      }
       return;
     }
   } catch (err) {

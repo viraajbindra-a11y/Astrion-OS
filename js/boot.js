@@ -275,6 +275,7 @@ function __bootFlush(reason) {
     (await import('./kernel/generation-bridge.js')).initGenerationBridge();
     (await import('./kernel/generation-runner.js')).initGenerationRunner();
     (await import('./kernel/app-generation-pipeline.js')).initAppGenerationPipeline();
+    (await import('./kernel/macro-recorder.js')).initMacroRecorder();
 
     // Phase 0: kill mock provider trap in native path too (lesson #72)
     if (localStorage.getItem('nova-ai-provider') === 'mock') {
@@ -496,6 +497,10 @@ function __bootFlush(reason) {
   // code→bundle→promote chain that ends with an installed app).
   (await import('./kernel/generation-runner.js')).initGenerationRunner();
   (await import('./kernel/app-generation-pipeline.js')).initAppGenerationPipeline();
+  // Macro recorder — explicit "save what I just did" sibling to
+  // sequence-observer's implicit pattern detection. Captures
+  // intent:completed events between /record start and /record stop.
+  (await import('./kernel/macro-recorder.js')).initMacroRecorder();
   // AI audio cues — soft beeps for thinking/response/gate/applied.
   (await import('./kernel/ai-audio-cues.js')).initAIAudioCues();
 
