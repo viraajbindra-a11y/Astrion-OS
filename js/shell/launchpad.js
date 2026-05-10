@@ -9,6 +9,12 @@ import { rankToys } from '../kernel/spotlight-defaults.js';
 
 let isOpen = false;
 let toysFolderOpen = false;
+// 2026-05-11: pin the escape-key listener at module scope so close() can
+// always find and remove it. Previously close(escHandler) only got the
+// handler when called from the click-outside or escape paths; F4 → F4
+// (open via toggle, then close via toggle) leaked one keydown listener
+// per open/close cycle because toggle() called close() with no arg.
+let activeEscHandler = null;
 
 const appColors = {
   finder: 'linear-gradient(145deg, #1e88e5, #1565c0)',
@@ -163,7 +169,7 @@ function open() {
 
   // Click background to close
   el.addEventListener('click', (e) => {
-    if (e.target === el) close(escHandler);
+    if (e.target === el) close();
   });
 
   // Escape closes the toys folder if open, otherwise closes Launchpad.
@@ -174,9 +180,14 @@ function open() {
         renderApps(searchInput.value);
         return;
       }
-      close(escHandler);
+      close();
     }
   };
+  // Defensive: clear any prior handler before registering a new one.
+  // open() shouldn't be reachable while isOpen is true, but if it is
+  // (e.g. an event-bus race), this prevents listener accumulation.
+  if (activeEscHandler) document.removeEventListener('keydown', activeEscHandler);
+  activeEscHandler = escHandler;
   document.addEventListener('keydown', escHandler);
 
   document.getElementById('desktop').appendChild(el);
@@ -184,14 +195,17 @@ function open() {
   isOpen = true;
 }
 
-function close(escHandler) {
+function close() {
   const el = document.getElementById('launchpad');
   if (el) {
     el.style.opacity = '0';
     el.style.transition = 'opacity 0.2s';
     setTimeout(() => el.remove(), 200);
   }
-  if (escHandler) document.removeEventListener('keydown', escHandler);
+  if (activeEscHandler) {
+    document.removeEventListener('keydown', activeEscHandler);
+    activeEscHandler = null;
+  }
   isOpen = false;
   toysFolderOpen = false;
 }
