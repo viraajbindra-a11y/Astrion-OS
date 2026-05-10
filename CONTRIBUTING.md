@@ -24,9 +24,10 @@
    - YouTube channel: Astrion OS
 
 2. **Write the pitch** (use this as a starting point):
-   > "Astrion OS is an AI-native operating system built by teenagers.
-   > 76 apps, native C desktop shell, runs on real hardware.
-   > Built from scratch in 2 weeks."
+   > "Astrion is an OS that won't change itself behind your back.
+   > 61 apps + 16 toys, native C/GTK3 shell, every AI action is
+   > labeled, reversible, and adversarially reviewed. Open source,
+   > free, boots from USB. Built solo by a 12-year-old."
 
 3. **Create content:**
    - Screen recording of Astrion OS running on the Surface Pro 6
@@ -98,7 +99,7 @@ Screenshot: [attach if possible]
 - [ ] Calendar (dates correct?)
 
 **Then test the rest:**
-- [ ] All 76 apps in the dock
+- [ ] All 77 apps register (61 real apps + 16 toys, plus Adaptations)
 - [ ] Spotlight search (Cmd+Space or Ctrl+Space)
 - [ ] Setup wizard (clear localStorage in DevTools, refresh)
 - [ ] Login screen (set a password in wizard, try logging in)
@@ -124,7 +125,7 @@ Screenshot: [attach if possible]
    - Tools: Figma (free), Illustrator, or Canva
 
 2. **Redesign app icons** (currently basic SVGs)
-   - 76 apps need icons
+   - 77 apps need icons (61 real + 16 toys)
    - Style guide: rounded square (like macOS), gradient backgrounds
    - Each icon: 120x120 SVG
    - Look at macOS/iOS icons for inspiration
