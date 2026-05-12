@@ -1980,6 +1980,63 @@ va._resetForTests();
 tr._resetForTests();
 gb._resetForTests();
 
+// ═══ 24. file-system.rename collision check (2026-05-11) ═══
+// Renaming a file/folder onto an existing target used to silently
+// overwrite the target via IDBObjectStore.put's upsert semantics —
+// a real data-loss bug. The rename now pre-checks for collisions and
+// rejects with a clear error. These tests pin both the positive path
+// (clean rename works) and the negative paths (collision rejects,
+// missing source rejects).
+{
+  const prefix = '/__v03_rename_' + Date.now();
+  // Setup: two distinct files we can swap
+  await fileSystem.writeFile(prefix + '_src.txt', 'SRC');
+  await fileSystem.writeFile(prefix + '_dst.txt', 'DST');
+
+  await test('rename → existing target rejects with "destination already exists"', async () => {
+    try {
+      await fileSystem.rename(prefix + '_src.txt', prefix + '_dst.txt');
+      return false; // should have thrown
+    } catch (err) {
+      return /destination already exists/.test(err.message);
+    }
+  });
+
+  await test('rename collision leaves both source AND destination intact (no data loss)', async () => {
+    const src = await fileSystem.readFile(prefix + '_src.txt');
+    const dst = await fileSystem.readFile(prefix + '_dst.txt');
+    return src?.content === 'SRC' && dst?.content === 'DST';
+  });
+
+  await test('rename to non-existent target succeeds', async () => {
+    await fileSystem.rename(prefix + '_src.txt', prefix + '_moved.txt');
+    const moved = await fileSystem.readFile(prefix + '_moved.txt');
+    const gone = await fileSystem.readFile(prefix + '_src.txt');
+    return moved?.content === 'SRC' && gone === null;
+  });
+
+  await test('rename of missing source rejects with "source not found"', async () => {
+    try {
+      await fileSystem.rename(prefix + '_does_not_exist.txt', prefix + '_anywhere.txt');
+      return false;
+    } catch (err) {
+      return /source not found/.test(err.message);
+    }
+  });
+
+  await test('rename same path is a no-op (no error)', async () => {
+    await fileSystem.writeFile(prefix + '_same.txt', 'SAME');
+    await fileSystem.rename(prefix + '_same.txt', prefix + '_same.txt');
+    const after = await fileSystem.readFile(prefix + '_same.txt');
+    return after?.content === 'SAME';
+  });
+
+  // Cleanup
+  await fileSystem.delete(prefix + '_moved.txt').catch(() => {});
+  await fileSystem.delete(prefix + '_dst.txt').catch(() => {});
+  await fileSystem.delete(prefix + '_same.txt').catch(() => {});
+}
+
 // ═══ Summary ═══
 const total = passCount + failCount;
 const summary = document.getElementById('summary');
