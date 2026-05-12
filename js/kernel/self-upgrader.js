@@ -492,6 +492,28 @@ export async function applyUpgrade(proposalId, opts = {}) {
     return { ok: false, error: 'syntax re-check failed (defense in depth): ' + syntax.reason };
   }
 
+  // M8.P5 kill-switch pre-check (2026-05-11). The server enforces it
+  // unconditionally via ASTRION_SELFMOD_DISABLED — this client probe
+  // just gives the user a fast, clear failure message before the
+  // write attempt instead of the generic 403 from the API. Best-
+  // effort: if the status endpoint is unreachable, we fall through
+  // to the write attempt and let the server be the authority.
+  try {
+    const probe = await fetch('/api/system/selfmod-status', { method: 'GET' });
+    if (probe.ok) {
+      const data = await probe.json().catch(() => null);
+      if (data && data.disabled) {
+        eventBus.emit('self-upgrade:kill-switch', { id: proposalId, target, source: data.source });
+        return {
+          ok: false,
+          error: 'self-mod disabled by kill-switch (' + (data.source || 'server policy') + '). ' + (data.reason || 'Clear ASTRION_SELFMOD_DISABLED and restart the server to re-enable.'),
+          killSwitch: true,
+          gatesPassed: gateResult.gatesPassed,
+        };
+      }
+    }
+  } catch { /* server probe failed — let the write call hit the real gate */ }
+
   try {
     const res = await fetch('/api/files/write', {
       method: 'POST',
@@ -552,6 +574,25 @@ export async function rollbackUpgrade(proposalId) {
   if (!isPathUpgradable(target)) {
     return { ok: false, error: 'target path not in allow-list: ' + target };
   }
+
+  // Kill-switch also blocks rollback. The server enforces this — the
+  // env var policy is "no source-file writes" regardless of direction.
+  // The client probe just makes the error message obvious instead of
+  // a generic 403. Same best-effort pattern as applyUpgrade.
+  try {
+    const probe = await fetch('/api/system/selfmod-status', { method: 'GET' });
+    if (probe.ok) {
+      const data = await probe.json().catch(() => null);
+      if (data && data.disabled) {
+        eventBus.emit('self-upgrade:kill-switch', { id: proposalId, target, source: data.source, op: 'rollback' });
+        return {
+          ok: false,
+          error: 'rollback blocked by kill-switch (' + (data.source || 'server policy') + '). ' + (data.reason || 'Clear ASTRION_SELFMOD_DISABLED and restart the server to roll back.'),
+          killSwitch: true,
+        };
+      }
+    }
+  } catch { /* server probe failed — server will be the authority */ }
 
   try {
     const res = await fetch('/api/files/write', {

@@ -473,8 +473,62 @@ app.get('/api/files/read', async (req, res) => {
 // Writes content to a file. Creates parent dirs if needed. Returns { path, bytes }.
 // The capability layer (code.writeFile, L2) gates this with a diff preview —
 // this endpoint trusts that the caller already has user approval.
+// M8.P5 kill-switch (2026-05-11).
+//
+// The hardest line of defense. If ASTRION_SELFMOD_DISABLED is truthy
+// in the server's environment, every source-file write fails at the
+// OS boundary regardless of which client-side gates passed. This is
+// the "I'm scared, stop modifying the OS" toggle the roadmap calls
+// out as a Phase 1 requirement before M8.P5 disk-write ships.
+//
+// Why env var at the server (not client) is load-bearing:
+//   - The 5 gates in selfmod-sandbox + applyUpgrade run in the JS
+//     bundle that the AI could in principle modify (lesson #186 —
+//     the self-upgrader.js IS in the golden lock for exactly this
+//     reason). A determined or buggy AI that bypasses the gates
+//     still has to ask the server to write bytes; the server is
+//     outside the AI's reach.
+//   - Setting the env var requires shell access. A user who wants
+//     to disable self-mod for a session does: `ASTRION_SELFMOD_DISABLED=1
+//     npm run dev`. On the installed ISO, it lands in a systemd
+//     drop-in or /etc/astrion/env.conf.
+//
+// Recognized truthy values: '1', 'true', 'yes', 'on' (case-insensitive).
+// Anything else (including unset) = self-mod allowed.
+function isSelfmodDisabled() {
+  const v = (process.env.ASTRION_SELFMOD_DISABLED || '').trim().toLowerCase();
+  return v === '1' || v === 'true' || v === 'yes' || v === 'on';
+}
+
+// GET /api/system/selfmod-status — lets the client mirror the kill
+// switch state in UI without waiting for a write attempt to fail.
+app.get('/api/system/selfmod-status', (req, res) => {
+  const disabled = isSelfmodDisabled();
+  res.json({
+    disabled,
+    source: disabled ? 'env:ASTRION_SELFMOD_DISABLED' : null,
+    reason: disabled
+      ? 'Server started with ASTRION_SELFMOD_DISABLED set. Source-file writes are blocked at /api/files/write until the env var is cleared and the server restarted.'
+      : null,
+  });
+});
+
 app.post('/api/files/write', async (req, res) => {
   try {
+    // Kill-switch: refuse every source-file write when the env var
+    // is set. This intentionally blocks BOTH M8.P5 self-upgrades AND
+    // the code.writeFile L2 capability — both are AI-orchestrated
+    // source modification, and the kill-switch is "AI doesn't touch
+    // my OS today" not "self-upgrade only." User document writes go
+    // through IndexedDB (js/kernel/file-system.js), not this endpoint,
+    // so editing /Documents/notes.txt is unaffected.
+    if (isSelfmodDisabled()) {
+      return res.status(403).json({
+        error: 'Source-file writes are disabled by ASTRION_SELFMOD_DISABLED. Restart the server with the env var cleared to re-enable.',
+        killSwitch: true,
+      });
+    }
+
     const { path: userPath, content } = req.body;
     const filePath = safeResolvePath(userPath);
     if (!filePath) return res.status(400).json({ error: 'Invalid or disallowed path' });

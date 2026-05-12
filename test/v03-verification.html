@@ -2037,6 +2037,50 @@ gb._resetForTests();
   await fileSystem.delete(prefix + '_same.txt').catch(() => {});
 }
 
+// ═══ 25. M8.P5 kill-switch endpoint contract (2026-05-11) ═══
+// The kill-switch (ASTRION_SELFMOD_DISABLED env var) is enforced at
+// the server level — it blocks /api/files/write so the AI can't
+// modify the OS even if every client-side gate is bypassed. These
+// tests pin the endpoint contract: status reports a boolean
+// `disabled` key, and (with the env var unset, which is the dev
+// default) /api/files/write does NOT return killSwitch:true.
+//
+// To verify the killed-path manually:
+//   pkill -f 'node server/index.js'; ASTRION_SELFMOD_DISABLED=1 npm run dev
+//   curl http://localhost:3000/api/system/selfmod-status   # → {disabled:true,...}
+//   curl -X POST .../api/files/write -d '...'              # → 403 killSwitch:true
+{
+  await test('GET /api/system/selfmod-status returns valid JSON with boolean disabled', async () => {
+    const r = await fetch('/api/system/selfmod-status');
+    if (!r.ok) return false;
+    const data = await r.json();
+    return typeof data.disabled === 'boolean';
+  });
+
+  await test('kill-switch endpoint reports source + reason when disabled, nulls when enabled', async () => {
+    const r = await fetch('/api/system/selfmod-status');
+    const data = await r.json();
+    if (data.disabled) {
+      return typeof data.source === 'string' && typeof data.reason === 'string';
+    } else {
+      return data.source === null && data.reason === null;
+    }
+  });
+
+  await test('with kill-switch off (dev default), /api/files/write does NOT return killSwitch:true', async () => {
+    // Use an obviously-rejected path to avoid actually writing.
+    const r = await fetch('/api/files/write', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ path: '../../../../../../etc/passwd', content: 'x' }),
+    });
+    // We expect a non-kill-switch error (path validation rejects it).
+    if (r.ok) return false; // shouldn't have written
+    const data = await r.json().catch(() => ({}));
+    return data.killSwitch !== true;
+  });
+}
+
 // ═══ Summary ═══
 const total = passCount + failCount;
 const summary = document.getElementById('summary');
