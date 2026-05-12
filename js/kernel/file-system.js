@@ -104,8 +104,43 @@ class NovaFileSystem {
   }
 
   async rename(oldPath, newPath) {
+    // 2026-05-11: was vulnerable to silent data loss when newPath
+    // already existed. delete + put in the same tx is atomic against
+    // the delete-then-put-fails scenario (audit's stated concern),
+    // but it doesn't protect against the COLLISION case: renaming
+    // /a/b onto an existing /c/b silently overwrote the existing
+    // /c/b entry because IDBObjectStore.put is upsert by primary key.
+    // Now we pre-check for collisions and source existence; rename
+    // becomes a no-op-with-error on either failure instead of partial
+    // success or silent overwrite. Callers (finder, desktop, trash)
+    // can surface the error to the user.
+    if (typeof oldPath !== 'string' || typeof newPath !== 'string') {
+      throw new Error('rename: oldPath and newPath must be strings');
+    }
+    if (oldPath === newPath) return; // no-op, not an error
+
     const all = await this._getAll();
     const toRename = all.filter(f => f.path === oldPath || f.path.startsWith(oldPath + '/'));
+    if (toRename.length === 0) {
+      throw new Error(`rename: source not found: ${oldPath}`);
+    }
+
+    // Collision check: build the set of new paths this rename WOULD
+    // produce, then verify none of them already exist (except the
+    // ones we're about to remove ourselves — i.e., paths within the
+    // source subtree, which the put-after-delete will recreate).
+    const sourcePaths = new Set(toRename.map(f => f.path));
+    const newPaths = toRename.map(f => ({
+      from: f.path,
+      to: f.path.replace(oldPath, newPath),
+    }));
+    const existingByPath = new Map(all.map(f => [f.path, f]));
+    for (const { to } of newPaths) {
+      if (existingByPath.has(to) && !sourcePaths.has(to)) {
+        throw new Error(`rename: destination already exists: ${to}`);
+      }
+    }
+
     const tx = this.db.transaction(this.STORE, 'readwrite');
     const store = tx.objectStore(this.STORE);
     for (const item of toRename) {
