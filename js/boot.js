@@ -94,11 +94,15 @@ import { registerQrCode } from './apps/qr-code.js';
 import { registerDictionary } from './apps/dictionary.js';
 import { registerJournal } from './apps/journal.js';
 import { registerFlashcards } from './apps/flashcards.js';
-import { registerChess } from './apps/chess.js';
-import { registerSnake } from './apps/snake.js';
-import { register2048 } from './apps/2048.js';
+// 2026-05-11: 16 toy apps lazy-load on first launch (see kernel/toy-stubs.js).
+// Removed eager imports for: chess, snake, 2048, quotes, tetris, minesweeper,
+// matrix-rain, neon-void, sudoku, emoji-kitchen, wordle, soundboard,
+// reaction-test, rock-paper-scissors, tic-tac-toe, random-facts.
+// Saves ~100 KB of JS parse work on every cold boot for users who never
+// open the toys folder. AI game.* capabilities still work — they already
+// dynamic-import via getGameModule() in capability-providers.js.
+import { registerAllToyStubs } from './kernel/toy-stubs.js';
 import { registerBudget } from './apps/budget.js';
-import { registerQuotes } from './apps/quotes.js';
 import { registerTypingTest } from './apps/typing-test.js';
 import { registerTodo } from './apps/todo.js';
 import { registerBeatStudio } from './apps/beat-studio.js';
@@ -109,23 +113,11 @@ import { registerAnimate } from './apps/animate.js';
 import { registerVideoEditor } from './apps/video-editor.js';
 import { registerAiArt } from './apps/ai-art.js';
 import { registerAiWriter } from './apps/ai-writer.js';
-import { registerTetris } from './apps/tetris.js';
-import { registerMinesweeper } from './apps/minesweeper.js';
-import { registerMatrixRain } from './apps/matrix-rain.js';
-import { registerNeonVoid } from './apps/neon-void.js';
-import { registerSudoku } from './apps/sudoku.js';
 import { registerSpeedTest } from './apps/speed-test.js';
 import { registerRecipeBook } from './apps/recipe-book.js';
-import { registerEmojiKitchen } from './apps/emoji-kitchen.js';
-import { registerWordle } from './apps/wordle.js';
 import { registerMeditation } from './apps/meditation.js';
-import { registerSoundboard } from './apps/soundboard.js';
 import { registerCountdown } from './apps/countdown.js';
-import { registerReactionTest } from './apps/reaction-test.js';
 import { registerColorPalette } from './apps/color-palette.js';
-import { registerRockPaperScissors } from './apps/rock-paper-scissors.js';
-import { registerTicTacToe } from './apps/tic-tac-toe.js';
-import { registerRandomFacts } from './apps/random-facts.js';
 import { registerBmiCalc } from './apps/bmi-calc.js';
 import { registerAdaptations } from './apps/adaptations.js';
 import { verifyPassword } from './kernel/crypto.js';
@@ -154,18 +146,24 @@ function registerAllApps() {
   registerStopwatch(); registerTimer(); registerWhiteboard();
   registerPasswordGen(); registerMarkdown(); registerQrCode();
   registerDictionary(); registerJournal(); registerFlashcards();
-  registerChess(); registerSnake(); register2048();
-  registerBudget(); registerQuotes(); registerTypingTest();
+  registerBudget(); registerTypingTest();
   registerTodo(); registerBeatStudio(); registerLiveChat();
-  registerYouTube(); registerPixelArt(); registerTetris();
-  registerMinesweeper(); registerMatrixRain(); registerNeonVoid();
+  registerYouTube(); registerPixelArt();
   registerAnimate(); registerVideoEditor(); registerAiArt(); registerAiWriter();
-  registerSudoku(); registerSpeedTest(); registerRecipeBook();
-  registerEmojiKitchen(); registerWordle(); registerMeditation();
-  registerSoundboard(); registerCountdown(); registerReactionTest();
-  registerColorPalette(); registerRockPaperScissors(); registerTicTacToe();
-  registerRandomFacts(); registerBmiCalc();
+  registerSpeedTest(); registerRecipeBook();
+  registerMeditation();
+  registerCountdown();
+  registerColorPalette();
+  registerBmiCalc();
   registerAdaptations();
+  // 16 toys (2048, chess, snake, tetris, minesweeper, sudoku, wordle,
+  // tic-tac-toe, rock-paper-scissors, matrix-rain, neon-void, emoji-
+  // kitchen, soundboard, reaction-test, random-facts, quotes) register
+  // as lazy stubs — the real module imports on first launch. Toys live
+  // in Launchpad's Toys folder ranked by usage (rankToys), not in the
+  // dock's default pinned list, so registration order doesn't affect
+  // user-facing layout.
+  registerAllToyStubs();
 }
 
 // Phase 1 hardening (2026-05-02): boot timeline instrumentation. The
