@@ -67,8 +67,17 @@ const DENY_LIST = [
 ];
 
 // New-content blocklist: patterns we refuse to accept even from the AI.
+// 2026-05-12: widened the Node-builtin regex to match BOTH
+// `import "fs"` (side-effect) AND `import fs from "fs"` /
+// `import { readFile } from "fs"` (named) — the original regex caught
+// only the side-effect form, so the synthetic-proposal suite's
+// `node-fs-import` case passed when it should have rejected. The gate
+// also now covers path/child_process/http/net/os/crypto — none have
+// any place in browser code, and an AI proposal that names one is
+// either confused (proposing server code) or hostile.
+const NODE_BUILTINS_RE = /(?:\bfrom\s+|\bimport\s+)['"](?:fs|path|child_process|http|https|net|os|crypto|stream|dgram|cluster|tls|dns)['"]/;
 const CONTENT_BLOCKLIST = [
-  { re: /\bimport\s+['"]fs['"]/, reason: 'Node fs import in browser code' },
+  { re: NODE_BUILTINS_RE, reason: 'Node built-in module import in browser code' },
   { re: /\beval\s*\(/, reason: 'eval() call' },
   { re: /\bnew\s+Function\s*\(/, reason: 'new Function() constructor' },
   { re: /\bimportScripts\s*\(/, reason: 'importScripts call' },
@@ -90,7 +99,11 @@ export function isPathUpgradable(path) {
   return false;
 }
 
-function checkContentSafe(content) {
+// Exported as of 2026-05-12 so the synthetic-proposal suite (Phase 1
+// Option A, Week 18) can drive the content gate directly without
+// staging a real proposal through proposeSelfMod. Internal callers
+// already used the module-local reference; the export is additive.
+export function checkContentSafe(content) {
   if (!content || typeof content !== 'string') return { ok: false, reason: 'empty content' };
   if (content.length > MAX_CONTENT_BYTES) return { ok: false, reason: `content ${content.length} bytes > ${MAX_CONTENT_BYTES} cap` };
   for (const { re, reason } of CONTENT_BLOCKLIST) {

@@ -2179,6 +2179,81 @@ gb._resetForTests();
   });
 }
 
+// ═══ 27. Synthetic self-mod proposal suite (2026-05-12) ═══
+// Phase 1 Option A, Week 18 from ROADMAP-DEC-2026-v3.md: "Synthetic
+// proposal generator (10 good + 10 bad)." This is the corpus the
+// Week 19 24h soak runs against to prove gate classification is
+// stable. These tests verify the suite itself classifies every
+// hand-crafted proposal correctly TODAY — if a future refactor
+// quietly weakens a gate, the relevant proposal will start passing
+// when it shouldn't, and a v03 row will go red.
+{
+  const synth = await import('/js/kernel/synthetic-proposals.js');
+
+  await test('synthetic suite: 10 good + 10 bad proposals defined', () => {
+    return synth.GOOD_PROPOSALS.length === 10 && synth.BAD_PROPOSALS.length === 10;
+  });
+
+  await test('synthetic suite: every good proposal targets an allow-listed path', async () => {
+    const { isPathUpgradable } = await import('/js/kernel/self-upgrader.js');
+    return synth.GOOD_PROPOSALS.every(p => isPathUpgradable(p.target));
+  });
+
+  await test('synthetic suite: runSyntheticSuite returns 10 passes among the good set', () => {
+    const r = synth.runSyntheticSuite();
+    const goodResults = r.results.filter(x => synth.GOOD_PROPOSALS.some(g => g.id === x.id));
+    return goodResults.length === 10 && goodResults.every(x => x.actual === 'pass');
+  });
+
+  await test('synthetic suite: every bad proposal is rejected', () => {
+    const r = synth.runSyntheticSuite();
+    const badResults = r.results.filter(x => synth.BAD_PROPOSALS.some(b => b.id === x.id));
+    return badResults.length === 10 && badResults.every(x => x.actual !== 'pass');
+  });
+
+  await test('synthetic suite: full corpus classifies 20/20 correctly', () => {
+    const r = synth.runSyntheticSuite();
+    return r.summary.total === 20 && r.summary.classifiedCorrectly === 20 && r.summary.misclassified.length === 0;
+  });
+
+  await test('synthetic suite: byGate breakdown distributes across content/syntax/path/pass', () => {
+    const r = synth.runSyntheticSuite();
+    const g = r.summary.byGate;
+    // Expect at least one of each rejection gate to be hit by the corpus
+    return g.content >= 1 && g.syntax >= 1 && g.path >= 1 && g.pass === 10;
+  });
+
+  await test('synthetic suite: a hand-crafted eval-injection proposal rejects at content gate', () => {
+    const r = synth.runOne({
+      id: 'spot-check-eval', label: 'spot check',
+      target: 'js/apps/quotes.js',
+      newContent: 'const x = 1; eval("alert(1)");',
+      expected: 'reject:content',
+    });
+    return r.actual === 'reject:content' && r.gate === 'content';
+  });
+
+  await test('synthetic suite: a hand-crafted oversize proposal rejects at content gate', () => {
+    const r = synth.runOne({
+      id: 'spot-check-oversize', label: 'spot check',
+      target: 'js/apps/quotes.js',
+      newContent: '// ' + 'x'.repeat(100 * 1024),
+      expected: 'reject:content',
+    });
+    return r.actual === 'reject:content' && /cap|bytes/.test(r.reason || '');
+  });
+
+  await test('synthetic suite: node fs import (named form) now rejected (regression test)', () => {
+    const r = synth.runOne({
+      id: 'spot-check-fs', label: 'spot check',
+      target: 'js/apps/quotes.js',
+      newContent: 'import fs from "fs";\nconst x = 1;\n',
+      expected: 'reject:content',
+    });
+    return r.actual === 'reject:content';
+  });
+}
+
 // ═══ Summary ═══
 const total = passCount + failCount;
 const summary = document.getElementById('summary');
