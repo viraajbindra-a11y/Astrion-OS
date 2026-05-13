@@ -478,7 +478,21 @@ export function registerChess() {
             if (state.selected) {
               const [sr, sc] = state.selected;
               if (r !== sr || c !== sc) {
-                makeChessMove(sr, sc, r, c);
+                // 2026-05-12: promotion picker. If the moving piece is a
+                // pawn AND the destination row is the back rank for that
+                // side, ask the user which piece to promote to BEFORE
+                // calling makeChessMove. Falls back to queen if the
+                // picker is dismissed (Escape or click outside).
+                const piece = state.board[sr][sc];
+                const pawnToBackRank = piece && piece.toLowerCase() === 'p'
+                  && ((piece === 'P' && r === 0) || (piece === 'p' && r === 7));
+                if (pawnToBackRank) {
+                  showPromotionPicker(piece === 'P', (choice) => {
+                    makeChessMove(sr, sc, r, c, choice || 'q');
+                  });
+                } else {
+                  makeChessMove(sr, sc, r, c);
+                }
               } else {
                 state.selected = null;
                 render();
@@ -492,6 +506,56 @@ export function registerChess() {
             }
           };
         });
+
+        // Promotion picker — overlay with Q / R / B / N buttons.
+        function showPromotionPicker(isWhitePawn, onChoice) {
+          const overlay = document.createElement('div');
+          overlay.style.cssText = 'position:absolute;inset:0;background:rgba(0,0,0,0.55);display:flex;align-items:center;justify-content:center;z-index:1000;backdrop-filter:blur(2px);';
+          const card = document.createElement('div');
+          card.style.cssText = 'background:#23232a;border-radius:14px;padding:18px 22px;box-shadow:0 12px 40px rgba(0,0,0,0.6);display:flex;flex-direction:column;align-items:center;gap:12px;';
+          const title = document.createElement('div');
+          title.textContent = 'Promote pawn to:';
+          title.style.cssText = 'font-size:13px;color:rgba(255,255,255,0.7);';
+          const row = document.createElement('div');
+          row.style.cssText = 'display:flex;gap:10px;';
+          const opts = [
+            { letter: 'q', glyph: isWhitePawn ? PIECES.Q : PIECES.q, label: 'Queen' },
+            { letter: 'r', glyph: isWhitePawn ? PIECES.R : PIECES.r, label: 'Rook' },
+            { letter: 'b', glyph: isWhitePawn ? PIECES.B : PIECES.b, label: 'Bishop' },
+            { letter: 'n', glyph: isWhitePawn ? PIECES.N : PIECES.n, label: 'Knight' },
+          ];
+          let picked = false;
+          const pick = (letter) => { if (picked) return; picked = true; cleanup(); onChoice(letter); };
+          const cleanup = () => {
+            document.removeEventListener('keydown', onKey);
+            overlay.remove();
+          };
+          const onKey = (e) => {
+            if (e.key === 'Escape') { pick('q'); }
+            const k = e.key?.toLowerCase();
+            if (['q','r','b','n'].includes(k)) pick(k);
+          };
+          for (const o of opts) {
+            const btn = document.createElement('button');
+            btn.style.cssText = 'background:#1a1a22;border:1px solid rgba(255,255,255,0.12);border-radius:10px;padding:10px 14px;cursor:pointer;font-family:var(--font);color:white;display:flex;flex-direction:column;align-items:center;gap:4px;min-width:60px;';
+            btn.innerHTML = `<span style="font-size:32px;">${o.glyph}</span><span style="font-size:10px;color:rgba(255,255,255,0.6);">${o.label}</span>`;
+            btn.onclick = () => pick(o.letter);
+            btn.onmouseenter = () => { btn.style.background = '#2a2a35'; };
+            btn.onmouseleave = () => { btn.style.background = '#1a1a22'; };
+            row.appendChild(btn);
+          }
+          card.appendChild(title);
+          card.appendChild(row);
+          overlay.appendChild(card);
+          overlay.onclick = (e) => { if (e.target === overlay) pick('q'); };
+          document.addEventListener('keydown', onKey);
+          // Anchor the overlay to the chess window's content element so
+          // it stays bounded to the app (not the whole page).
+          if (el.style.position !== 'relative' && el.style.position !== 'absolute') {
+            el.style.position = 'relative';
+          }
+          el.appendChild(overlay);
+        }
         el.querySelector('#ch-reset').onclick = () => {
           state.board = INITIAL.map(r => [...r]);
           state.turn = 'white';
