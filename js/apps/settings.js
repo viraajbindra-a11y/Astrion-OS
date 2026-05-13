@@ -1361,6 +1361,23 @@ function initSettings(container) {
           </div>
         </div>
 
+        <div id="selfmod-soak-panel" style="background:rgba(255,255,255,0.04);border-radius:10px;padding:18px;margin-top:16px;">
+          <div style="display:flex;align-items:baseline;justify-content:space-between;gap:8px;margin-bottom:6px;">
+            <div style="font-size:14px;font-weight:600;">🛡️ Self-mod gate soak</div>
+            <span id="kill-switch-pill" style="font-size:10px;padding:2px 8px;border-radius:999px;background:rgba(255,255,255,0.06);color:rgba(255,255,255,0.5);font-family:var(--font);">kill-switch: …</span>
+          </div>
+          <p style="font-size:12px;color:rgba(255,255,255,0.55);margin:0 0 12px;">
+            Runs the synthetic proposal corpus (10 good + 10 bad) through the M8.P5 gates on an interval. Detects drift if any proposal's classification changes between runs — that's the trip wire for "a gate silently weakened." The kill-switch env var (ASTRION_SELFMOD_DISABLED) blocks all source-file writes regardless of what the gates say.
+          </p>
+          <div id="soak-status-grid" style="display:grid;grid-template-columns:auto 1fr;gap:6px 12px;font-size:12px;margin-bottom:12px;">Loading…</div>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            <button id="soak-start" style="padding:8px 14px;background:rgba(122,162,247,0.18);color:#7aa2f7;border:1px solid #7aa2f7;border-radius:6px;font-family:var(--font);font-size:12px;cursor:pointer;">▶ Start soak</button>
+            <button id="soak-stop"  style="padding:8px 14px;background:transparent;color:rgba(255,255,255,0.6);border:1px solid rgba(255,255,255,0.18);border-radius:6px;font-family:var(--font);font-size:12px;cursor:pointer;">⏹ Stop</button>
+            <button id="soak-once"  style="padding:8px 14px;background:transparent;color:rgba(255,255,255,0.6);border:1px solid rgba(255,255,255,0.18);border-radius:6px;font-family:var(--font);font-size:12px;cursor:pointer;">▶ Run once</button>
+            <button id="soak-clear" style="padding:8px 14px;background:transparent;color:rgba(255,159,64,0.7);border:1px solid rgba(255,159,64,0.35);border-radius:6px;font-family:var(--font);font-size:12px;cursor:pointer;">Clear history</button>
+          </div>
+        </div>
+
         <div id="self-upgrade-history-panel" style="background:rgba(255,255,255,0.04);border-radius:10px;padding:18px;margin-top:16px;">
           <div style="font-size:14px;font-weight:600;margin-bottom:6px;">🤖 Self-upgrade audit trail</div>
           <p style="font-size:12px;color:rgba(255,255,255,0.55);margin:0 0 12px;">
@@ -1387,8 +1404,75 @@ function initSettings(container) {
       fireChaosNow();
     });
 
+    // ─── M8.P5 soak + kill-switch panel ───
+    renderSoakPanel();
     // ─── Self-upgrade history (M8.P5 audit surface) ───
     renderSelfUpgradeHistory();
+  }
+
+  async function renderSoakPanel() {
+    const grid = container.querySelector('#soak-status-grid');
+    const pill = container.querySelector('#kill-switch-pill');
+    if (!grid) return;
+
+    // Kill-switch pill — live probe of /api/system/selfmod-status.
+    try {
+      const probe = await fetch('/api/system/selfmod-status');
+      if (probe.ok) {
+        const data = await probe.json();
+        if (data.disabled) {
+          pill.textContent = 'kill-switch: ON (writes blocked)';
+          pill.style.background = 'rgba(243,139,168,0.18)';
+          pill.style.color = '#f38ba8';
+        } else {
+          pill.textContent = 'kill-switch: off';
+          pill.style.background = 'rgba(166,227,161,0.14)';
+          pill.style.color = '#a6e3a1';
+        }
+      } else {
+        pill.textContent = 'kill-switch: unknown';
+      }
+    } catch {
+      pill.textContent = 'kill-switch: unreachable';
+    }
+
+    // Soak state + report
+    const soak = await import('../kernel/selfmod-soak.js');
+    const state = soak.getSoakState();
+    const report = soak.getSoakReport();
+    const lastDriftCount = report.lastRun?.drift?.length || 0;
+    const lastDriftColor = lastDriftCount > 0 ? '#f38ba8' : '#a6e3a1';
+    grid.innerHTML = `
+      <span style="color:rgba(255,255,255,0.5);">Running</span>
+      <span style="color:${state.running ? '#a6e3a1' : 'rgba(255,255,255,0.55)'};font-weight:600;">${state.running ? `yes · every ${(state.intervalMs / 1000).toFixed(0)}s` : 'no'}</span>
+      <span style="color:rgba(255,255,255,0.5);">Runs recorded</span>
+      <span>${report.runs}</span>
+      <span style="color:rgba(255,255,255,0.5);">Proposals classified</span>
+      <span>${report.totalProposalsClassified}</span>
+      <span style="color:rgba(255,255,255,0.5);">Drift events</span>
+      <span style="color:${report.driftEvents > 0 ? '#f38ba8' : 'inherit'};">${report.driftEvents}</span>
+      <span style="color:rgba(255,255,255,0.5);">Mean iteration</span>
+      <span>${report.meanIterationMs ? report.meanIterationMs + ' ms' : '—'}</span>
+      <span style="color:rgba(255,255,255,0.5);">Last run</span>
+      <span>${report.lastRun ? `${report.lastRun.classifiedCorrectly}/${report.lastRun.total} correct · <span style="color:${lastDriftColor};">${lastDriftCount} drift</span>` : '—'}</span>
+    `;
+
+    container.querySelector('#soak-start')?.addEventListener('click', () => {
+      soak.startSoak({ intervalMs: 60000 });
+      renderSoakPanel();
+    });
+    container.querySelector('#soak-stop')?.addEventListener('click', () => {
+      soak.stopSoak();
+      renderSoakPanel();
+    });
+    container.querySelector('#soak-once')?.addEventListener('click', () => {
+      soak.runIteration();
+      renderSoakPanel();
+    });
+    container.querySelector('#soak-clear')?.addEventListener('click', () => {
+      soak.clearSoakHistory();
+      renderSoakPanel();
+    });
   }
 
   async function renderSelfUpgradeHistory() {
