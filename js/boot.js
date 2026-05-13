@@ -29,27 +29,19 @@ import { initDesktop } from './shell/desktop.js';
 import { initSpotlight } from './shell/spotlight.js';
 import { initChatPanel } from './shell/chat-panel.js';
 import { initShortcutsOverlay } from './shell/shortcuts-overlay.js';
-import { registerFinder } from './apps/finder.js';
-import { registerNotes } from './apps/notes.js';
-import { registerTerminal } from './apps/terminal.js';
-import { registerCalculator } from './apps/calculator.js';
+// 2026-05-12: 59 real apps lazy-load via app-stubs (see js/kernel/app-stubs.js).
+// Only settings stays eager — boot.js calls applyWallpaper() and applyAccentColor()
+// after the shell mounts, so its module needs to be loaded before that point.
+// Splitting those two helpers into a kernel/theme module would let settings be
+// lazy too; future PR. Net savings on cold boot: ~60 module fetches + parse
+// (~400 KB compiled, varies) deferred until first launch.
+import { registerAllRealAppStubs } from './kernel/app-stubs.js';
 import { registerSettings, applyWallpaper, applyAccentColor } from './apps/settings.js';
-import { registerTextEditor } from './apps/text-editor.js';
-import { registerDraw } from './apps/draw.js';
-import { registerBrowser } from './apps/browser.js';
-import { registerMusic } from './apps/music.js';
-import { registerCalendar } from './apps/calendar.js';
-import { registerAppStore } from './apps/appstore.js';
 import { showSetupWizard } from './shell/setup-wizard.js';
 import { notifications } from './kernel/notifications.js';
 import { initControlCenter } from './shell/control-center.js';
 import { initLaunchpad } from './shell/launchpad.js';
-import { registerPhotos } from './apps/photos.js';
 import { initShortcuts } from './shell/shortcuts.js';
-import { registerWeather } from './apps/weather.js';
-import { registerClock } from './apps/clock.js';
-import { registerReminders } from './apps/reminders.js';
-import { registerActivityMonitor } from './apps/activity-monitor.js';
 import { initLockScreen } from './shell/lock-screen.js';
 import { initScreenshot } from './shell/screenshot.js';
 import { appInstaller } from './kernel/app-installer.js';
@@ -66,34 +58,7 @@ import { initFocusMode } from './shell/focus-mode.js';
 import { initIdleLock } from './shell/idle-lock.js';
 import { initRecentApps } from './shell/recent-apps.js';
 import { initSelectionInfo } from './shell/selection-info.js';
-import { registerVault } from './apps/vault.js';
-import { registerMessages } from './apps/messages.js';
 import { initScreensaver } from './shell/screensaver.js';
-import { registerScreenRecorder } from './apps/screen-recorder.js';
-import { registerTrash } from './apps/trash.js';
-import { registerInstaller } from './apps/installer.js';
-import { registerStickyNotes } from './apps/sticky-notes.js';
-import { registerContacts } from './apps/contacts.js';
-import { registerMaps } from './apps/maps.js';
-import { registerVoiceMemos } from './apps/voice-memos.js';
-import { registerPomodoro } from './apps/pomodoro.js';
-import { registerPdfViewer } from './apps/pdf-viewer.js';
-import { registerKanban } from './apps/kanban.js';
-import { registerHabitTracker } from './apps/habit-tracker.js';
-import { registerVideoPlayer } from './apps/video-player.js';
-import { registerSystemInfo } from './apps/system-info.js';
-import { registerTranslator } from './apps/translator.js';
-import { registerUnitConverter } from './apps/unit-converter.js';
-import { registerColorPicker } from './apps/color-picker.js';
-import { registerStopwatch } from './apps/stopwatch.js';
-import { registerTimer } from './apps/timer.js';
-import { registerWhiteboard } from './apps/whiteboard.js';
-import { registerPasswordGen } from './apps/password-gen.js';
-import { registerMarkdown } from './apps/markdown.js';
-import { registerQrCode } from './apps/qr-code.js';
-import { registerDictionary } from './apps/dictionary.js';
-import { registerJournal } from './apps/journal.js';
-import { registerFlashcards } from './apps/flashcards.js';
 // 2026-05-11: 16 toy apps lazy-load on first launch (see kernel/toy-stubs.js).
 // Removed eager imports for: chess, snake, 2048, quotes, tetris, minesweeper,
 // matrix-rain, neon-void, sudoku, emoji-kitchen, wordle, soundboard,
@@ -102,24 +67,6 @@ import { registerFlashcards } from './apps/flashcards.js';
 // open the toys folder. AI game.* capabilities still work — they already
 // dynamic-import via getGameModule() in capability-providers.js.
 import { registerAllToyStubs } from './kernel/toy-stubs.js';
-import { registerBudget } from './apps/budget.js';
-import { registerTypingTest } from './apps/typing-test.js';
-import { registerTodo } from './apps/todo.js';
-import { registerBeatStudio } from './apps/beat-studio.js';
-import { registerLiveChat } from './apps/live-chat.js';
-import { registerYouTube } from './apps/youtube.js';
-import { registerPixelArt } from './apps/pixel-art.js';
-import { registerAnimate } from './apps/animate.js';
-import { registerVideoEditor } from './apps/video-editor.js';
-import { registerAiArt } from './apps/ai-art.js';
-import { registerAiWriter } from './apps/ai-writer.js';
-import { registerSpeedTest } from './apps/speed-test.js';
-import { registerRecipeBook } from './apps/recipe-book.js';
-import { registerMeditation } from './apps/meditation.js';
-import { registerCountdown } from './apps/countdown.js';
-import { registerColorPalette } from './apps/color-palette.js';
-import { registerBmiCalc } from './apps/bmi-calc.js';
-import { registerAdaptations } from './apps/adaptations.js';
 import { verifyPassword } from './kernel/crypto.js';
 import { sounds } from './kernel/sound.js';
 import { initVolumeHud } from './shell/volume-hud.js';
@@ -131,38 +78,17 @@ import { initVolumeHud } from './shell/volume-hud.js';
 // matters for the dock — keep new apps appended at the end so the
 // dock layout stays stable.
 function registerAllApps() {
-  registerFinder(); registerNotes(); registerTerminal();
-  registerCalculator(); registerSettings(); registerTextEditor();
-  registerDraw(); registerBrowser(); registerMusic();
-  registerCalendar(); registerAppStore(); registerPhotos();
-  registerWeather(); registerClock(); registerReminders();
-  registerActivityMonitor();
-  registerVault(); registerMessages(); registerScreenRecorder();
-  registerTrash(); registerInstaller(); registerStickyNotes();
-  registerContacts(); registerMaps(); registerVoiceMemos();
-  registerPomodoro(); registerPdfViewer(); registerKanban();
-  registerHabitTracker(); registerVideoPlayer(); registerSystemInfo();
-  registerTranslator(); registerUnitConverter(); registerColorPicker();
-  registerStopwatch(); registerTimer(); registerWhiteboard();
-  registerPasswordGen(); registerMarkdown(); registerQrCode();
-  registerDictionary(); registerJournal(); registerFlashcards();
-  registerBudget(); registerTypingTest();
-  registerTodo(); registerBeatStudio(); registerLiveChat();
-  registerYouTube(); registerPixelArt();
-  registerAnimate(); registerVideoEditor(); registerAiArt(); registerAiWriter();
-  registerSpeedTest(); registerRecipeBook();
-  registerMeditation();
-  registerCountdown();
-  registerColorPalette();
-  registerBmiCalc();
-  registerAdaptations();
-  // 16 toys (2048, chess, snake, tetris, minesweeper, sudoku, wordle,
-  // tic-tac-toe, rock-paper-scissors, matrix-rain, neon-void, emoji-
-  // kitchen, soundboard, reaction-test, random-facts, quotes) register
-  // as lazy stubs — the real module imports on first launch. Toys live
-  // in Launchpad's Toys folder ranked by usage (rankToys), not in the
-  // dock's default pinned list, so registration order doesn't affect
-  // user-facing layout.
+  // Settings is the one app that has to load eagerly — boot.js calls
+  // applyWallpaper() and applyAccentColor() right after the shell
+  // mounts, and those live on the settings module.
+  registerSettings();
+  // The other 59 real apps register as lazy stubs (name + icon +
+  // dims). First launch dynamic-imports the real module and dispatches
+  // to its registered launch. Saves ~60 module fetches on cold boot.
+  registerAllRealAppStubs();
+  // 16 toys register as lazy stubs the same way (see toy-stubs.js).
+  // Toys live in Launchpad's Toys folder ranked by usage (rankToys),
+  // not in the dock's default pinned list.
   registerAllToyStubs();
 }
 
