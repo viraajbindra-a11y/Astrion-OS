@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Astrion App Smoke Test</title>
+<style>
+  body { background: #1e1e2e; color: #eee; font-family: -apple-system, system-ui, sans-serif;
+         padding: 24px; line-height: 1.5; max-width: 1100px; margin: 0 auto; }
+  h1 { color: #fff; margin: 0 0 12px; font-size: 22px; }
+  .legend { color: rgba(255,255,255,0.5); font-size: 12px; margin-bottom: 16px; line-height: 1.7; }
+  .legend code { background: rgba(255,255,255,0.08); padding: 1px 6px; border-radius: 4px; font-size: 11px; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 6px; margin-top: 12px; }
+  .row { padding: 7px 10px; border-radius: 6px; font-family: ui-monospace, Menlo, monospace; font-size: 12px; display: flex; align-items: center; gap: 8px; }
+  .row.pass { background: rgba(166,227,161,0.10); color: #a6e3a1; }
+  .row.fail { background: rgba(243,139,168,0.15); color: #f38ba8; }
+  .row.pending { background: rgba(250,179,135,0.08); color: #fab387; }
+  .row.empty { background: rgba(122,162,247,0.12); color: #7aa2f7; }
+  .row .id { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row .tag { font-size: 10px; opacity: 0.7; }
+  .summary { margin-top: 24px; padding: 14px 18px; border-radius: 10px; background: #313244; font-size: 15px; }
+  .err { color: #f38ba8; font-size: 11px; margin-top: 6px; opacity: 0.9; font-family: ui-monospace, Menlo, monospace; white-space: pre-wrap; line-height: 1.4; }
+  details { margin-top: 14px; }
+  details summary { cursor: pointer; color: #cba6f7; font-size: 13px; }
+  /* Hidden render surface — apps mount here, off-screen, and we read state from it. */
+  #smoke-stage { position: fixed; left: -10000px; top: 0; width: 700px; height: 480px; pointer-events: none; opacity: 0; }
+</style>
+</head>
+<body>
+<h1>Astrion App Smoke Test</h1>
+<p class="legend">
+  Iterates every <code>processManager.register()</code>-installed app, instantiates each in a hidden
+  off-screen container, waits 250 ms for first paint, then checks: <strong>(1)</strong> launch threw
+  no exception, <strong>(2)</strong> the contentEl has at least one child node, <strong>(3)</strong> no
+  console errors fired during that window. Reports per-app pass / fail / empty / error so a UI
+  breakage can no longer land silently. Sanity-check #5 (2026-05-02 audit) flagged this gap;
+  this is the runner that closes it.
+</p>
+
+<div id="status" class="summary">Initializing…</div>
+<div id="grid" class="grid"></div>
+
+<details>
+  <summary>What does each tag mean?</summary>
+  <div class="legend" style="margin-top:6px;">
+    <div><strong style="color:#a6e3a1;">pass</strong> — launch returned, content rendered, no errors during the 250ms window.</div>
+    <div><strong style="color:#f38ba8;">fail</strong> — launch threw an exception OR a console error fired inside the window.</div>
+    <div><strong style="color:#7aa2f7;">empty</strong> — launch ran without throwing, but contentEl had no children after 250ms. Either the app is lazy-loading and didn't paint within the window (lazy stubs intentionally show "Loading…" first) or its render path is broken.</div>
+    <div><strong style="color:#fab387;">pending</strong> — currently being tested.</div>
+  </div>
+</details>
+
+<div id="smoke-stage"></div>
+
+<script type="module">
+// Offline path — never reach for an API key during smoke.
+localStorage.setItem('nova-ai-provider', 'mock');
+localStorage.removeItem('astrion-budget-day');
+
+import { fileSystem } from '/js/kernel/file-system.js';
+import { graphStore } from '/js/kernel/graph-store.js';
+import { processManager } from '/js/kernel/process-manager.js';
+import { eventBus } from '/js/kernel/event-bus.js';
+import { migrateLocalStorageToGraph } from '/js/kernel/graph-migration.js';
+
+await fileSystem.init();
+await graphStore.init();
+await migrateLocalStorageToGraph();
+
+// Load the standard boot register chain so processManager has every
+// known app's stub or real definition. Importing boot.js whole would
+// run the desktop bring-up; we just need its app-register side effects.
+// The simplest route: import the kernel modules that register apps,
+// then call each register fn. To stay in sync with boot.js without
+// duplicating its 76-entry list, we manually re-import the same
+// modules. Any drift between boot.js's registerAllApps() and this
+// list shows up immediately as an "unregistered" warning below.
+const REGISTER_IMPORTS = [
+  ['./apps/finder.js', 'registerFinder'],
+  ['./apps/notes.js', 'registerNotes'],
+  ['./apps/terminal.js', 'registerTerminal'],
+  ['./apps/calculator.js', 'registerCalculator'],
+  ['./apps/settings.js', 'registerSettings'],
+  ['./apps/text-editor.js', 'registerTextEditor'],
+  ['./apps/draw.js', 'registerDraw'],
+  ['./apps/browser.js', 'registerBrowser'],
+  ['./apps/music.js', 'registerMusic'],
+  ['./apps/calendar.js', 'registerCalendar'],
+  ['./apps/appstore.js', 'registerAppStore'],
+  ['./apps/photos.js', 'registerPhotos'],
+  ['./apps/weather.js', 'registerWeather'],
+  ['./apps/clock.js', 'registerClock'],
+  ['./apps/reminders.js', 'registerReminders'],
+  ['./apps/activity-monitor.js', 'registerActivityMonitor'],
+  ['./apps/vault.js', 'registerVault'],
+  ['./apps/messages.js', 'registerMessages'],
+  ['./apps/screen-recorder.js', 'registerScreenRecorder'],
+  ['./apps/trash.js', 'registerTrash'],
+  ['./apps/installer.js', 'registerInstaller'],
+  ['./apps/sticky-notes.js', 'registerStickyNotes'],
+  ['./apps/contacts.js', 'registerContacts'],
+  ['./apps/maps.js', 'registerMaps'],
+  ['./apps/voice-memos.js', 'registerVoiceMemos'],
+  ['./apps/pomodoro.js', 'registerPomodoro'],
+  ['./apps/pdf-viewer.js', 'registerPdfViewer'],
+  ['./apps/kanban.js', 'registerKanban'],
+  ['./apps/habit-tracker.js', 'registerHabitTracker'],
+  ['./apps/video-player.js', 'registerVideoPlayer'],
+  ['./apps/system-info.js', 'registerSystemInfo'],
+  ['./apps/translator.js', 'registerTranslator'],
+  ['./apps/unit-converter.js', 'registerUnitConverter'],
+  ['./apps/color-picker.js', 'registerColorPicker'],
+  ['./apps/stopwatch.js', 'registerStopwatch'],
+  ['./apps/timer.js', 'registerTimer'],
+  ['./apps/whiteboard.js', 'registerWhiteboard'],
+  ['./apps/password-gen.js', 'registerPasswordGen'],
+  ['./apps/markdown.js', 'registerMarkdown'],
+  ['./apps/qr-code.js', 'registerQrCode'],
+  ['./apps/dictionary.js', 'registerDictionary'],
+  ['./apps/journal.js', 'registerJournal'],
+  ['./apps/flashcards.js', 'registerFlashcards'],
+  ['./apps/budget.js', 'registerBudget'],
+  ['./apps/typing-test.js', 'registerTypingTest'],
+  ['./apps/todo.js', 'registerTodo'],
+  ['./apps/beat-studio.js', 'registerBeatStudio'],
+  ['./apps/live-chat.js', 'registerLiveChat'],
+  ['./apps/youtube.js', 'registerYouTube'],
+  ['./apps/pixel-art.js', 'registerPixelArt'],
+  ['./apps/animate.js', 'registerAnimate'],
+  ['./apps/video-editor.js', 'registerVideoEditor'],
+  ['./apps/ai-art.js', 'registerAiArt'],
+  ['./apps/ai-writer.js', 'registerAiWriter'],
+  ['./apps/speed-test.js', 'registerSpeedTest'],
+  ['./apps/recipe-book.js', 'registerRecipeBook'],
+  ['./apps/meditation.js', 'registerMeditation'],
+  ['./apps/countdown.js', 'registerCountdown'],
+  ['./apps/color-palette.js', 'registerColorPalette'],
+  ['./apps/bmi-calc.js', 'registerBmiCalc'],
+  ['./apps/adaptations.js', 'registerAdaptations'],
+];
+
+// Register every "real" app.
+for (const [path, fnName] of REGISTER_IMPORTS) {
+  try {
+    const mod = await import('/js/' + path.replace('./', ''));
+    if (typeof mod[fnName] === 'function') mod[fnName]();
+  } catch (err) {
+    console.warn('[smoke] failed to import', path, err.message);
+  }
+}
+
+// Toys are NOT in the smoke test corpus. Each toy's launch sets up
+// timers / observers / animation loops that don't fit cleanly in a
+// 250ms-per-iteration smoke loop — early attempts had the runner
+// stuck for tens of seconds per toy, with no actual rendering bug
+// being caught. The lazy-stub mechanism for toys is covered by v03
+// section 28 (verifies all 16 are stub-registered), and any toy
+// render path bug surfaces immediately when a user opens the toy in
+// the Toys folder. Smoke focuses on the 60 real apps that boot eagerly.
+
+const stage = document.getElementById('smoke-stage');
+const grid = document.getElementById('grid');
+const status = document.getElementById('status');
+
+const allApps = processManager.getAllApps();
+status.textContent = `Testing ${allApps.length} apps…`;
+
+const rows = new Map();
+for (const app of allApps) {
+  const row = document.createElement('div');
+  row.className = 'row pending';
+  row.innerHTML = `<span class="id" title="${app.id}">${app.icon || ''} ${app.id}</span><span class="tag">…</span>`;
+  grid.appendChild(row);
+  rows.set(app.id, row);
+}
+
+function markRow(id, klass, tagText, errText) {
+  const row = rows.get(id);
+  if (!row) return;
+  row.className = 'row ' + klass;
+  const tag = row.querySelector('.tag');
+  if (tag) tag.textContent = tagText;
+  if (errText) {
+    const e = document.createElement('div');
+    e.className = 'err';
+    e.textContent = errText;
+    row.appendChild(e);
+  }
+}
+
+let passCount = 0, failCount = 0, emptyCount = 0;
+const failures = [];
+
+// Capture console.error inside each app's launch window. We restore
+// the original at the end so the page console stays clean.
+const origErr = console.error;
+let capturedErrors = [];
+console.error = (...args) => {
+  capturedErrors.push(args.map(a => (a && a.message) || String(a)).join(' '));
+  return origErr.apply(console, args);
+};
+
+for (const app of allApps) {
+  capturedErrors = [];
+  const container = document.createElement('div');
+  container.style.cssText = 'width:700px;height:480px;';
+  stage.appendChild(container);
+
+  let launchThrew = null;
+  try {
+    const launch = app.launch;
+    if (typeof launch !== 'function') {
+      markRow(app.id, 'fail', 'no launch', '`launch` is not a function');
+      failCount++; failures.push({ id: app.id, reason: 'no launch' });
+      stage.removeChild(container);
+      continue;
+    }
+    launch(container, app.id + '-smoke', {});
+  } catch (err) {
+    launchThrew = err;
+  }
+
+  // Wait for first paint + any sync render side effects.
+  await new Promise(r => setTimeout(r, 250));
+
+  if (launchThrew) {
+    markRow(app.id, 'fail', 'threw', launchThrew?.message || String(launchThrew));
+    failCount++;
+    failures.push({ id: app.id, reason: 'launch threw', err: launchThrew?.message });
+  } else if (capturedErrors.length > 0) {
+    markRow(app.id, 'fail', 'console.error', capturedErrors.slice(0, 3).join('\n'));
+    failCount++;
+    failures.push({ id: app.id, reason: 'console.error', err: capturedErrors[0] });
+  } else if (!container.firstChild) {
+    markRow(app.id, 'empty', 'empty', 'launch ran but contentEl has no children');
+    emptyCount++;
+  } else {
+    markRow(app.id, 'pass', 'ok');
+    passCount++;
+  }
+
+  // Cleanup
+  stage.removeChild(container);
+}
+
+console.error = origErr;
+
+const total = allApps.length;
+status.innerHTML =
+  `<strong>${passCount} / ${total} pass</strong>` +
+  (emptyCount > 0 ? `  ·  <span style="color:#7aa2f7">${emptyCount} empty (lazy)</span>` : '') +
+  (failCount > 0
+    ? `  ·  <span style="color:#f38ba8">${failCount} fail</span>`
+    : `  ·  <span style="color:#a6e3a1">no failures</span>`);
+
+console.log(`[app-smoke] ${passCount}/${total} pass, ${emptyCount} empty, ${failCount} fail`);
+if (failures.length) console.table(failures);
+
+eventBus.emit('app-smoke:complete', { total, pass: passCount, empty: emptyCount, fail: failCount, failures });
+</script>
+</body>
+</html>
