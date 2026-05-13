@@ -2254,6 +2254,63 @@ gb._resetForTests();
   });
 }
 
+// ═══ 28. Self-mod soak driver (2026-05-12, Phase 1 Week 19) ═══
+// Wraps the synthetic corpus in an interval-driven harness that
+// records each iteration to localStorage and detects classification
+// drift across runs. The 24h soak's actual 24h run is operational
+// (set the interval, leave it overnight); these tests pin the driver
+// logic that makes that run produce a trustworthy verdict.
+{
+  const soak = await import('/js/kernel/selfmod-soak.js');
+  soak._resetForTests();
+
+  await test('soak driver: a single iteration classifies the full corpus', () => {
+    soak._resetForTests();
+    const r = soak.runIteration();
+    return r.run.total === 20 && r.run.classifiedCorrectly === 20 && r.drift.length === 0;
+  });
+
+  await test('soak driver: two consecutive iterations of identical corpus produce zero drift', () => {
+    soak._resetForTests();
+    soak.runIteration();
+    const r2 = soak.runIteration();
+    return r2.drift.length === 0;
+  });
+
+  await test('soak driver: detectDrift returns empty when previous run is empty', () => {
+    return soak.detectDrift([], [{ id: 'a', actual: 'pass' }]).length === 0;
+  });
+
+  await test('soak driver: detectDrift surfaces a single changed classification', () => {
+    const drift = soak.detectDrift(
+      [{ id: 'x', actual: 'pass' }],
+      [{ id: 'x', actual: 'reject:content' }],
+    );
+    return drift.length === 1 && drift[0].before === 'pass' && drift[0].after === 'reject:content';
+  });
+
+  await test('soak driver: getSoakReport reports run count + cumulative totals', () => {
+    soak._resetForTests();
+    soak.runIteration();
+    soak.runIteration();
+    soak.runIteration();
+    const report = soak.getSoakReport();
+    return report.runs === 3 && report.totalProposalsClassified === 60 && report.driftEvents === 0;
+  });
+
+  await test('soak driver: startSoak then stopSoak is idempotent', () => {
+    soak._resetForTests();
+    const r1 = soak.startSoak({ intervalMs: 10000, runImmediately: false });
+    const r2 = soak.startSoak({ intervalMs: 10000 }); // second call is a no-op
+    const stop1 = soak.stopSoak();
+    const stop2 = soak.stopSoak(); // second stop is a no-op
+    soak._resetForTests();
+    return r1.ok === true && r2.ok === false && stop1.ok === true && stop2.ok === false;
+  });
+
+  soak._resetForTests();
+}
+
 // ═══ Summary ═══
 const total = passCount + failCount;
 const summary = document.getElementById('summary');
