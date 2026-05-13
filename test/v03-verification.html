@@ -2081,6 +2081,104 @@ gb._resetForTests();
   });
 }
 
+// ═══ 26. Chess engine (2026-05-12) ═══
+// Previously chess.js validated piece-shape only — no king-safety,
+// no castling, no en passant, no promotion, no check/checkmate. The
+// audit (SESSION_HANDOFF_MUSIC_AUDIT.md) flagged it as "casual 2-player
+// board, not a real chess engine." These tests pin real-chess rules
+// so future refactors can't quietly regress them.
+{
+  const chessMod = await import('/js/apps/chess.js');
+  const E = chessMod._engine;
+
+  const empty = () => Array.from({ length: 8 }, () => Array(8).fill(' '));
+  const defaultState = () => ({ castling: { K: true, Q: true, k: true, q: true }, enPassantTarget: null });
+
+  await test('chess engine: empty board detects no check', () => {
+    const b = empty();
+    b[0][4] = 'k'; b[7][4] = 'K';
+    return E.isInCheck(b, true) === false && E.isInCheck(b, false) === false;
+  });
+
+  await test('chess engine: rook attacks orthogonal king (in check)', () => {
+    const b = empty();
+    b[0][4] = 'k'; b[7][4] = 'K'; b[0][0] = 'R';
+    return E.isInCheck(b, false) === true;
+  });
+
+  await test('chess engine: pinned pawn cannot move (would expose king)', () => {
+    const b = empty();
+    b[0][3] = 'k'; b[5][3] = 'P'; b[6][3] = 'K'; b[7][3] = 'r';
+    return E.isValidMove(b, 5, 3, 4, 3, defaultState()).ok === false;
+  });
+
+  await test('chess engine: Scholar’s Mate position recognized as checkmate', () => {
+    // White queen on f7, white bishop on c4, black king on e8 with pieces
+    // blocking and no escape squares.
+    const b = [
+      ['r',' ','b','q','k','b','n','r'],
+      ['p','p','p','p',' ','Q','p','p'],
+      [' ',' ','n',' ',' ',' ',' ',' '],
+      [' ',' ',' ',' ','p',' ',' ',' '],
+      [' ',' ','B',' ','P',' ',' ',' '],
+      [' ',' ',' ',' ',' ',' ',' ',' '],
+      ['P','P','P','P',' ','P','P','P'],
+      ['R','N','B',' ','K',' ','N','R'],
+    ];
+    const inCheck = E.isInCheck(b, false);
+    const moves = E.getAllLegalMoves(b, false, defaultState());
+    return inCheck && moves.length === 0;
+  });
+
+  await test('chess engine: stalemate detected (no legal moves, not in check)', () => {
+    // Classic K+Q stalemate: black king h8, white king f7, white queen g6.
+    // Black to move — every king square is attacked, but king is NOT in check.
+    const b = empty();
+    b[0][7] = 'k';
+    b[1][5] = 'K';
+    b[2][6] = 'Q';
+    const inCheck = E.isInCheck(b, false);
+    const moves = E.getAllLegalMoves(b, false, defaultState());
+    return !inCheck && moves.length === 0;
+  });
+
+  await test('chess engine: castling kingside legal when path clear + rights intact', () => {
+    const b = empty();
+    b[7][4] = 'K'; b[7][7] = 'R'; b[0][4] = 'k';
+    const r = E.isValidMove(b, 7, 4, 7, 6, defaultState());
+    return r.ok && r.special === 'castle';
+  });
+
+  await test('chess engine: castling refused when king passes through check', () => {
+    const b = empty();
+    b[7][4] = 'K'; b[7][7] = 'R'; b[0][4] = 'k';
+    b[5][5] = 'n'; // black knight attacks f1 (row 7 col 5)
+    const r = E.isValidMove(b, 7, 4, 7, 6, defaultState());
+    return r.ok === false && /through check/.test(r.reason || '');
+  });
+
+  await test('chess engine: en passant accepted only with matching enPassantTarget', () => {
+    const b = empty();
+    b[3][3] = 'p'; b[3][4] = 'P'; b[0][4] = 'k'; b[7][4] = 'K';
+    const withTarget = E.isValidMove(b, 3, 4, 2, 3, { castling: { K:false,Q:false,k:false,q:false }, enPassantTarget: [2, 3] });
+    const withoutTarget = E.isValidMove(b, 3, 4, 2, 3, { castling: { K:false,Q:false,k:false,q:false }, enPassantTarget: null });
+    return withTarget.ok === true && withTarget.special === 'enpassant' && withoutTarget.ok === false;
+  });
+
+  await test('chess engine: pawn promotion recognized at last rank', () => {
+    const b = empty();
+    b[1][7] = 'P'; b[7][0] = 'K'; b[0][0] = 'k';
+    const r = E.isValidMove(b, 1, 7, 0, 7, { castling: { K:false,Q:false,k:false,q:false }, enPassantTarget: null });
+    return r.ok && r.special === 'promote';
+  });
+
+  await test('chess engine: side-with-no-king never reports in check (defensive)', () => {
+    const b = empty();
+    b[7][4] = 'K'; // white king only; no black king
+    return E.isInCheck(b, false) === false;
+  });
+}
+
 // ═══ Summary ═══
 const total = passCount + failCount;
 const summary = document.getElementById('summary');
