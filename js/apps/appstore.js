@@ -2,7 +2,7 @@
 
 import { processManager } from '../kernel/process-manager.js';
 import { appInstaller } from '../kernel/app-installer.js';
-import { escapeError } from '../lib/safe-html.js';
+import { escapeHtml, escapeError } from '../lib/safe-html.js';
 
 export function registerAppStore() {
   processManager.register('appstore', {
@@ -275,7 +275,17 @@ function initAppStore(container) {
         <div class="appstore-section-title" style="margin-top:24px;">Bundled skills (${bundled.length})</div>
         <div class="appstore-grid" id="store-bundled-skills">${bundled.map(skillCard).join('')}</div>
 
+        <div class="appstore-section-title" style="margin-top:24px;display:flex;align-items:center;gap:10px;">
+          <span>Browse marketplace</span>
+          <span style="font-size:10px;color:rgba(255,255,255,0.4);text-transform:uppercase;letter-spacing:0.06em;">M7</span>
+        </div>
+        <p style="font-size:11px;color:rgba(255,255,255,0.45);margin:-10px 0 12px;">
+          Skills the Astrion team curates. Click Install to add one to your runtime. Source is local for v1.0 — Phase 3 swaps the manifest URL to a hosted catalog without changing the install flow.
+        </p>
+        <div class="appstore-grid" id="store-marketplace-skills">Loading marketplace…</div>
+
         <div style="margin-top:28px;padding:18px;background:rgba(255,255,255,0.04);border-radius:10px;">
+
           <div style="font-size:14px;font-weight:600;margin-bottom:6px;">\u{1F9E9} Install a custom skill</div>
           <p style="font-size:12px;color:rgba(255,255,255,0.55);margin:0 0 12px;">
             Paste any <code>.skill</code> file. See <code>docs/skill-language.md</code> for the format.
@@ -324,6 +334,107 @@ function initAppStore(container) {
         installStatus.textContent = '\u2717 ' + r.error;
         installStatus.style.color = '#ff5555';
       }
+    });
+
+    // Marketplace browse (M7 cloud-catalog stand-in, 2026-05-15)
+    renderMarketplace(mod, skills);
+  }
+
+  // Parse minimal metadata from a .skill source for the card preview.
+  function previewSkillMeta(source) {
+    const lines = String(source).split('\n');
+    let goal = '';
+    const phrases = [];
+    let inTrigger = false;
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (trimmed.startsWith('goal:')) {
+        goal = trimmed.slice(5).trim().replace(/^['"]|['"]$/g, '');
+      } else if (trimmed.startsWith('trigger:')) {
+        inTrigger = true;
+      } else if (inTrigger && trimmed.startsWith('- phrase:')) {
+        phrases.push(trimmed.slice(9).trim().replace(/^['"]|['"]$/g, ''));
+      } else if (inTrigger && trimmed && !trimmed.startsWith('-') && !trimmed.startsWith('#')) {
+        inTrigger = false;
+      }
+    }
+    return { goal, phrases };
+  }
+
+  async function renderMarketplace(skillMod, installedSkills) {
+    const grid = container.querySelector('#store-marketplace-skills');
+    if (!grid) return;
+    const MANIFEST_URL = '/skills/manifest.json';
+    const SKILL_URL = (name) => '/skills/examples/' + name + '.skill';
+    let manifest;
+    try {
+      const r = await fetch(MANIFEST_URL);
+      if (!r.ok) throw new Error('catalog fetch ' + r.status);
+      manifest = await r.json();
+    } catch (err) {
+      grid.innerHTML = '<div style="padding:18px;color:rgba(255,255,255,0.5);font-size:12px;">Catalog unavailable: ' + escapeError(err) + '</div>';
+      return;
+    }
+    const examples = Array.isArray(manifest.examples) ? manifest.examples : [];
+    if (examples.length === 0) {
+      grid.innerHTML = '<div style="padding:18px;color:rgba(255,255,255,0.5);font-size:12px;">Catalog empty.</div>';
+      return;
+    }
+    const installedNames = new Set(installedSkills.map(s => s.name));
+    const sources = await Promise.all(examples.map(async (name) => {
+      try {
+        const r = await fetch(SKILL_URL(name));
+        if (!r.ok) return null;
+        return { name, source: await r.text() };
+      } catch { return null; }
+    }));
+    const cards = sources.filter(Boolean).map(({ name, source }) => {
+      const meta = previewSkillMeta(source);
+      const alreadyInstalled = installedNames.has(name);
+      const phraseStr = meta.phrases.length
+        ? meta.phrases.slice(0, 3).map(p => '"' + p + '"').join(' \u00b7 ')
+        : '(no phrases)';
+      return '<div class="appstore-card" style="cursor:default;background:rgba(255,255,255,0.04);">'
+        + '<div class="appstore-card-icon" style="background:#4a148c;font-size:24px;">\u2728</div>'
+        + '<div class="appstore-card-name" title="' + escapeHtml(name) + '">' + escapeHtml(meta.goal || name) + '</div>'
+        + '<div class="appstore-card-category" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">'
+        +   '<span style="font-size:9px;color:rgba(255,255,255,0.65);text-transform:uppercase;letter-spacing:0.06em;">marketplace</span>'
+        +   (alreadyInstalled ? '<span style="font-size:9px;color:#a6e3a1;text-transform:uppercase;letter-spacing:0.06em;">installed</span>' : '')
+        + '</div>'
+        + '<div style="font-size:10px;color:rgba(255,255,255,0.4);font-family:ui-monospace,monospace;margin-top:4px;line-height:1.4;height:28px;overflow:hidden;">' + escapeHtml(phraseStr) + '</div>'
+        + '<div class="appstore-card-footer" style="margin-top:8px;">'
+        +   (alreadyInstalled
+              ? '<span style="font-size:10px;color:rgba(166,227,161,0.8);">\u2713 In your skills</span>'
+              : '<button class="appstore-get-btn appstore-marketplace-install" data-skill-name="' + escapeHtml(name) + '" style="background:var(--accent);color:white;">Install</button>')
+        + '</div>'
+        + '</div>';
+    }).join('');
+    grid.innerHTML = cards || '<div style="padding:18px;color:rgba(255,255,255,0.5);font-size:12px;">Catalog unreachable.</div>';
+    grid.querySelectorAll('.appstore-marketplace-install').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const name = btn.dataset.skillName;
+        btn.disabled = true;
+        btn.textContent = 'Installing\u2026';
+        try {
+          const r = await fetch(SKILL_URL(name));
+          if (!r.ok) throw new Error('fetch ' + r.status);
+          const src = await r.text();
+          const result = await skillMod.installUserSkill(src);
+          if (result.ok) {
+            btn.textContent = '\u2713 Installed';
+            btn.style.background = '#34c759';
+            setTimeout(() => renderSkills(), 600);
+          } else {
+            btn.disabled = false;
+            btn.textContent = 'Failed: ' + (result.error || 'install rejected').slice(0, 30);
+            btn.style.background = '#ff5555';
+          }
+        } catch (err) {
+          btn.disabled = false;
+          btn.textContent = 'Network error';
+          btn.style.background = '#ff5555';
+        }
+      });
     });
   }
 
