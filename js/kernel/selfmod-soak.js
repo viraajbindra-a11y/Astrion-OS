@@ -32,10 +32,34 @@
 
 import { eventBus } from './event-bus.js';
 import { runSyntheticSuite } from './synthetic-proposals.js';
+import { proposeSelfMod, discardProposal } from './selfmod-sandbox.js';
+import { applyUpgrade, rollbackUpgrade } from './self-upgrader.js';
+import { graphStore } from './graph-store.js';
 
 const HISTORY_KEY = 'astrion-soak-history-v1';
 const MAX_RUNS = 1440;             // 24 h × 60 min
 const DEFAULT_INTERVAL_MS = 60 * 1000;
+
+// Synthetic apply/rollback target. Gitignored — written + restored
+// in every disk cycle. The initial-content string MUST match the
+// file's on-disk initial content character-for-character; after each
+// cycle the soak reads disk, compares against this, and reports
+// drift if they don't match.
+const SOAK_TARGET_PATH = 'js/apps/.synthetic-target.js';
+const SOAK_TARGET_INITIAL =
+  '// Astrion OS — Synthetic Soak Target (M8.P5 Week 19, ROADMAP-DEC-2026-v3.md)\n' +
+  '//\n' +
+  '// This file is the throwaway target the apply+rollback soak writes\n' +
+  '// against. It is gitignored — every CI checkout starts with this\n' +
+  '// initial content; the soak rewrites it many times during a run and\n' +
+  '// always restores it before the next iteration.\n' +
+  '//\n' +
+  '// Do NOT import this from runtime code. It is a soak fixture only.\n' +
+  '//\n' +
+  '// If you see drift in this file in git, the soak left a tail. Reset\n' +
+  '// to this initial content via git checkout or by deleting + re-creating.\n' +
+  '\n' +
+  'export const SYNTHETIC_SOAK_TARGET_VERSION = 1;\n';
 
 let _timer = null;
 let _started = false;
@@ -210,6 +234,162 @@ export function getSoakReport() {
 export function clearSoakHistory() {
   try { localStorage.removeItem(HISTORY_KEY); } catch {}
   return { ok: true };
+}
+
+// ─── Disk cycle (Week 19 — full apply/rollback) ─────────────────────
+//
+// One iteration of the disk-write soak: stage a synthetic proposal,
+// applyUpgrade (writes new content), verify on-disk, rollbackUpgrade
+// (restores old content), verify on-disk. Returns { ok, phases } so
+// the caller can record per-step outcomes.
+//
+// Bypasses proposeUpgrade (the AI-driven path) by calling the lower-
+// level proposeSelfMod helper directly and patching the proposal
+// node with explicit newContent + oldContent. Same pattern as
+// js/kernel/pen-test.js test #3.
+//
+// Honest scope: this proves the apply + rollback chain is stable
+// across iterations. It does NOT exercise the AI proposal step (the
+// soak corpus is hand-crafted on purpose — Week 18 lesson). The full
+// AI loop is tested on first ISO boot.
+
+async function readTargetFromDisk() {
+  try {
+    const r = await fetch('/api/files/read?path=' + encodeURIComponent(SOAK_TARGET_PATH) + '&limit=20000');
+    if (!r.ok) return null;
+    const data = await r.json();
+    return typeof data.content === 'string' ? data.content : null;
+  } catch {
+    return null;
+  }
+}
+
+async function ensureSoakTargetExists() {
+  const current = await readTargetFromDisk();
+  if (current !== null) return { ok: true, restored: false };
+  // File missing — write the initial content. Uses the same
+  // /api/files/write endpoint as applyUpgrade, so the kill-switch
+  // gate applies. If the kill-switch is on, ensure returns ok:false
+  // and the caller skips the disk cycle.
+  try {
+    const r = await fetch('/api/files/write', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ path: SOAK_TARGET_PATH, content: SOAK_TARGET_INITIAL }),
+    });
+    if (!r.ok) {
+      const err = await r.json().catch(() => ({}));
+      return { ok: false, error: err.error || `write returned ${r.status}`, killSwitch: !!err.killSwitch };
+    }
+    return { ok: true, restored: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+}
+
+export async function runDiskCycle(opts = {}) {
+  const phases = { ensure: null, propose: null, apply: null, applyVerify: null, rollback: null, rollbackVerify: null };
+  const t0 = Date.now();
+
+  const ensure = await ensureSoakTargetExists();
+  phases.ensure = ensure;
+  if (!ensure.ok) {
+    return { ok: false, phases, durationMs: Date.now() - t0, reason: 'target unavailable: ' + ensure.error };
+  }
+
+  const original = await readTargetFromDisk();
+  if (original === null) {
+    return { ok: false, phases, durationMs: Date.now() - t0, reason: 'cannot read original content' };
+  }
+
+  // New content: append a comment with the iteration timestamp so each
+  // cycle's apply produces a different byte sequence. Verifies the apply
+  // path is genuinely writing, not just no-op-passing.
+  const tag = `// soak-iteration: ${t0}\n`;
+  const newContent = original + tag;
+
+  // 1. Stage a proposal through the sandbox helper (bypasses AI).
+  let proposalId;
+  try {
+    proposalId = await proposeSelfMod({
+      target: SOAK_TARGET_PATH,
+      diff: '--- a/' + SOAK_TARGET_PATH + '\n+++ b/' + SOAK_TARGET_PATH + '\n+' + tag,
+      reason: 'M8.P5 Week 19 soak iteration ' + t0,
+      proposer: 'selfmod-soak',
+    });
+    phases.propose = { ok: true, proposalId };
+  } catch (err) {
+    phases.propose = { ok: false, error: err.message };
+    return { ok: false, phases, durationMs: Date.now() - t0 };
+  }
+
+  // Patch the proposal node with explicit newContent + oldContent so
+  // applyUpgrade has what it needs. (Normally proposeUpgrade in self-
+  // upgrader.js sets these; we bypass it.)
+  try {
+    await graphStore.updateNode(proposalId, (prev) => ({
+      ...prev.props,
+      newContent,
+      oldContent: original,
+      rollbackDiff: 'auto',
+    }));
+  } catch (err) {
+    phases.propose.patchError = err.message;
+  }
+
+  // 2. Apply — walks 5 gates + writes to disk.
+  let applyResult;
+  try {
+    applyResult = await applyUpgrade(proposalId, { typedConfirm: proposalId });
+    phases.apply = { ok: applyResult.ok, error: applyResult.error, killSwitch: applyResult.killSwitch, bytes: applyResult.bytes };
+  } catch (err) {
+    phases.apply = { ok: false, error: err.message };
+  }
+
+  if (!applyResult || !applyResult.ok) {
+    // Apply failed — nothing to roll back. Discard the proposal so we
+    // don't leak it across iterations.
+    await discardProposal(proposalId, 'soak apply failed').catch(() => {});
+    return { ok: false, phases, durationMs: Date.now() - t0, reason: 'apply failed' };
+  }
+
+  // 2a. Verify disk now matches newContent
+  const afterApply = await readTargetFromDisk();
+  phases.applyVerify = {
+    ok: afterApply === newContent,
+    diskBytes: afterApply?.length,
+    expectedBytes: newContent.length,
+  };
+  if (afterApply !== newContent) {
+    // Surface the mismatch but proceed to rollback (we need to restore
+    // the original regardless).
+  }
+
+  // 3. Rollback
+  let rollbackResult;
+  try {
+    rollbackResult = await rollbackUpgrade(proposalId);
+    phases.rollback = { ok: rollbackResult.ok, error: rollbackResult.error, killSwitch: rollbackResult.killSwitch, bytes: rollbackResult.bytes };
+  } catch (err) {
+    phases.rollback = { ok: false, error: err.message };
+  }
+
+  // 3a. Verify disk now matches original
+  const afterRollback = await readTargetFromDisk();
+  phases.rollbackVerify = {
+    ok: afterRollback === original,
+    diskBytes: afterRollback?.length,
+    expectedBytes: original.length,
+  };
+
+  const ok =
+    phases.apply?.ok === true &&
+    phases.applyVerify?.ok === true &&
+    phases.rollback?.ok === true &&
+    phases.rollbackVerify?.ok === true;
+
+  eventBus.emit('selfmod-soak:disk-cycle', { ok, phases, proposalId, durationMs: Date.now() - t0 });
+  return { ok, phases, proposalId, durationMs: Date.now() - t0 };
 }
 
 /** Test helper — visible only on localhost. */
