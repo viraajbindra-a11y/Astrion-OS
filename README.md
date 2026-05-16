@@ -88,12 +88,28 @@ us shipping faster than we were verifying. Numbers below are
 machine-checkable — see `tasks/SESSION_HANDOFF.md` for the trail.
 
 **Verified ✓**
-- v0.3 verification suite: 227/227 tests pass (math parser, executor,
+- v0.3 verification suite: 345/345 tests pass (math parser, executor,
   budget, planner, intent parser, capability registry, plan rehearser,
-  skill scheduler, predicate parser, API surface lock).
+  skill scheduler, predicate parser, API surface lock, file-system
+  rename collision, M8.P5 kill-switch endpoint, chess engine, synthetic
+  proposal suite, self-mod soak driver).
+- App smoke runner (`/test/app-smoke.html`): 61/61 real apps mount
+  cleanly with no console errors and a non-empty contentEl after the
+  first paint window.
 - Golden lock integrity: 19 files SHA-256 matched at boot.
 - API surface drift: 41 capabilities + 47 browser IPC channels +
   11 skill-registry exports — locked + auto-checked every v03 run.
+- M8.P5 disk-write self-mod: one full propose→apply→rollback cycle
+  end-to-end against the synthetic target (`js/apps/.synthetic-target.js`)
+  with real Ollama qwen2.5:7b on the red-team gate. 22.2 s first
+  cycle, 8.3 s warm cycle, byte-identical restore both times.
+- Kill-switch (`ASTRION_SELFMOD_DISABLED` env var): blocks the
+  /api/files/write endpoint at the server before path validation or
+  disk work. Verified with curl: env unset → 200; env set → 403
+  with `killSwitch: true`; no file created on disk.
+- Symlink escape defense on /api/files/write: `js/apps/evil → /etc`
+  symlink rejected with HTTP 400 before reaching fsWriteFile
+  (commit `de95c79`, three curl scenarios verified).
 - Web build (web preview at astrion-os.com): boots, all apps register,
   Spotlight + Launchpad + Setup Wizard exercised.
 

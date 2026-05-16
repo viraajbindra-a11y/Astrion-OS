@@ -132,7 +132,7 @@ to test with. Astrion is alpha software; v1.0 is targeted Dec 2026.
 
 ## What you get
 
-- 76 apps (Notes, Terminal, Calculator, Files, …)
+- 77 apps total (61 real apps + 16 toys: Notes, Terminal, Calculator, Files, Chess, 2048, …)
 - Spotlight search with intent kernel
 - Self-hosted AI — Ollama bundled, model on your laptop
 - Five-gate self-modification with branch + rewind
