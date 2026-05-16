@@ -1439,11 +1439,17 @@ const gameMakeMove = {
         const dir = args.direction || args.move || args._rawArgs || '';
         return mod.makeSnakeMove(dir);
       } else if (gameId === 'chess') {
-        const { fromR, fromC, toR, toC } = args;
+        const { fromR, fromC, toR, toC, promote } = args;
         if (fromR == null || fromC == null || toR == null || toC == null) {
           throw new Error('Chess move requires fromR, fromC, toR, toC');
         }
-        return mod.makeChessMove(fromR, fromC, toR, toC);
+        // 2026-05-16: pass through the optional `promote` arg for
+        // pawn-promotion moves. makeChessMove accepts a 5th
+        // `promotionPiece` (q|r|b|n, defaults to 'q'); passing it
+        // through the capability surface lets an AI pick under-
+        // promotion (rook for stalemate avoidance, knight for fork)
+        // instead of always auto-queening.
+        return mod.makeChessMove(fromR, fromC, toR, toC, promote);
       } else if (gameId === '2048') {
         const dir = args.direction || args.move || args._rawArgs || '';
         return mod.make2048Move(dir);
