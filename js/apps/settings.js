@@ -5,7 +5,7 @@ import { windowManager } from '../kernel/window-manager.js';
 import { eventBus } from '../kernel/event-bus.js';
 import { getTodaySummary, getDailyCap, setDailyCap, resetBudget } from '../kernel/budget-manager.js';
 import { getAllAccuracy, getEscalatedCategories } from '../kernel/calibration-tracker.js';
-import { escapeError } from '../lib/safe-html.js';
+import { escapeError, escapeHtml } from '../lib/safe-html.js';
 // 2026-05-09 round 2 — usage-aware sidebar ordering (#18). Sections
 // you actually use float to the top; never-opened ones sink.
 import { rankSettingsSections } from '../kernel/spotlight-defaults.js';
@@ -537,8 +537,12 @@ function initSettings(container) {
         const stateLabel = d.alive ? 'Running (responding on :11434)' : d.active ? 'Active but not responding' : 'Stopped';
         const ramLabel = d.freeRamMb != null ? `${(d.freeRamMb / 1024).toFixed(1)} GB free RAM` : 'RAM unknown';
         const diskLabel = d.freeDiskMb != null ? `${(d.freeDiskMb / 1024).toFixed(1)} GB free disk` : 'disk unknown';
+        // 2026-05-16: model names come from /api/ai/ollama-status which
+        // reflects what Ollama has pulled. The name field is attacker-
+        // influenceable if the user pulls a model from a compromised
+        // registry — escape before inserting into innerHTML.
         const modelsLabel = d.models && d.models.length
-          ? `${d.models.length} model${d.models.length === 1 ? '' : 's'} pulled (${d.models.map(m => m.name).slice(0, 3).join(', ')}${d.models.length > 3 ? '…' : ''})`
+          ? `${d.models.length} model${d.models.length === 1 ? '' : 's'} pulled (${d.models.map(m => escapeHtml(m.name || '')).slice(0, 3).join(', ')}${d.models.length > 3 ? '…' : ''})`
           : 'no models pulled';
         summary.innerHTML = `${dot(stateColor)}<strong>${stateLabel}</strong> — ${modelsLabel} · ${ramLabel} · ${diskLabel}`;
         summary.style.color = 'rgba(255,255,255,0.85)';
