@@ -499,9 +499,11 @@ Each milestone has: a 1-sentence success definition, **explicit phases** (the su
 
 ---
 
-### M7 — Declarative Intent Language + Skill Marketplace *(SUBSTANTIALLY SHIPPED 2026-04-19/20)*
+### M7 — Declarative Intent Language + Skill Marketplace *(SHIPPED 2026-04-19 → 2026-05-15)*
 
-**Status:** P1 + P2 (a/b/c) + P3 + P4 (first cut + scheduler + user-installed skills) all shipped. Cloud marketplace backend deferred (needs external infra: auth, payments, hosted catalog, moderation queue). Commits: `f4a8653` `091793d` `7344fe9` `e453b58` `f6e4b22` `d3357bf` `2f4a587` `1c525b3` `39887f3`.
+**Status:** P1 + P2 (a/b/c) + P3 + P4 (first cut + scheduler + user-installed skills) all shipped 2026-04. Catalog browse UI shipped 2026-05-15 (`b7e70d1`) — App Store → AI Skills → "Browse marketplace" reads `/skills/manifest.json` + each `.skill` source, renders install cards with goal + phrases preview, install button calls the existing `installUserSkill`. Source is local for v1.0 (manifest + .skill files served as static assets); Phase 3 Week 26 (Jun 29) swaps the URL constants for a hosted catalog without touching the install flow. Substrate commits: `f4a8653` `091793d` `7344fe9` `e453b58` `f6e4b22` `d3357bf` `2f4a587` `1c525b3` `39887f3`. Browse-UI commit: `b7e70d1`.
+
+**Deferred to v1.1:** Cloud upload UI + auth + paid skills + 70/30 revenue split. Roadmap Phase 3 explicitly defers automated moderation ("manual moderation — no auto-review yet") for v1.0; the v1.1 backend takes over both upload and rating.
 
 **Kid version:** Invent a tiny language for saying "I want X." People share their intents as skills. Friends can write skills without coding.
 
@@ -537,9 +539,13 @@ Each milestone has: a 1-sentence success definition, **explicit phases** (the su
 
 ---
 
-### M8 — Alignment-Proven Self-Modification *(SUBSTRATE SHIPPED 2026-04-19/20)*
+### M8 — Alignment-Proven Self-Modification *(SHIPPED 2026-04-19 → 2026-05-15)*
 
-**Status:** P1 (golden integrity check), P2 (value-lock + selfmod-sandbox stubs), P3 (5-gate apply with red-team signoff via M8.P3.b model diversity), P4 (drift detector) all shipped. The actual disk-write side of self-mod (M8.P5) is deliberately deferred — applyProposal validates all gates and marks proposal `'approved'` but does NOT mutate source. That step needs a server-side write API + signed request flow, which is a separate safety conversation. Commits: `f316f23` `8a36a82` `498656d` `20e2e55` `1c525b3`.
+**Status:** P1 (golden integrity check), P2 (value-lock + selfmod-sandbox stubs), P3 (5-gate apply with red-team signoff via M8.P3.b model diversity), P4 (drift detector) all shipped 2026-04. P5 (disk-write side) shipped 2026-05-11 → 2026-05-15: kill-switch env var (`af16f68`) blocks /api/files/write at the server boundary; applyUpgrade walks all 6 gates + writes via /api/files/write when allowed; rollbackUpgrade restores the prior content the same way. Substrate commits: `f316f23` `8a36a82` `498656d` `20e2e55` `1c525b3`. P5 commits: `af16f68` (kill-switch) `e6a78ec` (synthetic corpus + Node-builtin regex fix) `7034b9d` (soak driver + drift detection) `8649a7f` (Settings safety panel) `2f03108` (real apply+rollback disk cycle). Symlink escape on /api/files/write closed by `de95c79` (parent-realpath check).
+
+**P5 verification end-to-end:** one full propose→apply→rollback cycle against the synthetic target (`js/apps/.synthetic-target.js`, gitignored) with real Ollama qwen2.5:7b on the red-team gate. 22.2 s first cycle, 8.3 s warm cycle, byte-identical restore both times. Kill-switch: server returns HTTP 403 with `killSwitch: true` when `ASTRION_SELFMOD_DISABLED` is set; no file created on disk. Tested with curl in both env-set and env-unset modes.
+
+**Still-deferred (cut from v1.0 per ROADMAP-DEC-2026-v3.md "What gets cut" list):** Per-install ECDSA signing of proposals. Roadmap explicitly states "SHA-256 + kill switch is enough." Asymmetric signing is v1.1.
 
 **Kid version:** Astrion can carefully modify itself. Strict rules: can't touch safety code, can't touch tests, every fix passes red-team, every fix is reversible.
 
