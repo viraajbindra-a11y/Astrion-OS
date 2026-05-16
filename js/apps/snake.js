@@ -203,14 +203,17 @@ export function registerSnake() {
         state.interval = setInterval(tick, 120);
       }
 
-      document.addEventListener('keydown', (e) => {
+      // 2026-05-15: keydown listener leak fix. Was inline-arrow,
+      // unremovable. Named function + cleanup on window close.
+      const onKey = (e) => {
         if (!el.isConnected) return;
         if (e.key === 'ArrowUp' && state.dir.y !== 1) state.dir = { x: 0, y: -1 };
         else if (e.key === 'ArrowDown' && state.dir.y !== -1) state.dir = { x: 0, y: 1 };
         else if (e.key === 'ArrowLeft' && state.dir.x !== 1) state.dir = { x: -1, y: 0 };
         else if (e.key === 'ArrowRight' && state.dir.x !== -1) state.dir = { x: 1, y: 0 };
         else if (e.key === ' ' && !state.alive) reset();
-      });
+      };
+      document.addEventListener('keydown', onKey);
 
       el.querySelector('#sn-auto').addEventListener('click', toggleAuto);
 
@@ -220,6 +223,7 @@ export function registerSnake() {
         if (!el.isConnected) {
           if (state.interval) clearInterval(state.interval);
           if (autoInterval) clearInterval(autoInterval);
+          document.removeEventListener('keydown', onKey);
           _game = null;
           _obs.disconnect();
         }

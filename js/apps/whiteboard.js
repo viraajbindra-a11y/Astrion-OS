@@ -17,7 +17,19 @@ export function registerWhiteboard() {
       const canvas = el.querySelector('#wb-canvas');
       const ctx = canvas.getContext('2d');
       const resize = () => { canvas.width = canvas.offsetWidth; canvas.height = canvas.offsetHeight; };
-      resize(); window.addEventListener('resize', resize);
+      resize();
+      window.addEventListener('resize', resize);
+      // 2026-05-15: resize listener leak fix. Whiteboard is NOT
+      // singleInstance — every reopen used to pile another resize
+      // handler onto window, each capturing its own canvas + ctx
+      // closure forever. Cleanup on window close.
+      const _wbObs = new MutationObserver(() => {
+        if (!el.isConnected) {
+          window.removeEventListener('resize', resize);
+          _wbObs.disconnect();
+        }
+      });
+      if (el.parentElement) _wbObs.observe(el.parentElement, { childList: true, subtree: true });
       let drawing = false, color = '#000000', size = 3, eraser = false;
       ctx.fillStyle = '#ffffff'; ctx.fillRect(0, 0, canvas.width, canvas.height);
       canvas.addEventListener('pointerdown', (e) => { drawing = true; ctx.beginPath(); ctx.moveTo(e.offsetX, e.offsetY); });

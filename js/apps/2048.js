@@ -239,17 +239,30 @@ export function register2048() {
         if (autoBtn) autoBtn.onclick = toggleAuto;
       }
 
-      document.addEventListener('keydown', (e) => {
+      // 2026-05-15: keydown listener leak fix. Named handler + cleanup
+      // on window close (MutationObserver pattern).
+      const onKey = (e) => {
         if (!el.isConnected || state.gameOver) return;
         if (e.key === 'ArrowLeft') moveDir('left');
         else if (e.key === 'ArrowRight') moveDir('right');
         else if (e.key === 'ArrowUp') { e.preventDefault(); moveDir('up'); }
         else if (e.key === 'ArrowDown') { e.preventDefault(); moveDir('down'); }
-      });
+      };
+      document.addEventListener('keydown', onKey);
 
       addTile();
       addTile();
       render();
+
+      // Cleanup on window close — removes the keydown listener so it
+      // doesn't accumulate across launches.
+      const _obs = new MutationObserver(() => {
+        if (!el.isConnected) {
+          document.removeEventListener('keydown', onKey);
+          _obs.disconnect();
+        }
+      });
+      if (el.parentElement) _obs.observe(el.parentElement, { childList: true, subtree: true });
     },
   });
 }
