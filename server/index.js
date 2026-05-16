@@ -8,7 +8,7 @@ import dns from 'dns';
 import { WebSocketServer } from 'ws';
 import { spawn } from 'child_process';
 // Phase 1 — File I/O Bridge (Agent Core Expansion)
-import { readFile as fsReadFile, writeFile as fsWriteFile, readdir, stat, mkdir } from 'fs/promises';
+import { readFile as fsReadFile, writeFile as fsWriteFile, readdir, stat, mkdir, realpath as fsRealpath } from 'fs/promises';
 import { existsSync } from 'fs';
 
 // Force IPv4 DNS resolution first — many networks (including some home
@@ -412,10 +412,19 @@ app.post('/api/ai', async (req, res) => {
 // approval before calling POST /api/files/write).
 
 const PROJECT_ROOT = resolve(__dirname, '..');
+// Cached realpath of the project root — symlink-escape check below
+// compares the resolved-with-symlinks ancestor against this. Computed
+// once on server start.
+let PROJECT_ROOT_REAL = PROJECT_ROOT;
+fsRealpath(PROJECT_ROOT).then(p => { PROJECT_ROOT_REAL = p; }).catch(() => {});
 
 /**
  * Resolve a user-provided path against PROJECT_ROOT. Returns null if the
  * resolved path escapes the project root (traversal defense).
+ *
+ * Syntactic check only — for write-path operations also call
+ * safeResolvePathStrict() which additionally fs.realpath()s the parent
+ * directory to defeat symlink escapes (e.g. js/apps/evil → /etc).
  */
 function safeResolvePath(userPath) {
   if (!userPath || typeof userPath !== 'string') return null;
@@ -424,6 +433,52 @@ function safeResolvePath(userPath) {
   if (!resolved.startsWith(PROJECT_ROOT)) return null;
   // Extra check: reject remaining ..
   if (resolved.includes('..')) return null;
+  return resolved;
+}
+
+/**
+ * Stricter resolver for write-path operations: also defeats symlink
+ * escapes. Walks the resolved path's ancestors (innermost first) until
+ * one exists on disk, fs.realpath()s it, and refuses the path if the
+ * realpath sits outside PROJECT_ROOT_REAL.
+ *
+ * Why this matters even though we have safeResolvePath: that function
+ * checks resolved.startsWith(PROJECT_ROOT) which is purely SYNTACTIC.
+ * If a directory inside the project is itself a symlink to /etc, the
+ * resolved path is "<PROJECT_ROOT>/js/apps/evil/foo" which passes the
+ * prefix check, but fs.writeFile will follow the symlink and write
+ * to /etc/foo. fs.realpath() resolves all symlinks; comparing the
+ * REAL ancestor's path to PROJECT_ROOT_REAL closes that gap.
+ *
+ * For nonexistent paths (a write that creates a new file), realpath
+ * throws. We walk up to the closest existing ancestor and check that
+ * one instead — same correctness because the new file inherits its
+ * parent's filesystem location.
+ *
+ * @returns {Promise<string|null>} the resolved path if safe, null otherwise.
+ */
+async function safeResolvePathStrict(userPath) {
+  const resolved = safeResolvePath(userPath);
+  if (!resolved) return null;
+  // Walk ancestors until one exists; fs.realpath that ancestor.
+  let probe = resolved;
+  let real;
+  for (let i = 0; i < 32; i++) {  // bounded loop; max-depth guard
+    try {
+      real = await fsRealpath(probe);
+      break;
+    } catch {
+      const parent = dirname(probe);
+      if (parent === probe) break;  // hit filesystem root
+      probe = parent;
+    }
+  }
+  if (!real) return null;
+  // The realpath of any existing ancestor must be inside the project
+  // root's realpath. If a symlink put us elsewhere, this check fails.
+  if (!real.startsWith(PROJECT_ROOT_REAL) && !real.startsWith(PROJECT_ROOT)) {
+    return null;
+  }
   return resolved;
 }
 
@@ -530,7 +585,8 @@ app.post('/api/files/write', async (req, res) => {
     }
 
     const { path: userPath, content } = req.body;
-    const filePath = safeResolvePath(userPath);
+    // Use strict resolver for the write path — defeats symlink escapes.
+    const filePath = await safeResolvePathStrict(userPath);
     if (!filePath) return res.status(400).json({ error: 'Invalid or disallowed path' });
     if (typeof content !== 'string') return res.status(400).json({ error: 'Content must be a string' });
     // Hard cap at 1MB per write
