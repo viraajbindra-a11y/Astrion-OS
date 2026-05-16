@@ -6,7 +6,21 @@ let _game = null;
 
 /**
  * Get the current chess game state. Returns null if no game is running.
- * @returns {{ board: string[][], turn: 'white'|'black', selected: [number,number]|null } | null}
+ * @returns {{
+ *   board: string[][],
+ *   turn: 'white'|'black',
+ *   selected: [number,number]|null,
+ *   castling: { K: boolean, Q: boolean, k: boolean, q: boolean },
+ *   enPassantTarget: [number, number]|null,
+ *   inCheck: boolean,
+ *   gameOver: string|null,
+ * } | null}
+ *
+ * 2026-05-16: expanded after the real-engine ship (a31f086). The AI
+ * driving game.makeMove via the game.* capabilities needs to know
+ * castling rights, en passant target, and whether the side-to-move
+ * is in check — otherwise it picks illegal moves the engine then
+ * rejects. The board+turn+selected fields stay backward-compatible.
  */
 export function getChessState() {
   if (!_game) return null;
@@ -14,6 +28,10 @@ export function getChessState() {
     board: _game.board.map(r => [...r]),
     turn: _game.turn,
     selected: _game.selected ? [..._game.selected] : null,
+    castling: _game.castling ? { ..._game.castling } : { K: true, Q: true, k: true, q: true },
+    enPassantTarget: _game.enPassantTarget ? [..._game.enPassantTarget] : null,
+    inCheck: !!_game.inCheck,
+    gameOver: _game.gameOver || null,
   };
 }
 
