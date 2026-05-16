@@ -595,7 +595,12 @@ function initMessages(container) {
   }
 
   // ─── Cross-context agent replies (e.g. Spotlight → Messages) ───
-  eventBus.on('chat:agent-reply', ({ text, conversationId }) => {
+  // Store the unsub so the MutationObserver cleanup below can release
+  // it on window close — without that, every relaunch leaks another
+  // chat:agent-reply subscription that captures the closed `el`
+  // closure forever (lesson #189). Messages is singleInstance so the
+  // observable effect is one leak per page reload, but still real.
+  const unsubAgentReply = eventBus.on('chat:agent-reply', ({ text, conversationId }) => {
     const convo = conversations.find(c => c.id === (conversationId || 'astrion-ai'));
     if (!convo) return;
     convo.messages.push({ from: 'them', text, time: Date.now() });
@@ -603,6 +608,13 @@ function initMessages(container) {
     if (activeConvo === convo.id) renderChat();
     sounds.notification();
   });
+  const _msgObs = new MutationObserver(() => {
+    if (!el.isConnected) {
+      try { unsubAgentReply(); } catch {}
+      _msgObs.disconnect();
+    }
+  });
+  if (el.parentElement) _msgObs.observe(el.parentElement, { childList: true, subtree: true });
 
   render();
 }

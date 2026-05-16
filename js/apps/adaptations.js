@@ -234,14 +234,27 @@ function initAdaptations(container) {
     renderSettings();
   }
 
-  // Live updates while the panel is open.
+  // Live updates while the panel is open. Subscribe to three events
+  // and STORE the unsub returns — without this, every relaunch piles
+  // another three subscriptions onto eventBus, each capturing the
+  // closed container's closure forever (lesson #189 territory). The
+  // MutationObserver cleanup below calls them on window close.
   const onChange = () => {
     if (!container.isConnected) return;
     renderAll();
   };
-  eventBus.on('adaptation:recorded', onChange);
-  eventBus.on('adaptation:reverted', onChange);
-  eventBus.on('adaptation:settings-changed', onChange);
+  const unsubRecorded = eventBus.on('adaptation:recorded', onChange);
+  const unsubReverted = eventBus.on('adaptation:reverted', onChange);
+  const unsubSettings = eventBus.on('adaptation:settings-changed', onChange);
+  const _obs = new MutationObserver(() => {
+    if (!container.isConnected) {
+      try { unsubRecorded(); } catch {}
+      try { unsubReverted(); } catch {}
+      try { unsubSettings(); } catch {}
+      _obs.disconnect();
+    }
+  });
+  if (container.parentElement) _obs.observe(container.parentElement, { childList: true, subtree: true });
 
   renderAll();
 }
