@@ -1138,9 +1138,29 @@ app.post('/api/browser/open', async (req, res) => {
 // they can be rendered inside the NOVA browser iframe without
 // X-Frame-Options / CSP blocking.
 // ═══════════════════════════════════════════════════════════
+// Minimal HTML-attribute escaper for the error page below. Same set
+// as escapeHtml in js/lib/safe-html.js — duplicated here so the
+// server doesn't need the client-side import.
+function _escapeHtmlServer(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  }[c]));
+}
+
 app.get('/api/browser/proxy', async (req, res) => {
   const targetUrl = req.query.url;
   if (!targetUrl) return res.status(400).send('Missing url');
+
+  // 2026-05-16: validate protocol. Without this, `?url=file:///etc/passwd`
+  // would let the proxy read local files; `?url=gopher://...` enables
+  // unexpected behavior. Only http/https are intended for a web proxy.
+  // (The other proxy at /api/proxy already has this check; /api/browser/proxy
+  // didn't.)
+  let parsed;
+  try { parsed = new URL(targetUrl); } catch { return res.status(400).send('Invalid url'); }
+  if (!['http:', 'https:'].includes(parsed.protocol)) {
+    return res.status(400).send('Only http/https URLs allowed');
+  }
 
   try {
     const upstream = await fetch(targetUrl, {
@@ -1195,7 +1215,12 @@ app.get('/api/browser/proxy', async (req, res) => {
     }
   } catch (err) {
     console.error('Browser proxy error:', err.message);
-    res.status(502).send(`<html><body style="font-family:sans-serif;padding:40px;background:#1e1e2e;color:white;"><h2>Proxy error</h2><p>Could not fetch: ${targetUrl}</p><p style="color:#888">${err.message}</p></body></html>`);
+    // 2026-05-16: escape targetUrl + err.message before injecting into
+    // HTML. Without this, a crafted `?url=http://evil/<script>x</script>`
+    // would reflect the script tag back to the iframe (which then
+    // executes it under the proxied origin — limited blast radius but
+    // still XSS, and the cost of escaping is zero).
+    res.status(502).send(`<html><body style="font-family:sans-serif;padding:40px;background:#1e1e2e;color:white;"><h2>Proxy error</h2><p>Could not fetch: ${_escapeHtmlServer(targetUrl)}</p><p style="color:#888">${_escapeHtmlServer(err.message)}</p></body></html>`);
   }
 });
 
