@@ -1793,7 +1793,15 @@ app.post('/api/terminal/exec', async (req, res) => {
 const WS_PORT = 3001;
 
 try {
-  const wss = new WebSocketServer({ port: WS_PORT });
+  // 2026-05-16: bind localhost-only by default. Was binding to all
+  // interfaces (the WebSocketServer default), which on a laptop joined
+  // to a WiFi means anyone on the same subnet could connect to
+  // ws://<victim-ip>:3001 and get a bash shell. Astrion is a single-
+  // user desktop OS; the terminal WebSocket should only be reachable
+  // from the same machine. Set ASTRION_BIND=0.0.0.0 in env to opt back
+  // into all-interfaces for dev / cross-machine debugging.
+  const wsBindHost = process.env.ASTRION_BIND || '127.0.0.1';
+  const wss = new WebSocketServer({ port: WS_PORT, host: wsBindHost });
 
   wss.on('connection', (ws) => {
     const shell = spawn('/bin/bash', ['-l'], {
@@ -1839,6 +1847,13 @@ try {
   console.log('WebSocket terminal not available:', e.message);
 }
 
-app.listen(PORT, () => {
-  console.log(`Astrion OS server running at http://localhost:${PORT}`);
+// 2026-05-16: bind localhost-only by default (same reasoning as the
+// WebSocket above). Without the host arg, Express's default binds to
+// all interfaces, exposing /api/files/write + every system endpoint
+// to the local network. Astrion is single-user desktop; the API
+// surface should only be reachable from the same machine. Set
+// ASTRION_BIND=0.0.0.0 in env to opt back in for dev / debugging.
+const apiBindHost = process.env.ASTRION_BIND || '127.0.0.1';
+app.listen(PORT, apiBindHost, () => {
+  console.log(`Astrion OS server running at http://${apiBindHost}:${PORT}`);
 });
