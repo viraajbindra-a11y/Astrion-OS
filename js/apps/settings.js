@@ -1374,10 +1374,14 @@ function initSettings(container) {
             Runs the synthetic proposal corpus (10 good + 10 bad) through the M8.P5 gates on an interval. Detects drift if any proposal's classification changes between runs — that's the trip wire for "a gate silently weakened." The kill-switch env var (ASTRION_SELFMOD_DISABLED) blocks all source-file writes regardless of what the gates say.
           </p>
           <div id="soak-status-grid" style="display:grid;grid-template-columns:auto 1fr;gap:6px 12px;font-size:12px;margin-bottom:12px;">Loading…</div>
+          <div style="margin:6px 0 6px;font-size:10px;color:rgba(255,255,255,0.4);font-weight:600;text-transform:uppercase;letter-spacing:0.5px;">Disk cycles (real apply + rollback against synthetic target)</div>
+          <div id="soak-disk-grid" style="display:grid;grid-template-columns:auto 1fr;gap:6px 12px;font-size:12px;margin-bottom:12px;">—</div>
           <div style="display:flex;gap:8px;flex-wrap:wrap;">
             <button id="soak-start" style="padding:8px 14px;background:rgba(122,162,247,0.18);color:#7aa2f7;border:1px solid #7aa2f7;border-radius:6px;font-family:var(--font);font-size:12px;cursor:pointer;">▶ Start soak</button>
             <button id="soak-stop"  style="padding:8px 14px;background:transparent;color:rgba(255,255,255,0.6);border:1px solid rgba(255,255,255,0.18);border-radius:6px;font-family:var(--font);font-size:12px;cursor:pointer;">⏹ Stop</button>
-            <button id="soak-once"  style="padding:8px 14px;background:transparent;color:rgba(255,255,255,0.6);border:1px solid rgba(255,255,255,0.18);border-radius:6px;font-family:var(--font);font-size:12px;cursor:pointer;">▶ Run once</button>
+            <button id="soak-once"  style="padding:8px 14px;background:transparent;color:rgba(255,255,255,0.6);border:1px solid rgba(255,255,255,0.18);border-radius:6px;font-family:var(--font);font-size:12px;cursor:pointer;">▶ Run classifier</button>
+            <button id="soak-disk-once" style="padding:8px 14px;background:transparent;color:#a6e3a1;border:1px solid rgba(166,227,161,0.4);border-radius:6px;font-family:var(--font);font-size:12px;cursor:pointer;">▶ Run disk cycle</button>
+            <button id="soak-refresh" style="padding:8px 14px;background:transparent;color:rgba(255,255,255,0.6);border:1px solid rgba(255,255,255,0.18);border-radius:6px;font-family:var(--font);font-size:12px;cursor:pointer;">↻ Refresh</button>
             <button id="soak-clear" style="padding:8px 14px;background:transparent;color:rgba(255,159,64,0.7);border:1px solid rgba(255,159,64,0.35);border-radius:6px;font-family:var(--font);font-size:12px;cursor:pointer;">Clear history</button>
           </div>
         </div>
@@ -1444,25 +1448,64 @@ function initSettings(container) {
     const soak = await import('../kernel/selfmod-soak.js');
     const state = soak.getSoakState();
     const report = soak.getSoakReport();
+    const diskReport = soak.getDiskCycleReport();
     const lastDriftCount = report.lastRun?.drift?.length || 0;
     const lastDriftColor = lastDriftCount > 0 ? '#f38ba8' : '#a6e3a1';
+    const runningLabel = state.running
+      ? `yes · every ${(state.intervalMs / 1000).toFixed(0)}s${state.diskCycleEvery > 0 ? ` · disk every ${state.diskCycleEvery}` : ' · classifier only'}`
+      : 'no';
     grid.innerHTML = `
       <span style="color:rgba(255,255,255,0.5);">Running</span>
-      <span style="color:${state.running ? '#a6e3a1' : 'rgba(255,255,255,0.55)'};font-weight:600;">${state.running ? `yes · every ${(state.intervalMs / 1000).toFixed(0)}s` : 'no'}</span>
-      <span style="color:rgba(255,255,255,0.5);">Runs recorded</span>
+      <span style="color:${state.running ? '#a6e3a1' : 'rgba(255,255,255,0.55)'};font-weight:600;">${runningLabel}</span>
+      <span style="color:rgba(255,255,255,0.5);">Ticks recorded</span>
       <span>${report.runs}</span>
       <span style="color:rgba(255,255,255,0.5);">Proposals classified</span>
       <span>${report.totalProposalsClassified}</span>
       <span style="color:rgba(255,255,255,0.5);">Drift events</span>
       <span style="color:${report.driftEvents > 0 ? '#f38ba8' : 'inherit'};">${report.driftEvents}</span>
-      <span style="color:rgba(255,255,255,0.5);">Mean iteration</span>
+      <span style="color:rgba(255,255,255,0.5);">Mean tick</span>
       <span>${report.meanIterationMs ? report.meanIterationMs + ' ms' : '—'}</span>
-      <span style="color:rgba(255,255,255,0.5);">Last run</span>
+      <span style="color:rgba(255,255,255,0.5);">Last classify</span>
       <span>${report.lastRun ? `${report.lastRun.classifiedCorrectly}/${report.lastRun.total} correct · <span style="color:${lastDriftColor};">${lastDriftCount} drift</span>` : '—'}</span>
     `;
 
+    const diskGrid = container.querySelector('#soak-disk-grid');
+    if (diskGrid) {
+      if (diskReport.cycles === 0) {
+        diskGrid.innerHTML = `
+          <span style="color:rgba(255,255,255,0.5);">Cycles run</span>
+          <span style="color:rgba(255,255,255,0.45);">0 — ${state.running && state.diskCycleEvery > 0 ? `pending (next at tick ${(Math.floor(state.iterationCount / state.diskCycleEvery) + 1) * state.diskCycleEvery})` : 'click <strong>Run disk cycle</strong> to fire one manually, or Start soak to schedule them'}</span>
+        `;
+      } else {
+        const last = diskReport.lastCycle;
+        const okColor = diskReport.totalFailed === 0 ? '#a6e3a1' : '#f38ba8';
+        const rollbackColor = diskReport.rollbackVerifyFailures === 0 ? '#a6e3a1' : '#f38ba8';
+        const lastPhases = `apply ${last.applyOk ? '✓' : '✗'} · applyV ${last.applyVerifyOk ? '✓' : '✗'} · rollback ${last.rollbackOk ? '✓' : '✗'} · rollbackV ${last.rollbackVerifyOk ? '✓' : '✗'}`;
+        const lastColor = last.ok ? '#a6e3a1' : '#f38ba8';
+        const heapMb = (b) => b === null ? '—' : (b >= 0 ? '+' : '') + (b / 1048576).toFixed(2) + ' MB';
+        const heapColor = diskReport.heapSamples >= 20 && diskReport.heapDeltaSum > 20 * 1048576
+          ? '#fab387' : 'inherit';
+        diskGrid.innerHTML = `
+          <span style="color:rgba(255,255,255,0.5);">Cycles run</span>
+          <span style="color:${okColor};">${diskReport.cycles} · ${diskReport.totalOk} ok · ${diskReport.totalFailed} failed</span>
+          <span style="color:rgba(255,255,255,0.5);">Mean duration</span>
+          <span>${(diskReport.meanDurationMs / 1000).toFixed(1)} s</span>
+          <span style="color:rgba(255,255,255,0.5);">Rollback-verify fails</span>
+          <span style="color:${rollbackColor};font-weight:${diskReport.rollbackVerifyFailures > 0 ? '600' : '400'};">${diskReport.rollbackVerifyFailures}</span>
+          <span style="color:rgba(255,255,255,0.5);">Kill-switch hits</span>
+          <span>${diskReport.killSwitchHits}</span>
+          <span style="color:rgba(255,255,255,0.5);">Heap delta (sum)</span>
+          <span style="color:${heapColor};">${heapMb(diskReport.heapDeltaSum)} over ${diskReport.heapSamples} samples</span>
+          <span style="color:rgba(255,255,255,0.5);">Last cycle</span>
+          <span style="color:${lastColor};">${(last.durationMs / 1000).toFixed(1)} s · ${lastPhases}</span>
+        `;
+      }
+    }
+
     container.querySelector('#soak-start')?.addEventListener('click', () => {
-      soak.startSoak({ intervalMs: 60000 });
+      // M8.P5 Week 19/20: 60s tick, disk cycle every 10th tick = every 10 minutes.
+      // 24h ≈ 144 disk cycles. See ROADMAP-DEC-2026-v3.md Phase 1 Option A.
+      soak.startSoak({ intervalMs: 60000, diskCycleEvery: 10 });
       renderSoakPanel();
     });
     container.querySelector('#soak-stop')?.addEventListener('click', () => {
@@ -1473,8 +1516,27 @@ function initSettings(container) {
       soak.runIteration();
       renderSoakPanel();
     });
+    container.querySelector('#soak-disk-once')?.addEventListener('click', async (ev) => {
+      const btn = ev.currentTarget;
+      btn.disabled = true;
+      const orig = btn.textContent;
+      btn.textContent = '… running disk cycle (~10–25 s)';
+      try {
+        await soak.runDiskCycle();
+      } catch (err) {
+        console.warn('[settings] manual runDiskCycle threw', err);
+      } finally {
+        btn.disabled = false;
+        btn.textContent = orig;
+        renderSoakPanel();
+      }
+    });
+    container.querySelector('#soak-refresh')?.addEventListener('click', () => {
+      renderSoakPanel();
+    });
     container.querySelector('#soak-clear')?.addEventListener('click', () => {
       soak.clearSoakHistory();
+      soak.clearDiskHistory();
       renderSoakPanel();
     });
   }

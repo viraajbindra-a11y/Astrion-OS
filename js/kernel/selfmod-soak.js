@@ -37,8 +37,11 @@ import { applyUpgrade, rollbackUpgrade } from './self-upgrader.js';
 import { graphStore } from './graph-store.js';
 
 const HISTORY_KEY = 'astrion-soak-history-v1';
+const DISK_HISTORY_KEY = 'astrion-soak-disk-history-v1';
 const MAX_RUNS = 1440;             // 24 h × 60 min
+const MAX_DISK_RUNS = 300;         // ~24 h × 6/h (every 10 min) with 25% headroom
 const DEFAULT_INTERVAL_MS = 60 * 1000;
+const DEFAULT_DISK_CYCLE_EVERY = 0;  // 0 = disabled by default (keep old callers cheap)
 
 // Synthetic apply/rollback target. Gitignored — written + restored
 // in every disk cycle. The initial-content string MUST match the
@@ -65,6 +68,10 @@ let _timer = null;
 let _started = false;
 let _startedAt = 0;
 let _intervalMs = DEFAULT_INTERVAL_MS;
+let _diskCycleEvery = DEFAULT_DISK_CYCLE_EVERY;
+let _iterationCount = 0;
+let _diskCycleBusy = false;
+let _lastDiskSkipReason = null;
 
 // ─── Persistence ────────────────────────────────────────────────────
 
@@ -88,6 +95,45 @@ function saveHistory(history) {
     // Quota or private-browsing — soak keeps running, just no history.
     return false;
   }
+}
+
+function loadDiskHistory() {
+  try {
+    const raw = localStorage.getItem(DISK_HISTORY_KEY);
+    if (!raw) return { startedAt: 0, cycles: [] };
+    const parsed = JSON.parse(raw);
+    if (!parsed || !Array.isArray(parsed.cycles)) return { startedAt: 0, cycles: [] };
+    return parsed;
+  } catch {
+    return { startedAt: 0, cycles: [] };
+  }
+}
+
+function saveDiskHistory(history) {
+  try {
+    localStorage.setItem(DISK_HISTORY_KEY, JSON.stringify(history));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function readHeapBytes() {
+  try {
+    if (typeof performance !== 'undefined' && performance.memory
+        && typeof performance.memory.usedJSHeapSize === 'number') {
+      return performance.memory.usedJSHeapSize;
+    }
+  } catch {}
+  return null;
+}
+
+function appendDiskCycle(entry) {
+  const history = loadDiskHistory();
+  if (!history.startedAt) history.startedAt = entry.at;
+  history.cycles.push(entry);
+  while (history.cycles.length > MAX_DISK_RUNS) history.cycles.shift();
+  saveDiskHistory(history);
 }
 
 // ─── Drift detection ────────────────────────────────────────────────
@@ -158,22 +204,75 @@ export function runIteration() {
 }
 
 /**
+ * One scheduled tick: always run the cheap classifier; every Nth tick
+ * additionally run a full disk apply+rollback cycle. The disk cycle is
+ * guarded by _diskCycleBusy so back-to-back ticks don't pile up if the
+ * model is slow.
+ */
+async function runScheduledTick() {
+  _iterationCount += 1;
+  try {
+    runIteration();
+  } catch (err) {
+    console.warn('[selfmod-soak] cheap iteration threw', err);
+  }
+  if (!_diskCycleEvery || _diskCycleEvery <= 0) return;
+  if (_iterationCount % _diskCycleEvery !== 0) return;
+  if (_diskCycleBusy) {
+    _lastDiskSkipReason = 'previous cycle still running at tick ' + _iterationCount;
+    eventBus.emit('selfmod-soak:disk-cycle-skipped', { at: Date.now(), reason: _lastDiskSkipReason });
+    return;
+  }
+  _diskCycleBusy = true;
+  const heapBefore = readHeapBytes();
+  const cycleStart = Date.now();
+  let cycle;
+  try {
+    cycle = await runDiskCycle();
+  } catch (err) {
+    cycle = { ok: false, error: err.message, phases: {}, durationMs: Date.now() - cycleStart };
+  } finally {
+    _diskCycleBusy = false;
+  }
+  const heapAfter = readHeapBytes();
+  appendDiskCycle({
+    at: cycleStart,
+    iteration: _iterationCount,
+    ok: !!cycle.ok,
+    durationMs: cycle.durationMs ?? (Date.now() - cycleStart),
+    reason: cycle.reason || null,
+    applyOk: cycle.phases?.apply?.ok === true,
+    applyVerifyOk: cycle.phases?.applyVerify?.ok === true,
+    rollbackOk: cycle.phases?.rollback?.ok === true,
+    rollbackVerifyOk: cycle.phases?.rollbackVerify?.ok === true,
+    killSwitch: cycle.phases?.apply?.killSwitch === true || cycle.phases?.ensure?.killSwitch === true,
+    heapBefore,
+    heapAfter,
+    heapDelta: (heapBefore !== null && heapAfter !== null) ? heapAfter - heapBefore : null,
+  });
+}
+
+/**
  * Start the soak. Subsequent calls are no-ops (idempotent — single
  * timer at a time).
  *
  * @param {object} [opts]
  * @param {number} [opts.intervalMs=60000]
+ * @param {number} [opts.diskCycleEvery=0]  N>0 = run a full disk apply+rollback every Nth tick.
+ *                                          0 = classifier-only (default; backwards-compat).
  * @param {boolean} [opts.runImmediately=true]
  */
 export function startSoak(opts = {}) {
   if (_started) return { ok: false, error: 'already running', intervalMs: _intervalMs };
   _intervalMs = Math.max(1000, opts.intervalMs || DEFAULT_INTERVAL_MS);
+  _diskCycleEvery = Math.max(0, opts.diskCycleEvery | 0);
+  _iterationCount = 0;
   _started = true;
   _startedAt = Date.now();
-  if (opts.runImmediately !== false) runIteration();
-  _timer = setInterval(runIteration, _intervalMs);
-  eventBus.emit('selfmod-soak:started', { at: _startedAt, intervalMs: _intervalMs });
-  return { ok: true, intervalMs: _intervalMs, startedAt: _startedAt };
+  if (opts.runImmediately !== false) runScheduledTick();
+  _timer = setInterval(runScheduledTick, _intervalMs);
+  eventBus.emit('selfmod-soak:started', { at: _startedAt, intervalMs: _intervalMs, diskCycleEvery: _diskCycleEvery });
+  return { ok: true, intervalMs: _intervalMs, diskCycleEvery: _diskCycleEvery, startedAt: _startedAt };
 }
 
 /** Stop the soak. Idempotent. History stays in localStorage. */
@@ -192,6 +291,10 @@ export function getSoakState() {
     running: _started,
     startedAt: _startedAt,
     intervalMs: _intervalMs,
+    diskCycleEvery: _diskCycleEvery,
+    iterationCount: _iterationCount,
+    diskCycleBusy: _diskCycleBusy,
+    lastDiskSkipReason: _lastDiskSkipReason,
   };
 }
 
@@ -233,6 +336,57 @@ export function getSoakReport() {
 /** Wipe history. Used for tests + the user-facing "reset" button. */
 export function clearSoakHistory() {
   try { localStorage.removeItem(HISTORY_KEY); } catch {}
+  return { ok: true };
+}
+
+/**
+ * Aggregate report over the retained disk-cycle history. The "leak
+ * proxy" is the heap-delta sum across cycles where heap was readable
+ * (Chromium-only; null elsewhere). Negative or near-zero = healthy.
+ * Large positive after dozens of cycles = look closer.
+ */
+export function getDiskCycleReport() {
+  const history = loadDiskHistory();
+  const cycles = history.cycles;
+  if (cycles.length === 0) {
+    return {
+      cycles: 0, startedAt: 0, totalOk: 0, totalFailed: 0,
+      rollbackVerifyFailures: 0, applyVerifyFailures: 0,
+      killSwitchHits: 0,
+      meanDurationMs: 0, lastCycle: null,
+      heapDeltaSum: null, heapSamples: 0,
+    };
+  }
+  let totalOk = 0, totalFailed = 0;
+  let rollbackVerifyFailures = 0, applyVerifyFailures = 0, killSwitchHits = 0;
+  let sumDuration = 0;
+  let heapDeltaSum = 0, heapSamples = 0;
+  for (const c of cycles) {
+    if (c.ok) totalOk += 1; else totalFailed += 1;
+    if (c.rollbackVerifyOk === false) rollbackVerifyFailures += 1;
+    if (c.applyVerifyOk === false) applyVerifyFailures += 1;
+    if (c.killSwitch) killSwitchHits += 1;
+    sumDuration += c.durationMs || 0;
+    if (typeof c.heapDelta === 'number') {
+      heapDeltaSum += c.heapDelta;
+      heapSamples += 1;
+    }
+  }
+  return {
+    cycles: cycles.length,
+    startedAt: history.startedAt,
+    totalOk, totalFailed,
+    rollbackVerifyFailures, applyVerifyFailures, killSwitchHits,
+    meanDurationMs: Math.round(sumDuration / cycles.length),
+    heapDeltaSum: heapSamples > 0 ? heapDeltaSum : null,
+    heapSamples,
+    lastCycle: cycles[cycles.length - 1],
+  };
+}
+
+/** Wipe disk-cycle history. */
+export function clearDiskHistory() {
+  try { localStorage.removeItem(DISK_HISTORY_KEY); } catch {}
   return { ok: true };
 }
 
@@ -399,7 +553,12 @@ export function _resetForTests() {
   _started = false;
   _startedAt = 0;
   _intervalMs = DEFAULT_INTERVAL_MS;
+  _diskCycleEvery = DEFAULT_DISK_CYCLE_EVERY;
+  _iterationCount = 0;
+  _diskCycleBusy = false;
+  _lastDiskSkipReason = null;
   try { localStorage.removeItem(HISTORY_KEY); } catch {}
+  try { localStorage.removeItem(DISK_HISTORY_KEY); } catch {}
 }
 
 // ─── Sanity tests ───────────────────────────────────────────────────
