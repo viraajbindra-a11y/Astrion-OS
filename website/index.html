@@ -347,6 +347,77 @@
       .compare-table th, .compare-table td { padding: 10px 8px; }
     }
 
+    /* ── Demo placeholder (Phase 2 W23 will replace this with real <video>) ── */
+    .demo-frame {
+      position: relative; width: 100%; max-width: 880px;
+      margin: 48px auto 0; aspect-ratio: 16 / 9;
+      border-radius: var(--radius);
+      background:
+        linear-gradient(135deg, rgba(0,122,255,0.10) 0%, rgba(255,69,58,0.06) 100%),
+        radial-gradient(circle at 30% 30%, rgba(0,122,255,0.15), transparent 60%),
+        #0e0e15;
+      border: 1px solid var(--border);
+      overflow: hidden;
+      display: flex; align-items: center; justify-content: center;
+      box-shadow: 0 30px 80px -20px rgba(0,0,0,0.5);
+    }
+    .demo-frame video {
+      width: 100%; height: 100%; object-fit: cover; display: block;
+    }
+    .demo-placeholder {
+      text-align: center; padding: 24px; color: var(--text-secondary);
+    }
+    .demo-placeholder strong {
+      display: block; color: var(--text); font-size: 18px;
+      font-weight: 600; margin-bottom: 6px;
+    }
+    .demo-placeholder small {
+      display: block; margin-top: 14px; color: var(--text-tertiary);
+      font-size: 12px; letter-spacing: 0.5px;
+    }
+
+    /* ── Email capture (Phase 2 W22 spec: "Get early access" + email form) ── */
+    .signup {
+      max-width: 560px; margin: 0 auto; padding: 80px 24px;
+      text-align: center;
+    }
+    .signup h2 {
+      font-size: clamp(28px, 4vw, 38px); font-weight: 700;
+      margin-bottom: 12px;
+    }
+    .signup p {
+      color: var(--text-secondary); font-size: 16px;
+      margin-bottom: 28px;
+    }
+    .signup-form {
+      display: flex; gap: 8px; flex-wrap: wrap;
+      justify-content: center;
+    }
+    .signup-form input[type="email"] {
+      flex: 1 1 260px; min-width: 0; padding: 14px 18px;
+      border-radius: 12px; border: 1px solid var(--border);
+      background: rgba(255,255,255,0.04); color: var(--text);
+      font-size: 15px; font-family: var(--font);
+      transition: border-color 0.2s, background 0.2s;
+    }
+    .signup-form input[type="email"]:focus {
+      outline: none; border-color: var(--accent);
+      background: rgba(255,255,255,0.06);
+    }
+    .signup-form button {
+      padding: 14px 28px; border-radius: 12px; border: none;
+      background: var(--accent); color: white; font-weight: 600;
+      font-size: 15px; cursor: pointer; font-family: var(--font);
+      transition: filter 0.2s, transform 0.2s;
+    }
+    .signup-form button:hover {
+      filter: brightness(1.15); transform: translateY(-1px);
+    }
+    .signup-fineprint {
+      margin-top: 16px; font-size: 12px;
+      color: var(--text-tertiary);
+    }
+
     /* ── Animations ── */
     @keyframes fadeInUp {
       from { opacity: 0; transform: translateY(20px); }
@@ -377,6 +448,7 @@
       <a href="#first-boot">First Boot</a>
       <a href="#compare">vs Others</a>
       <a href="#download">Download</a>
+      <a href="#early-access">Early Access</a>
       <a href="https://github.com/viraajbindra-a11y/Astrion-OS" target="_blank">GitHub</a>
       <a href="https://viraajbindra-a11y.github.io/Astrion-OS/" target="_blank" class="nav-cta">Try Online</a>
     </div>
@@ -403,6 +475,32 @@
         View Source
       </a>
     </div>
+
+    <!--
+      Phase 2 W22 hero demo. Currently a placeholder. When the 30 s
+      screencast lands (Phase 2 W23, week of Jun 8), drop the files at
+      `website/demo.mp4` (+ optional `website/demo.webm` for Firefox)
+      and `website/demo-poster.jpg`, then SWAP this entire block for:
+
+        <div class="demo-frame">
+          <video autoplay muted loop playsinline preload="metadata"
+                 poster="demo-poster.jpg"
+                 aria-label="Astrion OS 30-second demo">
+            <source src="demo.mp4" type="video/mp4">
+            <source src="demo.webm" type="video/webm">
+          </video>
+        </div>
+
+      Spec from ROADMAP-DEC-2026-v3.md Phase 2 Week 22: "Hero: 30-second
+      autoplay demo (no audio)."
+    -->
+    <div class="demo-frame">
+      <div class="demo-placeholder">
+        <strong>30-second demo lands week of Jun 8</strong>
+        Spotlight → plan preview → red-team review → typed confirm → done.
+        <small>Phase 2 W23 · ROADMAP-DEC-2026-v3.md</small>
+      </div>
+    </div>
   </section>
 
   <!-- Pull quote / one-sentence pitch -->
@@ -417,9 +515,9 @@
   <!-- Stats -->
   <section class="section">
     <div class="stats">
-      <div class="stat"><div class="stat-number">76</div><div class="stat-label">Built-in Apps</div></div>
+      <div class="stat"><div class="stat-number">77</div><div class="stat-label">Built-in Apps</div></div>
       <div class="stat"><div class="stat-number">5</div><div class="stat-label">Self-Mod Gates</div></div>
-      <div class="stat"><div class="stat-number">216</div><div class="stat-label">Verification Tests</div></div>
+      <div class="stat"><div class="stat-number">345</div><div class="stat-label">Verification Tests</div></div>
       <div class="stat"><div class="stat-number">0</div><div class="stat-label">Telemetry</div></div>
       <div class="stat"><div class="stat-number">100%</div><div class="stat-label">Open Source</div></div>
     </div>
@@ -494,7 +592,7 @@
       </div>
 
       <div class="gates">
-        <div class="gate"><span class="gate-num">1 ✓</span><span class="gate-name">golden-integrity</span><span class="gate-sub">18 safety files unchanged</span></div>
+        <div class="gate"><span class="gate-num">1 ✓</span><span class="gate-name">golden-integrity</span><span class="gate-sub">19 safety files unchanged</span></div>
         <div class="gate"><span class="gate-num">2 ✓</span><span class="gate-name">value-lock</span><span class="gate-sub">LOCKED_VALUES match baseline</span></div>
         <div class="gate"><span class="gate-num">3 ✓</span><span class="gate-name">red-team</span><span class="gate-sub">2nd model, no high-severity risks</span></div>
         <div class="gate"><span class="gate-num">4 ✓</span><span class="gate-name">typed-confirm</span><span class="gate-sub">user typed proposal id</span></div>
@@ -536,7 +634,7 @@
       <div style="padding:18px 20px; border-radius:12px; background:var(--bg-card); border:1px solid var(--border);">
         <div style="font-size:11px; font-weight:600; color:var(--text-tertiary); letter-spacing:0.6px; margin-bottom:8px;">FOR BEEFY MACHINES</div>
         <div style="font-size:17px; font-weight:600; color:var(--text); margin-bottom:4px;">Big</div>
-        <div style="font-size:13px; color:var(--text-secondary); margin-bottom:8px;">gpt-oss:16b · ~10 GB</div>
+        <div style="font-size:13px; color:var(--text-secondary); margin-bottom:8px;">gpt-oss:20b · ~13 GB</div>
         <div style="font-size:12px; color:var(--text-tertiary);">Best answers — wants 16 GB+ free RAM.</div>
       </div>
       <div style="padding:18px 20px; border-radius:12px; background:var(--bg-card); border:1px solid var(--border);">
@@ -718,7 +816,7 @@
   <!-- Apps -->
   <section class="section" id="apps">
     <div class="section-label">Apps</div>
-    <h2>76 apps. Zero frameworks.</h2>
+    <h2>77 apps. Zero frameworks.</h2>
     <p>Every app built from scratch in vanilla JavaScript. No React, no Vue. Just code you can read.</p>
 
     <div class="apps-scroll">
@@ -793,6 +891,43 @@
         <p>Fork it. Hack it. Ship a skill. MIT, audit every line.</p>
         <a href="https://github.com/viraajbindra-a11y/Astrion-OS" target="_blank">View on GitHub</a>
       </div>
+    </div>
+  </section>
+
+  <!-- Get early access (Phase 2 W22 spec: email capture) -->
+  <!--
+    HOW TO WIRE THE FORM:
+    1. Pick a service: Formspree (formspree.io, easy), Tally (tally.so,
+       form-builder UI), Buttondown (buttondown.email, treats it like a
+       newsletter). All have free tiers. Formspree is the smallest lift.
+    2. Sign up, create a form, copy the form's POST URL.
+    3. Replace the action="https://formspree.io/f/REPLACE_WITH_YOUR_FORM_ID"
+       below with your real URL.
+    4. Confirm the success page or thank-you message matches your service.
+    Until that's wired, the form posts to the placeholder and the user
+    sees the service's 404 — better to leave it disabled in production
+    until the URL is real. The visible label says "wiring up" so it's
+    honest.
+  -->
+  <section class="signup" id="early-access">
+    <div class="section-label">Get early access</div>
+    <h2>Be the first to know when v1.0 ships.</h2>
+    <p>
+      Target launch: Mon Dec 21, 2026. One email when it lands — and a personal
+      invite to the public beta in September. No drip campaign, no spam, no
+      tracking pixels.
+    </p>
+
+    <form class="signup-form" action="https://formspree.io/f/REPLACE_WITH_YOUR_FORM_ID" method="POST">
+      <input type="email" name="email" placeholder="you@example.com" required autocomplete="email">
+      <button type="submit">Notify me at launch</button>
+    </form>
+
+    <div class="signup-fineprint">
+      Wiring up the form on launch week — until then this submits to a placeholder.
+      <br>
+      No newsletter. Two emails total: beta invite (Sep) + v1.0 launch (Dec 21).
+      Unsubscribe in one click.
     </div>
   </section>
 
