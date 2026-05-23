@@ -235,6 +235,13 @@ async function runScheduledTick() {
     _diskCycleBusy = false;
   }
   const heapAfter = readHeapBytes();
+  // Compact the gatesFailed array into a short string so a 24h history
+  // with N failures doesn't bloat localStorage with full error objects.
+  // Each entry "<gate>: <reason>" — capped at ~200 chars total.
+  const gatesFailed = cycle.phases?.apply?.gatesFailed;
+  const failureSummary = Array.isArray(gatesFailed) && gatesFailed.length > 0
+    ? gatesFailed.map(g => `${g.check}: ${g.reason}`).join(' | ').slice(0, 240)
+    : null;
   appendDiskCycle({
     at: cycleStart,
     iteration: _iterationCount,
@@ -246,6 +253,8 @@ async function runScheduledTick() {
     rollbackOk: cycle.phases?.rollback?.ok === true,
     rollbackVerifyOk: cycle.phases?.rollbackVerify?.ok === true,
     killSwitch: cycle.phases?.apply?.killSwitch === true || cycle.phases?.ensure?.killSwitch === true,
+    applyError: cycle.phases?.apply?.error || null,
+    failureSummary,
     heapBefore,
     heapAfter,
     heapDelta: (heapBefore !== null && heapAfter !== null) ? heapAfter - heapBefore : null,
@@ -495,7 +504,21 @@ export async function runDiskCycle(opts = {}) {
   let applyResult;
   try {
     applyResult = await applyUpgrade(proposalId, { typedConfirm: proposalId });
-    phases.apply = { ok: applyResult.ok, error: applyResult.error, killSwitch: applyResult.killSwitch, bytes: applyResult.bytes };
+    phases.apply = {
+      ok: applyResult.ok,
+      error: applyResult.error,
+      killSwitch: applyResult.killSwitch,
+      bytes: applyResult.bytes,
+      // Capture gate-walk detail so persistence + UI can show WHICH gate
+      // failed without a console diagnostic (2026-05-19 lesson: the
+      // prior cut only stored `error: "1 gate(s) failed"` and the
+      // user had to drop into devtools + call applyProposal manually
+      // to learn the gate name was 'red-team-signoff' and the reason
+      // was Ollama unreachable. Surfacing this here closes that gap).
+      gatesPassed: applyResult.gatesPassed,
+      gatesFailed: applyResult.gatesFailed,
+      redTeamRecommendation: applyResult.redTeamRecommendation,
+    };
   } catch (err) {
     phases.apply = { ok: false, error: err.message };
   }

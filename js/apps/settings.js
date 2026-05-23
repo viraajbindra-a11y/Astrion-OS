@@ -1485,6 +1485,15 @@ function initSettings(container) {
         const heapMb = (b) => b === null ? '—' : (b >= 0 ? '+' : '') + (b / 1048576).toFixed(2) + ' MB';
         const heapColor = diskReport.heapSamples >= 20 && diskReport.heapDeltaSum > 20 * 1048576
           ? '#fab387' : 'inherit';
+        // 2026-05-19 instrumentation patch: surface gate failures so the
+        // user doesn't have to drop into devtools + manually call
+        // applyProposal to learn which gate tripped. failureSummary is
+        // the compact "gate: reason" string built in appendDiskCycle.
+        const failureRow = (last.failureSummary || last.applyError)
+          ? `
+          <span style="color:rgba(255,255,255,0.5);">Last failure</span>
+          <span style="color:#f38ba8;font-family:var(--mono);font-size:11px;word-break:break-word;">${escapeHtml(last.failureSummary || last.applyError || '')}</span>`
+          : '';
         diskGrid.innerHTML = `
           <span style="color:rgba(255,255,255,0.5);">Cycles run</span>
           <span style="color:${okColor};">${diskReport.cycles} · ${diskReport.totalOk} ok · ${diskReport.totalFailed} failed</span>
@@ -1497,7 +1506,7 @@ function initSettings(container) {
           <span style="color:rgba(255,255,255,0.5);">Heap delta (sum)</span>
           <span style="color:${heapColor};">${heapMb(diskReport.heapDeltaSum)} over ${diskReport.heapSamples} samples</span>
           <span style="color:rgba(255,255,255,0.5);">Last cycle</span>
-          <span style="color:${lastColor};">${(last.durationMs / 1000).toFixed(1)} s · ${lastPhases}</span>
+          <span style="color:${lastColor};">${(last.durationMs / 1000).toFixed(1)} s · ${lastPhases}</span>${failureRow}
         `;
       }
     }
