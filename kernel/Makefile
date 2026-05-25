@@ -61,8 +61,13 @@ boot:
 	@mkdir -p $(BUILD_DIR)
 	$(CC) $(EFI_CFLAGS) -c boot/boot.c -o $(BUILD_DIR)/boot.o
 	$(LD) $(EFI_LDFLAGS) $(BUILD_DIR)/boot.o -o $(BUILD_DIR)/boot.so
-	$(OBJCOPY) -j .text -j .sdata -j .data -j .dynamic -j .dynsym \
-	           -j .rel -j .rela -j .reloc --target=efi-app-x86_64 \
+	# .rodata is required for string literals + const data; without it
+	# the loaded EFI binary has dangling pointers and crashes with #UD
+	# at runtime (2026-05-25 QEMU test caught this). .eh_frame is a
+	# safety belt — not always present but harmless if absent.
+	$(OBJCOPY) -j .text -j .sdata -j .data -j .rodata -j .dynamic \
+	           -j .dynsym -j .rel -j .rela -j .reloc -j .eh_frame \
+	           --target=efi-app-x86_64 \
 	           $(BUILD_DIR)/boot.so $(BUILD_DIR)/BOOTX64.EFI
 	@echo "Bootloader built: $(BUILD_DIR)/BOOTX64.EFI"
 
