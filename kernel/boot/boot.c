@@ -132,8 +132,18 @@ EFI_STATUS SetGraphicsMode(EFI_GRAPHICS_OUTPUT_PROTOCOL *gop, BootInfo *info) {
 
 /**
  * EFI Main — entry point from UEFI firmware
+ *
+ * 2026-05-25: NOTE the absence of EFIAPI here. gnu-efi's crt0-efi-x86_64.o
+ * converts the firmware's MS-ABI call into a SysV-ABI call before invoking
+ * efi_main. If we declare efi_main as EFIAPI (= __attribute__((ms_abi))),
+ * the args land in RCX/RDX but crt0 has already moved them to RDI/RSI —
+ * so we read garbage. ImageHandle showed up as 0x0 and every protocol
+ * query returned EFI_INVALID_PARAMETER. gnu-efi's own examples don't put
+ * EFIAPI on efi_main for exactly this reason. EFIAPI is for callbacks
+ * we register with the firmware (e.g. protocol implementations), not for
+ * the entry point.
  */
-EFI_STATUS EFIAPI efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
+EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
     EFI_STATUS status;
     BootInfo boot_info = {0};
 
