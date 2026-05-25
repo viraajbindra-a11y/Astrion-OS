@@ -184,7 +184,7 @@ async function testGoldenIntegrity() {
   if (r.ok) {
     return {
       passed: true,
-      evidence: `${r.checked || 18} golden files match lock`,
+      evidence: `${r.checked || 19} golden files match lock`,
       blocker: null,
     };
   }
@@ -248,14 +248,154 @@ async function testRubberStampTrackerAlive() {
   };
 }
 
+// ─── Test 7: browser proxy rejects non-HTTP schemes (SSRF defense) ─
+// Verifies commit `d366ebe` (2026-05-16): /api/browser/proxy must
+// allow-list only http: and https:. file:// access would let a
+// browser-app turn into a local-filesystem read primitive.
+async function testBrowserProxySSRF() {
+  const evilSchemes = [
+    'file:///etc/passwd',
+    'data:text/html,<script>alert(1)</script>',
+    'javascript:alert(1)',
+    'gopher://localhost:11434/_GET',
+    'ftp://localhost/secrets',
+  ];
+  const accepted = [];
+  for (const url of evilSchemes) {
+    try {
+      const r = await fetch('/api/browser/proxy?url=' + encodeURIComponent(url), {
+        signal: AbortSignal.timeout(2000),
+      });
+      // ANY 2xx means the server fetched it — accepted.
+      if (r.ok) {
+        accepted.push({ url, status: r.status });
+      }
+    } catch {
+      // Network error / abort = server refused or timed out = also acceptable.
+    }
+  }
+  if (accepted.length > 0) {
+    return {
+      passed: false,
+      evidence: `${accepted.length} non-HTTP scheme(s) accepted by /api/browser/proxy: ` +
+        accepted.map(a => `${a.url} -> ${a.status}`).join(' · '),
+      blocker: 'Browser-proxy SSRF defense bypassed. Restrict to http(s):// schemes only.',
+    };
+  }
+  return {
+    passed: true,
+    evidence: `${evilSchemes.length} non-HTTP scheme(s) refused: ` + evilSchemes.map(u => u.split(':')[0]).join(', '),
+    blocker: null,
+  };
+}
+
+// ─── Test 8: kill-switch surface exists + returns valid JSON ──────
+// Verifies commit `af16f68` (2026-05-11): the M8.P5 kill-switch
+// status endpoint must exist and return {disabled, source, reason}.
+// If the endpoint is gone or returns nonsense, the Settings safety
+// panel can't show the kill-switch state — bad UX + bad safety story.
+async function testKillSwitchSurface() {
+  let r, data;
+  try {
+    r = await fetch('/api/system/selfmod-status', { signal: AbortSignal.timeout(2000) });
+  } catch (err) {
+    return {
+      passed: false,
+      evidence: 'kill-switch endpoint unreachable: ' + (err?.message || String(err)),
+      blocker: 'M8.P5 kill-switch status endpoint missing or server down. Settings panel can\'t verify state.',
+    };
+  }
+  if (!r.ok) {
+    return {
+      passed: false,
+      evidence: `kill-switch endpoint returned HTTP ${r.status}`,
+      blocker: 'M8.P5 kill-switch status endpoint broken (non-2xx).',
+    };
+  }
+  try {
+    data = await r.json();
+  } catch {
+    return {
+      passed: false,
+      evidence: 'kill-switch endpoint returned non-JSON',
+      blocker: 'M8.P5 kill-switch status endpoint malformed.',
+    };
+  }
+  // Shape check: must have boolean `disabled`, plus `source` + `reason`
+  // fields (may be null).
+  const shapeOk = typeof data?.disabled === 'boolean'
+    && ('source' in data) && ('reason' in data);
+  if (!shapeOk) {
+    return {
+      passed: false,
+      evidence: 'kill-switch endpoint returned wrong shape: ' + JSON.stringify(data).slice(0, 100),
+      blocker: 'M8.P5 kill-switch status endpoint changed shape; UI assumptions broken.',
+    };
+  }
+  return {
+    passed: true,
+    evidence: `kill-switch surface OK · disabled=${data.disabled}`,
+    blocker: null,
+  };
+}
+
+// ─── Test 9: write API rejects path traversal at the server ──────
+// Verifies commit `de95c79` (2026-05-16) defense. Even if a caller
+// bypasses client-side isPathUpgradable, the server's
+// safeResolvePathStrict must reject paths that escape the project
+// root via ../, absolute paths, or symlinks. We test the easy ones
+// (traversal + absolute); symlink escape requires server-side
+// pre-existence so it's tested manually per commit `de95c79`.
+async function testServerSideTraversalReject() {
+  const evilPaths = [
+    '../../../etc/passwd',
+    '/etc/passwd',
+    'js/../../../etc/passwd',
+    '..\\..\\..\\Windows\\System32\\config\\SAM',
+  ];
+  const accepted = [];
+  for (const path of evilPaths) {
+    try {
+      const r = await fetch('/api/files/write', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ path, content: 'pen-test should never land' }),
+        signal: AbortSignal.timeout(2000),
+      });
+      // If the server returned 2xx, the file got written. That's bad.
+      if (r.ok) {
+        accepted.push({ path, status: r.status });
+      }
+    } catch {
+      // Refused / timed out = good.
+    }
+  }
+  if (accepted.length > 0) {
+    return {
+      passed: false,
+      evidence: `${accepted.length} traversal/absolute path(s) accepted: ` +
+        accepted.map(a => `${a.path} -> ${a.status}`).join(' · '),
+      blocker: 'Server-side path-traversal defense bypassed. M8.P5 disk-write boundary breached.',
+    };
+  }
+  return {
+    passed: true,
+    evidence: `${evilPaths.length} traversal/absolute paths refused at the server`,
+    blocker: null,
+  };
+}
+
 // ─── Public runner ────────────────────────────────────────────────
 
 const TESTS = [
   { id: 'typed-confirm', name: 'Typed-confirm gate refuses wrong id', team: 'red', run: testTypedConfirmGate },
-  { id: 'path-allow', name: 'Path allow-list refuses kernel + traversal', team: 'red', run: testPathAllowList },
+  { id: 'path-allow', name: 'Path allow-list refuses kernel + traversal (client-side)', team: 'red', run: testPathAllowList },
   { id: 'content-blocklist', name: 'Content scan blocks eval / new Function / state clears', team: 'red', run: testContentBlocklist },
-  { id: 'golden', name: 'Golden integrity matches lock (18 files)', team: 'blue', run: testGoldenIntegrity },
+  { id: 'browser-proxy-ssrf', name: 'Browser proxy refuses file:// / data: / non-HTTP schemes', team: 'red', run: testBrowserProxySSRF },
+  { id: 'server-traversal', name: 'Server /api/files/write refuses path traversal + absolute paths', team: 'red', run: testServerSideTraversalReject },
+  { id: 'golden', name: 'Golden integrity matches lock (19 files)', team: 'blue', run: testGoldenIntegrity },
   { id: 'value-lock', name: 'Value-lock baseline matches live constants', team: 'blue', run: testValueLockBaseline },
+  { id: 'kill-switch', name: 'M8.P5 kill-switch status endpoint live + valid shape', team: 'blue', run: testKillSwitchSurface },
   { id: 'rubber-stamp', name: 'Rubber-stamp tracker + chaos injector alive', team: 'blue', run: testRubberStampTrackerAlive },
 ];
 
