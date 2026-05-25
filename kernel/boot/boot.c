@@ -223,27 +223,40 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable
     // code (e.g. 0x8000000000000002 = EFI_INVALID_PARAMETER seen as RIP).
 
     // Get LoadedImage for the current bootloader image (us).
-    // 2026-05-25: HandleProtocol(LoadedImage) was failing in QEMU+EDK2.
-    // Try OpenProtocol (UEFI 2.x API) as primary; fall back to
-    // HandleProtocol if OpenProtocol isn't available on the BootServices.
+    // 2026-05-25: HandleProtocol + OpenProtocol both returned
+    // EFI_INVALID_PARAMETER (0x8000000000000002) with a local GUID
+    // variable. Try gnu-efi's global LoadedImageProtocol symbol —
+    // some firmwares apparently do pointer-identity checks on
+    // well-known protocol GUIDs rather than memcmp.
     EFI_LOADED_IMAGE_PROTOCOL *loaded_image = NULL;
-    EFI_GUID li_guid = EFI_LOADED_IMAGE_PROTOCOL_GUID;
-    serial_log("  calling OpenProtocol(LoadedImage)\n");
-    status = BS->OpenProtocol(ImageHandle, &li_guid, (void **)&loaded_image,
-                              ImageHandle, NULL, EFI_OPEN_PROTOCOL_GET_PROTOCOL);
-    serial_log("  OpenProtocol(LoadedImage) status = ");
+    extern EFI_GUID LoadedImageProtocol;  // from gnu-efi libefi.a
+
+    serial_log("  ImageHandle = ");
+    serial_log_hex((UINT64)ImageHandle);
+    serial_log("\n");
+    serial_log("  &LoadedImageProtocol = ");
+    serial_log_hex((UINT64)&LoadedImageProtocol);
+    serial_log("\n");
+
+    serial_log("  calling HandleProtocol(LoadedImage) with gnu-efi global GUID\n");
+    status = BS->HandleProtocol(ImageHandle, &LoadedImageProtocol, (void **)&loaded_image);
+    serial_log("  HandleProtocol status = ");
     serial_log_hex((UINT64)status);
     serial_log("\n");
+
     if (EFI_ERROR(status) || !loaded_image) {
-        // Fall back to legacy HandleProtocol
-        serial_log("  OpenProtocol failed; trying HandleProtocol\n");
-        status = BS->HandleProtocol(ImageHandle, &li_guid, (void **)&loaded_image);
-        serial_log("  HandleProtocol(LoadedImage) status = ");
+        // Try OpenProtocol with the global GUID as second attempt
+        serial_log("  trying OpenProtocol with global GUID\n");
+        status = BS->OpenProtocol(ImageHandle, &LoadedImageProtocol,
+                                  (void **)&loaded_image,
+                                  ImageHandle, NULL,
+                                  EFI_OPEN_PROTOCOL_GET_PROTOCOL);
+        serial_log("  OpenProtocol status = ");
         serial_log_hex((UINT64)status);
         serial_log("\n");
     }
     if (EFI_ERROR(status) || !loaded_image) {
-        serial_log("  ERROR: LoadedImage unavailable via both APIs\n");
+        serial_log("  ERROR: LoadedImage unavailable via any method\n");
         Print(L"ERROR: LoadedImage not available\n");
         goto halt;
     }
