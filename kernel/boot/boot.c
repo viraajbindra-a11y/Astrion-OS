@@ -152,6 +152,12 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
     serial_init();
     serial_log("\n=== Astrion Kernel Bootloader v0.1 ===\n");
     serial_log("efi_main entered; serial init OK\n");
+    serial_log("at-entry ImageHandle = ");
+    serial_log_hex((UINT64)ImageHandle);
+    serial_log("\n");
+    serial_log("at-entry SystemTable = ");
+    serial_log_hex((UINT64)SystemTable);
+    serial_log("\n");
     serial_log("calling InitializeLib...\n");
     InitializeLib(ImageHandle, SystemTable);
     serial_log("InitializeLib returned\n");
@@ -240,26 +246,35 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
     // well-known protocol GUIDs rather than memcmp.
     EFI_LOADED_IMAGE_PROTOCOL *loaded_image = NULL;
     extern EFI_GUID LoadedImageProtocol;  // from gnu-efi libefi.a
+    extern EFI_HANDLE LibImageHandle;     // from gnu-efi, set by InitializeLib
 
-    serial_log("  ImageHandle = ");
+    serial_log("  ImageHandle (param) = ");
     serial_log_hex((UINT64)ImageHandle);
     serial_log("\n");
-    serial_log("  &LoadedImageProtocol = ");
-    serial_log_hex((UINT64)&LoadedImageProtocol);
+    serial_log("  LibImageHandle (gnu-efi global) = ");
+    serial_log_hex((UINT64)LibImageHandle);
     serial_log("\n");
 
-    serial_log("  calling HandleProtocol(LoadedImage) with gnu-efi global GUID\n");
-    status = BS->HandleProtocol(ImageHandle, &LoadedImageProtocol, (void **)&loaded_image);
+    // Prefer LibImageHandle since InitializeLib set it correctly
+    // (Print() works, which proves InitializeLib got the right args).
+    // The function-parameter ImageHandle might be stale here due to
+    // compiler optimization or stack-slot reuse.
+    EFI_HANDLE effective_handle = LibImageHandle ? LibImageHandle : ImageHandle;
+    serial_log("  effective_handle = ");
+    serial_log_hex((UINT64)effective_handle);
+    serial_log("\n");
+
+    serial_log("  calling HandleProtocol(LoadedImage)\n");
+    status = BS->HandleProtocol(effective_handle, &LoadedImageProtocol, (void **)&loaded_image);
     serial_log("  HandleProtocol status = ");
     serial_log_hex((UINT64)status);
     serial_log("\n");
 
     if (EFI_ERROR(status) || !loaded_image) {
-        // Try OpenProtocol with the global GUID as second attempt
-        serial_log("  trying OpenProtocol with global GUID\n");
-        status = BS->OpenProtocol(ImageHandle, &LoadedImageProtocol,
+        serial_log("  trying OpenProtocol\n");
+        status = BS->OpenProtocol(effective_handle, &LoadedImageProtocol,
                                   (void **)&loaded_image,
-                                  ImageHandle, NULL,
+                                  effective_handle, NULL,
                                   EFI_OPEN_PROTOCOL_GET_PROTOCOL);
         serial_log("  OpenProtocol status = ");
         serial_log_hex((UINT64)status);
