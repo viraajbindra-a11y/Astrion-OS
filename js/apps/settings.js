@@ -1386,6 +1386,17 @@ function initSettings(container) {
           </div>
         </div>
 
+        <div id="pen-test-panel" style="background:rgba(255,255,255,0.04);border-radius:10px;padding:18px;margin-top:16px;">
+          <div style="font-size:14px;font-weight:600;margin-bottom:6px;">🔬 Pen-test — adversarial self-verification</div>
+          <p style="font-size:12px;color:rgba(255,255,255,0.55);margin:0 0 12px;">
+            Synthetic attack suite that probes every safety claim Astrion makes. 9 tests across red team (try to break things) and blue team (verify defenses are alive). Click <strong>Run pen-test</strong> and confirm every claim is real on YOUR install.
+          </p>
+          <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px;">
+            <button id="run-pen-test" style="padding:8px 14px;background:rgba(122,162,247,0.18);color:#7aa2f7;border:1px solid #7aa2f7;border-radius:6px;font-family:var(--font);font-size:12px;cursor:pointer;">▶ Run pen-test</button>
+          </div>
+          <div id="pen-test-results" style="font-size:12px;color:rgba(255,255,255,0.55);font-style:italic;">Click Run pen-test to start — usually completes in 5–10 s.</div>
+        </div>
+
         <div id="self-upgrade-history-panel" style="background:rgba(255,255,255,0.04);border-radius:10px;padding:18px;margin-top:16px;">
           <div style="font-size:14px;font-weight:600;margin-bottom:6px;">🤖 Self-upgrade audit trail</div>
           <p style="font-size:12px;color:rgba(255,255,255,0.55);margin:0 0 12px;">
@@ -1410,6 +1421,57 @@ function initSettings(container) {
       const { fireChaosNow, clearChaosCooldown } = await import('../kernel/chaos-injector.js');
       clearChaosCooldown();
       fireChaosNow();
+    });
+
+    // ─── Pen-test: adversarial self-verification ───
+    main.querySelector('#run-pen-test')?.addEventListener('click', async (ev) => {
+      const btn = ev.currentTarget;
+      const resultsEl = main.querySelector('#pen-test-results');
+      if (!resultsEl) return;
+      btn.disabled = true;
+      const originalLabel = btn.textContent;
+      btn.textContent = '… running 9 tests (5–10 s)';
+      resultsEl.innerHTML = '<span style="color:rgba(255,255,255,0.6);">Running…</span>';
+      try {
+        const { runAll } = await import('../kernel/pen-test.js');
+        const t0 = Date.now();
+        const results = await runAll();
+        const durMs = Date.now() - t0;
+        const passed = results.filter(r => r.passed).length;
+        const failed = results.filter(r => !r.passed);
+        const allGreen = failed.length === 0;
+        const headerColor = allGreen ? '#a6e3a1' : '#f38ba8';
+        const rows = results.map(r => {
+          const team = r.team === 'red' ? '🔴' : '🔵';
+          const status = r.passed ? '<span style="color:#a6e3a1;">✓</span>' : '<span style="color:#f38ba8;">✗</span>';
+          const evidence = `<span style="color:rgba(255,255,255,0.55);font-size:11px;">${escapeHtml(r.evidence || '')}</span>`;
+          const blocker = !r.passed && r.blocker
+            ? `<div style="font-size:11px;color:#fab387;margin-top:3px;padding-left:24px;">⚠ ${escapeHtml(r.blocker)}</div>`
+            : '';
+          return `
+            <div style="padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.04);">
+              <div style="display:flex;align-items:baseline;gap:6px;font-size:12px;">
+                <span>${team}</span><span style="width:14px;">${status}</span>
+                <span style="font-weight:500;">${escapeHtml(r.name)}</span>
+                <span style="color:rgba(255,255,255,0.35);font-size:10px;margin-left:auto;">${r.durationMs} ms</span>
+              </div>
+              <div style="font-size:11px;color:rgba(255,255,255,0.5);padding-left:24px;margin-top:2px;">${evidence}</div>
+              ${blocker}
+            </div>`;
+        }).join('');
+        resultsEl.innerHTML = `
+          <div style="font-size:13px;font-weight:600;color:${headerColor};margin-bottom:8px;">
+            ${passed} / ${results.length} passed · ${durMs} ms total
+            ${allGreen ? ' — every safety claim verified' : ` · ${failed.length} BLOCKER${failed.length === 1 ? '' : 'S'}`}
+          </div>
+          <div>${rows}</div>
+        `;
+      } catch (err) {
+        resultsEl.innerHTML = `<span style="color:#f38ba8;">Pen-test threw: ${escapeError(err)}</span>`;
+      } finally {
+        btn.disabled = false;
+        btn.textContent = originalLabel;
+      }
     });
 
     // ─── M8.P5 soak + kill-switch panel ───
