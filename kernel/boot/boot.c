@@ -150,12 +150,29 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable
     Print(L"[1/4] Setting up display...\n");
     EFI_GRAPHICS_OUTPUT_PROTOCOL *gop;
     EFI_GUID gop_guid = EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID;
-    serial_log("  calling BS->LocateProtocol for GOP\n");
-    status = BS->LocateProtocol(&gop_guid, NULL, (void **)&gop);
-    serial_log("  LocateProtocol returned\n");
-    if (EFI_ERROR(status)) {
-        serial_log("  ERROR: GOP not found\n");
+    // 2026-05-25: BS->LocateProtocol hangs in QEMU + edk2-x86_64-code.fd
+    // for the GOP guid (no return; not even a status). Switching to the
+    // more conservative LocateHandleBuffer + HandleProtocol pattern,
+    // which is what gnu-efi's own examples use and seems to be more
+    // robust across firmware versions.
+    serial_log("  calling BS->LocateHandleBuffer for GOP\n");
+    UINTN gop_handle_count = 0;
+    EFI_HANDLE *gop_handles = NULL;
+    status = BS->LocateHandleBuffer(ByProtocol, &gop_guid, NULL,
+                                    &gop_handle_count, &gop_handles);
+    serial_log("  LocateHandleBuffer returned\n");
+    if (EFI_ERROR(status) || gop_handle_count == 0) {
+        serial_log("  ERROR: no GOP-providing handles found\n");
         Print(L"ERROR: Could not find graphics output protocol\n");
+        return status;
+    }
+    serial_log("  about to HandleProtocol on first GOP handle\n");
+    status = BS->HandleProtocol(gop_handles[0], &gop_guid, (void **)&gop);
+    serial_log("  HandleProtocol returned\n");
+    if (gop_handles) BS->FreePool(gop_handles);
+    if (EFI_ERROR(status)) {
+        serial_log("  ERROR: HandleProtocol failed for GOP\n");
+        Print(L"ERROR: Could not bind GOP\n");
         return status;
     }
 
