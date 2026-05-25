@@ -72,6 +72,19 @@ static void serial_log(const char *s) {
     }
 }
 
+// Write a UINT64 as 0x<16 hex chars> to serial. Used for status codes
+// + addresses when we need to see the exact value.
+static void serial_log_hex(UINT64 v) {
+    static const char hex[] = "0123456789abcdef";
+    char buf[19];
+    buf[0] = '0'; buf[1] = 'x';
+    for (int i = 0; i < 16; i++) {
+        buf[2 + i] = hex[(v >> ((15 - i) * 4)) & 0xF];
+    }
+    buf[18] = 0;
+    serial_log(buf);
+}
+
 /**
  * Find and set the best available screen resolution
  */
@@ -210,16 +223,33 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable
     // code (e.g. 0x8000000000000002 = EFI_INVALID_PARAMETER seen as RIP).
 
     // Get LoadedImage for the current bootloader image (us).
+    // 2026-05-25: HandleProtocol(LoadedImage) was failing in QEMU+EDK2.
+    // Try OpenProtocol (UEFI 2.x API) as primary; fall back to
+    // HandleProtocol if OpenProtocol isn't available on the BootServices.
     EFI_LOADED_IMAGE_PROTOCOL *loaded_image = NULL;
     EFI_GUID li_guid = EFI_LOADED_IMAGE_PROTOCOL_GUID;
-    serial_log("  calling HandleProtocol(LoadedImage)\n");
-    status = BS->HandleProtocol(ImageHandle, &li_guid, (void **)&loaded_image);
-    serial_log("  HandleProtocol(LoadedImage) returned\n");
+    serial_log("  calling OpenProtocol(LoadedImage)\n");
+    status = BS->OpenProtocol(ImageHandle, &li_guid, (void **)&loaded_image,
+                              ImageHandle, NULL, EFI_OPEN_PROTOCOL_GET_PROTOCOL);
+    serial_log("  OpenProtocol(LoadedImage) status = ");
+    serial_log_hex((UINT64)status);
+    serial_log("\n");
     if (EFI_ERROR(status) || !loaded_image) {
-        serial_log("  ERROR: LoadedImage protocol not available\n");
+        // Fall back to legacy HandleProtocol
+        serial_log("  OpenProtocol failed; trying HandleProtocol\n");
+        status = BS->HandleProtocol(ImageHandle, &li_guid, (void **)&loaded_image);
+        serial_log("  HandleProtocol(LoadedImage) status = ");
+        serial_log_hex((UINT64)status);
+        serial_log("\n");
+    }
+    if (EFI_ERROR(status) || !loaded_image) {
+        serial_log("  ERROR: LoadedImage unavailable via both APIs\n");
         Print(L"ERROR: LoadedImage not available\n");
         goto halt;
     }
+    serial_log("  LoadedImage OK; DeviceHandle = ");
+    serial_log_hex((UINT64)loaded_image->DeviceHandle);
+    serial_log("\n");
 
     // Get the file system for the device we booted from.
     EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *fs = NULL;
