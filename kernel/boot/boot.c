@@ -244,60 +244,44 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
     // variable. Try gnu-efi's global LoadedImageProtocol symbol —
     // some firmwares apparently do pointer-identity checks on
     // well-known protocol GUIDs rather than memcmp.
-    EFI_LOADED_IMAGE_PROTOCOL *loaded_image = NULL;
-    extern EFI_GUID LoadedImageProtocol;  // from gnu-efi libefi.a
-    extern EFI_HANDLE LibImageHandle;     // from gnu-efi, set by InitializeLib
+    // 2026-05-25: skip LoadedImage entirely. QEMU+EDK2 doesn't install
+    // it on our image handle (OpenProtocol returns EFI_UNSUPPORTED).
+    // Instead, enumerate ALL handles that expose SimpleFileSystem and
+    // pick the first one. The boot device's filesystem is among them.
+    EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *fs = NULL;
+    extern EFI_GUID FileSystemProtocol;  // gnu-efi global; EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID
+    EFI_GUID fs_guid_local = EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID;
+    EFI_GUID *fs_guid = &fs_guid_local;  // use local copy; gnu-efi global may not be named FileSystemProtocol
 
-    serial_log("  ImageHandle (param) = ");
-    serial_log_hex((UINT64)ImageHandle);
-    serial_log("\n");
-    serial_log("  LibImageHandle (gnu-efi global) = ");
-    serial_log_hex((UINT64)LibImageHandle);
-    serial_log("\n");
-
-    // Prefer LibImageHandle since InitializeLib set it correctly
-    // (Print() works, which proves InitializeLib got the right args).
-    // The function-parameter ImageHandle might be stale here due to
-    // compiler optimization or stack-slot reuse.
-    EFI_HANDLE effective_handle = LibImageHandle ? LibImageHandle : ImageHandle;
-    serial_log("  effective_handle = ");
-    serial_log_hex((UINT64)effective_handle);
-    serial_log("\n");
-
-    serial_log("  calling HandleProtocol(LoadedImage)\n");
-    status = BS->HandleProtocol(effective_handle, &LoadedImageProtocol, (void **)&loaded_image);
-    serial_log("  HandleProtocol status = ");
+    serial_log("  enumerating SimpleFileSystem handles\n");
+    UINTN fs_handle_count = 0;
+    EFI_HANDLE *fs_handles = NULL;
+    status = BS->LocateHandleBuffer(ByProtocol, fs_guid, NULL,
+                                    &fs_handle_count, &fs_handles);
+    serial_log("  LocateHandleBuffer status = ");
     serial_log_hex((UINT64)status);
+    serial_log(", count = ");
+    serial_log_hex((UINT64)fs_handle_count);
     serial_log("\n");
-
-    if (EFI_ERROR(status) || !loaded_image) {
-        serial_log("  trying OpenProtocol\n");
-        status = BS->OpenProtocol(effective_handle, &LoadedImageProtocol,
-                                  (void **)&loaded_image,
-                                  effective_handle, NULL,
-                                  EFI_OPEN_PROTOCOL_GET_PROTOCOL);
-        serial_log("  OpenProtocol status = ");
-        serial_log_hex((UINT64)status);
-        serial_log("\n");
-    }
-    if (EFI_ERROR(status) || !loaded_image) {
-        serial_log("  ERROR: LoadedImage unavailable via any method\n");
-        Print(L"ERROR: LoadedImage not available\n");
+    if (EFI_ERROR(status) || fs_handle_count == 0) {
+        serial_log("  ERROR: no SimpleFileSystem handles\n");
+        Print(L"ERROR: No filesystem available\n");
         goto halt;
     }
-    serial_log("  LoadedImage OK; DeviceHandle = ");
-    serial_log_hex((UINT64)loaded_image->DeviceHandle);
-    serial_log("\n");
 
-    // Get the file system for the device we booted from.
-    EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *fs = NULL;
-    EFI_GUID fs_guid = EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID;
-    serial_log("  calling HandleProtocol(SimpleFileSystem)\n");
-    status = BS->HandleProtocol(loaded_image->DeviceHandle, &fs_guid, (void **)&fs);
-    serial_log("  HandleProtocol(SimpleFileSystem) returned\n");
+    // Try each FS handle until one opens with our kernel file present.
+    // For now, just use the first.
+    serial_log("  binding first FS handle (");
+    serial_log_hex((UINT64)fs_handles[0]);
+    serial_log(")\n");
+    status = BS->HandleProtocol(fs_handles[0], fs_guid, (void **)&fs);
+    serial_log("  HandleProtocol(FS) status = ");
+    serial_log_hex((UINT64)status);
+    serial_log("\n");
+    if (fs_handles) BS->FreePool(fs_handles);
     if (EFI_ERROR(status) || !fs) {
-        serial_log("  ERROR: SimpleFileSystem not on boot device\n");
-        Print(L"ERROR: SimpleFileSystem not on boot device\n");
+        serial_log("  ERROR: FS HandleProtocol failed\n");
+        Print(L"ERROR: FS not bindable\n");
         goto halt;
     }
 
