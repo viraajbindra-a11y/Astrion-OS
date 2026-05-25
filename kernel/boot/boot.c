@@ -133,12 +133,13 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable
     InitializeLib(ImageHandle, SystemTable);
     serial_log("InitializeLib returned\n");
 
-    // Narrower per-call diagnostic to pinpoint which UEFI service hangs.
-    // 2026-05-25: the boot reached InitializeLib + serial OK but produced
-    // no output past this point in QEMU's serial; narrowing now.
-    serial_log("about to ConOut->ClearScreen\n");
-    ST->ConOut->ClearScreen(ST->ConOut);
-    serial_log("ClearScreen done; about to Print(banner)\n");
+    // 2026-05-25: ConOut->ClearScreen() hangs in QEMU+EDK2 builds where
+    // ConOut is redirected to serial. The firmware writes ANSI escape
+    // codes (visible earlier in the output as [2J[01;01H...) and
+    // apparently blocks waiting on something we can't satisfy. Skip
+    // ClearScreen entirely — it's cosmetic. Print() works fine and is
+    // what we actually need for boot diagnostics.
+    serial_log("about to Print(banner)\n");
     Print(L"Astrion Kernel Bootloader v0.1\n");
     serial_log("Print(banner) done; about to Print(Initializing)\n");
     Print(L"Initializing...\n\n");
