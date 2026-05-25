@@ -155,6 +155,11 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable
     // more conservative LocateHandleBuffer + HandleProtocol pattern,
     // which is what gnu-efi's own examples use and seems to be more
     // robust across firmware versions.
+    // 2026-05-25: GOP isn't always available — some QEMU+EDK2 builds
+    // boot without exposing GOP at all (especially with -display none).
+    // Real hardware always provides GOP. Make this graceful: if no GOP,
+    // set framebuffer info to zero and let the kernel decide. The
+    // kernel can either run headless (serial-only) or refuse to start.
     serial_log("  calling BS->LocateHandleBuffer for GOP\n");
     UINTN gop_handle_count = 0;
     EFI_HANDLE *gop_handles = NULL;
@@ -162,31 +167,35 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable
                                     &gop_handle_count, &gop_handles);
     serial_log("  LocateHandleBuffer returned\n");
     if (EFI_ERROR(status) || gop_handle_count == 0) {
-        serial_log("  ERROR: no GOP-providing handles found\n");
-        Print(L"ERROR: Could not find graphics output protocol\n");
-        return status;
+        serial_log("  WARN: no GOP-providing handles; continuing headless\n");
+        Print(L"WARN: no GOP found; booting headless\n");
+        boot_info.framebuffer_addr = 0;
+        boot_info.width = 0;
+        boot_info.height = 0;
+        boot_info.pitch = 0;
+        boot_info.bpp = 0;
+    } else {
+        serial_log("  about to HandleProtocol on first GOP handle\n");
+        status = BS->HandleProtocol(gop_handles[0], &gop_guid, (void **)&gop);
+        serial_log("  HandleProtocol returned\n");
+        if (gop_handles) BS->FreePool(gop_handles);
+        if (EFI_ERROR(status)) {
+            serial_log("  WARN: HandleProtocol failed; booting headless\n");
+            boot_info.framebuffer_addr = 0;
+        } else {
+            serial_log("  calling SetGraphicsMode\n");
+            status = SetGraphicsMode(gop, &boot_info);
+            serial_log("  SetGraphicsMode returned\n");
+            if (EFI_ERROR(status)) {
+                serial_log("  WARN: SetGraphicsMode failed; booting headless\n");
+                boot_info.framebuffer_addr = 0;
+            } else {
+                serial_log("  display mode set OK\n");
+                Print(L"  Display: %dx%d @ %d bpp\n", boot_info.width, boot_info.height, boot_info.bpp);
+                Print(L"  Framebuffer: 0x%lx\n", boot_info.framebuffer_addr);
+            }
+        }
     }
-    serial_log("  about to HandleProtocol on first GOP handle\n");
-    status = BS->HandleProtocol(gop_handles[0], &gop_guid, (void **)&gop);
-    serial_log("  HandleProtocol returned\n");
-    if (gop_handles) BS->FreePool(gop_handles);
-    if (EFI_ERROR(status)) {
-        serial_log("  ERROR: HandleProtocol failed for GOP\n");
-        Print(L"ERROR: Could not bind GOP\n");
-        return status;
-    }
-
-    serial_log("  calling SetGraphicsMode\n");
-    status = SetGraphicsMode(gop, &boot_info);
-    serial_log("  SetGraphicsMode returned\n");
-    if (EFI_ERROR(status)) {
-        serial_log("  ERROR: SetGraphicsMode failed\n");
-        Print(L"ERROR: Could not set graphics mode\n");
-        return status;
-    }
-    serial_log("  display mode set OK\n");
-    Print(L"  Display: %dx%d @ %d bpp\n", boot_info.width, boot_info.height, boot_info.bpp);
-    Print(L"  Framebuffer: 0x%lx\n", boot_info.framebuffer_addr);
 
     serial_log("[1/4] display OK\n");
 
