@@ -150,17 +150,24 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable
     Print(L"[1/4] Setting up display...\n");
     EFI_GRAPHICS_OUTPUT_PROTOCOL *gop;
     EFI_GUID gop_guid = EFI_GRAPHICS_OUTPUT_PROTOCOL_GUID;
+    serial_log("  calling BS->LocateProtocol for GOP\n");
     status = BS->LocateProtocol(&gop_guid, NULL, (void **)&gop);
+    serial_log("  LocateProtocol returned\n");
     if (EFI_ERROR(status)) {
+        serial_log("  ERROR: GOP not found\n");
         Print(L"ERROR: Could not find graphics output protocol\n");
         return status;
     }
 
+    serial_log("  calling SetGraphicsMode\n");
     status = SetGraphicsMode(gop, &boot_info);
+    serial_log("  SetGraphicsMode returned\n");
     if (EFI_ERROR(status)) {
+        serial_log("  ERROR: SetGraphicsMode failed\n");
         Print(L"ERROR: Could not set graphics mode\n");
         return status;
     }
+    serial_log("  display mode set OK\n");
     Print(L"  Display: %dx%d @ %d bpp\n", boot_info.width, boot_info.height, boot_info.bpp);
     Print(L"  Framebuffer: 0x%lx\n", boot_info.framebuffer_addr);
 
