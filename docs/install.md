@@ -135,18 +135,28 @@ to test with. Astrion is alpha software; v1.0 is targeted Dec 2026.
 - 77 apps total (61 real apps + 16 toys: Notes, Terminal, Calculator, Files, Chess, 2048, …)
 - Spotlight search with intent kernel
 - Self-hosted AI — Ollama bundled, model on your laptop
-- Five-gate self-modification with branch + rewind
+- Six-gate self-modification with branch + rewind (24h-soak-class
+  verified 2026-05-24 — see [`tasks/m8-p5-soak-verdict-2026-05-24.md`](../tasks/m8-p5-soak-verdict-2026-05-24.md))
 - Open source, MIT-style licensed, free forever
 
 ## Hardware tested
 
 | Device | Status |
 |---|---|
-| Surface Pro 6 | ✓ verified |
-| ThinkPad / IdeaPad (Intel + AMD) | testing in progress |
-| Chromebook (boot-from-USB enabled) | testing in progress |
+| Surface Pro 6 | 🟡 ISO builds + boots in dev; hardware-test flash pending |
+| ThinkPad / IdeaPad (Intel + AMD) | ⬜ untested — we want your bug report |
+| Chromebook (boot-from-USB enabled) | ⬜ untested — we want your bug report |
 | Apple Silicon Mac | ✗ not supported (no x86_64) |
 
-If you boot Astrion on hardware not on this list, please file an
-issue with `[hardware]` in the title and the make/model — we're
-building the compatibility matrix.
+**Hardware matrix is Phase 4 work (Aug 10 – Sep 27 per
+[`ROADMAP-DEC-2026-v3.md`](../ROADMAP-DEC-2026-v3.md)).** Today
+v0.2.x boots are tested in browser preview + dev environment, not
+on physical hardware. The first real hardware soak is the Surface
+Pro 6 flash that's still open as of 2026-05-24. If you boot Astrion
+on hardware not on this list, please file an issue with
+`[hardware]` in the title and the make/model — we're building the
+compatibility matrix from your bug reports.
+
+If you're a tester planning to flash Astrion on real hardware, read
+[`docs/hardware-testing.md`](hardware-testing.md) FIRST — pre-flash
+checklist + post-boot smoke test + recovery path.
