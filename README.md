@@ -103,6 +103,15 @@ machine-checkable — see `tasks/SESSION_HANDOFF.md` for the trail.
   end-to-end against the synthetic target (`js/apps/.synthetic-target.js`)
   with real Ollama qwen2.5:7b on the red-team gate. 22.2 s first
   cycle, 8.3 s warm cycle, byte-identical restore both times.
+  **24h-soak-class verification 2026-05-23 → 2026-05-24:** 10 scheduled
+  cycles via the Settings → Safety panel. 9 byte-identical clean across
+  every phase (apply, applyVerify, rollback, rollbackVerify). 1 cycle's
+  rollbackVerify failed during a low-battery force-sleep that aborted
+  the in-flight fetch; post-incident file state was byte-identical to
+  the original, confirming the substrate did not corrupt the file. 0
+  apply-verify failures, 0 kill-switch hits, 0 classifier drift across
+  2020 classifications. Heap delta sum +8.64 MB / 10 samples (bounded).
+  Verdict: `tasks/m8-p5-soak-verdict-2026-05-24.md`.
 - Kill-switch (`ASTRION_SELFMOD_DISABLED` env var): blocks the
   /api/files/write endpoint at the server before path validation or
   disk work. Verified with curl: env unset → 200; env set → 403
