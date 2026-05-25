@@ -22,7 +22,7 @@ suite tests against:
 |---|---|
 | [`capability-api.js`](js/kernel/capability-api.js) | Every action declares its **level** (observe/sandbox/real/self-mod), **reversibility** (free/bounded/permanent), and **blast radius** (none/file/directory/account/external). The planner reads this *before* executing. |
 | [`operation-interceptor.js`](js/kernel/operation-interceptor.js) | L2+ actions hit a typed-confirm gate. The user sees what's about to change before it changes. |
-| [`red-team.js`](js/kernel/red-team.js) | A second model reviews every L2+ preview adversarially. If it spots a problem you didn't, it blocks. |
+| [`red-team.js`](js/kernel/red-team.js) | A second model reviews every L2+ preview adversarially and surfaces its risks inline next to the planner's proposal. **Advisory for general L2+** — the user still has the final say. **Hard-gates self-modification** via [`selfmod-sandbox.js`](js/kernel/selfmod-sandbox.js): `proceed` passes, `review` passes IFF you typed-confirm, `abort` hard-blocks. |
 | [`rubber-stamp-tracker.js`](js/kernel/rubber-stamp-tracker.js) | Watches your confirm rate. Cross 80% rapid-confirm over 20+ samples and a Socratic warning fires. |
 | [`branch-manager.js`](js/kernel/branch-manager.js) | Every change goes into a branch. One Spotlight command rewinds it. |
 | [`plan-rehearser.js`](js/kernel/plan-rehearser.js) | Multi-step plans run on a sandbox graph first. You see the diff before the real write happens. |
@@ -30,7 +30,7 @@ suite tests against:
 | [`value-lock.js`](js/kernel/value-lock.js) | Predicate-based runtime invariants the AI cannot relax. |
 | [`golden-check.js`](js/kernel/golden-check.js) | 19 safety-critical files SHA-256 hashed at boot. Any drift logs `TAMPERED`. |
 | [`api-surface.lock.js`](js/kernel/api-surface.lock.js) | The 41 capability IDs, 47 browser IPC channels, and 11 skill-registry exports are locked. New entries require updating the manifest, which fails v03 if you forget. |
-| [`self-upgrader.js`](js/kernel/self-upgrader.js) + [`selfmod-sandbox.js`](js/kernel/selfmod-sandbox.js) | Self-modification gated by golden-integrity + value-lock + red-team + typed-confirm + rollback-plan. All five must pass. The pre-upgrade bytes are restored bytewise on undo. |
+| [`self-upgrader.js`](js/kernel/self-upgrader.js) + [`selfmod-sandbox.js`](js/kernel/selfmod-sandbox.js) | Self-modification gated by **6 checks**: content-blocklist + golden-integrity + value-lock + red-team-signoff + user-typed-confirm + rollback-plan. All six must pass. The pre-upgrade bytes are stored and restored bytewise on undo. Lesson #181 added the 6th gate (content-blocklist defense-in-depth) after the pen-test caught a bypass via the lower-level `proposeSelfMod` path. |
 | [`chaos-injector.js`](js/kernel/chaos-injector.js) | Synthetic L2+ previews fire occasionally to keep the user's confirm muscle alive. |
 
 The point isn't "we have lots of files." The point is: **every L2+ action
@@ -38,7 +38,7 @@ runs through this stack**. There is no path that bypasses it.
 
 → **Full walkthrough with citations:** [docs/SAFETY.md](docs/SAFETY.md) —
 traces a real `terminal.exec` from intent parse through every gate,
-explains self-modification's 5-gate flow, and includes an honest
+explains self-modification's 6-gate flow, and includes an honest
 "what this doesn't protect against" threat model.
 
 ## What's there

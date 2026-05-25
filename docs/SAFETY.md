@@ -97,8 +97,10 @@ second model reads the cap + args and produces a structured review:
 It emits **`interception:enriched`** which the gate UI appends to the
 preview panel. The user sees the planner's proposal **and** the
 critic's concerns side-by-side. Red-team is **advisory** in v0.3 (M6) —
-it can recommend `abort` but only the user can actually abort. M8 will
-hard-gate self-modification on a `proceed` recommendation specifically.
+it can recommend `abort` but only the user can actually abort. **M8
+hard-gates self-modification on the red-team's recommendation**
+(shipped 2026-05-15, 24h-soak-class verified 2026-05-24 — see the
+"Self-modification" section below).
 
 ### 6. Typed-confirm for points of no return — [`operation-interceptor.js:103`](../js/kernel/operation-interceptor.js)
 
@@ -111,10 +113,12 @@ the wrong key doesn't accidentally fire a destructive op.
 ### 7. Rubber-stamp tracking — [`rubber-stamp-tracker.js`](../js/kernel/rubber-stamp-tracker.js)
 
 The tracker watches every preview/confirm/abort. A confirm in under
-2 seconds is "rapid"; over 2 s is "considered." After at least 20
-samples, if the rapid-confirm rate exceeds **80%**, a Socratic warning
-fires. The user is told they're stamping without reading and the next
-preview is held longer. This is the gate against gate fatigue.
+**1.5 seconds** is "rapid"; at 1.5 s or above is "considered."
+([`rubber-stamp-tracker.js:25`](../js/kernel/rubber-stamp-tracker.js)
+`READ_FLOOR_MS = 1500`.) After at least 20 samples, if the
+rapid-confirm rate exceeds **80%**, a Socratic warning fires. The
+user is told they're stamping without reading and the next preview
+is held longer. This is the gate against gate fatigue.
 
 ### 8. Plan rehearsal (multi-step plans only) — [`plan-rehearser.js`](../js/kernel/plan-rehearser.js)
 
@@ -154,25 +158,45 @@ Every other capability changes user data. Self-modification changes
 
 When the user asks Astrion to fix a bug in its own code (Spotlight →
 `upgrade yourself with: ...`), the proposed change has to pass **all
-five** of these:
+six** of these:
 
-1. **Golden integrity** — [`golden-check.js`](../js/kernel/golden-check.js)
+1. **Content blocklist** — [`selfmod-sandbox.js`](../js/kernel/selfmod-sandbox.js) (gate added per lesson #181)
+   Regex + AST scan of the proposal's `newContent`. Refuses
+   `eval(`, `new Function(`, `importScripts`, `localStorage.removeItem('astrion-…`,
+   `graphStore.deleteNode`, Node-builtin imports (`fs`, `path`, `child_process`, etc.),
+   and oversized blobs (>80 KB). Defense-in-depth: the high-level
+   `proposeUpgrade` already calls these checks before staging, but
+   the lower-level `proposeSelfMod` path bypasses them — the pen-test
+   suite caught a bypass via that path 2026-05-03, so we re-run the
+   scan inside the gate walker as gate 1.
+2. **Golden integrity** — [`golden-check.js`](../js/kernel/golden-check.js)
    The pre-change SHA-256 of every safety-critical file matches
    `golden.lock.json`. Tampering is detected before anything runs.
-2. **Value lock** — [`value-lock.js`](../js/kernel/value-lock.js)
+3. **Value lock** — [`value-lock.js`](../js/kernel/value-lock.js)
    Predicate-based runtime invariants the AI cannot relax. Examples:
    "the red-team agent must remain subscribed to `interception:preview`",
    "self-upgrader must remain in the golden file list."
-3. **Red-team approval** — [`red-team.js`](../js/kernel/red-team.js)
-   Adversarial review of the proposed diff. Recommendation must be
-   `proceed`. M8 hard-gates here, unlike M6's advisory mode.
-4. **Typed confirmation** — [`self-upgrader.js`](../js/kernel/self-upgrader.js)
+4. **Red-team approval** — [`red-team.js`](../js/kernel/red-team.js)
+   Adversarial review of the proposed diff. The gate uses a
+   **three-tier semantic** (see
+   [`selfmod-sandbox.js`](../js/kernel/selfmod-sandbox.js) gate 3):
+   `proceed` passes automatically; `review` passes IFF the user
+   typed-confirmed (the typing IS the read-and-accept signal —
+   captured in the audit trail as "red-team-signoff (overridden by
+   typed-confirm)"); `abort` hard-blocks with no override. M8.P3.b
+   routes this to a different model than the planner for true
+   diversity (Settings → AI → Red-team model). M8 hard-gates here,
+   unlike M6's advisory mode.
+5. **Typed confirmation** — [`self-upgrader.js`](../js/kernel/self-upgrader.js)
    The user types the cap id verbatim. No accidental Enter.
-5. **Rollback plan present** — [`self-upgrader.js`](../js/kernel/self-upgrader.js)
+6. **Rollback plan present** — [`self-upgrader.js`](../js/kernel/self-upgrader.js)
    Pre-change bytes are stored. After write, the user has a
-   one-command bytewise restore.
+   one-command bytewise restore. **Verified end-to-end byte-identical
+   2026-05-23 → 2026-05-24 across 9 of 10 scheduled disk cycles**
+   (the 1 failure was a low-battery force-sleep, not a substrate bug;
+   see [`tasks/m8-p5-soak-verdict-2026-05-24.md`](../tasks/m8-p5-soak-verdict-2026-05-24.md)).
 
-Only when all five pass do bytes hit disk. If any fail, the proposal
+Only when all six pass do bytes hit disk. If any fail, the proposal
 is discarded. The AI **cannot** add a new safety primitive that grants
 itself broader rights — `self-upgrader.js` is in the golden list, so
 modifying its allow-list / blocklist / content scanner triggers a
@@ -294,7 +318,7 @@ Both layers help. Astrion adds the runtime layer most projects skip.
 | 80% rapid-confirm threshold over 20+ samples | [rubber-stamp-tracker.js:27-28](../js/kernel/rubber-stamp-tracker.js) |
 | Plan rehearser runs on sandbox graph branch | [plan-rehearser.js](../js/kernel/plan-rehearser.js) |
 | onBranch helper for capability authors | [branch-manager.js:348-358](../js/kernel/branch-manager.js) |
-| Self-upgrader 5-gate flow | [self-upgrader.js](../js/kernel/self-upgrader.js) |
+| Self-upgrader 6-gate flow (content-blocklist + golden + value-lock + red-team + typed-confirm + rollback-plan) | [self-upgrader.js](../js/kernel/self-upgrader.js) + [selfmod-sandbox.js](../js/kernel/selfmod-sandbox.js) |
 | 19 files in golden lock | [golden.lock.json](../golden.lock.json) |
 | 41/47/11 locked surface counts | [api-surface.lock.js](../js/kernel/api-surface.lock.js) |
 | v03 enforces surface drift | [test/v03-verification.html](../test/v03-verification.html) section 19 |
@@ -310,9 +334,16 @@ story.
 
 - Branch-wrap is opt-in by capability author. Not every L2+ capability
   uses it. The pattern is documented; coverage is partial.
-- Drift detector ships but doesn't yet have a default prompt set
-  in v0.3. It's plumbing for now.
-- Red-team is M6 (advisory). M8 will hard-gate self-mod on it.
+- Drift detector ships but doesn't yet have a default prompt set.
+  It's plumbing for now.
+- M8.P5 disk-write self-mod: shipped 2026-05-15, 24h-soak-class
+  verified 2026-05-24 (9 of 10 cycles byte-identical clean; 1
+  rollbackVerify failure correlated with a low-battery force-sleep,
+  not a substrate bug — file-on-disk inspection confirmed no
+  corruption; see [`tasks/m8-p5-soak-verdict-2026-05-24.md`](../tasks/m8-p5-soak-verdict-2026-05-24.md)).
+  v1.1 hardening target: in-flight interruption recovery so a
+  future power-event during a cycle leaves no `rollbackVerify`
+  ambiguity.
 - Astrion Browser is ~5500 lines and has not been hardware-tested.
   Pre-flash audit caught two silent IPC bugs in 2026-05-09; another
   pass is warranted.

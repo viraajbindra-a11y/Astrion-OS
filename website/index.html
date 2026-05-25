@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Astrion OS — The AI-native OS whose safety story is actually true.</title>
-  <meta name="description" content="Astrion is an open-source AI-native operating system. The AI runs on your hardware — no cloud, no key, no account. Writes code that passes its own tests, rewinds any change it makes, refuses to modify itself unless five gates agree. Free. Boots from USB.">
+  <meta name="description" content="Astrion is an open-source AI-native operating system. The AI runs on your hardware — no cloud, no key, no account. Writes code that passes its own tests, rewinds any change it makes, refuses to modify itself unless six gates agree. Free. Boots from USB.">
   <meta name="theme-color" content="#007aff">
   <meta property="og:title" content="Astrion OS — the AI-native OS whose safety story is actually true.">
   <meta property="og:description" content="Self-hosted AI on first boot. Verifiable. Reversible. Socratic. Open source. Built by a 12-year-old.">
@@ -464,7 +464,7 @@
     <p>
       Every AI feature in Windows, macOS, or any phone is bolted onto an OS that wasn't built for it.
       Astrion is the OS, AI woven through every layer — and the only one that ships verifiable code,
-      reversible actions, and five gates between "the AI proposes a change" and "the change hits disk."
+      reversible actions, and six gates between "the AI proposes a change" and "the change hits disk."
     </p>
     <div class="hero-buttons">
       <a href="https://viraajbindra-a11y.github.io/Astrion-OS/" target="_blank" class="btn btn-primary">
@@ -516,7 +516,7 @@
   <section class="section">
     <div class="stats">
       <div class="stat"><div class="stat-number">77</div><div class="stat-label">Built-in Apps</div></div>
-      <div class="stat"><div class="stat-number">5</div><div class="stat-label">Self-Mod Gates</div></div>
+      <div class="stat"><div class="stat-number">6</div><div class="stat-label">Self-Mod Gates</div></div>
       <div class="stat"><div class="stat-number">345</div><div class="stat-label">Verification Tests</div></div>
       <div class="stat"><div class="stat-number">0</div><div class="stat-label">Telemetry</div></div>
       <div class="stat"><div class="stat-number">100%</div><div class="stat-label">Open Source</div></div>
@@ -577,7 +577,7 @@
     <p>
       Type <code style="background:rgba(255,255,255,0.06); padding:2px 8px; border-radius:6px; font-family:var(--mono); font-size:13px;">upgrade yourself</code>
       in Spotlight. The AI reads the screen, picks one file from the allow-list, proposes a fix,
-      and walks five gates before a single byte hits disk.
+      and walks six gates before a single byte hits disk.
     </p>
 
     <div class="selfmod-card">
@@ -592,11 +592,12 @@
       </div>
 
       <div class="gates">
-        <div class="gate"><span class="gate-num">1 ✓</span><span class="gate-name">golden-integrity</span><span class="gate-sub">19 safety files unchanged</span></div>
-        <div class="gate"><span class="gate-num">2 ✓</span><span class="gate-name">value-lock</span><span class="gate-sub">LOCKED_VALUES match baseline</span></div>
-        <div class="gate"><span class="gate-num">3 ✓</span><span class="gate-name">red-team</span><span class="gate-sub">2nd model, no high-severity risks</span></div>
-        <div class="gate"><span class="gate-num">4 ✓</span><span class="gate-name">typed-confirm</span><span class="gate-sub">user typed proposal id</span></div>
-        <div class="gate"><span class="gate-num">5 ✓</span><span class="gate-name">rollback-plan</span><span class="gate-sub">inverse diff stored</span></div>
+        <div class="gate"><span class="gate-num">1 ✓</span><span class="gate-name">content-blocklist</span><span class="gate-sub">no eval(), no Node imports, ≤80 KB</span></div>
+        <div class="gate"><span class="gate-num">2 ✓</span><span class="gate-name">golden-integrity</span><span class="gate-sub">19 safety files unchanged</span></div>
+        <div class="gate"><span class="gate-num">3 ✓</span><span class="gate-name">value-lock</span><span class="gate-sub">LOCKED_VALUES match baseline</span></div>
+        <div class="gate"><span class="gate-num">4 ✓</span><span class="gate-name">red-team</span><span class="gate-sub">2nd model · proceed / review / abort</span></div>
+        <div class="gate"><span class="gate-num">5 ✓</span><span class="gate-name">typed-confirm</span><span class="gate-sub">user typed proposal id</span></div>
+        <div class="gate"><span class="gate-num">6 ✓</span><span class="gate-name">rollback-plan</span><span class="gate-sub">inverse diff stored</span></div>
       </div>
 
       <div style="margin-top:24px; padding:14px 18px; background:rgba(255,255,255,0.04); border-radius:10px; font-size:13px; color:var(--text-secondary);">
@@ -742,7 +743,7 @@
             <td class="ex">✗</td>
           </tr>
           <tr>
-            <td>Self-modification with 5 gates → disk write</td>
+            <td>Self-modification with 6 gates → disk write</td>
             <td class="us check">✓</td>
             <td class="ex">✗</td>
             <td class="ex">✗</td>
