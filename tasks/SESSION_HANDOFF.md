@@ -1,12 +1,19 @@
 # Session Handoff — 2026-05-24 (Phase 1 close + Phase 2 jumpstart)
 
-**11 commits, the heaviest single day of v1.0 prep so far.** Phase 1
+**16 commits, the heaviest single day of v1.0 prep so far.** Phase 1
 closed with a GREEN verdict on M8.P5 disk-write self-mod. Phase 2
 W22 (landing page) + W23 (demo video script) shipped ahead of
 schedule. v1.0 hardening (verify-read retry) closed the soak's
 single ambiguous failure mode. Safety-story docs audited + fixed
 across README, SAFETY.md, landing page, install.md, Spotlight help.
-New hardware-testing checklist for Phase 4 prep.
+New hardware-testing checklist for Phase 4 prep. Pen-test extended
++6 tests with a self-verification button in Settings. Hostile-
+reviewer audit caught + closed: missing LICENSE file, 4 content-
+blocklist eval-bypass holes (`Function('...')` no-new, bracket-
+access eval, string-arg setTimeout/setInterval, .constructor()
+bypass), and a silent L2+ enforcement bypass in the Messages
+mini-executor. Three ISO builds queued/completed (the third has
+everything from today).
 
 **Today: 2026-05-24.** Branch: `claude/objective-pike-2b892a`,
 ff-merged into main after every commit. Main is now at `9591b0d`,
@@ -29,8 +36,14 @@ TODAY; Phase 2 starts tomorrow.
 | 8 | `8434031` | selfmod-soak: verify-read retry (v1.0 hardening) + kill-switch pill style fix |
 | 9 | `f726c09` | spotlight: '5 safety gates' → '6 safety gates' in upgrade-yourself help |
 | 10 | `9591b0d` | docs: fix install.md overclaims + add hardware-testing pre-flash checklist |
+| 11 | `e597a4a` | SESSION_HANDOFF: 2026-05-24 (mid-day snapshot) |
+| 12 | `2c12a49` | pen-test: +3 attack patterns (browser proxy SSRF, server traversal, kill-switch surface) |
+| 13 | `9268845` | settings: Run-pen-test button + results panel (self-verification surface) |
+| 14 | `19d68ae` | LICENSE: add MIT license file (was claimed in 3 places, never existed) |
+| 15 | `c807cae` | content-blocklist: close 4 eval-bypass holes the audit pass found |
+| 16 | `6b2a4d4` | messages: refuse L2+ caps in the in-tab mini-executor (close silent bypass) |
 
-(11th commit will be this handoff.)
+(17th commit is this handoff update.)
 
 ---
 
