@@ -33,8 +33,10 @@ EFI_CFLAGS = -I/usr/include/efi -I/usr/include/efi/x86_64 \
 EFI_LIB_DIR := $(shell if [ -f /usr/lib/x86_64-linux-gnu/elf_x86_64_efi.lds ]; \
                        then echo /usr/lib/x86_64-linux-gnu; \
                        else echo /usr/lib; fi)
-EFI_LDFLAGS = -nostdlib -shared -Bsymbolic -T $(EFI_LIB_DIR)/elf_x86_64_efi.lds \
-              $(EFI_LIB_DIR)/crt0-efi-x86_64.o -L $(EFI_LIB_DIR) -lefi -lgnuefi
+EFI_LDFLAGS = -nostdlib -znocombreloc -shared -Bsymbolic \
+              -T $(EFI_LIB_DIR)/elf_x86_64_efi.lds \
+              -L $(EFI_LIB_DIR) \
+              $(EFI_LIB_DIR)/crt0-efi-x86_64.o
 
 # Source files
 KERNEL_SRCS = src/kernel.c gui/framebuffer.c drivers/keyboard.c drivers/mouse.c
@@ -60,7 +62,7 @@ kernel: $(KERNEL_OBJS)
 boot:
 	@mkdir -p $(BUILD_DIR)
 	$(CC) $(EFI_CFLAGS) -c boot/boot.c -o $(BUILD_DIR)/boot.o
-	$(LD) $(EFI_LDFLAGS) $(BUILD_DIR)/boot.o -o $(BUILD_DIR)/boot.so
+	$(LD) $(EFI_LDFLAGS) $(BUILD_DIR)/boot.o -o $(BUILD_DIR)/boot.so -lefi -lgnuefi
 	# .rodata is required for string literals + const data; without it
 	# the loaded EFI binary has dangling pointers and crashes with #UD
 	# at runtime (2026-05-25 QEMU test caught this). .eh_frame is a
