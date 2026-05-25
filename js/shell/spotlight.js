@@ -938,7 +938,7 @@ export function initSpotlight() {
           label: '🛡 Safety + Reversibility',
           subtitle: 'The unique stuff Astrion does that no other OS ships.',
           commands: [
-            { cmd: 'upgrade yourself · improve yourself [js/apps/<file>]', desc: 'AI reads screen + source, proposes a fix, walks 5 safety gates, writes to disk' },
+            { cmd: 'upgrade yourself · improve yourself [js/apps/<file>]', desc: 'AI reads screen + source, proposes a fix, walks 6 safety gates, writes to disk' },
             { cmd: 'undo upgrade · rollback upgrade', desc: 'Restore the pre-upgrade file content. Bytewise, idempotent.' },
             { cmd: 'branches · timeline · history', desc: 'See recent L2+ operations. Click ⏪ Rewind on any committed branch.' },
             { cmd: 'rehearse <query> · preview <query>', desc: 'Dry-run a plan in a branch, see the diff, then Apply or Discard' },
