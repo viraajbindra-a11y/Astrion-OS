@@ -116,11 +116,22 @@ async function testContentBlocklist() {
   // needing a full propose/apply cycle.
   const upgrader = await import('./self-upgrader.js');
   const samples = [
+    // Original 5 — the obvious patterns
     { content: 'eval("alert(1)")', shouldBlock: true, why: 'eval' },
     { content: 'new Function("return 1")()', shouldBlock: true, why: 'new Function' },
     { content: 'localStorage.removeItem("astrion-value-lock-baseline")', shouldBlock: true, why: 'clears Astrion key' },
     { content: 'graphStore.deleteNode("foo")', shouldBlock: true, why: 'direct graph mutation' },
     { content: '// hello world\nconsole.log(1);', shouldBlock: false, why: 'benign' },
+    // 2026-05-24 round — bypass attempts the audit pass identified:
+    { content: 'Function("alert(1)")()', shouldBlock: true, why: 'Function() no-new bypass' },
+    { content: 'window["eval"]("alert(1)")', shouldBlock: true, why: 'bracket-access eval bypass' },
+    { content: 'globalThis["eval"]("x")', shouldBlock: true, why: 'globalThis bracket eval' },
+    { content: 'setTimeout("alert(1)", 0)', shouldBlock: true, why: 'string-arg setTimeout' },
+    { content: 'setInterval("alert(1)", 100)', shouldBlock: true, why: 'string-arg setInterval' },
+    { content: '(()=>{}).constructor("alert(1)")()', shouldBlock: true, why: '.constructor bypass' },
+    // Benign-but-similar lookalikes — verify the new regexes don't false-positive:
+    { content: 'setTimeout(() => doStuff(), 100);', shouldBlock: false, why: 'callback-form setTimeout (legitimate)' },
+    { content: 'class App { constructor(opts) { this.opts = opts; } }', shouldBlock: false, why: 'class constructor (legitimate)' },
   ];
   const wrong = [];
   for (const s of samples) {

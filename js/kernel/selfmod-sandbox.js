@@ -113,9 +113,18 @@ export async function applyProposal(id, opts = {}) {
   if (typeof proposal.newContent === 'string' && proposal.newContent.length > 0) {
     try {
       const upgrader = await import('./self-upgrader.js');
+      // 2026-05-24 hardening pass (pen-test bypass round). Original
+      // 4-pattern list missed: Function('...') without `new` (spec-
+      // equivalent to new Function), bracket-access eval, string-arg
+      // setTimeout/setInterval (implicit eval), and .constructor() with
+      // string arg. Mirrors self-upgrader.js CONTENT_BLOCKLIST exactly.
       const dangerous = [
         { re: /\beval\s*\(/, reason: 'contains eval(' },
-        { re: /new\s+Function\s*\(/, reason: 'contains new Function(' },
+        { re: /\bnew\s+Function\s*\(/, reason: 'contains new Function(' },
+        { re: /\bFunction\s*\(\s*['"`]/, reason: 'Function() constructor (no new) — spec-equivalent to new Function' },
+        { re: /\[\s*['"`]eval['"`]\s*\]/, reason: 'bracket-access eval — string-form direct eval' },
+        { re: /\b(?:setTimeout|setInterval)\s*\(\s*['"`]/, reason: 'string-arg setTimeout/setInterval — implicit eval of string' },
+        { re: /\.\s*constructor\s*\(\s*['"`]/, reason: '.constructor() with string arg — Function-constructor bypass' },
         { re: /localStorage\.removeItem\s*\(\s*['"]astrion-/, reason: 'clears Astrion state key' },
         { re: /graphStore\.(deleteNode|removeEdge)\s*\(/, reason: 'direct graph mutation bypassing capabilities' },
       ];

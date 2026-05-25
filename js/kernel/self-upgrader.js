@@ -80,6 +80,24 @@ const CONTENT_BLOCKLIST = [
   { re: NODE_BUILTINS_RE, reason: 'Node built-in module import in browser code' },
   { re: /\beval\s*\(/, reason: 'eval() call' },
   { re: /\bnew\s+Function\s*\(/, reason: 'new Function() constructor' },
+  // 2026-05-24 hardening pass (pen-test bypass round). The original
+  // /\bnew\s+Function\s*\(/ misses the spec-equivalent `Function('...')`
+  // form — calling Function as a function (no `new`) creates a function
+  // identically. Catch the constructor-as-function form regardless.
+  { re: /\bFunction\s*\(\s*['"`]/, reason: 'Function() constructor (no new) — spec-equivalent to new Function' },
+  // /\beval\s*\(/ misses bracket-access bypass: `window['eval']('...')`,
+  // `globalThis['eval']('...')`, or even `obj['ev'+'al']`. Flag any
+  // reference to 'eval' as a string literal in a bracket context.
+  { re: /\[\s*['"`]eval['"`]\s*\]/, reason: 'bracket-access eval (e.g. window["eval"]) — string-form direct eval' },
+  // setTimeout/setInterval with a STRING first arg is eval-equivalent
+  // (browsers implicitly run eval on the string). The function-arg
+  // form is fine; only flag the string-arg one.
+  { re: /\b(?:setTimeout|setInterval)\s*\(\s*['"`]/, reason: 'string-arg setTimeout/setInterval — implicit eval of string' },
+  // `(()=>{}).constructor('...')` and similar tricks grab the Function
+  // constructor via property access. Any `.constructor(` with a string
+  // first arg is highly suspect — legitimate uses pass an object, not
+  // a string literal.
+  { re: /\.\s*constructor\s*\(\s*['"`]/, reason: '.constructor() with string arg — Function-constructor bypass' },
   { re: /\bimportScripts\s*\(/, reason: 'importScripts call' },
   { re: /localStorage\.removeItem\s*\(\s*['"]astrion-/, reason: 'clears Astrion state key' },
   { re: /graphStore\.(deleteNode|removeEdge)\s*\(/, reason: 'direct graph mutation bypassing capabilities' },

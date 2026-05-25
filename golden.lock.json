@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "generated_at": "2026-05-13T01:30:49.486Z",
+  "generated_at": "2026-05-25T16:14:29.547Z",
   "files": {
     "js/kernel/capability-api.js": "85a4c950586c902da27fb6a9a5c417db6a1ad0267e3b8cb88a76f5823cc52eaa",
     "js/kernel/operation-interceptor.js": "8cb583c547779556b1d8aacab1cc50d9e8156de1cf4cf25040570ffbf5222d6b",
@@ -15,10 +15,10 @@
     "js/kernel/skill-registry.js": "640ca9e02b4e19b321b00727b93f805dd1e1eb41164a574af49771fd81c2ba68",
     "js/kernel/golden-check.js": "145e1ddce707232b08b53312884c5761c58eb354d213a98b5e23cc9fa53e1b78",
     "js/kernel/value-lock.js": "4458349bae7102220f4ef3d120bf2a5c2f47c0466bfd619bf08a8c8edddb2c00",
-    "js/kernel/selfmod-sandbox.js": "9faca3522b81a91bb9df939ddc31c4c1b7c8330f7a1042ea8b0e828a385ebe10",
+    "js/kernel/selfmod-sandbox.js": "ee965c2807aace72280c669dc08e2634e0a9319378fc472995d485816890649b",
     "js/kernel/drift-detector.js": "7852aa3708f01ede4873e30e6fa55a08528d9d437a6d4db66a4d3e7bdd71cefb",
     "js/kernel/skill-scheduler.js": "935e40f8722cca8e5ccd78f89e4ed20d6276e67952f22ae20f7d388d5b3a8656",
-    "js/kernel/self-upgrader.js": "295babce3f593d1db9e94730cdd42a4d21854298e20133eb69aa134d52e46ad4",
+    "js/kernel/self-upgrader.js": "f7c34428fda2d687cd00eddcb0ceb36b75967c68616e57f5de5a7d93745380df",
     "js/kernel/api-surface.lock.js": "14aa8b207a41caf6ac78b1992034cec1cffd855ee0a3ef1c276e0bb85b05f1db",
     "test/v03-verification.html": "aa3206b7ecbe38b8602835829ced51717d0d8b32c71523fe27c6ad9668dc8161"
   }
