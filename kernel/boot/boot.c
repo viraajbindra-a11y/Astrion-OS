@@ -203,17 +203,46 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable
     serial_log("[2/4] Loading kernel from \\nova\\kernel.bin\n");
     Print(L"[2/4] Loading kernel...\n");
 
-    // Load kernel file from the EFI system partition
-    EFI_LOADED_IMAGE_PROTOCOL *loaded_image;
+    // 2026-05-25: every HandleProtocol/OpenVolume/Open call now has
+    // status checks. Previously the calls just trusted the output
+    // pointers; if any returned an error, we'd dereference garbage
+    // and #GP on a "function pointer" that's actually an EFI status
+    // code (e.g. 0x8000000000000002 = EFI_INVALID_PARAMETER seen as RIP).
+
+    // Get LoadedImage for the current bootloader image (us).
+    EFI_LOADED_IMAGE_PROTOCOL *loaded_image = NULL;
     EFI_GUID li_guid = EFI_LOADED_IMAGE_PROTOCOL_GUID;
-    BS->HandleProtocol(ImageHandle, &li_guid, (void **)&loaded_image);
+    serial_log("  calling HandleProtocol(LoadedImage)\n");
+    status = BS->HandleProtocol(ImageHandle, &li_guid, (void **)&loaded_image);
+    serial_log("  HandleProtocol(LoadedImage) returned\n");
+    if (EFI_ERROR(status) || !loaded_image) {
+        serial_log("  ERROR: LoadedImage protocol not available\n");
+        Print(L"ERROR: LoadedImage not available\n");
+        goto halt;
+    }
 
-    EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *fs;
+    // Get the file system for the device we booted from.
+    EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *fs = NULL;
     EFI_GUID fs_guid = EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID;
-    BS->HandleProtocol(loaded_image->DeviceHandle, &fs_guid, (void **)&fs);
+    serial_log("  calling HandleProtocol(SimpleFileSystem)\n");
+    status = BS->HandleProtocol(loaded_image->DeviceHandle, &fs_guid, (void **)&fs);
+    serial_log("  HandleProtocol(SimpleFileSystem) returned\n");
+    if (EFI_ERROR(status) || !fs) {
+        serial_log("  ERROR: SimpleFileSystem not on boot device\n");
+        Print(L"ERROR: SimpleFileSystem not on boot device\n");
+        goto halt;
+    }
 
-    EFI_FILE_PROTOCOL *root;
-    fs->OpenVolume(fs, &root);
+    // Open the volume's root directory.
+    EFI_FILE_PROTOCOL *root = NULL;
+    serial_log("  calling fs->OpenVolume\n");
+    status = fs->OpenVolume(fs, &root);
+    serial_log("  OpenVolume returned\n");
+    if (EFI_ERROR(status) || !root) {
+        serial_log("  ERROR: OpenVolume failed\n");
+        Print(L"ERROR: OpenVolume failed\n");
+        goto halt;
+    }
 
     EFI_FILE_PROTOCOL *kernel_file;
     status = root->Open(root, &kernel_file, L"\\nova\\kernel.bin", EFI_FILE_MODE_READ, 0);
