@@ -124,17 +124,25 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable
     EFI_STATUS status;
     BootInfo boot_info = {0};
 
-    // Initialize UEFI library + serial debug output
-    InitializeLib(ImageHandle, SystemTable);
+    // Initialize UEFI library + serial debug output. Serial first so
+    // we see early-boot output even if InitializeLib crashes.
     serial_init();
     serial_log("\n=== Astrion Kernel Bootloader v0.1 ===\n");
     serial_log("efi_main entered; serial init OK\n");
+    serial_log("calling InitializeLib...\n");
+    InitializeLib(ImageHandle, SystemTable);
+    serial_log("InitializeLib returned\n");
 
-    // Clear screen and show boot message
+    // Narrower per-call diagnostic to pinpoint which UEFI service hangs.
+    // 2026-05-25: the boot reached InitializeLib + serial OK but produced
+    // no output past this point in QEMU's serial; narrowing now.
+    serial_log("about to ConOut->ClearScreen\n");
     ST->ConOut->ClearScreen(ST->ConOut);
+    serial_log("ClearScreen done; about to Print(banner)\n");
     Print(L"Astrion Kernel Bootloader v0.1\n");
+    serial_log("Print(banner) done; about to Print(Initializing)\n");
     Print(L"Initializing...\n\n");
-    serial_log("ClearScreen + initial Print done\n");
+    serial_log("Print(Initializing) done\n");
 
     // --- Step 1: Set up Graphics ---
     serial_log("[1/4] Setting up display\n");
