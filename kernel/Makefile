@@ -25,8 +25,16 @@ LDFLAGS = -nostdlib -T src/linker.ld
 EFI_CFLAGS = -I/usr/include/efi -I/usr/include/efi/x86_64 \
              -fpic -ffreestanding -fno-stack-protector -fshort-wchar \
              -mno-red-zone -DEFI_FUNCTION_WRAPPER
-EFI_LDFLAGS = -nostdlib -shared -Bsymbolic -T /usr/lib/elf_x86_64_efi.lds \
-              /usr/lib/crt0-efi-x86_64.o -lefi -lgnuefi
+
+# Detect gnu-efi lib dir. Ubuntu 22+ uses /usr/lib/x86_64-linux-gnu
+# (Debian multi-arch); older systems used /usr/lib directly. 2026-04-04
+# CI build failed here — the paths were hardcoded to /usr/lib and the
+# linker couldn't find -lefi / -lgnuefi.
+EFI_LIB_DIR := $(shell if [ -f /usr/lib/x86_64-linux-gnu/elf_x86_64_efi.lds ]; \
+                       then echo /usr/lib/x86_64-linux-gnu; \
+                       else echo /usr/lib; fi)
+EFI_LDFLAGS = -nostdlib -shared -Bsymbolic -T $(EFI_LIB_DIR)/elf_x86_64_efi.lds \
+              $(EFI_LIB_DIR)/crt0-efi-x86_64.o -L $(EFI_LIB_DIR) -lefi -lgnuefi
 
 # Source files
 KERNEL_SRCS = src/kernel.c gui/framebuffer.c drivers/keyboard.c drivers/mouse.c
