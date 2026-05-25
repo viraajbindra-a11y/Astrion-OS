@@ -417,6 +417,18 @@
       margin-top: 16px; font-size: 12px;
       color: var(--text-tertiary);
     }
+    .signup-success {
+      margin-top: 18px;
+      padding: 14px 18px; border-radius: 12px;
+      background: rgba(52, 199, 89, 0.10);
+      border: 1px solid rgba(52, 199, 89, 0.35);
+      color: var(--text);
+      font-size: 14px; line-height: 1.6;
+    }
+    .signup-success strong {
+      display: block; margin-bottom: 4px;
+      color: var(--green); font-size: 15px;
+    }
 
     /* ── Animations ── */
     @keyframes fadeInUp {
@@ -897,18 +909,13 @@
 
   <!-- Get early access (Phase 2 W22 spec: email capture) -->
   <!--
-    HOW TO WIRE THE FORM:
-    1. Pick a service: Formspree (formspree.io, easy), Tally (tally.so,
-       form-builder UI), Buttondown (buttondown.email, treats it like a
-       newsletter). All have free tiers. Formspree is the smallest lift.
-    2. Sign up, create a form, copy the form's POST URL.
-    3. Replace the action="https://formspree.io/f/REPLACE_WITH_YOUR_FORM_ID"
-       below with your real URL.
-    4. Confirm the success page or thank-you message matches your service.
-    Until that's wired, the form posts to the placeholder and the user
-    sees the service's 404 — better to leave it disabled in production
-    until the URL is real. The visible label says "wiring up" so it's
-    honest.
+    Wired to Formspree form mojbkeky (2026-05-25). Free tier: 50 submissions/month.
+    The hidden _next field sends the user back to this page with ?signup=success
+    so the inline success message at the bottom of <body> can render without
+    Formspree's hosted thank-you page taking over. _subject sets the inbox subject.
+    To check / rotate: log in at formspree.io, find form "mojbkeky".
+    If submissions cap out: bump to Tally or Buttondown, swap the action URL,
+    drop the hidden _next field (Tally has its own redirect param).
   -->
   <section class="signup" id="early-access">
     <div class="section-label">Get early access</div>
@@ -919,14 +926,20 @@
       tracking pixels.
     </p>
 
-    <form class="signup-form" action="https://formspree.io/f/REPLACE_WITH_YOUR_FORM_ID" method="POST">
+    <form class="signup-form" id="early-access-form" action="https://formspree.io/f/mojbkeky" method="POST">
+      <input type="hidden" name="_subject" value="Astrion OS early-access signup">
+      <input type="hidden" name="_next" value="https://astrion-os.com/?signup=success#early-access">
       <input type="email" name="email" placeholder="you@example.com" required autocomplete="email">
       <button type="submit">Notify me at launch</button>
     </form>
 
+    <div class="signup-success" id="signup-success" hidden>
+      <strong>You're on the list.</strong>
+      Two emails total: beta invite (Sep) + v1.0 launch (Dec 21, 2026).
+      Watch the GitHub repo for build progress in the meantime.
+    </div>
+
     <div class="signup-fineprint">
-      Wiring up the form on launch week — until then this submits to a placeholder.
-      <br>
       No newsletter. Two emails total: beta invite (Sep) + v1.0 launch (Dec 21).
       Unsubscribe in one click.
     </div>
@@ -956,6 +969,34 @@
       <a href="https://viraajbindra-a11y.github.io/Astrion-OS/">Try Online</a>
     </p>
   </footer>
+
+  <!--
+    Post-signup success swap. Formspree's _next hidden field sends the
+    user back to /?signup=success#early-access after a successful POST.
+    On load we detect the query param, hide the form, reveal the
+    pre-styled success block, and clean the URL so a reload doesn't
+    keep showing the success state. Zero dependencies, no analytics.
+  -->
+  <script>
+    (function () {
+      try {
+        var params = new URLSearchParams(window.location.search);
+        if (params.get('signup') === 'success') {
+          var form = document.getElementById('early-access-form');
+          var success = document.getElementById('signup-success');
+          if (form) form.hidden = true;
+          if (success) success.hidden = false;
+          // Clean the URL so a refresh doesn't re-show the success state.
+          var clean = window.location.pathname + window.location.hash;
+          window.history.replaceState({}, document.title, clean);
+        }
+      } catch (e) {
+        // URL parsing / DOM access failed (very old browser). The user
+        // sees the form + success message both — harmless, slightly
+        // weird. Not worth bloating this script with feature detection.
+      }
+    })();
+  </script>
 
 </body>
 </html>
