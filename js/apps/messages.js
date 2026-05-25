@@ -9,7 +9,7 @@ import { aiService } from '../kernel/ai-service.js';
 import { sounds } from '../kernel/sound.js';
 import { parseIntent } from '../kernel/intent-parser.js';
 import { routeQuery, planIntent } from '../kernel/intent-planner.js';
-import { getCapability, resolveCapability } from '../kernel/capability-api.js';
+import { getCapability, resolveCapability, LEVEL } from '../kernel/capability-api.js';
 import { getContextBundle } from '../kernel/context-bundle.js';
 import { getOrCreateSession, getRecentTurns, recordTurn } from '../kernel/conversation-memory.js';
 import { resolveBindings, findUnresolvedBindings, pickBindValue } from '../kernel/intent-executor.js';
@@ -102,6 +102,21 @@ async function executeStepsInChat(steps, query, container) {
 
     // Inject _intent context for capability providers that read it
     resolvedArgs._intent = { raw: query, args: step.args || {} };
+
+    // 2026-05-24 hardening: the mini-executor deliberately bypasses
+    // Spotlight's L2+ gate UI (so it doesn't hijack the Messages tab),
+    // but it MUST NOT silently bypass the L2+ enforcement. Refuse any
+    // L2+ capability here — the user can re-issue via Spotlight which
+    // has the proper preview + red-team + typed-confirm gate. This is
+    // the v1.0 conservative fix; v1.1 could give Messages its own
+    // in-tab gate UI.
+    if (typeof cap.level === 'number' && cap.level >= LEVEL.REAL) {
+      results.push({
+        index: i, cap: step.cap, ok: false,
+        error: `L2+ capability "${step.cap}" needs Spotlight's preview gate — re-issue via Cmd+Space`,
+      });
+      break;
+    }
 
     // Show step progress in typing indicator
     updateTypingStatus(container, `Step ${i + 1}/${steps.length}: ${cap.summary}...`);
@@ -565,6 +580,20 @@ function initMessages(container) {
 
     // Execute the single capability
     const args = { ...intent.args, _intent: intent };
+
+    // 2026-05-24 hardening: same L2+ refusal as the multi-step
+    // mini-executor above. The single-shot path here ALSO bypasses
+    // Spotlight's gate UI. L2+ caps must go through Spotlight to
+    // get the preview + red-team + typed-confirm chain.
+    if (typeof cap.level === 'number' && cap.level >= LEVEL.REAL) {
+      const sessionId = getOrCreateSession();
+      await recordTurn({
+        sessionId, query: text, parsedIntent: intent, ok: false,
+        error: 'refused: L2+ requires Spotlight gate',
+        capSummary: cap.id,
+      });
+      return `Action "${cap.summary}" needs the Spotlight preview gate (it's an L2+ action that touches real state). Press Cmd+Space and re-issue there.`;
+    }
 
     updateTypingStatus(container, cap.summary + '...');
 
