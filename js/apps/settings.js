@@ -1424,6 +1424,13 @@ function initSettings(container) {
     if (!grid) return;
 
     // Kill-switch pill — live probe of /api/system/selfmod-status.
+    // 2026-05-24: reset bg+color on every branch (including unknown +
+    // unreachable) — previously the "unknown" path only changed
+    // textContent, leaving stale green/red styling from a prior render
+    // visible. The user saw "kill-switch: unknown" rendered in the
+    // off-pill green color twice in screenshots; this fixes that.
+    const defaultPillBg = 'rgba(255,255,255,0.06)';
+    const defaultPillFg = 'rgba(255,255,255,0.5)';
     try {
       const probe = await fetch('/api/system/selfmod-status');
       if (probe.ok) {
@@ -1438,10 +1445,14 @@ function initSettings(container) {
           pill.style.color = '#a6e3a1';
         }
       } else {
-        pill.textContent = 'kill-switch: unknown';
+        pill.textContent = `kill-switch: unknown (HTTP ${probe.status})`;
+        pill.style.background = defaultPillBg;
+        pill.style.color = defaultPillFg;
       }
-    } catch {
+    } catch (err) {
       pill.textContent = 'kill-switch: unreachable';
+      pill.style.background = defaultPillBg;
+      pill.style.color = defaultPillFg;
     }
 
     // Soak state + report
@@ -1494,6 +1505,11 @@ function initSettings(container) {
           <span style="color:rgba(255,255,255,0.5);">Last failure</span>
           <span style="color:#f38ba8;font-family:var(--mono);font-size:11px;word-break:break-word;">${escapeHtml(last.failureSummary || last.applyError || '')}</span>`
           : '';
+        const transientRow = diskReport.transientReadsAbsorbed > 0
+          ? `
+          <span style="color:rgba(255,255,255,0.5);">Transients absorbed</span>
+          <span style="color:#a6e3a1;">${diskReport.transientReadsAbsorbed} (verify-read retry caught transient + succeeded)</span>`
+          : '';
         diskGrid.innerHTML = `
           <span style="color:rgba(255,255,255,0.5);">Cycles run</span>
           <span style="color:${okColor};">${diskReport.cycles} · ${diskReport.totalOk} ok · ${diskReport.totalFailed} failed</span>
@@ -1502,7 +1518,7 @@ function initSettings(container) {
           <span style="color:rgba(255,255,255,0.5);">Rollback-verify fails</span>
           <span style="color:${rollbackColor};font-weight:${diskReport.rollbackVerifyFailures > 0 ? '600' : '400'};">${diskReport.rollbackVerifyFailures}</span>
           <span style="color:rgba(255,255,255,0.5);">Kill-switch hits</span>
-          <span>${diskReport.killSwitchHits}</span>
+          <span>${diskReport.killSwitchHits}</span>${transientRow}
           <span style="color:rgba(255,255,255,0.5);">Heap delta (sum)</span>
           <span style="color:${heapColor};">${heapMb(diskReport.heapDeltaSum)} over ${diskReport.heapSamples} samples</span>
           <span style="color:rgba(255,255,255,0.5);">Last cycle</span>

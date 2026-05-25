@@ -255,6 +255,13 @@ async function runScheduledTick() {
     killSwitch: cycle.phases?.apply?.killSwitch === true || cycle.phases?.ensure?.killSwitch === true,
     applyError: cycle.phases?.apply?.error || null,
     failureSummary,
+    // v1.0 hardening (lesson #193): persist the verify-read classifier
+    // so the panel can show whether a "failure" was a real wrong-content
+    // event vs a partial/read-failed transient that survived retry.
+    applyVerifyClassifier: cycle.phases?.applyVerify?.classifier || null,
+    applyVerifyAttempts: cycle.phases?.applyVerify?.attempts || null,
+    rollbackVerifyClassifier: cycle.phases?.rollbackVerify?.classifier || null,
+    rollbackVerifyAttempts: cycle.phases?.rollbackVerify?.attempts || null,
     heapBefore,
     heapAfter,
     heapDelta: (heapBefore !== null && heapAfter !== null) ? heapAfter - heapBefore : null,
@@ -370,6 +377,11 @@ export function getDiskCycleReport() {
   let rollbackVerifyFailures = 0, applyVerifyFailures = 0, killSwitchHits = 0;
   let sumDuration = 0;
   let heapDeltaSum = 0, heapSamples = 0;
+  // v1.0 hardening (lesson #193): count cycles where the verify-read
+  // retry absorbed a transient. attempts > 1 with ok=true means the
+  // first read missed but a retry caught it. High counts here are a
+  // good signal the retry is doing its job, not a problem.
+  let transientReadsAbsorbed = 0;
   for (const c of cycles) {
     if (c.ok) totalOk += 1; else totalFailed += 1;
     if (c.rollbackVerifyOk === false) rollbackVerifyFailures += 1;
@@ -380,12 +392,15 @@ export function getDiskCycleReport() {
       heapDeltaSum += c.heapDelta;
       heapSamples += 1;
     }
+    if ((c.applyVerifyAttempts || 1) > 1 && c.applyVerifyOk === true) transientReadsAbsorbed += 1;
+    if ((c.rollbackVerifyAttempts || 1) > 1 && c.rollbackVerifyOk === true) transientReadsAbsorbed += 1;
   }
   return {
     cycles: cycles.length,
     startedAt: history.startedAt,
     totalOk, totalFailed,
     rollbackVerifyFailures, applyVerifyFailures, killSwitchHits,
+    transientReadsAbsorbed,
     meanDurationMs: Math.round(sumDuration / cycles.length),
     heapDeltaSum: heapSamples > 0 ? heapDeltaSum : null,
     heapSamples,
@@ -425,6 +440,79 @@ async function readTargetFromDisk() {
   } catch {
     return null;
   }
+}
+
+/**
+ * Read the target with retry, looking for a specific expected content
+ * string. Returns a verify result that distinguishes transient read
+ * failures (network blip, browser-aborted fetch during sleep) from
+ * real substrate failures (rollback wrote wrong bytes).
+ *
+ * Lesson #193 (2026-05-24 soak): the W19 soak's single failure was a
+ * rollbackVerify that fired during a low-battery force-sleep. The
+ * cycle's verify-read got a partial / aborted response back from
+ * /api/files/read; the actual file on disk was byte-identical to the
+ * original ("test\n"). Adding 2 retries with a small backoff makes
+ * the difference between "the disk is wrong" and "the read couldn't
+ * see the disk" — the former is a v1.0-killer, the latter is a flake
+ * that the substrate already handled correctly.
+ *
+ * Classifier values:
+ *   - 'match-first' → first read succeeded (most cycles, no retry needed)
+ *   - 'match-retry-N' → succeeded on attempt N+1 (transient absorbed)
+ *   - 'wrong-content' → all reads succeeded but bytes don't match expected
+ *                      (REAL substrate failure; rollback wrote wrong bytes)
+ *   - 'partial-content' → all reads returned a length < half expected
+ *                        (likely fetch-abort; treat as transient)
+ *   - 'read-failed' → all reads returned null (server unreachable / 5xx)
+ *
+ * @param {string} expectedContent
+ * @param {object} [opts]
+ * @param {number} [opts.maxAttempts=3]
+ * @param {number} [opts.backoffMs=250]
+ * @returns {Promise<{ok, attempts, diskBytes, classifier, finalReadOk}>}
+ */
+async function verifyReadWithRetry(expectedContent, opts = {}) {
+  const maxAttempts = Math.max(1, opts.maxAttempts ?? 3);
+  const backoffMs = Math.max(0, opts.backoffMs ?? 250);
+  const expectedLen = expectedContent.length;
+  let lastRead = null;
+  let attempts = 0;
+  let anyReadSucceeded = false;
+  for (let i = 0; i < maxAttempts; i++) {
+    attempts += 1;
+    const content = await readTargetFromDisk();
+    if (content !== null) anyReadSucceeded = true;
+    if (content === expectedContent) {
+      return {
+        ok: true,
+        attempts,
+        diskBytes: content.length,
+        classifier: i === 0 ? 'match-first' : `match-retry-${i}`,
+        finalReadOk: true,
+      };
+    }
+    lastRead = content;
+    if (i < maxAttempts - 1) {
+      await new Promise(r => setTimeout(r, backoffMs));
+    }
+  }
+  // All attempts exhausted without a match.
+  let classifier;
+  if (!anyReadSucceeded) {
+    classifier = 'read-failed';
+  } else if (typeof lastRead === 'string' && lastRead.length < expectedLen / 2) {
+    classifier = 'partial-content';
+  } else {
+    classifier = 'wrong-content';
+  }
+  return {
+    ok: false,
+    attempts,
+    diskBytes: lastRead === null ? null : lastRead.length,
+    classifier,
+    finalReadOk: lastRead !== null,
+  };
 }
 
 async function ensureSoakTargetExists() {
@@ -530,17 +618,20 @@ export async function runDiskCycle(opts = {}) {
     return { ok: false, phases, durationMs: Date.now() - t0, reason: 'apply failed' };
   }
 
-  // 2a. Verify disk now matches newContent
-  const afterApply = await readTargetFromDisk();
+  // 2a. Verify disk now matches newContent (with retry — v1.0 hardening
+  // per lesson #193: a transient read failure during apply/rollback was
+  // false-positiving as a substrate bug).
+  const applyVerifyResult = await verifyReadWithRetry(newContent);
   phases.applyVerify = {
-    ok: afterApply === newContent,
-    diskBytes: afterApply?.length,
+    ok: applyVerifyResult.ok,
+    diskBytes: applyVerifyResult.diskBytes,
     expectedBytes: newContent.length,
+    attempts: applyVerifyResult.attempts,
+    classifier: applyVerifyResult.classifier,
   };
-  if (afterApply !== newContent) {
-    // Surface the mismatch but proceed to rollback (we need to restore
-    // the original regardless).
-  }
+  // If applyVerify fails, we still proceed to rollback — we need to
+  // restore the original regardless (which is the whole point of the
+  // rollback half).
 
   // 3. Rollback
   let rollbackResult;
@@ -551,12 +642,16 @@ export async function runDiskCycle(opts = {}) {
     phases.rollback = { ok: false, error: err.message };
   }
 
-  // 3a. Verify disk now matches original
-  const afterRollback = await readTargetFromDisk();
+  // 3a. Verify disk now matches original (with retry — same lesson #193
+  // rationale as applyVerify above; this is the half the 2026-05-24
+  // soak's single failure tripped on).
+  const rollbackVerifyResult = await verifyReadWithRetry(original);
   phases.rollbackVerify = {
-    ok: afterRollback === original,
-    diskBytes: afterRollback?.length,
+    ok: rollbackVerifyResult.ok,
+    diskBytes: rollbackVerifyResult.diskBytes,
     expectedBytes: original.length,
+    attempts: rollbackVerifyResult.attempts,
+    classifier: rollbackVerifyResult.classifier,
   };
 
   const ok =
