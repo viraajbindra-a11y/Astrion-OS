@@ -172,18 +172,18 @@ static void draw_menubar(void) {
     fb_fill_rect_alpha(0, 0, fb_width(), MENUBAR_HEIGHT,
         (Color){30, 30, 30, 200});
 
-    // NOVA logo
+    // Astrion logo
     fb_fill_circle(12, MENUBAR_HEIGHT / 2, 5, COLOR_ACCENT);
 
     // App name
-    const char *app_name = focused_window >= 0 ? windows[focused_window].title : "NOVA OS";
+    const char *app_name = focused_window >= 0 ? windows[focused_window].title : "Astrion";
     fb_draw_string(24, 6, app_name, COLOR_WHITE, 1);
 
     // Menu items
     fb_draw_string(24 + fb_text_width(app_name, 1) + 16, 6, "File  Edit  View  Help", COLOR_TEXT2, 1);
 
     // Clock (right side) — simple static for now
-    fb_draw_string(fb_width() - 80, 6, "NOVA OS", COLOR_TEXT2, 1);
+    fb_draw_string(fb_width() - 80, 6, "Astrion", COLOR_TEXT2, 1);
 }
 
 static void draw_window(Window *w) {
@@ -273,7 +273,7 @@ void kernel_main(BootInfo *boot_info) {
     fb_swap();
 
     // Create a welcome window
-    create_window("Welcome to NOVA OS", fb_width()/2 - 200, fb_height()/2 - 120, 400, 240,
+    create_window("Welcome to Astrion", fb_width()/2 - 200, fb_height()/2 - 120, 400, 240,
         (Color){30, 30, 30, 255});
 
     // Main event loop — this runs forever

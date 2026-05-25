@@ -85,7 +85,7 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable
 
     // Clear screen and show boot message
     ST->ConOut->ClearScreen(ST->ConOut);
-    Print(L"NOVA OS Bootloader v0.1\n");
+    Print(L"Astrion Kernel Bootloader v0.1\n");
     Print(L"Initializing...\n\n");
 
     // --- Step 1: Set up Graphics ---
@@ -162,7 +162,7 @@ EFI_STATUS EFIAPI efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable
     boot_info.memory_map_desc_size = desc_size;
 
     // --- Step 4: Exit boot services and jump to kernel ---
-    Print(L"[4/4] Starting NOVA OS kernel...\n\n");
+    Print(L"[4/4] Starting Astrion kernel...\n\n");
 
     // Exit UEFI boot services — after this, we own the hardware
     status = BS->ExitBootServices(ImageHandle, map_key);
