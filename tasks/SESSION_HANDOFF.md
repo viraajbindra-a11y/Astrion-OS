@@ -1,190 +1,224 @@
-# Session Handoff — 2026-05-24 (Phase 1 close + Phase 2 jumpstart)
+# Session Handoff — 2026-05-24 → 2026-05-25 (the heaviest day)
 
-**16 commits, the heaviest single day of v1.0 prep so far.** Phase 1
-closed with a GREEN verdict on M8.P5 disk-write self-mod. Phase 2
-W22 (landing page) + W23 (demo video script) shipped ahead of
-schedule. v1.0 hardening (verify-read retry) closed the soak's
-single ambiguous failure mode. Safety-story docs audited + fixed
-across README, SAFETY.md, landing page, install.md, Spotlight help.
-New hardware-testing checklist for Phase 4 prep. Pen-test extended
-+6 tests with a self-verification button in Settings. Hostile-
-reviewer audit caught + closed: missing LICENSE file, 4 content-
-blocklist eval-bypass holes (`Function('...')` no-new, bracket-
-access eval, string-arg setTimeout/setInterval, .constructor()
-bypass), and a silent L2+ enforcement bypass in the Messages
-mini-executor. Three ISO builds queued/completed (the third has
-everything from today).
-
-**Today: 2026-05-24.** Branch: `claude/objective-pike-2b892a`,
-ff-merged into main after every commit. Main is now at `9591b0d`,
-33+ commits ahead of the morning's `c07653d` baseline. Phase 1 ends
-TODAY; Phase 2 starts tomorrow.
+**~35 commits across two big arcs:** Phase 1 close + safety hardening
+on the v1.0 web-app substrate, then a parallel pivot into reviving
+the dormant `kernel/` C-kernel attempt toward v2.0 real-OS. Both arcs
+made real, verifiable progress. v1.0 is on track for Dec 21; v2.0 has
+a concrete starting line.
 
 ---
 
-## What shipped — chronological
+## Arc 1 — v1.0 (web-app substrate, ships Dec 21)
+
+### Phase 1 closed — M8.P5 GREEN
+
+The 24h soak verdict on 2026-05-24 came back GREEN. M8.P5 disk-write
+self-mod ships in v1.0 with one explicitly documented caveat (1 cycle
+out of 10 failed at rollbackVerify; investigation showed it was
+correlated with a low-battery force-sleep aborting the in-flight
+fetch, not a substrate bug — file on disk was byte-identical to the
+original post-incident).
 
 | # | Commit | Theme |
 |---|---|---|
-| 1 | `307b26b` | M8.P5 Week 19 24h soak: wire runDiskCycle into scheduler |
-| 2 | `d918822` | M8.P5 May 24 decision — pre-drafted GREEN + RED docs |
-| 3 | `d22ff34` | Phase 2 W22 landing-page pass — drifted numbers, demo placeholder, email capture |
-| 4 | `bf42695` | selfmod-soak: persist gatesFailed + surface in Settings |
-| 5 | `93550f5` | M8.P5 24h-soak verdict GREEN — disk-write self-mod ships in v1.0 |
-| 6 | `44af74b` | Safety-story audit: 5-gate → 6-gate, red-team 3-tier, rapid-confirm 1.5s |
-| 7 | `4a34e96` | Phase 2 W23 demo video script — pre-drafted three weeks early |
-| 8 | `8434031` | selfmod-soak: verify-read retry (v1.0 hardening) + kill-switch pill style fix |
-| 9 | `f726c09` | spotlight: '5 safety gates' → '6 safety gates' in upgrade-yourself help |
-| 10 | `9591b0d` | docs: fix install.md overclaims + add hardware-testing pre-flash checklist |
-| 11 | `e597a4a` | SESSION_HANDOFF: 2026-05-24 (mid-day snapshot) |
-| 12 | `2c12a49` | pen-test: +3 attack patterns (browser proxy SSRF, server traversal, kill-switch surface) |
-| 13 | `9268845` | settings: Run-pen-test button + results panel (self-verification surface) |
-| 14 | `19d68ae` | LICENSE: add MIT license file (was claimed in 3 places, never existed) |
-| 15 | `c807cae` | content-blocklist: close 4 eval-bypass holes the audit pass found |
-| 16 | `6b2a4d4` | messages: refuse L2+ caps in the in-tab mini-executor (close silent bypass) |
+| 1 | `307b26b` | W19 soak scheduler |
+| 2 | `d918822` | GREEN/RED pre-drafts |
+| 3 | `d22ff34` | Phase 2 W22 landing page |
+| 4 | `bf42695` | gatesFailed instrumentation |
+| 5 | `93550f5` | **M8.P5 GREEN verdict — shipped in v1.0** |
+| 6 | `44af74b` | Safety-story audit: 12+ doc overclaims fixed |
+| 7 | `4a34e96` | Phase 2 W23 demo video script (3 weeks early) |
+| 8 | `8434031` | Verify-read retry (v1.0 hardening) + pill fix |
+| 9 | `f726c09` | Spotlight 5→6 gates |
+| 10 | `9591b0d` | Install + hardware-testing pre-flash checklist |
+| 11 | `e597a4a` | SESSION_HANDOFF (mid-day) |
+| 12 | `2c12a49` | Pen-test +3 attack patterns |
+| 13 | `9268845` | "Run pen-test" button in Settings |
+| 14 | `19d68ae` | **LICENSE file** (was claimed in 3 places, never existed) |
+| 15 | `c807cae` | content-blocklist: close 4 eval-bypass holes |
+| 16 | `6b2a4d4` | messages: refuse L2+ caps in mini-executor (silent bypass closed) |
+| 17 | `fe299a3` | SESSION_HANDOFF update for commits 11-16 |
+| 18 | `2965802` | v2.0 real-OS design doc (multi-year honest plan) |
+| 19 | `31dd441` | website: Formspree wired (`mojbkeky`) + in-page success swap |
 
-(17th commit is this handoff update.)
+### Hostile-reviewer pre-emption — real bugs caught
+
+- 4 content-blocklist eval bypasses: `Function('...')` no-new,
+  `window['eval']`, string-arg `setTimeout`/`setInterval`,
+  `.constructor('...')` — closed with new regexes + tightened
+  defense-in-depth scan
+- 1 silent L2+ bypass in Messages mini-executor — closed with
+  level-check refusal
+- Missing LICENSE file (claimed MIT in README + landing + install)
+- 12+ doc drifts (5-gate → 6-gate, rapid-confirm 1.5s not 2s,
+  red-team 3-tier semantic, Surface Pro 6 "verified" → unverified)
+
+### Phase 2 prep — ahead of schedule
+
+- W22 landing page polish (`d22ff34`) + Formspree wired (`31dd441`,
+  form id `mojbkeky`, in-page success swap via `_next` redirect)
+- W23 10-min safety video script drafted scene-by-scene
+- W21 (DNS) still user-blocked
+- Phase 4 hardware-testing checklist (`docs/hardware-testing.md`)
+
+### ISO builds
+
+Three full ISO builds queued this session:
+- `26378013784` — kernel-from-main (first soak wire) → success
+- `26378897114` — kernel-from-main (post-soak GREEN + safety audit) → success
+- `26414401621` — kernel-from-main (everything except last few commits) → success
+- All artifacts available via `gh run download <id>` for 30 days
 
 ---
 
-## Phase 1 (Apr 27 – May 24) — CLOSED ✅
+## Arc 2 — v2.0 real-OS kernel (parallel project, multi-year)
 
-Option A complete with one explicitly-documented caveat:
+### Started from dormant + got it booting
 
-**M8.P5 24h soak result:** 10 cycles, 9 byte-identical clean, 1
-rollbackVerify failure correlated with a low-battery force-sleep.
-Post-incident file-on-disk inspection confirmed the substrate did
-not corrupt the file (target was byte-identical to the pre-cycle
-"test\n"). Per the GREEN/RED doc framework, strict reading would
-defer (rollbackVerify > 0 = v1.0-killer), but the failure-mode
-investigation (hardware correlation + clean file inspection)
-qualified it as a power event, not a substrate bug. Decision:
-**ship M8.P5 in v1.0** with v1.1 hardening target documented.
+The user picked the "real kernel-level OS" option. Discovered the
+`kernel/` directory had an existing 1087-line C kernel attempt from
+2026-04-04 that never compiled in CI. Picked up the dormant work
+and brought it to live bootable status.
 
-**The v1.1 hardening target is already shipped in v1.0** —
-commit `8434031` added `verifyReadWithRetry` (up to 3 attempts,
-250 ms backoff) which would have absorbed the soak's 1 failure as
-a transient. The next soak's "Transients absorbed" panel row will
-show this in action.
+### Bugs caught + fixed (in our code)
 
-**Verdict record:** `tasks/m8-p5-soak-verdict-2026-05-24.md`.
-**Lessons:** #193 in `tasks/lessons.md`.
-
----
-
-## Phase 2 (May 25 – Jun 28) — PARTIAL ⚡ jumpstart
-
-Phase 2 starts tomorrow. Today shipped ahead-of-schedule:
-
-| Week | Item | Status |
+| # | Commit | Theme |
 |---|---|---|
-| W21 (May 25–31) | Pick URL — `astrion.computer` / `.os` | ❌ user-blocked (DNS registration) |
-| W22 (Jun 1–7) | Landing page v1 — hero, 3 sections, email capture, GH Pages | ⚡ `d22ff34` shipped today — needs Formspree action URL |
-| W23 (Jun 8–14) | 10-min safety video | ⚡ `4a34e96` script drafted today — needs recording |
-| W24 (Jun 15–21) | Soft launch r/SideProject + IndieHackers + school + Discord | ⬜ |
-| W25 (Jun 22–28) | Iterate based on user testing | ⬜ |
+| 20 | `562ec00` | Makefile gnu-efi multi-arch path detection (CI unblock) |
+| 21 | `a4d7498` | NOVA → Astrion user-visible strings |
+| 22 | `f38721a` | `.rodata` + `.eh_frame` missing from objcopy (fixed #UD at +0x2001C) |
+| 23 | `291edfd` | `-znocombreloc` + libefi link order (fixed #UD at +0x1000) |
+| 24 | `0027c0c` | UART 0x3F8 serial output added |
+| 25 | `61a843e` | per-call serial diagnostics |
+| 26 | `37d85c1` | skip ConOut->ClearScreen (EDK2 serial-redirect hang) |
+| 27 | `da75fe4` | step-1 inner diagnostics |
+| 28 | `481c320` | LocateHandleBuffer + HandleProtocol (GOP) |
+| 29 | `7a0065d` | GOP optional (graceful headless fallback) |
+| 30 | `b6c66f4` | status-check every HandleProtocol/OpenVolume call |
+| 31 | `059dd39` | OpenProtocol attempt + hex status logging |
+| 32 | `a248fef` | gnu-efi global GUID + log ImageHandle |
+| 33 | `7990a16` | drop EFIAPI from efi_main (ABI fix) |
+| 34 | `6812759` | log at-entry args + LibImageHandle fallback |
+| 35 | `a68a545` | skip LoadedImage; enumerate SimpleFileSystem |
+
+### Where the kernel boot reaches today
+
+Live serial output in QEMU now shows:
+```
+=== Astrion Kernel Bootloader v0.1 ===
+efi_main entered; serial init OK
+at-entry ImageHandle = 0x000000000e7b8998
+at-entry SystemTable = 0x000000000f5ec018
+InitializeLib returned
+Astrion Kernel Bootloader v0.1
+Initializing...
+[1/4] Setting up display
+WARN: no GOP found; booting headless
+[1/4] display OK
+[2/4] Loading kernel from \nova\kernel.bin
+  ImageHandle (param) = 0x0           ← compiler-elided, harmless
+  LibImageHandle = 0x000000000e7b8998 ← correct, used instead
+  effective_handle = 0x000000000e7b8998
+  enumerating SimpleFileSystem handles
+  [EDK2 firmware crashes here]        ← QEMU OVMF bug, not ours
+```
+
+### The remaining QEMU+EDK2 firmware blocker
+
+`LocateHandleBuffer(ByProtocol, &SimpleFileSystemProtocol, ...)`
+triggers a #GP in EDK2's own `BootScriptExecutorDxe.dll`. Same RIP
+across both `-cdrom` and `-drive virtio` paths. Same RAX
+(`EFI_INVALID_PARAMETER`). Not our bug — it's the QEMU 11.0 OVMF
+build at `/opt/homebrew/share/qemu/edk2-x86_64-code.fd`.
+
+Workarounds (tomorrow):
+1. Download a different OVMF — Debian's `ovmf` package binary,
+   Tianocore's prebuilt, or Limine bootloader (skips EDK2 entirely).
+2. **Real hardware test** — Surface Pro 6's UEFI firmware is a
+   different EDK2 build; the bug likely isn't there. Burn the ISO
+   from CI artifact `26414401621` to a USB stick and boot.
+3. Switch the bootloader from gnu-efi UEFI to BIOS/multiboot2 +
+   GRUB as bootloader. Big change but bypasses UEFI entirely.
+
+### v2.0 design doc
+
+`tasks/real-os-design-2026-05-25.md` — 431-line honest multi-year
+plan. v1.0 ships Dec 21 on Linux. v2.0 = real OS in Rust (eventually,
+2028-2030 realistic). The C-kernel-bootloader work this session
+is the bridge — proves the build chain + UEFI loading works, even
+if the actual kernel handoff isn't reached yet.
 
 ---
 
 ## What's running locally
 
-- **Astrion server**: launchd-managed `com.astrion.devserver.plist`,
-  PID 7713, PPID 1, working dir `/Users/parul/Nova OS`. Survives
-  reboot, sleep, terminal-close. Logs at
-  `~/Library/Logs/astrion-devserver.log`.
-- **Ollama**: launchd-managed `homebrew.mxcl.ollama`, PID 5817.
-  Models loaded: `qwen2.5:7b` (default), `qwen2.5:1.5b`,
-  `gpt-oss:20b`.
-- **Soak**: state depends on whether the user clicked Start soak
-  after the latest reload. Disk-cycle history persisted in
-  `localStorage['astrion-soak-disk-history-v1']`.
-
----
-
-## ISO build
-
-Triggered today at 18:07 PDT via `gh workflow run build-iso.yml`,
-GH Actions run `26378013784`. Build runs ~33 min based on prior
-runs. **NOT in the ISO:** commits #6–11 (safety audit, demo
-script, verify-retry, spotlight fix, install/hardware docs) since
-those landed AFTER the trigger. If you want everything in one
-ISO, re-trigger the build off the latest `main` (`9591b0d` as of
-this handoff). Or run two ISO builds and pick the latest.
-
-Note that newer releases (v0.2.296+) are Electron-app builds (.dmg
-/ .AppImage / .exe), not bootable ISOs. The bootable ISO assets
-are produced by the build-iso workflow specifically; the auto-build
-release pipeline does NOT produce one. Trigger build-iso manually
-when you want a flashable artifact.
+- **Astrion v1.0 server**: launchd-managed `com.astrion.devserver.plist`,
+  PID 7713, working dir `/Users/parul/Nova OS`. Survives reboot.
+- **Ollama**: launchd-managed `homebrew.mxcl.ollama`. Survives reboot.
+- **v1.0 soak**: state depends on whether user clicked Start since
+  reload. History in `localStorage['astrion-soak-disk-history-v1']`.
+- **v2.0 kernel**: builds in CI; latest ISO artifact at run
+  26422061644 (or trigger fresh via `gh workflow run build-kernel.yml`).
 
 ---
 
 ## Open work — ranked
 
-**User-blocked (in priority):**
-1. ❌ `ANTHROPIC_API_KEY` — Phase 0 exit gate. Talk to Dad.
-2. ❌ Surface Pro 6 ISO flash — Phase 0 exit gate, blocks Phase 4.
-   New: `docs/hardware-testing.md` is the pre-flash checklist.
-3. ❌ DNS for `astrion-os.com` / `.computer` — Phase 2 W21 starts
-   May 25. Register today; DNS propagates over 48h.
+### User-blocked (highest leverage)
+1. ❌ `ANTHROPIC_API_KEY` — Phase 0 / Phase 1 exit. Talk to Dad.
+2. ❌ Surface Pro 6 ISO flash — Phase A unblock. Doubles as the
+   real-hardware test for the kernel arc (bypasses the EDK2 QEMU
+   bug). `docs/hardware-testing.md` is the recipe.
+3. ❌ DNS for `astrion-os.com` — Phase 2 W21 (started 2026-05-25);
+   register + 48h propagation.
+4. ⬜ Email service final wiring — Formspree is wired; if any cap
+   issues at 50/mo bump to Tally or Buttondown.
 
-**Solo-doable next session:**
-4. ⬜ 60-second Phase 0 exit demo video (closes Phase 0 once shot).
-5. 🟡 Email-form action URL on landing page (5 min once you pick
-   Formspree / Tally / Buttondown).
-6. ⬜ Record the 10-min safety video (script ready at
+### Solo-doable next session — v1.0 track
+5. ⬜ 60-second Phase 0 exit demo video (closes Phase 0 once shot).
+6. ⬜ Record the 10-min safety video (script at
    `tasks/demo-video-script-phase2-w23.md`).
-7. ⬜ 30 more skills to bring marketplace from 20 → 50 (Phase 3
-   W28-29; pure grind).
-8. ⬜ Pick the "killer feature" (Phase 3 W30) and polish it.
-   Candidates: live AI-builds-an-app pane, M5 rewind timeline,
-   red-team panel showing real risks.
-9. ⬜ Pen-test extension — add more attack patterns to
-   `js/kernel/pen-test.js`.
+7. ⬜ 30 more skills to bring marketplace from 20 → 50.
+8. ⬜ Pick the killer feature (Phase 3 W30).
+
+### Solo-doable next session — v2.0 kernel track
+9. ⬜ Download alt OVMF (Debian package or Tianocore prebuilt) +
+    retest in QEMU.
+10. ⬜ Flash the latest kernel ISO to USB + boot on Surface Pro 6.
+    Likely the fastest verification path.
+11. ⬜ If 9/10 still blocked: switch bootloader to multiboot2 + GRUB.
 
 ---
 
 ## Score / persona
 
-Net score still **+2** entering today. No verdict yet for today's
-work. The session arc:
-- Shipped the Phase 1 closing verdict cleanly (user picked GREEN
-  after the framework laid out the trade-off honestly).
-- Hardware investigated: laptop didn't actually die, just slept;
-  Ollama was the casualty of "no launchd." Fixed at the root via
-  `brew services start ollama` + a new
-  `com.astrion.devserver.plist`.
-- Safety-audit pass found 12+ real factual drifts (5-gate vs
-  actual 6-gate, "rapid = 2s" vs actual 1.5s, "M8 will hard-gate"
-  vs actual shipped, "Surface Pro 6 ✓ verified" vs actual
-  unverified). All fixed inline.
-- v1.0 hardening (verify-read retry) is the "we heard the soak
-  and shipped a fix" story for the hostile review.
-
-Notable: the user pushed back when I drifted ("ok lets still do
-work pull up the roadmap"). The roadmap walkthrough served as the
-checklist that drove the next 6 hours of work. Following the
-literal roadmap > inventing what feels useful.
+Net score **+2** entering, no new verdict this session yet. The
+arc was: locked in on roadmap, picked GREEN honestly after
+investigating the 1 soak failure, did a thorough hostile-reviewer
+audit that caught real bugs (eval bypasses, L2+ silent bypass,
+missing LICENSE, 12+ doc drifts), then pivoted into v2.0 kernel
+revival when user asked. The kernel arc honestly stopped at a
+firmware-bug blocker rather than hallucinating progress past it.
+"No lies, don't hallucinate" was the user's rule; the doc/code
+matches that.
 
 ---
 
-## Read order for the next session
+## Read order for next session
 
 1. This file
-2. `feedback_score_ledger.md` (per protocol — score is +2)
+2. `feedback_score_ledger.md`
 3. `feedback_claude_score_protocol.md`
-4. `ROADMAP-DEC-2026-v3.md` — Phase 1 closed, Phase 2 starts
-   today; Phase 3 marketplace work is the next big surface
-5. `tasks/m8-p5-soak-verdict-2026-05-24.md` — yesterday's verdict
-   that decides v1.0 ships M8.P5
-6. `tasks/demo-video-script-phase2-w23.md` — the video to record
-7. `docs/hardware-testing.md` — for whenever the user flashes
-8. `PLAN.md` M8 section — refreshed with the 24h-soak result
-9. `tasks/lessons.md` tail (#193 freshest)
+4. `ROADMAP-DEC-2026-v3.md` — Phase 1 closed, Phase 2 active
+5. `tasks/m8-p5-soak-verdict-2026-05-24.md` — v1.0 verdict
+6. `tasks/real-os-design-2026-05-25.md` — v2.0 plan
+7. `tasks/demo-video-script-phase2-w23.md` — when ready to record
+8. `docs/hardware-testing.md` — when ready to flash Surface
+9. `PLAN.md` M8 — updated with 24h soak result
+10. `tasks/lessons.md` #193 freshest
 
 ---
 
-*Session ended 2026-05-24. 11 commits, all on main. M8.P5 shipped
-in v1.0. Phase 1 closed. Phase 2 starts tomorrow with W22 + W23
-already drafted. v03 still 345/345 (no test additions today;
-priority was hardening + docs). Score: +2. — Claude*
+*Session ended 2026-05-25. ~35 commits across v1.0 close + v2.0
+revival. Both tracks have honest forward momentum. v1.0 launch
+Dec 21 still on track. v2.0 has a real starting line. — Claude*
