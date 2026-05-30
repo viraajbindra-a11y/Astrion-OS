@@ -481,3 +481,73 @@ above gets picked next.
 ---
 
 *Written 2026-05-25. Updated 2026-05-26 with firmware reality check.*
+
+---
+
+## Update 2026-05-26 (later) — multiboot2+GRUB path GREEN
+
+The bootloader pivot from the firmware-reality-check section (Option 2)
+shipped + works. End-to-end:
+
+```
+GRUB loads /boot/kernel_mb2.elf from the ISO
+  → 32-bit protected mode entry (boot/multiboot2.S)
+  → page tables (identity-map 1 GiB, 2 MiB huge pages)
+  → CR4.PAE, EFER.LME, CR0.PG → long mode
+  → far-jump to gdt64.code → 64-bit
+  → call kernel_mb2_main(magic=0x36d76289, info_ptr)
+  → serial banner + magic verify + halt
+```
+
+Verified live in QEMU:
+```
+=== Astrion v2.0 Kernel (multiboot2 path) ===
+kernel_mb2_main reached; long-mode OK
+multiboot2 magic = 0x0000000036d76289
+multiboot2 info  = 0x00000000001005f8
+magic OK — GRUB hand-off clean
+kernel halt (stub — next: parse info tags + drive framebuffer)
+```
+
+No firmware crashes. No DxeCore #PF. No BootScriptExecutorDxe #GP.
+A clean, deterministic boot path we control end-to-end. This IS the
+v2.0 substrate — what UEFI+gnu-efi was trying to be.
+
+### What's actually proven by this milestone
+
+1. The build toolchain works for both 32-bit protected-mode asm AND
+   64-bit C in the same binary.
+2. The page-table setup + long-mode transition is correct.
+3. GRUB hand-off semantics match expectation: EAX=magic, EBX=info_ptr,
+   loaded at 1 MiB, multiboot2 header validated by `grub-file
+   --is-x86-multiboot2`.
+4. The serial code from boot/boot.c ports cleanly to 64-bit C.
+5. CI can build the GRUB ISO on every push (grub-pc-bin + grub-common
+   added to workflow). Artifact upload separate from the UEFI ISO.
+
+### Next steps on this substrate
+
+1. **Parse multiboot2 info tags.** The info pointer holds a tagged
+   list (memory map, framebuffer, command line, etc.). Walk the tags
+   in kernel_mb2_main; extract memory map for our allocator.
+2. **Wire the existing framebuffer code.** gui/framebuffer.c already
+   accepts a BootInfo struct with addr/width/height/pitch. Multiboot2
+   gives us this directly in a framebuffer tag — adapt the conversion.
+3. **Wire keyboard + mouse drivers.** Same as the UEFI path, since
+   PS/2 + USB HID work the same regardless of bootloader.
+4. **Test on real hardware.** With multiboot2+GRUB the ISO is bootable
+   via any BIOS/UEFI-CSM machine; Surface Pro 6 should boot it.
+5. **Then port the C code to Rust** per the v2.0 long-term plan, on a
+   working substrate instead of one with firmware archaeology.
+
+### The two boot paths now coexist
+
+- `kernel/boot/boot.c` + `make iso` → UEFI/gnu-efi path. Boots in CI;
+  has the OVMF firmware issues documented above. Surface Pro 6's UEFI
+  may or may not reproduce. Keep it; it's the eventual UEFI ship target.
+- `kernel/boot/multiboot2.S` + `kernel/src/kernel_mb2.c` + `make
+  iso-grub` → GRUB/multiboot2 path. Just shipped + verified. The
+  unblocked development path.
+
+CI builds both on every push to `kernel/**`. Two artifacts:
+`nova-os-kernel-iso` and `astrion-grub-iso`.

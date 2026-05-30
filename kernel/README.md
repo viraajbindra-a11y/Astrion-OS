@@ -8,23 +8,37 @@ honest scope.
 
 ## Status (2026-05-26)
 
-- Builds cleanly in CI (`.github/workflows/build-kernel.yml`, ~30s).
-- Boots in QEMU through UEFI firmware → runs our bootloader → prints live
-  serial through 4 stages → hits `\nova\kernel.bin` lookup.
-- **Today's milestone**: the QEMU+EDK2 firmware crash that blocked us
-  yesterday is bypassed by switching from the Homebrew-bundled OVMF to the
-  upstream EDK2 nightly. See `scripts/get-ovmf.sh`.
+Two boot paths live in this directory:
+
+### Path A — UEFI / gnu-efi (`boot/boot.c`)
+- Builds cleanly in CI.
+- Boots in QEMU through UEFI firmware → runs bootloader → prints live serial.
+- Hit two stacked OVMF firmware bugs that block further work (see lesson
+  #194). Surface Pro 6 hardware will be the next test vector.
+
+### Path B — Multiboot2 / GRUB (`boot/multiboot2.S` + `src/kernel_mb2.c`) ✅ GREEN
+- Shipped 2026-05-26. End-to-end verified in QEMU.
+- GRUB loads `/boot/kernel_mb2.elf` from ISO → 32-bit entry → page tables
+  → long mode → C kernel → serial output ✓
+- No firmware archaeology. Path forward for the v2.0 substrate.
 
 ## Local test recipe (macOS)
 
 ```bash
 cd kernel
-make run-retrage      # downloads upstream OVMF on first run, then boots
+make run-retrage     # Path A: UEFI via retrage OVMF (debugging the UEFI path)
+make run-grub        # Path B: Multiboot2/GRUB (the working substrate)
 ```
 
-Expected serial output ends at "enumerating SimpleFileSystem handles" —
-the next debugging step is wiring the LoadedImage → DeviceHandle path so
-we find the boot device's filesystem reliably.
+Expected Path B serial output:
+```
+=== Astrion v2.0 Kernel (multiboot2 path) ===
+kernel_mb2_main reached; long-mode OK
+multiboot2 magic = 0x0000000036d76289
+multiboot2 info  = 0x00000000001005f8
+magic OK — GRUB hand-off clean
+kernel halt (stub — next: parse info tags + drive framebuffer)
+```
 
 ## Why two OVMFs?
 
