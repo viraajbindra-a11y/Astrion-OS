@@ -1,206 +1,156 @@
-# Session Handoff — 2026-05-24 → 2026-05-25 (the heaviest day)
+# Session Handoff — 2026-05-26 → next session
 
-**~35 commits across two big arcs:** Phase 1 close + safety hardening
-on the v1.0 web-app substrate, then a parallel pivot into reviving
-the dormant `kernel/` C-kernel attempt toward v2.0 real-OS. Both arcs
-made real, verifiable progress. v1.0 is on track for Dec 21; v2.0 has
-a concrete starting line.
-
----
-
-## Arc 1 — v1.0 (web-app substrate, ships Dec 21)
-
-### Phase 1 closed — M8.P5 GREEN
-
-The 24h soak verdict on 2026-05-24 came back GREEN. M8.P5 disk-write
-self-mod ships in v1.0 with one explicitly documented caveat (1 cycle
-out of 10 failed at rollbackVerify; investigation showed it was
-correlated with a low-battery force-sleep aborting the in-flight
-fetch, not a substrate bug — file on disk was byte-identical to the
-original post-incident).
-
-| # | Commit | Theme |
-|---|---|---|
-| 1 | `307b26b` | W19 soak scheduler |
-| 2 | `d918822` | GREEN/RED pre-drafts |
-| 3 | `d22ff34` | Phase 2 W22 landing page |
-| 4 | `bf42695` | gatesFailed instrumentation |
-| 5 | `93550f5` | **M8.P5 GREEN verdict — shipped in v1.0** |
-| 6 | `44af74b` | Safety-story audit: 12+ doc overclaims fixed |
-| 7 | `4a34e96` | Phase 2 W23 demo video script (3 weeks early) |
-| 8 | `8434031` | Verify-read retry (v1.0 hardening) + pill fix |
-| 9 | `f726c09` | Spotlight 5→6 gates |
-| 10 | `9591b0d` | Install + hardware-testing pre-flash checklist |
-| 11 | `e597a4a` | SESSION_HANDOFF (mid-day) |
-| 12 | `2c12a49` | Pen-test +3 attack patterns |
-| 13 | `9268845` | "Run pen-test" button in Settings |
-| 14 | `19d68ae` | **LICENSE file** (was claimed in 3 places, never existed) |
-| 15 | `c807cae` | content-blocklist: close 4 eval-bypass holes |
-| 16 | `6b2a4d4` | messages: refuse L2+ caps in mini-executor (silent bypass closed) |
-| 17 | `fe299a3` | SESSION_HANDOFF update for commits 11-16 |
-| 18 | `2965802` | v2.0 real-OS design doc (multi-year honest plan) |
-| 19 | `31dd441` | website: Formspree wired (`mojbkeky`) + in-page success swap |
-
-### Hostile-reviewer pre-emption — real bugs caught
-
-- 4 content-blocklist eval bypasses: `Function('...')` no-new,
-  `window['eval']`, string-arg `setTimeout`/`setInterval`,
-  `.constructor('...')` — closed with new regexes + tightened
-  defense-in-depth scan
-- 1 silent L2+ bypass in Messages mini-executor — closed with
-  level-check refusal
-- Missing LICENSE file (claimed MIT in README + landing + install)
-- 12+ doc drifts (5-gate → 6-gate, rapid-confirm 1.5s not 2s,
-  red-team 3-tier semantic, Surface Pro 6 "verified" → unverified)
-
-### Phase 2 prep — ahead of schedule
-
-- W22 landing page polish (`d22ff34`) + Formspree wired (`31dd441`,
-  form id `mojbkeky`, in-page success swap via `_next` redirect)
-- W23 10-min safety video script drafted scene-by-scene
-- W21 (DNS) still user-blocked
-- Phase 4 hardware-testing checklist (`docs/hardware-testing.md`)
-
-### ISO builds
-
-Three full ISO builds queued this session:
-- `26378013784` — kernel-from-main (first soak wire) → success
-- `26378897114` — kernel-from-main (post-soak GREEN + safety audit) → success
-- `26414401621` — kernel-from-main (everything except last few commits) → success
-- All artifacts available via `gh run download <id>` for 30 days
+**~10 commits across two arcs:** v2.0 kernel infrastructure (retrage OVMF
+workaround for the QEMU firmware bug, then a NEW firmware wall hit
+honestly), and v1.0 marketplace expansion (20 → 55 skills, parse-validated,
+descriptions don't overclaim).
 
 ---
 
-## Arc 2 — v2.0 real-OS kernel (parallel project, multi-year)
+## Arc 1 — v2.0 kernel revival continued
 
-### Started from dormant + got it booting
-
-The user picked the "real kernel-level OS" option. Discovered the
-`kernel/` directory had an existing 1087-line C kernel attempt from
-2026-04-04 that never compiled in CI. Picked up the dormant work
-and brought it to live bootable status.
-
-### Bugs caught + fixed (in our code)
+### What landed
 
 | # | Commit | Theme |
 |---|---|---|
-| 20 | `562ec00` | Makefile gnu-efi multi-arch path detection (CI unblock) |
-| 21 | `a4d7498` | NOVA → Astrion user-visible strings |
-| 22 | `f38721a` | `.rodata` + `.eh_frame` missing from objcopy (fixed #UD at +0x2001C) |
-| 23 | `291edfd` | `-znocombreloc` + libefi link order (fixed #UD at +0x1000) |
-| 24 | `0027c0c` | UART 0x3F8 serial output added |
-| 25 | `61a843e` | per-call serial diagnostics |
-| 26 | `37d85c1` | skip ConOut->ClearScreen (EDK2 serial-redirect hang) |
-| 27 | `da75fe4` | step-1 inner diagnostics |
-| 28 | `481c320` | LocateHandleBuffer + HandleProtocol (GOP) |
-| 29 | `7a0065d` | GOP optional (graceful headless fallback) |
-| 30 | `b6c66f4` | status-check every HandleProtocol/OpenVolume call |
-| 31 | `059dd39` | OpenProtocol attempt + hex status logging |
-| 32 | `a248fef` | gnu-efi global GUID + log ImageHandle |
-| 33 | `7990a16` | drop EFIAPI from efi_main (ABI fix) |
-| 34 | `6812759` | log at-entry args + LibImageHandle fallback |
-| 35 | `a68a545` | skip LoadedImage; enumerate SimpleFileSystem |
+| 1 | `8746c55` | kernel: retrage OVMF infrastructure + LoadedImage attempt (mixed) |
+| 2 | `30c9f65` | boot: extern LibImageHandle CI fix |
+| 3 | `78cd0ee` | boot: drop GUID-dump calls (didn't fix it) |
+| 4 | `9fccd92` | boot: revert to a68a545 (yesterday's GREEN state) |
+| 5 | `1b1b2d2` | boot: surgical LoadedImage retry (still regressed) |
+| 6 | `3299cd5` | boot: re-revert; firmware wall documented |
+| 7 | `e4aa454` | lesson #194 + v2.0 design doc update |
 
-### Where the kernel boot reaches today
+### The retrage OVMF win
 
-Live serial output in QEMU now shows:
-```
-=== Astrion Kernel Bootloader v0.1 ===
-efi_main entered; serial init OK
-at-entry ImageHandle = 0x000000000e7b8998
-at-entry SystemTable = 0x000000000f5ec018
-InitializeLib returned
-Astrion Kernel Bootloader v0.1
-Initializing...
-[1/4] Setting up display
-WARN: no GOP found; booting headless
-[1/4] display OK
-[2/4] Loading kernel from \nova\kernel.bin
-  ImageHandle (param) = 0x0           ← compiler-elided, harmless
-  LibImageHandle = 0x000000000e7b8998 ← correct, used instead
-  effective_handle = 0x000000000e7b8998
-  enumerating SimpleFileSystem handles
-  [EDK2 firmware crashes here]        ← QEMU OVMF bug, not ours
+`kernel/scripts/get-ovmf.sh` downloads
+`https://retrage.github.io/edk2-nightly/bin/RELEASEX64_OVMF.fd`. The
+Homebrew QEMU 11.0 OVMF (`/opt/homebrew/share/qemu/edk2-x86_64-code.fd`)
+has a real bug — `LocateHandleBuffer(SimpleFileSystem)` triggers a
+`#GP` in `BootScriptExecutorDxe`. The retrage build does not.
+
+```bash
+cd kernel
+make run-retrage   # downloads OVMF on first run, then boots
 ```
 
-### The remaining QEMU+EDK2 firmware blocker
+Update from yesterday: with retrage OVMF + `a68a545` boot.c, the
+bootloader reaches `[2/4] Loading kernel`, hits `LocateHandleBuffer`,
+returns `EFI_INVALID_PARAMETER count=0` (no firmware crash). Different
+problem than yesterday, but a fixable one.
 
-`LocateHandleBuffer(ByProtocol, &SimpleFileSystemProtocol, ...)`
-triggers a #GP in EDK2's own `BootScriptExecutorDxe.dll`. Same RIP
-across both `-cdrom` and `-drive virtio` paths. Same RAX
-(`EFI_INVALID_PARAMETER`). Not our bug — it's the QEMU 11.0 OVMF
-build at `/opt/homebrew/share/qemu/edk2-x86_64-code.fd`.
+### The second firmware wall
 
-Workarounds (tomorrow):
-1. Download a different OVMF — Debian's `ovmf` package binary,
-   Tianocore's prebuilt, or Limine bootloader (skips EDK2 entirely).
-2. **Real hardware test** — Surface Pro 6's UEFI firmware is a
-   different EDK2 build; the bug likely isn't there. Burn the ISO
-   from CI artifact `26414401621` to a USB stick and boot.
-3. Switch the bootloader from gnu-efi UEFI to BIOS/multiboot2 +
-   GRUB as bootloader. Big change but bypasses UEFI entirely.
+Attempting to add a `LoadedImage` lookup path to find the boot device's
+filesystem (canonical UEFI pattern: HandleProtocol(ImageHandle,
+LoadedImage) → DeviceHandle → HandleProtocol(DeviceHandle,
+SimpleFileSystem)) **regressed the GOP locate**. Even a minimal +512B
+addition to `BOOTX64.EFI` reproducibly crashed the firmware's DxeCore
+with `#PF` (writing to CR2 = RIP - 0x40 inside DxeCore's own code page).
+Same offset across RELEASE + DEBUG retrage OVMF builds. Layout-sensitive
+firmware bug.
 
-### v2.0 design doc
+Lesson #194 captures the forensics. The right next test is real
+hardware (Surface Pro 6 = Microsoft UEFI = a third EDK2 variant
+entirely) OR a different bootloader path (multiboot2+GRUB) that
+doesn't depend on UEFI's DxeCore.
 
-`tasks/real-os-design-2026-05-25.md` — 431-line honest multi-year
-plan. v1.0 ships Dec 21 on Linux. v2.0 = real OS in Rust (eventually,
-2028-2030 realistic). The C-kernel-bootloader work this session
-is the bridge — proves the build chain + UEFI loading works, even
-if the actual kernel handoff isn't reached yet.
+### v2.0 design doc updated
+
+`tasks/real-os-design-2026-05-25.md` now has a 2026-05-26 update at
+the bottom: three productive next moves are documented:
+1. Surface Pro 6 flash (already user-blocked #2)
+2. Bootloader pivot to multiboot2+GRUB
+3. Jump straight to Rust+Limine (the v2.0 destination)
+
+---
+
+## Arc 2 — v1.0 marketplace expansion
+
+### Skills 20 → 55
+
+| # | Commit | Theme |
+|---|---|---|
+| 8 | `ddbf3e5` | skills: 35 new bundled skills, 6 categories |
+| 9 | `d018c60` | docs: skill count 20 → 55 in README + ROADMAP + ai-service comment |
+| 10 | `2349b0b` | skills: fix descriptions that named non-existent capabilities (lesson #188 audit) |
+
+### New skill categories
+
+- **System controls (6)**: brightness-up/down, volume-up/down/mute, toggle-wifi
+- **Productivity (5)**: pomodoro-break, start-meeting, end-meeting, snooze-notifications, nap-timer
+- **Utilities (6)**: flip-coin, roll-dice, random-number, tip-calc, unit-convert, password-gen
+- **AI helpers via Ollama (5)**: translate, summarize-selection, explain-clipboard, brainstorm-chat, quote-of-the-day
+- **Notes / memory (4)**: journal-entry, random-note, find-todos-in-notes, recent-files
+- **Time / search / system info (9)**: countdown-to, wake-me-up, search-web, clean-screenshots, list-running-apps, quit-all-apps, weather, word-count, show-shortcuts
+
+All level-graded (L1/L2/L3) with appropriate reversibility tags. AI
+skills capped at 1000 tokens. quit-all-apps and clean-screenshots
+require rapid-confirm. Weather uses Open-Meteo (no key, privacy-friendly).
+
+### Audit caught real issues
+
+After shipping, audited my own work and found 7 skills named
+capability IDs that don't actually exist in `capability-providers.js`
+(per lesson #188 pattern — "mass-shipped batch of unit-tested-but-not-
+wired modules"). Fixed all 7 by describing intent via event bus
+events + localStorage keys + real process-manager methods, so the
+skills degrade gracefully in browser-only contexts.
+
+All 55 skills parse + validate clean via
+`parseSkill + validateSkill` (55/55 OK).
 
 ---
 
 ## What's running locally
 
 - **Astrion v1.0 server**: launchd-managed `com.astrion.devserver.plist`,
-  PID 7713, working dir `/Users/parul/Nova OS`. Survives reboot.
+  PID 7713, working dir `/Users/parul/Nova OS`. Survives reboot. Confirmed
+  serving the new manifest + .skill files at HTTP 200.
 - **Ollama**: launchd-managed `homebrew.mxcl.ollama`. Survives reboot.
-- **v1.0 soak**: state depends on whether user clicked Start since
-  reload. History in `localStorage['astrion-soak-disk-history-v1']`.
 - **v2.0 kernel**: builds in CI; latest ISO artifact at run
-  26422061644 (or trigger fresh via `gh workflow run build-kernel.yml`).
+  26693506362 (matches the a68a545 boot.c state).
+- **OVMF firmware**: not committed (4MB binary). Downloaded by
+  `kernel/scripts/get-ovmf.sh` to `kernel/firmware/` (gitignored).
 
 ---
 
-## Open work — ranked
+## Open work — re-ranked
 
-### User-blocked (highest leverage)
+### User-blocked (highest leverage, unchanged)
 1. ❌ `ANTHROPIC_API_KEY` — Phase 0 / Phase 1 exit. Talk to Dad.
 2. ❌ Surface Pro 6 ISO flash — Phase A unblock. Doubles as the
    real-hardware test for the kernel arc (bypasses the EDK2 QEMU
-   bug). `docs/hardware-testing.md` is the recipe.
+   bugs). `docs/hardware-testing.md` is the recipe.
 3. ❌ DNS for `astrion-os.com` — Phase 2 W21 (started 2026-05-25);
    register + 48h propagation.
-4. ⬜ Email service final wiring — Formspree is wired; if any cap
-   issues at 50/mo bump to Tally or Buttondown.
 
-### Solo-doable next session — v1.0 track
-5. ⬜ 60-second Phase 0 exit demo video (closes Phase 0 once shot).
-6. ⬜ Record the 10-min safety video (script at
+### Solo-doable — v1.0 track
+4. ⬜ 60-second Phase 0 exit demo video (closes Phase 0 once shot).
+5. ⬜ Record the 10-min safety video (script at
    `tasks/demo-video-script-phase2-w23.md`).
-7. ⬜ 30 more skills to bring marketplace from 20 → 50.
-8. ⬜ Pick the killer feature (Phase 3 W30).
+6. ✅ DONE today — skills 20 → 55 (overshot the 30 target).
+7. ⬜ Pick the killer feature (Phase 3 W30).
 
-### Solo-doable next session — v2.0 kernel track
-9. ⬜ Download alt OVMF (Debian package or Tianocore prebuilt) +
-    retest in QEMU.
-10. ⬜ Flash the latest kernel ISO to USB + boot on Surface Pro 6.
-    Likely the fastest verification path.
-11. ⬜ If 9/10 still blocked: switch bootloader to multiboot2 + GRUB.
+### Solo-doable — v2.0 kernel track
+8. ✅ DONE today — alt OVMF tested. retrage works for the first
+   bug; hit a second one underneath. Real hardware is the unblock.
+9. ⬜ Switch bootloader to multiboot2+GRUB (skip UEFI DxeCore).
+10. ⬜ Read Phil Oppermann's "Writing an OS in Rust" tutorial.
 
 ---
 
 ## Score / persona
 
-Net score **+2** entering, no new verdict this session yet. The
-arc was: locked in on roadmap, picked GREEN honestly after
-investigating the 1 soak failure, did a thorough hostile-reviewer
-audit that caught real bugs (eval bypasses, L2+ silent bypass,
-missing LICENSE, 12+ doc drifts), then pivoted into v2.0 kernel
-revival when user asked. The kernel arc honestly stopped at a
-firmware-bug blocker rather than hallucinating progress past it.
-"No lies, don't hallucinate" was the user's rule; the doc/code
-matches that.
+Entering at **+2**. Today's session: locked onto the open-work
+ranking, executed #8 first (alt OVMF), reverted when adding code
+regressed verification (lesson #193 applied), documented honestly
+in lesson #194 + the v2.0 design doc. Pivoted to #6 (skill grind)
+when v2.0 hit the firmware wall. Audited my own skill descriptions
+and caught the lesson-#188 "dormant modules" pattern before user
+had to flag it. No lies, no hallucination — the two firmware bugs
+are real, the 35 new skills are real, the 7 audit-caught issues
+are real.
 
 ---
 
@@ -209,16 +159,17 @@ matches that.
 1. This file
 2. `feedback_score_ledger.md`
 3. `feedback_claude_score_protocol.md`
-4. `ROADMAP-DEC-2026-v3.md` — Phase 1 closed, Phase 2 active
-5. `tasks/m8-p5-soak-verdict-2026-05-24.md` — v1.0 verdict
-6. `tasks/real-os-design-2026-05-25.md` — v2.0 plan
-7. `tasks/demo-video-script-phase2-w23.md` — when ready to record
-8. `docs/hardware-testing.md` — when ready to flash Surface
-9. `PLAN.md` M8 — updated with 24h soak result
-10. `tasks/lessons.md` #193 freshest
+4. `tasks/lessons.md` #194 (today's firmware lesson)
+5. `tasks/real-os-design-2026-05-25.md` — has 2026-05-26 update
+6. `kernel/README.md` — local test recipe + the two-OVMF situation
+7. `ROADMAP-DEC-2026-v3.md` — Phase 1 closed, Phase 2 active, M7 = 55 skills
+8. `tasks/demo-video-script-phase2-w23.md` — when ready to record
+9. `docs/hardware-testing.md` — when ready to flash Surface
 
 ---
 
-*Session ended 2026-05-25. ~35 commits across v1.0 close + v2.0
-revival. Both tracks have honest forward momentum. v1.0 launch
-Dec 21 still on track. v2.0 has a real starting line. — Claude*
+*Session ended 2026-05-26. ~10 commits across two arcs. v1.0
+marketplace expansion shipped clean. v2.0 kernel hit a second
+firmware wall under the first; documented honestly. Both tracks
+have forward momentum. v1.0 launch Dec 21 still on track. v2.0
+unblocks on hardware. — Claude*
