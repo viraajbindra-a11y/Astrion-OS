@@ -5,10 +5,12 @@ trigger:
   - phrase: "wifi on"
   - phrase: "toggle wifi"
 do: |
-  Toggle the Wi-Fi radio via the system.toggleWifi capability. Show
-  a notification with the new state and (if connecting) the SSID once
-  associated. If turning off and a download is in progress, ask the
-  user to confirm via rapid-confirm before proceeding.
+  Toggle the Wi-Fi radio state. Emit 'network:wifi-toggled' on the
+  event bus so the menubar status icon updates. Show a notification
+  with the new state and (if connecting) the SSID once associated.
+  If turning off and a download is in progress, ask the user to confirm
+  via rapid-confirm before proceeding. Note: this requires the system
+  bridge (only available on Linux desktop install, not in browser).
 constraints:
   level: L2
   budget_tokens: 150

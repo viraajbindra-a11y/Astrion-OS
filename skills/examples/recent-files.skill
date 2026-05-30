@@ -5,10 +5,12 @@ trigger:
   - phrase: "recently opened"
   - phrase: "what did I just open"
 do: |
-  Query the recents capability (system.recentFiles) for the 5 most
-  recently opened files across all apps. Render as Spotlight result
-  rows with file name, app icon, and "X minutes ago" timestamp.
-  Clicking a row reopens the file in its app.
+  Read the 'nova-recent-files' localStorage record (a rolling array
+  of {appId, filePath, openedAt} written by every app on file open;
+  capped at 50). Show the most recent 5 as Spotlight result rows
+  with file name, app icon, and "X minutes ago" timestamp. Clicking
+  a row dispatches a file:open event with the path so the owning
+  app reopens it.
 constraints:
   level: L1
   budget_tokens: 150

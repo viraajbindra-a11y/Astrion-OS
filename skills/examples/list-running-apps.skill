@@ -5,10 +5,11 @@ trigger:
   - phrase: "running apps"
   - phrase: "open apps"
 do: |
-  Query processManager.listRunning() for every app currently launched.
+  Call processManager.getRunningApps() for every app currently launched.
   Render as Spotlight result rows showing the app icon, name, and
   uptime ("running for X minutes"). Clicking a row focuses that
-  app's main window. A long-press shows a "Quit" option.
+  app's main window via windowManager.focus(). A long-press shows
+  a "Quit" option that calls processManager.terminate(instanceId).
 constraints:
   level: L1
   budget_tokens: 150

@@ -5,9 +5,11 @@ trigger:
   - phrase: "volume down"
   - phrase: "turn down the volume"
 do: |
-  Lower the system output volume by 10% via the system.setVolume
-  capability. Floor at 0%. Briefly show the new level in a notification
-  toast with a volume icon.
+  Lower the system output volume by 10%. Floor at 0%. Emit a
+  'volume:set' event on the bus with the new level so the menubar
+  speaker indicator updates. Briefly show the new level in a
+  notification toast with a volume icon. If running in a context
+  with no real audio system, log a warning and skip the actual change.
 constraints:
   level: L2
   budget_tokens: 100

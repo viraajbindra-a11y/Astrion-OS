@@ -5,9 +5,11 @@ trigger:
   - phrase: "silence audio"
   - phrase: "unmute"
 do: |
-  Toggle the system output mute state via the system.toggleMute
-  capability. Show a notification indicating the new state ("Muted"
-  or "Unmuted") with the current volume level if unmuting.
+  Toggle the system output mute state. Emit 'volume:mute-toggled' on
+  the event bus so the menubar speaker icon updates. Show a notification
+  indicating the new state ("Muted" or "Unmuted") with the current
+  volume level if unmuting. Persist the mute state across reloads via
+  the nova-volume-muted localStorage key.
 constraints:
   level: L2
   budget_tokens: 100
