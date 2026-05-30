@@ -211,9 +211,6 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
     // set framebuffer info to zero and let the kernel decide. The
     // kernel can either run headless (serial-only) or refuse to start.
     serial_log("  calling BS->LocateHandleBuffer for GOP\n");
-    serial_log("  gop_guid bytes: ");
-    serial_log_guid(&gop_guid);
-    serial_log("\n");
     UINTN gop_handle_count = 0;
     EFI_HANDLE *gop_handles = NULL;
     status = BS->LocateHandleBuffer(ByProtocol, &gop_guid, NULL,
@@ -288,13 +285,6 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
 
     EFI_GUID li_guid = LOADED_IMAGE_PROTOCOL;
     EFI_GUID fs_guid_local = EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID;
-
-    serial_log("  li_guid bytes: ");
-    serial_log_guid(&li_guid);
-    serial_log("\n");
-    serial_log("  fs_guid bytes: ");
-    serial_log_guid(&fs_guid_local);
-    serial_log("\n");
 
     // gnu-efi sets LibImageHandle from InitializeLib — use it as a
     // fallback if the param ImageHandle was compiler-elided. The two
