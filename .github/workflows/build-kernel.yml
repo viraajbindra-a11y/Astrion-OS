@@ -24,21 +24,34 @@ jobs:
           sudo apt-get install -y -qq \
             build-essential gcc gnu-efi \
             xorriso mtools dosfstools \
-            qemu-system-x86 ovmf nasm
+            qemu-system-x86 ovmf nasm \
+            grub-pc-bin grub-common
 
-      - name: Build Astrion OS kernel and ISO
+      - name: Build Astrion OS kernel and UEFI ISO
         run: |
           cd kernel
           make iso
 
-      - name: Upload kernel ISO
+      - name: Build Astrion OS kernel and GRUB/multiboot2 ISO
+        run: |
+          cd kernel
+          make iso-grub
+
+      - name: Upload UEFI kernel ISO
         uses: actions/upload-artifact@v4
         with:
           name: nova-os-kernel-iso
           path: kernel/build/nova-os.iso
           retention-days: 30
 
+      - name: Upload GRUB/multiboot2 kernel ISO
+        uses: actions/upload-artifact@v4
+        with:
+          name: astrion-grub-iso
+          path: kernel/build/astrion-grub.iso
+          retention-days: 30
+
       - name: Show build info
         run: |
-          ls -lh kernel/build/nova-os.iso
-          echo "Astrion OS kernel ISO built successfully!"
+          ls -lh kernel/build/nova-os.iso kernel/build/astrion-grub.iso
+          echo "Astrion OS kernel ISOs (UEFI + GRUB) built successfully!"

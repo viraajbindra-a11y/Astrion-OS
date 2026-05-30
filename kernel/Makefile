@@ -45,7 +45,7 @@ KERNEL_OBJS = $(KERNEL_SRCS:.c=.o)
 BUILD_DIR = build
 ISO_DIR = $(BUILD_DIR)/iso
 
-.PHONY: all kernel boot iso clean run
+.PHONY: all kernel boot iso clean run run-retrage kernel-mb2 iso-grub run-grub
 
 all: iso
 
@@ -126,6 +126,49 @@ run-kernel: kernel
 	    -kernel $(BUILD_DIR)/kernel.bin \
 	    -m 256M \
 	    -serial stdio
+
+# ─── Multiboot2 + GRUB path (v2.0 alt boot, 2026-05-26) ─────────────
+# Bypasses UEFI/OVMF entirely. GRUB reads our multiboot2 header, loads
+# the kernel at 1 MiB, hands off in 32-bit protected mode. Our asm stub
+# in boot/multiboot2.S sets up long mode + calls kernel_mb2_main.
+#
+# Doesn't depend on gnu-efi. Doesn't go through DxeCore. Works on any
+# x86_64 machine with a BIOS or UEFI CSM (or with UEFI when grub-efi
+# is used, which is a separate target we'll add when needed).
+
+MB2_CFLAGS = -ffreestanding -fno-stack-protector -fno-pic -mno-red-zone \
+             -Wall -Wextra -O2 -mcmodel=kernel -m64
+MB2_LDFLAGS = -nostdlib -T src/linker_mb2.ld -z max-page-size=4096
+
+kernel-mb2:
+	@mkdir -p $(BUILD_DIR)
+	$(CC) $(MB2_CFLAGS) -c boot/multiboot2.S -o $(BUILD_DIR)/multiboot2.o
+	$(CC) $(MB2_CFLAGS) -c src/kernel_mb2.c -o $(BUILD_DIR)/kernel_mb2.o
+	$(LD) $(MB2_LDFLAGS) -o $(BUILD_DIR)/kernel_mb2.elf \
+	    $(BUILD_DIR)/multiboot2.o $(BUILD_DIR)/kernel_mb2.o
+	# Verify the multiboot2 header is present + first in the binary.
+	grub-file --is-x86-multiboot2 $(BUILD_DIR)/kernel_mb2.elf
+	@echo "Multiboot2 kernel built: $(BUILD_DIR)/kernel_mb2.elf"
+
+iso-grub: kernel-mb2
+	@mkdir -p $(BUILD_DIR)/iso-grub/boot/grub
+	cp $(BUILD_DIR)/kernel_mb2.elf $(BUILD_DIR)/iso-grub/boot/kernel_mb2.elf
+	@echo 'set timeout=0'                                > $(BUILD_DIR)/iso-grub/boot/grub/grub.cfg
+	@echo 'set default=0'                               >> $(BUILD_DIR)/iso-grub/boot/grub/grub.cfg
+	@echo 'menuentry "Astrion v2.0 (multiboot2)" {'     >> $(BUILD_DIR)/iso-grub/boot/grub/grub.cfg
+	@echo '  multiboot2 /boot/kernel_mb2.elf'           >> $(BUILD_DIR)/iso-grub/boot/grub/grub.cfg
+	@echo '  boot'                                      >> $(BUILD_DIR)/iso-grub/boot/grub/grub.cfg
+	@echo '}'                                           >> $(BUILD_DIR)/iso-grub/boot/grub/grub.cfg
+	grub-mkrescue -o $(BUILD_DIR)/astrion-grub.iso $(BUILD_DIR)/iso-grub
+	@echo "GRUB ISO: $(BUILD_DIR)/astrion-grub.iso"
+
+run-grub: iso-grub
+	qemu-system-x86_64 \
+	    -cdrom $(BUILD_DIR)/astrion-grub.iso \
+	    -m 256M \
+	    -serial stdio \
+	    -display none \
+	    -no-reboot
 
 clean:
 	rm -rf $(BUILD_DIR)
