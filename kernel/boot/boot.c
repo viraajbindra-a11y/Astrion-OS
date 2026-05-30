@@ -296,11 +296,14 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
     serial_log_guid(&fs_guid_local);
     serial_log("\n");
 
-    // gnu-efi sets LibImageHandle from InitializeLib — use that since
-    // the param ImageHandle sometimes gets compiler-elided in the
-    // crt0 → efi_main handoff. The two should be identical when both
-    // are non-NULL; we logged that match at boot.
+    // gnu-efi sets LibImageHandle from InitializeLib — use it as a
+    // fallback if the param ImageHandle was compiler-elided. The two
+    // should be identical when both are non-NULL.
+    extern EFI_HANDLE LibImageHandle;  // from gnu-efi; set by InitializeLib
     EFI_HANDLE effective_handle = ImageHandle ? ImageHandle : LibImageHandle;
+    serial_log("  LibImageHandle = ");
+    serial_log_hex((UINT64)LibImageHandle);
+    serial_log("\n");
     serial_log("  effective ImageHandle = ");
     serial_log_hex((UINT64)effective_handle);
     serial_log("\n");
