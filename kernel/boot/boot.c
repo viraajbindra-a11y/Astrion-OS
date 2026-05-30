@@ -249,58 +249,39 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
     // Instead, enumerate ALL handles that expose SimpleFileSystem and
     // pick the first one. The boot device's filesystem is among them.
     EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *fs = NULL;
+    extern EFI_GUID FileSystemProtocol;  // gnu-efi global; EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID
     EFI_GUID fs_guid_local = EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID;
-    EFI_GUID *fs_guid = &fs_guid_local;
+    EFI_GUID *fs_guid = &fs_guid_local;  // use local copy; gnu-efi global may not be named FileSystemProtocol
 
-    // 2026-05-26: PATH A — canonical UEFI boot-device lookup.
-    // HandleProtocol(ImageHandle, LoadedImage) gives us loaded_image,
-    // and loaded_image->DeviceHandle is the device we booted from.
-    // Then HandleProtocol(DeviceHandle, SimpleFileSystem) gives us
-    // the boot device's filesystem directly — bypassing the
-    // LocateHandleBuffer enumeration path that returns
-    // EFI_INVALID_PARAMETER in retrage OVMF on cdrom.
-    extern EFI_HANDLE LibImageHandle;  // from gnu-efi
-    EFI_HANDLE effective_handle = ImageHandle ? ImageHandle : LibImageHandle;
-    EFI_GUID li_guid = LOADED_IMAGE_PROTOCOL;
-    EFI_LOADED_IMAGE *loaded_image = NULL;
-    serial_log("  PATH A: HandleProtocol(ImageHandle, LoadedImage)\n");
-    status = BS->HandleProtocol(effective_handle, &li_guid, (void **)&loaded_image);
-    serial_log("    status = ");
+    serial_log("  enumerating SimpleFileSystem handles\n");
+    UINTN fs_handle_count = 0;
+    EFI_HANDLE *fs_handles = NULL;
+    status = BS->LocateHandleBuffer(ByProtocol, fs_guid, NULL,
+                                    &fs_handle_count, &fs_handles);
+    serial_log("  LocateHandleBuffer status = ");
+    serial_log_hex((UINT64)status);
+    serial_log(", count = ");
+    serial_log_hex((UINT64)fs_handle_count);
+    serial_log("\n");
+    if (EFI_ERROR(status) || fs_handle_count == 0) {
+        serial_log("  ERROR: no SimpleFileSystem handles\n");
+        Print(L"ERROR: No filesystem available\n");
+        goto halt;
+    }
+
+    // Try each FS handle until one opens with our kernel file present.
+    // For now, just use the first.
+    serial_log("  binding first FS handle (");
+    serial_log_hex((UINT64)fs_handles[0]);
+    serial_log(")\n");
+    status = BS->HandleProtocol(fs_handles[0], fs_guid, (void **)&fs);
+    serial_log("  HandleProtocol(FS) status = ");
     serial_log_hex((UINT64)status);
     serial_log("\n");
-    if (!EFI_ERROR(status) && loaded_image && loaded_image->DeviceHandle) {
-        serial_log("    DeviceHandle = ");
-        serial_log_hex((UINT64)loaded_image->DeviceHandle);
-        serial_log("\n");
-        status = BS->HandleProtocol(loaded_image->DeviceHandle, fs_guid, (void **)&fs);
-        serial_log("    FS HandleProtocol status = ");
-        serial_log_hex((UINT64)status);
-        serial_log("\n");
-        if (EFI_ERROR(status)) fs = NULL;
-    }
-
-    // PATH B fallback — only run if A didn't bind fs.
-    if (!fs) {
-        serial_log("  PATH B: LocateHandleBuffer(SimpleFileSystem)\n");
-        UINTN fs_handle_count = 0;
-        EFI_HANDLE *fs_handles = NULL;
-        status = BS->LocateHandleBuffer(ByProtocol, fs_guid, NULL,
-                                        &fs_handle_count, &fs_handles);
-        serial_log("    status = ");
-        serial_log_hex((UINT64)status);
-        serial_log(", count = ");
-        serial_log_hex((UINT64)fs_handle_count);
-        serial_log("\n");
-        if (!EFI_ERROR(status) && fs_handle_count > 0 && fs_handles) {
-            status = BS->HandleProtocol(fs_handles[0], fs_guid, (void **)&fs);
-            if (EFI_ERROR(status)) fs = NULL;
-        }
-        if (fs_handles) BS->FreePool(fs_handles);
-    }
-
-    if (!fs) {
-        serial_log("  ERROR: no filesystem bound via either path\n");
-        Print(L"ERROR: No filesystem available\n");
+    if (fs_handles) BS->FreePool(fs_handles);
+    if (EFI_ERROR(status) || !fs) {
+        serial_log("  ERROR: FS HandleProtocol failed\n");
+        Print(L"ERROR: FS not bindable\n");
         goto halt;
     }
 
