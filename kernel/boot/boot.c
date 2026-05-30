@@ -85,6 +85,27 @@ static void serial_log_hex(UINT64 v) {
     serial_log(buf);
 }
 
+// Dump 16 bytes of a GUID to serial as `xxxx-xx-xx-xx-xxxxxxxx`. Used to
+// verify a stack-local EFI_GUID actually contains the bytes we expect
+// before we hand it to a firmware call. Useful diagnostic when
+// LocateHandleBuffer returns EFI_INVALID_PARAMETER and we want to rule
+// out a zeroed-out GUID.
+static void serial_log_guid(EFI_GUID *g) {
+    static const char hex[] = "0123456789abcdef";
+    unsigned char *b = (unsigned char *)g;
+    char buf[37];
+    int p = 0;
+    // 4-2-2-2-6 byte layout per RFC 4122 (Microsoft EFI uses little-endian
+    // for the first three groups — fine, we just dump bytes-as-is here).
+    for (int i = 0; i < 16; i++) {
+        buf[p++] = hex[(b[i] >> 4) & 0xF];
+        buf[p++] = hex[b[i] & 0xF];
+        if (i == 3 || i == 5 || i == 7 || i == 9) buf[p++] = '-';
+    }
+    buf[p] = 0;
+    serial_log(buf);
+}
+
 /**
  * Find and set the best available screen resolution
  */
@@ -190,11 +211,18 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
     // set framebuffer info to zero and let the kernel decide. The
     // kernel can either run headless (serial-only) or refuse to start.
     serial_log("  calling BS->LocateHandleBuffer for GOP\n");
+    serial_log("  gop_guid bytes: ");
+    serial_log_guid(&gop_guid);
+    serial_log("\n");
     UINTN gop_handle_count = 0;
     EFI_HANDLE *gop_handles = NULL;
     status = BS->LocateHandleBuffer(ByProtocol, &gop_guid, NULL,
                                     &gop_handle_count, &gop_handles);
-    serial_log("  LocateHandleBuffer returned\n");
+    serial_log("  LocateHandleBuffer(GOP) status = ");
+    serial_log_hex((UINT64)status);
+    serial_log(", count = ");
+    serial_log_hex((UINT64)gop_handle_count);
+    serial_log("\n");
     if (EFI_ERROR(status) || gop_handle_count == 0) {
         serial_log("  WARN: no GOP-providing handles; continuing headless\n");
         Print(L"WARN: no GOP found; booting headless\n");
@@ -238,50 +266,104 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable) {
     // and #GP on a "function pointer" that's actually an EFI status
     // code (e.g. 0x8000000000000002 = EFI_INVALID_PARAMETER seen as RIP).
 
-    // Get LoadedImage for the current bootloader image (us).
-    // 2026-05-25: HandleProtocol + OpenProtocol both returned
-    // EFI_INVALID_PARAMETER (0x8000000000000002) with a local GUID
-    // variable. Try gnu-efi's global LoadedImageProtocol symbol —
-    // some firmwares apparently do pointer-identity checks on
-    // well-known protocol GUIDs rather than memcmp.
-    // 2026-05-25: skip LoadedImage entirely. QEMU+EDK2 doesn't install
-    // it on our image handle (OpenProtocol returns EFI_UNSUPPORTED).
-    // Instead, enumerate ALL handles that expose SimpleFileSystem and
-    // pick the first one. The boot device's filesystem is among them.
-    EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *fs = NULL;
-    extern EFI_GUID FileSystemProtocol;  // gnu-efi global; EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID
-    EFI_GUID fs_guid_local = EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID;
-    EFI_GUID *fs_guid = &fs_guid_local;  // use local copy; gnu-efi global may not be named FileSystemProtocol
+    // 2026-05-26: TWO-PATH approach to find the boot device's filesystem.
+    //
+    // Path A (canonical): HandleProtocol(ImageHandle, LoadedImageProtocol)
+    //   → loaded_image->DeviceHandle
+    //   → HandleProtocol(DeviceHandle, SimpleFileSystem)
+    //
+    // Path B (fallback): LocateHandleBuffer(ByProtocol, SimpleFileSystem)
+    //   then iterate over each returned handle.
+    //
+    // Yesterday (homebrew OVMF, EDK2 firmware bug) Path B crashed in
+    // BootScriptExecutorDxe. With retrage OVMF (today), Path B returns
+    // EFI_INVALID_PARAMETER with count=0 — which is wrong (spec says
+    // EFI_NOT_FOUND on no matches), but matches what some firmware does
+    // when the protocol simply isn't registered on any handle. So we go
+    // through Path A first; it's the canonical UEFI boot-device lookup
+    // and tells the firmware exactly which device we want.
 
-    serial_log("  enumerating SimpleFileSystem handles\n");
-    UINTN fs_handle_count = 0;
-    EFI_HANDLE *fs_handles = NULL;
-    status = BS->LocateHandleBuffer(ByProtocol, fs_guid, NULL,
-                                    &fs_handle_count, &fs_handles);
-    serial_log("  LocateHandleBuffer status = ");
-    serial_log_hex((UINT64)status);
-    serial_log(", count = ");
-    serial_log_hex((UINT64)fs_handle_count);
+    EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *fs = NULL;
+    EFI_HANDLE boot_device_handle = NULL;
+
+    EFI_GUID li_guid = LOADED_IMAGE_PROTOCOL;
+    EFI_GUID fs_guid_local = EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID;
+
+    serial_log("  li_guid bytes: ");
+    serial_log_guid(&li_guid);
     serial_log("\n");
-    if (EFI_ERROR(status) || fs_handle_count == 0) {
-        serial_log("  ERROR: no SimpleFileSystem handles\n");
-        Print(L"ERROR: No filesystem available\n");
-        goto halt;
+    serial_log("  fs_guid bytes: ");
+    serial_log_guid(&fs_guid_local);
+    serial_log("\n");
+
+    // gnu-efi sets LibImageHandle from InitializeLib — use that since
+    // the param ImageHandle sometimes gets compiler-elided in the
+    // crt0 → efi_main handoff. The two should be identical when both
+    // are non-NULL; we logged that match at boot.
+    EFI_HANDLE effective_handle = ImageHandle ? ImageHandle : LibImageHandle;
+    serial_log("  effective ImageHandle = ");
+    serial_log_hex((UINT64)effective_handle);
+    serial_log("\n");
+
+    // PATH A: HandleProtocol(ImageHandle, LoadedImage)
+    EFI_LOADED_IMAGE_PROTOCOL *loaded_image = NULL;
+    serial_log("  PATH A: HandleProtocol(ImageHandle, LoadedImage)\n");
+    status = BS->HandleProtocol(effective_handle, &li_guid, (void **)&loaded_image);
+    serial_log("    status = ");
+    serial_log_hex((UINT64)status);
+    serial_log("\n");
+    if (!EFI_ERROR(status) && loaded_image) {
+        boot_device_handle = loaded_image->DeviceHandle;
+        serial_log("    loaded_image->DeviceHandle = ");
+        serial_log_hex((UINT64)boot_device_handle);
+        serial_log("\n");
+        if (boot_device_handle) {
+            serial_log("  PATH A: HandleProtocol(DeviceHandle, SimpleFileSystem)\n");
+            status = BS->HandleProtocol(boot_device_handle, &fs_guid_local, (void **)&fs);
+            serial_log("    status = ");
+            serial_log_hex((UINT64)status);
+            serial_log("\n");
+            if (EFI_ERROR(status)) fs = NULL;
+        }
     }
 
-    // Try each FS handle until one opens with our kernel file present.
-    // For now, just use the first.
-    serial_log("  binding first FS handle (");
-    serial_log_hex((UINT64)fs_handles[0]);
-    serial_log(")\n");
-    status = BS->HandleProtocol(fs_handles[0], fs_guid, (void **)&fs);
-    serial_log("  HandleProtocol(FS) status = ");
-    serial_log_hex((UINT64)status);
-    serial_log("\n");
-    if (fs_handles) BS->FreePool(fs_handles);
-    if (EFI_ERROR(status) || !fs) {
-        serial_log("  ERROR: FS HandleProtocol failed\n");
-        Print(L"ERROR: FS not bindable\n");
+    // PATH B: fall back to LocateHandleBuffer if Path A didn't bind fs.
+    if (!fs) {
+        serial_log("  PATH B: LocateHandleBuffer(SimpleFileSystem)\n");
+        UINTN fs_handle_count = 0;
+        EFI_HANDLE *fs_handles = NULL;
+        status = BS->LocateHandleBuffer(ByProtocol, &fs_guid_local, NULL,
+                                        &fs_handle_count, &fs_handles);
+        serial_log("    status = ");
+        serial_log_hex((UINT64)status);
+        serial_log(", count = ");
+        serial_log_hex((UINT64)fs_handle_count);
+        serial_log("\n");
+        if (!EFI_ERROR(status) && fs_handle_count > 0 && fs_handles) {
+            for (UINTN i = 0; i < fs_handle_count && !fs; i++) {
+                serial_log("    trying handle[");
+                serial_log_hex((UINT64)i);
+                serial_log("] = ");
+                serial_log_hex((UINT64)fs_handles[i]);
+                serial_log("\n");
+                EFI_SIMPLE_FILE_SYSTEM_PROTOCOL *candidate = NULL;
+                EFI_STATUS s = BS->HandleProtocol(fs_handles[i], &fs_guid_local,
+                                                  (void **)&candidate);
+                if (!EFI_ERROR(s) && candidate) {
+                    fs = candidate;
+                    boot_device_handle = fs_handles[i];
+                    serial_log("    bound fs on handle[");
+                    serial_log_hex((UINT64)i);
+                    serial_log("]\n");
+                }
+            }
+        }
+        if (fs_handles) BS->FreePool(fs_handles);
+    }
+
+    if (!fs) {
+        serial_log("  ERROR: no filesystem found via either path\n");
+        Print(L"ERROR: No filesystem available\n");
         goto halt;
     }
 

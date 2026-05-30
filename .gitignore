@@ -10,3 +10,7 @@ scripts/auto-push.launchd.err.log
 
 # M8.P5 soak target — written + restored by the apply/rollback soak
 js/apps/.synthetic-target.js
+
+# Kernel firmware (downloaded by kernel/scripts/get-ovmf.sh; ~4MB)
+kernel/firmware/
+kernel/build/

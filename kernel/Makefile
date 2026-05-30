@@ -96,7 +96,7 @@ iso: kernel boot
 	@echo "  NOVA OS ISO: $(BUILD_DIR)/nova-os.iso"
 	@echo "==================================="
 
-# Run in QEMU for testing
+# Run in QEMU for testing (Linux — /usr/share/ovmf is Debian/Ubuntu's path)
 run: iso
 	qemu-system-x86_64 \
 	    -bios /usr/share/ovmf/OVMF.fd \
@@ -104,6 +104,21 @@ run: iso
 	    -m 256M \
 	    -serial stdio \
 	    -vga virtio
+
+# Run in QEMU using retrage's upstream EDK2 nightly OVMF.
+# Background (2026-05-26): Homebrew QEMU 11.0's bundled OVMF (Linaro 2024 build)
+# hits a #GP in BootScriptExecutorDxe when our bootloader calls
+# LocateHandleBuffer. The retrage nightly does not have that bug. Use this
+# target on macOS to test the kernel locally.
+run-retrage: iso
+	./scripts/get-ovmf.sh
+	qemu-system-x86_64 \
+	    -bios firmware/RELEASEX64_OVMF.fd \
+	    -cdrom $(BUILD_DIR)/nova-os.iso \
+	    -m 256M \
+	    -serial stdio \
+	    -display none \
+	    -no-reboot
 
 # Run kernel directly (faster, for development)
 run-kernel: kernel
