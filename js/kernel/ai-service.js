@@ -502,10 +502,12 @@ class AIService {
 
   // The tutorial half of the system prompt. Three live registries get
   // flattened into a compact reference: 76 apps (names only), ~39
-  // capabilities (id + one-line "what it does" tag), 20 skills (name
-  // + best phrase trigger). Total weight ~1.8KB / ~500 tokens — well
+  // capabilities (id + one-line "what it does" tag), 55 skills (name
+  // + best phrase trigger). Total weight ~2.1KB / ~580 tokens — still
   // inside the 4096-token budget on Ollama and prompt-cache-friendly
-  // for the Anthropic path.
+  // for the Anthropic path. Skill count is derived from the live
+  // registry at call time, not hardcoded — this comment just notes the
+  // current size for capacity planning.
   //
   // Imports happen inside the method (not at module scope) because
   // ai-service.js is loaded before the app/skill registries are

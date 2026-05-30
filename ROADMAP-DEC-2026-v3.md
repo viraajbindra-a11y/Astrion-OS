@@ -19,7 +19,7 @@ Substrate as of commit `b6e89d4` (auto-push job confirms pushed):
 | M4 — Verifiable Code Gen | ✅ shipped | spec→tests→sandbox→code→app-in-dock |
 | M5 — Reversibility | ✅ shipped | Branch, interceptor, rewind, PONR, typed confirm |
 | M6 — Socratic + Red-Team | ✅ shipped | All P1–P4 + chaos + Settings dashboard |
-| M7 — Skill Marketplace | 🟡 substrate | DSL + parser + 20 skills + scheduler. **Cloud catalog not built.** |
+| M7 — Skill Marketplace | 🟡 substrate | DSL + parser + 55 bundled skills + scheduler. **Cloud catalog not built.** |
 | M8 — Self-Modification | 🟡 substrate | All 5 gates run. **Disk-write side (P5) not implemented.** |
 
 **170/170 verification tests** green offline (stubbed AI). **Real-API soak: incomplete.**

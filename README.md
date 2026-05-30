@@ -57,7 +57,7 @@ explains self-modification's 6-gate flow, and includes an honest
   desktop right-click, window snapping, screensaver, HiDPI auto-detect.
 - **Spotlight** (Cmd+Space) — every keystroke runs through the intent
   parser. High-confidence intents become "Press Enter to run."
-- **Skill registry** — 20 bundled skills + user-installable. Phrase
+- **Skill registry** — 55 bundled skills + user-installable. Phrase
   triggers index to a case-insensitive lookup, so Spotlight can
   dispatch a skill in O(1).
 - **Graph store** — notes, todos, reminders all share one graph.
