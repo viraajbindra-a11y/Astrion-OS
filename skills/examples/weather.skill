@@ -1,0 +1,16 @@
+# astrion-skill v1
+goal: Show the current weather
+trigger:
+  - phrase: "weather"
+  - phrase: "what's the weather"
+  - phrase: "temperature outside"
+do: |
+  Fetch the current weather for the user's saved location (or detect
+  via IP geolocation if not saved). Show a notification with the
+  current temperature, condition, and high/low for today. Use the
+  user-configured weather provider (Open-Meteo by default, no key
+  required, privacy-friendly).
+constraints:
+  level: L2
+  budget_tokens: 200
+  reversibility: FREE

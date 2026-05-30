@@ -1,0 +1,15 @@
+# astrion-skill v1
+goal: Surface a random note from your history (memory jog)
+trigger:
+  - phrase: "random note"
+  - phrase: "surprise me"
+  - phrase: "memory jog"
+do: |
+  Pick a random note from the user's Notes app history (excluding
+  notes from the last 7 days — we want OLDER memories). If none
+  qualifies, pick any random note. Open it in the Notes app. Show
+  a notification "From X days ago." No edits — read-only surface.
+constraints:
+  level: L1
+  budget_tokens: 150
+  reversibility: FREE

@@ -1,0 +1,14 @@
+# astrion-skill v1
+goal: Toggle system mute
+trigger:
+  - phrase: "mute"
+  - phrase: "silence audio"
+  - phrase: "unmute"
+do: |
+  Toggle the system output mute state via the system.toggleMute
+  capability. Show a notification indicating the new state ("Muted"
+  or "Unmuted") with the current volume level if unmuting.
+constraints:
+  level: L2
+  budget_tokens: 100
+  reversibility: FREE

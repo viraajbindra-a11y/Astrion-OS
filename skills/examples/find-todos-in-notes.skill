@@ -1,0 +1,16 @@
+# astrion-skill v1
+goal: Extract every TODO line from your notes into one view
+trigger:
+  - phrase: "find todos"
+  - phrase: "scan for todos"
+  - phrase: "loose todos"
+do: |
+  Scan every Notes app note for lines starting with "TODO", "[ ]",
+  or "- []". Collect them with the source note title. Open a new
+  Notes app note titled "Loose TODOs — YYYY-MM-DD" listing each
+  TODO with a link back to its source note. Highlights items the
+  user wrote down but never moved to the Todos app.
+constraints:
+  level: L2
+  budget_tokens: 400
+  reversibility: BOUNDED

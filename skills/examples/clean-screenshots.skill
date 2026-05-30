@@ -1,0 +1,16 @@
+# astrion-skill v1
+goal: Move all screenshots older than 7 days to ~/Screenshots/Archive
+trigger:
+  - phrase: "clean screenshots"
+  - phrase: "archive screenshots"
+  - phrase: "tidy screenshots"
+do: |
+  Find all .png and .jpg files in the user's default screenshot folder
+  (per OS) whose mtime is older than 7 days. Confirm count with the
+  user via rapid-confirm ("Move X screenshots to Archive?"). On
+  confirm, create ~/Screenshots/Archive if missing and move the files
+  there. Show summary toast with count and recoverable path.
+constraints:
+  level: L2
+  budget_tokens: 300
+  reversibility: BOUNDED

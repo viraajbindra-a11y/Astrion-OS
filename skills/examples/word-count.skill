@@ -1,0 +1,15 @@
+# astrion-skill v1
+goal: Count words and characters in the clipboard
+trigger:
+  - phrase: "word count"
+  - phrase: "how many words"
+  - phrase: "count words"
+do: |
+  Read the clipboard. Count words (split on whitespace, drop empty
+  strings), characters (with + without spaces), and sentences
+  (split on .!?). Show all four counts in a notification. If
+  clipboard is empty, prompt "Copy text first."
+constraints:
+  level: L1
+  budget_tokens: 120
+  reversibility: FREE

@@ -1,0 +1,15 @@
+# astrion-skill v1
+goal: Create a new dated journal entry note
+trigger:
+  - phrase: "journal"
+  - phrase: "new journal entry"
+  - phrase: "log my day"
+do: |
+  Create a new Notes app note titled "Journal — YYYY-MM-DD" (today's
+  date). Pre-populate with three section headers: "What happened",
+  "What I learned", "Tomorrow". Focus the cursor at the first section.
+  Record a 'journal-entry' graph node so it shows in weekly digest.
+constraints:
+  level: L2
+  budget_tokens: 200
+  reversibility: BOUNDED

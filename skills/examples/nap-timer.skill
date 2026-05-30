@@ -1,0 +1,15 @@
+# astrion-skill v1
+goal: Start a 20-minute nap timer with gentle wake
+trigger:
+  - phrase: "nap"
+  - phrase: "power nap"
+  - phrase: "quick rest"
+do: |
+  Start a 20-minute timer. Enable Do Not Disturb. Dim the display
+  to 30%. When the timer fires, raise display brightness gradually
+  back to normal over 10 seconds and play a soft alert sound. Show
+  notification: "Nap done — back to it."
+constraints:
+  level: L2
+  budget_tokens: 250
+  reversibility: BOUNDED

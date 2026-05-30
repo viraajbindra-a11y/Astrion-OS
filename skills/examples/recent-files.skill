@@ -1,0 +1,15 @@
+# astrion-skill v1
+goal: Show the 5 most recently used files
+trigger:
+  - phrase: "recent files"
+  - phrase: "recently opened"
+  - phrase: "what did I just open"
+do: |
+  Query the recents capability (system.recentFiles) for the 5 most
+  recently opened files across all apps. Render as Spotlight result
+  rows with file name, app icon, and "X minutes ago" timestamp.
+  Clicking a row reopens the file in its app.
+constraints:
+  level: L1
+  budget_tokens: 150
+  reversibility: FREE

@@ -1,0 +1,15 @@
+# astrion-skill v1
+goal: Generate a random number in a range
+trigger:
+  - phrase: "random number"
+  - phrase: "pick a number"
+  - phrase: "random between"
+do: |
+  Parse the user's text for a range (e.g., "1 and 100", "between
+  1-50"). Default to 1-100. Generate a uniform random integer in
+  that inclusive range. Show the result in a large-format
+  notification with the range as subtext.
+constraints:
+  level: L1
+  budget_tokens: 100
+  reversibility: FREE

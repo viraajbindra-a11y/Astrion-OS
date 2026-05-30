@@ -1,0 +1,15 @@
+# astrion-skill v1
+goal: Show a list of currently running apps
+trigger:
+  - phrase: "what's running"
+  - phrase: "running apps"
+  - phrase: "open apps"
+do: |
+  Query processManager.listRunning() for every app currently launched.
+  Render as Spotlight result rows showing the app icon, name, and
+  uptime ("running for X minutes"). Clicking a row focuses that
+  app's main window. A long-press shows a "Quit" option.
+constraints:
+  level: L1
+  budget_tokens: 150
+  reversibility: FREE

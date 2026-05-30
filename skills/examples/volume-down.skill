@@ -1,0 +1,14 @@
+# astrion-skill v1
+goal: Lower system volume one step
+trigger:
+  - phrase: "quieter"
+  - phrase: "volume down"
+  - phrase: "turn down the volume"
+do: |
+  Lower the system output volume by 10% via the system.setVolume
+  capability. Floor at 0%. Briefly show the new level in a notification
+  toast with a volume icon.
+constraints:
+  level: L2
+  budget_tokens: 100
+  reversibility: FREE

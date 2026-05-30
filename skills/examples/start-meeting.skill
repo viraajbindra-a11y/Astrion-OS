@@ -1,0 +1,16 @@
+# astrion-skill v1
+goal: Prepare for a video meeting — mute notifications, mute mic check
+trigger:
+  - phrase: "start meeting"
+  - phrase: "meeting mode"
+  - phrase: "going on a call"
+do: |
+  Enable Do Not Disturb. Set system volume to 60% (audible but not
+  loud). Toggle the camera/mic check app open if installed. Record
+  a 'meeting' graph node with start timestamp so the meeting shows
+  up in today-agenda + weekly digest. Show notification: "Meeting
+  mode on. Say 'end meeting' when done."
+constraints:
+  level: L2
+  budget_tokens: 250
+  reversibility: BOUNDED

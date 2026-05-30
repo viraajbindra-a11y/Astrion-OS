@@ -1,0 +1,15 @@
+# astrion-skill v1
+goal: Summarize text from the clipboard via the local AI
+trigger:
+  - phrase: "summarize"
+  - phrase: "tldr"
+  - phrase: "tl;dr"
+do: |
+  Read the clipboard. If empty, show "Nothing to summarize — copy text
+  first." Otherwise route through aiService with a 3-bullet-summary
+  prompt. Show the summary in a notification with a "Copy summary"
+  button. Local Ollama only — no data leaves the machine.
+constraints:
+  level: L2
+  budget_tokens: 800
+  reversibility: FREE

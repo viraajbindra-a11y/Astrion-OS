@@ -1,0 +1,15 @@
+# astrion-skill v1
+goal: Roll one or more dice
+trigger:
+  - phrase: "roll dice"
+  - phrase: "roll a die"
+  - phrase: "dnd roll"
+do: |
+  Parse the user's text for a dice expression (e.g., "2d6", "1d20",
+  "3d8+2"). Default to 1d6. Roll the dice and show each die's value
+  plus the total in a notification with a die icon. If a modifier is
+  present, show the math (e.g., "Rolls: 4, 5, 2; +2 modifier; total = 13").
+constraints:
+  level: L1
+  budget_tokens: 120
+  reversibility: FREE

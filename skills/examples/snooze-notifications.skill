@@ -1,0 +1,15 @@
+# astrion-skill v1
+goal: Snooze notifications for a duration
+trigger:
+  - phrase: "snooze notifications"
+  - phrase: "dnd for"
+  - phrase: "quiet for"
+do: |
+  Parse the user's text for a duration (e.g., "30 minutes", "1 hour",
+  "until 3pm"). Default to 30 minutes. Enable Do Not Disturb and
+  schedule a system task to disable it after the duration. Show
+  notification confirming the snooze duration + end time.
+constraints:
+  level: L2
+  budget_tokens: 200
+  reversibility: BOUNDED

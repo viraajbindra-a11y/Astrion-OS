@@ -1,0 +1,14 @@
+# astrion-skill v1
+goal: Increase screen brightness one step
+trigger:
+  - phrase: "brighter"
+  - phrase: "brightness up"
+  - phrase: "increase brightness"
+do: |
+  Raise the display brightness by 10% via the system.setBrightness
+  capability. If already at max, show a notification "Already at max
+  brightness." Otherwise show the new brightness percentage briefly.
+constraints:
+  level: L2
+  budget_tokens: 100
+  reversibility: FREE

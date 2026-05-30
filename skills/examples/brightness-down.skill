@@ -1,0 +1,14 @@
+# astrion-skill v1
+goal: Decrease screen brightness one step
+trigger:
+  - phrase: "dimmer"
+  - phrase: "brightness down"
+  - phrase: "decrease brightness"
+do: |
+  Lower the display brightness by 10% via the system.setBrightness
+  capability. If already at min (10%), show "Already at minimum
+  brightness — won't go to zero." Otherwise show the new percentage.
+constraints:
+  level: L2
+  budget_tokens: 100
+  reversibility: FREE

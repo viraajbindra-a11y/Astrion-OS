@@ -1,0 +1,16 @@
+# astrion-skill v1
+goal: Set an alarm for a specific time
+trigger:
+  - phrase: "wake me up at"
+  - phrase: "alarm for"
+  - phrase: "set alarm"
+do: |
+  Parse the user's text for a target time ("7am", "in 8 hours",
+  "tomorrow at 6:30"). Schedule a system alarm via system.scheduleAlarm.
+  Show a confirmation notification with the scheduled time. When the
+  alarm fires, raise display brightness gradually + play an alert
+  sound + show a dismissible notification.
+constraints:
+  level: L2
+  budget_tokens: 250
+  reversibility: BOUNDED

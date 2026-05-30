@@ -1,0 +1,16 @@
+# astrion-skill v1
+goal: Show an inspiring quote
+trigger:
+  - phrase: "quote"
+  - phrase: "inspire me"
+  - phrase: "quote of the day"
+  - cron: "0 8 * * *"
+do: |
+  Pick a quote from the built-in 200-quote bundle (rotating daily —
+  use today's date as seed so the same date always shows the same
+  quote). Show as a notification with the author below. Tap to open
+  Notes app pre-populated with the quote text for journaling.
+constraints:
+  level: L1
+  budget_tokens: 100
+  reversibility: FREE

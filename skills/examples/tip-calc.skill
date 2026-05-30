@@ -1,0 +1,15 @@
+# astrion-skill v1
+goal: Calculate a tip on a bill amount
+trigger:
+  - phrase: "tip on"
+  - phrase: "calculate tip"
+  - phrase: "tip for"
+do: |
+  Parse the user's text for the bill amount and (optional) tip
+  percentage. Default to 18% if not given. Compute tip + total +
+  per-person amount if "split N ways" is mentioned. Show all three
+  values in a notification with the math broken down.
+constraints:
+  level: L1
+  budget_tokens: 150
+  reversibility: FREE

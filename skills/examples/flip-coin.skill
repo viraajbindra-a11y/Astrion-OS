@@ -1,0 +1,14 @@
+# astrion-skill v1
+goal: Flip a coin (heads or tails)
+trigger:
+  - phrase: "flip a coin"
+  - phrase: "coin flip"
+  - phrase: "heads or tails"
+do: |
+  Generate a 0 or 1 via Math.random(). Show a notification with the
+  result: a coin icon and "Heads" or "Tails" in large text. No
+  side effects, no graph node — purely a quick decision helper.
+constraints:
+  level: L1
+  budget_tokens: 80
+  reversibility: FREE

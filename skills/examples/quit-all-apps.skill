@@ -1,0 +1,16 @@
+# astrion-skill v1
+goal: Close all running apps with confirmation
+trigger:
+  - phrase: "close everything"
+  - phrase: "quit all apps"
+  - phrase: "close all"
+do: |
+  Query processManager.listRunning() for all running apps. Show a
+  rapid-confirm modal listing the apps + a count: "Quit all N apps?
+  Unsaved work will be lost." On confirm, call .quit() on each. Skip
+  apps that have unsaved indicators (return their list at the end so
+  the user knows what stayed open).
+constraints:
+  level: L3
+  budget_tokens: 400
+  reversibility: BOUNDED

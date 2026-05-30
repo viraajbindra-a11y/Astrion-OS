@@ -1,0 +1,15 @@
+# astrion-skill v1
+goal: End meeting mode — restore notifications and volume
+trigger:
+  - phrase: "end meeting"
+  - phrase: "meeting over"
+  - phrase: "call ended"
+do: |
+  Disable Do Not Disturb. Restore volume to pre-meeting level (from
+  the 'meeting' graph node started by start-meeting). Update the
+  graph node with end timestamp and duration. Show notification:
+  "Meeting ended — duration X minutes."
+constraints:
+  level: L2
+  budget_tokens: 200
+  reversibility: FREE

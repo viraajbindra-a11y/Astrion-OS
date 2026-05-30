@@ -1,0 +1,14 @@
+# astrion-skill v1
+goal: Raise system volume one step
+trigger:
+  - phrase: "louder"
+  - phrase: "volume up"
+  - phrase: "turn up the volume"
+do: |
+  Raise the system output volume by 10% via the system.setVolume
+  capability. Cap at 100%. Briefly show the new level in a notification
+  toast with a volume icon.
+constraints:
+  level: L2
+  budget_tokens: 100
+  reversibility: FREE

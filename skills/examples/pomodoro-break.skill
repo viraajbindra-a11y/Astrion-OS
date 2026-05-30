@@ -1,0 +1,16 @@
+# astrion-skill v1
+goal: Take a 5-minute Pomodoro break
+trigger:
+  - phrase: "break"
+  - phrase: "pomodoro break"
+  - phrase: "take a break"
+do: |
+  Start a 5-minute break timer. Disable Do Not Disturb if it's on
+  (focus session likely just ended). Show a notification "5-minute
+  break started. Step away from the screen." When timer fires,
+  notify "Break over — back to work?" with a button to re-enter
+  focus mode.
+constraints:
+  level: L2
+  budget_tokens: 200
+  reversibility: BOUNDED

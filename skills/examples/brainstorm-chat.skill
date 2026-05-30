@@ -1,0 +1,16 @@
+# astrion-skill v1
+goal: Start a brainstorming session in the chat panel
+trigger:
+  - phrase: "brainstorm"
+  - phrase: "help me think about"
+  - phrase: "ideas for"
+do: |
+  Open the chat panel in BRAINSTORM mode (preloaded system prompt
+  framing the AI as a sharp thinking partner that asks questions
+  and pushes back, not just affirms). Pre-fill the input with the
+  user's trigger text minus the trigger phrase. The user can
+  continue the conversation freely from there.
+constraints:
+  level: L2
+  budget_tokens: 300
+  reversibility: FREE

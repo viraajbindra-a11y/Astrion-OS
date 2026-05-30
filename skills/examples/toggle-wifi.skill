@@ -1,0 +1,15 @@
+# astrion-skill v1
+goal: Toggle Wi-Fi on or off
+trigger:
+  - phrase: "wifi off"
+  - phrase: "wifi on"
+  - phrase: "toggle wifi"
+do: |
+  Toggle the Wi-Fi radio via the system.toggleWifi capability. Show
+  a notification with the new state and (if connecting) the SSID once
+  associated. If turning off and a download is in progress, ask the
+  user to confirm via rapid-confirm before proceeding.
+constraints:
+  level: L2
+  budget_tokens: 150
+  reversibility: BOUNDED

@@ -1,0 +1,15 @@
+# astrion-skill v1
+goal: Show a cheatsheet of keyboard shortcuts
+trigger:
+  - phrase: "shortcuts"
+  - phrase: "keyboard shortcuts"
+  - phrase: "hotkeys"
+do: |
+  Open a Spotlight-style overlay listing the most-useful shortcuts:
+  Cmd+Space (Spotlight), Cmd+Tab (app switcher), Cmd+W (close window),
+  Cmd+, (settings), Cmd+/ (this cheatsheet). Categorize by app/system.
+  Tap-anywhere dismisses. Toggle with the same shortcut.
+constraints:
+  level: L1
+  budget_tokens: 150
+  reversibility: FREE

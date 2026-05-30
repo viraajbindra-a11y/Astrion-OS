@@ -1,0 +1,16 @@
+# astrion-skill v1
+goal: Translate text via the local AI
+trigger:
+  - phrase: "translate"
+  - phrase: "say in"
+  - phrase: "in spanish"
+do: |
+  Parse the user's text for the source text and target language. If
+  no source is given, read the clipboard. Route through aiService
+  with a translation prompt. Display the translation in a notification
+  with copy-to-clipboard action. No external API — uses the local
+  Ollama model.
+constraints:
+  level: L2
+  budget_tokens: 600
+  reversibility: FREE

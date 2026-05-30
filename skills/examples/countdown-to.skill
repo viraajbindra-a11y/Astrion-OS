@@ -1,0 +1,16 @@
+# astrion-skill v1
+goal: Show a countdown to a date or event
+trigger:
+  - phrase: "countdown to"
+  - phrase: "how long until"
+  - phrase: "days until"
+do: |
+  Parse the user's text for a date or named event ("Christmas",
+  "Friday", "my birthday" if stored in graph). Compute the difference
+  from now. Show in a notification with the most appropriate unit
+  ("3 hours 12 minutes", "5 days", "47 weeks"). Optionally pin to
+  the desktop as a widget if the user says "pin it".
+constraints:
+  level: L1
+  budget_tokens: 200
+  reversibility: FREE

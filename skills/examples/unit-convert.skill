@@ -1,0 +1,16 @@
+# astrion-skill v1
+goal: Convert between common units
+trigger:
+  - phrase: "convert"
+  - phrase: "how many"
+  - phrase: "in inches"
+do: |
+  Parse the user's text for a value + source unit + target unit
+  (e.g., "5 km to miles", "convert 100 fahrenheit to celsius",
+  "200 grams in ounces"). Compute the conversion using built-in
+  unit tables (length, mass, temperature, volume). Show the result
+  in a notification with 4 sig figs.
+constraints:
+  level: L1
+  budget_tokens: 150
+  reversibility: FREE

@@ -1,0 +1,16 @@
+# astrion-skill v1
+goal: Search the web for a query
+trigger:
+  - phrase: "search for"
+  - phrase: "google"
+  - phrase: "look up online"
+do: |
+  Extract the query from the user's text. Open the system browser
+  with the user's default search engine + the query (DuckDuckGo by
+  default, configurable in Settings). Show a notification confirming
+  "Searching: <query>" with a "Cancel" button (closes the browser
+  tab if clicked within 3s).
+constraints:
+  level: L2
+  budget_tokens: 150
+  reversibility: FREE

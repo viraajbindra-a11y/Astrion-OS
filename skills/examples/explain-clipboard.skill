@@ -1,0 +1,16 @@
+# astrion-skill v1
+goal: Explain whatever is in the clipboard (code, jargon, etc.)
+trigger:
+  - phrase: "explain this"
+  - phrase: "explain clipboard"
+  - phrase: "what is this"
+do: |
+  Read the clipboard. If empty, prompt "Copy something first." Auto-
+  detect content type (code, error message, technical term, foreign
+  text). Route through aiService with an "explain like I'm 12" prompt.
+  Show the explanation as a multi-line notification with a "More"
+  button that opens the chat panel for follow-up.
+constraints:
+  level: L2
+  budget_tokens: 1000
+  reversibility: FREE
