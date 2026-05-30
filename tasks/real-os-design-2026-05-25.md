@@ -427,5 +427,57 @@ you pick.
 
 ---
 
-*Written 2026-05-25. Updated as v2.0 work progresses (or when v1.0
-ships and the question gets re-asked).*
+## Update 2026-05-26 — firmware reality check
+
+Two firmware bugs found in the C-kernel revival. They're stacked:
+
+1. **Homebrew QEMU 11.0 OVMF** (`/opt/homebrew/share/qemu/edk2-x86_64-code.fd`)
+   triggers `#GP` in `BootScriptExecutorDxe` when our bootloader calls
+   `LocateHandleBuffer(SimpleFileSystem)`. Workaround landed today:
+   `kernel/scripts/get-ovmf.sh` downloads retrage's upstream EDK2 nightly
+   build instead. `make run-retrage` uses it.
+
+2. **retrage OVMF** (the workaround) **has its own bug**: `LocateHandleBuffer`
+   for `SimpleFileSystem` returns `EFI_INVALID_PARAMETER count=0` on a
+   CDROM boot device, and adding even a tiny amount of code to `boot.c`
+   to try the canonical `LoadedImage → DeviceHandle → SimpleFileSystem`
+   path crashes the firmware's own DxeCore with `#PF`. Layout-sensitive
+   firmware bug. Lesson #194 captures the full forensics.
+
+### What this means for v2.0 pacing
+
+The "C kernel bridge" idea (use the existing 1087-line `kernel/` code
+to prove the toolchain works while we plan Rust) is hitting firmware
+walls that aren't ours. The productive next moves are:
+
+1. **Surface Pro 6 ISO flash** (already #2 in the user-blocked list).
+   Microsoft's UEFI is yet another EDK2 build; very likely doesn't
+   reproduce either bug. Real-hardware bring-up was always the
+   intended verification anyway.
+
+2. **Bootloader pivot — multiboot2 + GRUB**. Skip UEFI's DxeCore
+   entirely. GRUB handles all the firmware quirks; we get a
+   well-defined entry state. This is a 1-2 day refactor that the
+   Rust direction would do anyway (the Limine/Multiboot2 path is
+   what blog_os and most "writing an OS in Rust" tutorials use).
+
+3. **Lean into the Rust direction earlier**. The C kernel was always
+   a bridge. If the bridge hits firmware walls, jump to the destination.
+   bootimage / Limine + Rust no_std skips this whole class of problem.
+
+### What landed today
+
+- `kernel/scripts/get-ovmf.sh` (downloads retrage OVMF on demand)
+- `kernel/Makefile run-retrage` target
+- `kernel/README.md` (local test recipe + the two-OVMF situation)
+- `.gitignore` excludes `kernel/firmware/` and `kernel/build/`
+- `kernel/boot/boot.c` reverted to commit `a68a545` (yesterday's GREEN
+  state); attempts to add LoadedImage path regressed GOP locate in
+  retrage's DxeCore
+
+The infrastructure stays useful regardless of which path #1, #2, or #3
+above gets picked next.
+
+---
+
+*Written 2026-05-25. Updated 2026-05-26 with firmware reality check.*
