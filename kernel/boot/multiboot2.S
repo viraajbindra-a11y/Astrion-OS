@@ -58,12 +58,22 @@ multiboot_header_end:
 .section .bss
 .align 4096
 
-    /* Page tables: PML4 -> PDPT -> PD (2MiB huge pages). 4KiB each. */
+    /* Page tables.
+     * PML4 -> PDPT -> 4x PD (2 MiB huge pages each). 4 PDs cover 4 GiB
+     * which is enough to reach the QEMU framebuffer at 0xfd000000.
+     * (2026-05-31: prev 1-GiB mapping caused a #PF when paint_test_pattern
+     * touched fb addr; extended here.) */
 p4_table:
     .skip 4096
 p3_table:
     .skip 4096
-p2_table:
+p2_table_0:                                 /* maps 0x0_0000_0000 .. 0x0_4000_0000 */
+    .skip 4096
+p2_table_1:                                 /* maps 0x0_4000_0000 .. 0x0_8000_0000 */
+    .skip 4096
+p2_table_2:                                 /* maps 0x0_8000_0000 .. 0x0_C000_0000 */
+    .skip 4096
+p2_table_3:                                 /* maps 0x0_C000_0000 .. 0x1_0000_0000 */
     .skip 4096
 
     /* 16 KiB stack — plenty for early boot. */
@@ -105,30 +115,43 @@ _start:
     cmp $0x36d76289, %eax
     jne hang32
 
-    /* Build page tables. Identity-map the first 1 GiB via 512 entries of
-     * 2 MiB huge pages. That gives us enough virt=phys territory that
-     * the kernel can read its multiboot info struct + the framebuffer
-     * (if mapped low) without any further paging work. */
+    /* Build page tables. Identity-map the first 4 GiB via 4 PDs of
+     * 512 x 2 MiB huge pages each. Reaches the QEMU framebuffer
+     * at 0xfd000000. */
 
     /* PML4[0] -> PDPT (present + writable). */
     mov $p3_table, %eax
     or $0b11, %eax
     mov %eax, p4_table
 
-    /* PDPT[0] -> PD. */
-    mov $p2_table, %eax
+    /* PDPT[0..3] -> the 4 PDs. */
+    mov $p2_table_0, %eax
     or $0b11, %eax
-    mov %eax, p3_table
+    mov %eax, p3_table + 0
+    mov $p2_table_1, %eax
+    or $0b11, %eax
+    mov %eax, p3_table + 8
+    mov $p2_table_2, %eax
+    or $0b11, %eax
+    mov %eax, p3_table + 16
+    mov $p2_table_3, %eax
+    or $0b11, %eax
+    mov %eax, p3_table + 24
 
-    /* PD[0..511] -> 2 MiB pages, identity-mapped, present + writable +
-     * huge-page flag (bit 7). */
+    /* PD[i][0..511] -> 2 MiB pages, identity-mapped, present + writable
+     * + huge-page flag (bit 7). 4 PDs × 512 entries = 2048 entries
+     * covering 4 GiB. ECX = global entry index 0..2047. */
     xor %ecx, %ecx
 1:  mov $0x200000, %eax
-    mul %ecx
+    mul %ecx                                /* edx:eax = ecx * 2 MiB (phys addr) */
     or $0b10000011, %eax                    /* present + writable + huge */
-    mov %eax, p2_table(, %ecx, 8)
+    /* Lower half of address goes in eax, top byte in dl (= bit 32..39 of phys).
+     * For 4 GiB max, edx is 0 or 1 — we write it into the high half of the
+     * 8-byte PTE so addresses above 4 GiB would still work later. */
+    mov %eax, p2_table_0(, %ecx, 8)         /* low 32 bits */
+    mov %edx, p2_table_0 + 4(, %ecx, 8)     /* high 32 bits */
     inc %ecx
-    cmp $512, %ecx
+    cmp $2048, %ecx
     jne 1b
 
     /* Load PML4 into CR3. */
