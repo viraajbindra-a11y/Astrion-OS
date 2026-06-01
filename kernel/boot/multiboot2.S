@@ -34,7 +34,21 @@ multiboot_header_start:
     .long multiboot_header_end - multiboot_header_start /* header length */
     .long -(0xe85250d6 + 0 + (multiboot_header_end - multiboot_header_start))
 
-    /* End tag (required). */
+    /* Framebuffer request tag (type 5). Asks GRUB for a linear graphical
+     * framebuffer instead of text mode. Width/height/depth = 0 means
+     * "any reasonable mode" — GRUB picks. With this, GRUB will include
+     * a type-8 framebuffer info tag pointing at the actual base address.
+     * 8-byte aligned. */
+    .align 8
+    .word 5                                 /* type: framebuffer request */
+    .word 1                                 /* flags: 1 = optional */
+    .long 20                                /* size */
+    .long 0                                 /* preferred width */
+    .long 0                                 /* preferred height */
+    .long 0                                 /* preferred depth */
+
+    /* End tag (required). 8-byte aligned. */
+    .align 8
     .word 0                                 /* type */
     .word 0                                 /* flags */
     .long 8                                 /* size */
