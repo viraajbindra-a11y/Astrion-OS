@@ -137,7 +137,14 @@ run-kernel: kernel
 # is used, which is a separate target we'll add when needed).
 
 MB2_CFLAGS = -ffreestanding -fno-stack-protector -fno-pic -mno-red-zone \
-             -Wall -Wextra -O2 -mcmodel=kernel -m64
+             -Wall -Wextra -O2 -mcmodel=kernel -m64 \
+             -mno-mmx -mno-sse -mno-sse2 -mno-3dnow \
+             -mgeneral-regs-only
+# 2026-05-31: -mno-sse + -mgeneral-regs-only stop gcc from emitting SSE
+# instructions for struct copies + memset. We never enable SSE in CR0/CR4,
+# so any SSE instruction would triple-fault silently. Caught when the
+# basic-meminfo tag case stopped producing serial output mid-parse —
+# gcc had inlined a struct-field write as an SSE move.
 MB2_LDFLAGS = -nostdlib -T src/linker_mb2.ld -z max-page-size=4096
 
 kernel-mb2:
