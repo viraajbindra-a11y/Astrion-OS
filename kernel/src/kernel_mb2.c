@@ -357,6 +357,85 @@ static void parse_info(uint64_t info_ptr) {
     serial_puts(" tags total\n");
 }
 
+/* ─── Framebuffer paint test ──────────────────────────────────────
+ *
+ * If GRUB gave us a linear 32-bpp framebuffer, paint a recognizable
+ * test pattern: navy background, big orange "A" block in the middle.
+ * Then read back a few pixels and verify they stuck. This is the
+ * smoke test that says "we own the display." Once it passes, we
+ * can start wiring real graphics code (fonts, windows, etc.).
+ */
+
+#define COL_NAVY    0x1E2761u    /* Astrion navy */
+#define COL_ORANGE  0xFF7A00u    /* Astrion orange */
+#define COL_WHITE   0xFFFFFFu
+
+static void fb_fill(uint32_t color) {
+    if (!boot_info.fb_present || boot_info.fb_bpp != 32) return;
+    volatile uint32_t *fb = (volatile uint32_t *)boot_info.fb_addr;
+    uint32_t pitch_px = boot_info.fb_pitch / 4;
+    for (uint32_t y = 0; y < boot_info.fb_height; y++) {
+        for (uint32_t x = 0; x < boot_info.fb_width; x++) {
+            fb[y * pitch_px + x] = color;
+        }
+    }
+}
+
+static void fb_rect(uint32_t x0, uint32_t y0, uint32_t w, uint32_t h, uint32_t color) {
+    if (!boot_info.fb_present || boot_info.fb_bpp != 32) return;
+    volatile uint32_t *fb = (volatile uint32_t *)boot_info.fb_addr;
+    uint32_t pitch_px = boot_info.fb_pitch / 4;
+    for (uint32_t y = y0; y < y0 + h && y < boot_info.fb_height; y++) {
+        for (uint32_t x = x0; x < x0 + w && x < boot_info.fb_width; x++) {
+            fb[y * pitch_px + x] = color;
+        }
+    }
+}
+
+static void paint_test_pattern(void) {
+    if (!boot_info.fb_present) {
+        serial_puts("framebuffer paint: skipped (no fb)\n");
+        return;
+    }
+    if (boot_info.fb_bpp != 32) {
+        serial_puts("framebuffer paint: skipped (bpp != 32)\n");
+        return;
+    }
+
+    serial_puts("framebuffer paint: filling navy background...\n");
+    fb_fill(COL_NAVY);
+
+    /* Centered orange block, ~1/3 of screen. */
+    uint32_t bw = boot_info.fb_width / 3;
+    uint32_t bh = boot_info.fb_height / 3;
+    uint32_t bx = (boot_info.fb_width  - bw) / 2;
+    uint32_t by = (boot_info.fb_height - bh) / 2;
+    serial_puts("framebuffer paint: drawing orange block at ");
+    serial_put_u32(bx); serial_puts(","); serial_put_u32(by);
+    serial_puts(" size "); serial_put_u32(bw); serial_puts("x"); serial_put_u32(bh);
+    serial_puts("\n");
+    fb_rect(bx, by, bw, bh, COL_ORANGE);
+
+    /* White corner marker so we can tell orientation. */
+    fb_rect(0, 0, 16, 16, COL_WHITE);
+
+    /* Read-back verification: sample the center of the orange block. */
+    volatile uint32_t *fb = (volatile uint32_t *)boot_info.fb_addr;
+    uint32_t pitch_px = boot_info.fb_pitch / 4;
+    uint32_t cx = bx + bw / 2;
+    uint32_t cy = by + bh / 2;
+    uint32_t got = fb[cy * pitch_px + cx];
+    serial_puts("framebuffer paint: readback @ center = ");
+    serial_put_hex64((uint64_t)got);
+    /* Some framebuffers store BGR-ordered; both 0xFF7A00 (RGB) and
+     * 0x007AFF (BGR) are acceptable matches. */
+    if ((got & 0xFFFFFFu) == COL_ORANGE || (got & 0xFFFFFFu) == 0x007AFFu) {
+        serial_puts("  OK — pixel write verified\n");
+    } else {
+        serial_puts("  WARN — readback didn't match written color\n");
+    }
+}
+
 static void print_summary(void) {
     serial_puts("\n--- boot summary ---\n");
     if (boot_info.bootloader_name) {
@@ -422,7 +501,10 @@ void kernel_mb2_main(uint32_t magic, uint64_t info_ptr) {
     parse_info(info_ptr);
     print_summary();
 
-    serial_puts("\nkernel halt (next: page allocator + framebuffer driver)\n");
+    serial_puts("\n");
+    paint_test_pattern();
+
+    serial_puts("\nkernel halt (next: page allocator + IDT + font renderer)\n");
 
     /* Halt forever. */
     for (;;) {
