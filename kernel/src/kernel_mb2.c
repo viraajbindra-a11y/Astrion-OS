@@ -21,6 +21,7 @@
  */
 
 #include <stdint.h>
+#include "fb_font.h"
 
 /* ─── COM1 UART (0x3F8) — identical to boot/boot.c ────────────────── */
 
@@ -369,6 +370,8 @@ static void parse_info(uint64_t info_ptr) {
 #define COL_NAVY    0x1E2761u    /* Astrion navy */
 #define COL_ORANGE  0xFF7A00u    /* Astrion orange */
 #define COL_WHITE   0xFFFFFFu
+#define COL_ICE     0xCADCFCu    /* slideshow secondary */
+#define COL_MUTED   0x64748Bu    /* slideshow muted */
 
 static void fb_fill(uint32_t color) {
     if (!boot_info.fb_present || boot_info.fb_bpp != 32) return;
@@ -392,40 +395,165 @@ static void fb_rect(uint32_t x0, uint32_t y0, uint32_t w, uint32_t h, uint32_t c
     }
 }
 
-static void paint_test_pattern(void) {
+/* ─── Framebuffer text rendering ─────────────────────────────────
+ *
+ * Walks the 8x12 bitmap in fb_font.h and writes pixels directly to
+ * the linear framebuffer. `scale` is integer (1 = native 8x12, 2 =
+ * 16x24, 3 = 24x36). No kerning, no antialiasing — just bits to
+ * pixels. Foreground color is the glyph; background is left
+ * untouched so callers can pre-fill if they want.
+ */
+
+static void fb_putchar(uint32_t x, uint32_t y, char c, uint32_t color, int scale) {
+    if (!boot_info.fb_present || boot_info.fb_bpp != 32) return;
+    if (c < 32 || c > 126) c = '?';
+    int idx = c - 32;
+    if (scale < 1) scale = 1;
+
+    volatile uint32_t *fb = (volatile uint32_t *)boot_info.fb_addr;
+    uint32_t pitch_px = boot_info.fb_pitch / 4;
+
+    for (int row = 0; row < FONT_HEIGHT; row++) {
+        uint8_t bits = font_data[idx][row];
+        for (int col = 0; col < FONT_WIDTH; col++) {
+            if (!(bits & (1 << (FONT_WIDTH - 1 - col)))) continue;
+            uint32_t px = x + col * scale;
+            uint32_t py = y + row * scale;
+            for (int sy = 0; sy < scale; sy++) {
+                if (py + sy >= boot_info.fb_height) continue;
+                for (int sx = 0; sx < scale; sx++) {
+                    if (px + sx >= boot_info.fb_width) continue;
+                    fb[(py + sy) * pitch_px + (px + sx)] = color;
+                }
+            }
+        }
+    }
+}
+
+/* Returns the x-coord after the last char drawn (so callers can chain).
+ * Wraps to next line on '\n'. Returns final cursor for caller use. */
+static uint32_t fb_puts(uint32_t x, uint32_t y, const char *s, uint32_t color, int scale) {
+    if (!boot_info.fb_present) return x;
+    uint32_t cx = x, cy = y;
+    int gw = FONT_WIDTH * scale;
+    int gh = FONT_HEIGHT * scale;
+    while (*s) {
+        if (*s == '\n') {
+            cx = x;
+            cy += gh + 2;
+            s++;
+            continue;
+        }
+        fb_putchar(cx, cy, *s, color, scale);
+        cx += gw;
+        s++;
+    }
+    return cx;
+}
+
+/* Render a uint32 as decimal at (x,y). Returns x past the last digit. */
+static uint32_t fb_put_u32(uint32_t x, uint32_t y, uint32_t v, uint32_t color, int scale) {
+    char buf[11];
+    int i = 0;
+    if (v == 0) { buf[i++] = '0'; }
+    else { while (v) { buf[i++] = '0' + (v % 10); v /= 10; } }
+    int gw = FONT_WIDTH * scale;
+    while (i > 0) {
+        fb_putchar(x, y, buf[--i], color, scale);
+        x += gw;
+    }
+    return x;
+}
+
+/* Hex u64 at (x,y) — "0x" + 16 nibbles. Returns x past last char. */
+static uint32_t fb_put_hex64(uint32_t x, uint32_t y, uint64_t v, uint32_t color, int scale) {
+    static const char hex[] = "0123456789abcdef";
+    int gw = FONT_WIDTH * scale;
+    fb_putchar(x, y, '0', color, scale); x += gw;
+    fb_putchar(x, y, 'x', color, scale); x += gw;
+    for (int i = 15; i >= 0; i--) {
+        fb_putchar(x, y, hex[(v >> (i * 4)) & 0xF], color, scale);
+        x += gw;
+    }
+    return x;
+}
+
+static void paint_boot_screen(void) {
     if (!boot_info.fb_present) {
-        serial_puts("framebuffer paint: skipped (no fb)\n");
+        serial_puts("boot screen: skipped (no fb)\n");
         return;
     }
     if (boot_info.fb_bpp != 32) {
-        serial_puts("framebuffer paint: skipped (bpp != 32)\n");
+        serial_puts("boot screen: skipped (bpp != 32)\n");
         return;
     }
 
-    serial_puts("framebuffer paint: filling navy background...\n");
+    serial_puts("boot screen: rendering...\n");
+
+    /* Background. */
     fb_fill(COL_NAVY);
 
-    /* Centered orange block, ~1/3 of screen. */
-    uint32_t bw = boot_info.fb_width / 3;
-    uint32_t bh = boot_info.fb_height / 3;
-    uint32_t bx = (boot_info.fb_width  - bw) / 2;
-    uint32_t by = (boot_info.fb_height - bh) / 2;
-    serial_puts("framebuffer paint: drawing orange block at ");
-    serial_put_u32(bx); serial_puts(","); serial_put_u32(by);
-    serial_puts(" size "); serial_put_u32(bw); serial_puts("x"); serial_put_u32(bh);
-    serial_puts("\n");
-    fb_rect(bx, by, bw, bh, COL_ORANGE);
+    /* Orange accent bar down the left edge — the visual motif from the
+     * slideshow + landing page. */
+    fb_rect(0, 0, 18, boot_info.fb_height, COL_ORANGE);
 
-    /* White corner marker so we can tell orientation. */
-    fb_rect(0, 0, 16, 16, COL_WHITE);
+    /* Wordmark + tagline, big. */
+    uint32_t mx = 60, my = 60;
+    fb_puts(mx, my,           "Astrion v2.0",          COL_WHITE,  6);
+    fb_puts(mx, my + 96,      "the AI-native kernel",  COL_ICE,    2);
 
-    /* Read-back verification: sample the center of the orange block. */
+    /* Status block — multiboot info summary, monospaced. */
+    uint32_t sx = 60;
+    uint32_t sy = my + 200;
+    int s = 2;
+    int rowh = FONT_HEIGHT * s + 4;
+
+    fb_puts(sx, sy,                   "boot:",   COL_ORANGE, s);
+    fb_puts(sx + 120, sy,             "GREEN  (multiboot2 + GRUB)", COL_WHITE, s);
+
+    fb_puts(sx, sy + rowh,            "mode:",   COL_ORANGE, s);
+    fb_puts(sx + 120, sy + rowh,      "long mode (x86_64)", COL_WHITE, s);
+
+    fb_puts(sx, sy + rowh*2,          "mmap:",   COL_ORANGE, s);
+    {
+        uint32_t x = sx + 120;
+        x = fb_put_u32(x, sy + rowh*2, boot_info.mmap_entry_count, COL_WHITE, s);
+        x = fb_puts(x, sy + rowh*2, " entries, ", COL_WHITE, s);
+        x = fb_put_u32(x, sy + rowh*2,
+                       (uint32_t)(boot_info.total_available_bytes / (1024*1024)),
+                       COL_WHITE, s);
+        fb_puts(x, sy + rowh*2, " MiB", COL_WHITE, s);
+    }
+
+    fb_puts(sx, sy + rowh*3,          "fb:",     COL_ORANGE, s);
+    {
+        uint32_t x = sx + 120;
+        x = fb_put_u32(x, sy + rowh*3, boot_info.fb_width,  COL_WHITE, s);
+        x = fb_puts(x, sy + rowh*3, "x", COL_WHITE, s);
+        x = fb_put_u32(x, sy + rowh*3, boot_info.fb_height, COL_WHITE, s);
+        x = fb_puts(x, sy + rowh*3, " @ ", COL_WHITE, s);
+        x = fb_put_u32(x, sy + rowh*3, (uint32_t)boot_info.fb_bpp, COL_WHITE, s);
+        fb_puts(x, sy + rowh*3, " bpp", COL_WHITE, s);
+    }
+
+    fb_puts(sx, sy + rowh*4,          "addr:",   COL_ORANGE, s);
+    fb_put_hex64(sx + 120, sy + rowh*4, boot_info.fb_addr, COL_WHITE, s);
+
+    /* Footer along the bottom. */
+    uint32_t fy = boot_info.fb_height - FONT_HEIGHT * 2 - 24;
+    fb_puts(60, fy, "stub kernel  -  next: IDT + page allocator + drivers",
+            COL_MUTED, 2);
+
+    /* Tiny orange corner marker for orientation. */
+    fb_rect(boot_info.fb_width - 18, boot_info.fb_height - 18, 18, 18, COL_ORANGE);
+
+    /* Read-back verification: sample one of the white text pixels. */
     volatile uint32_t *fb = (volatile uint32_t *)boot_info.fb_addr;
     uint32_t pitch_px = boot_info.fb_pitch / 4;
-    uint32_t cx = bx + bw / 2;
-    uint32_t cy = by + bh / 2;
-    uint32_t got = fb[cy * pitch_px + cx];
-    serial_puts("framebuffer paint: readback @ center = ");
+    /* A safe known-white pixel is inside the "A" of "Astrion v2.0" at ~(75, 75)
+     * given 6x scale. Just sample the accent bar instead for reliability. */
+    uint32_t got = fb[20 * pitch_px + 5];   /* inside the orange accent bar */
+    serial_puts("boot screen: readback @ accent = ");
     serial_put_hex64((uint64_t)got);
     /* Some framebuffers store BGR-ordered; both 0xFF7A00 (RGB) and
      * 0x007AFF (BGR) are acceptable matches. */
@@ -502,7 +630,7 @@ void kernel_mb2_main(uint32_t magic, uint64_t info_ptr) {
     print_summary();
 
     serial_puts("\n");
-    paint_test_pattern();
+    paint_boot_screen();
 
     serial_puts("\nkernel halt (next: page allocator + IDT + font renderer)\n");
 
