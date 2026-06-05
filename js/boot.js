@@ -453,6 +453,12 @@ function __bootFlush(reason) {
   (await import('./shell/text-learner-toast.js')).initTextLearnerToast();
   (await import('./shell/dock-usage-toast.js')).initDockUsageToast();
   (await import('./shell/time-routine-toast.js')).initTimeRoutineToast();
+  // 2026-06-04: Self-Healing Apps surface (idea #2). The kernel/healer
+  // module captures runtime errors and proposes M8 self-mod patches;
+  // this toast announces each proposal so the user can open the
+  // Healer Log app to review the diff + run the 6-gate apply.
+  (await import('./shell/healer-toast.js')).initHealerToast();
+  (await import('./kernel/healer.js')).initHealer();
   initShortcuts();
   initLockScreen();
   initScreenshot();

@@ -90,6 +90,7 @@ const APP_MANIFEST = [
   { id: 'color-palette', name: 'Color Palette', icon: '🎨', width: 440, height: 500, singleInstance: true, modulePath: '../apps/color-palette.js', fnName: 'registerColorPalette' },
   { id: 'bmi-calc', name: 'BMI Calculator', icon: '⚖️', width: 360, height: 440, singleInstance: true, modulePath: '../apps/bmi-calc.js', fnName: 'registerBmiCalc' },
   { id: 'adaptations', name: 'Adaptations', icon: '✨', width: 720, height: 560, singleInstance: true, minWidth: 540, minHeight: 420, modulePath: '../apps/adaptations.js', fnName: 'registerAdaptations' },
+  { id: 'healer-log', name: 'Healer Log', icon: '🩹', width: 720, height: 580, singleInstance: true, minWidth: 540, minHeight: 420, modulePath: '../apps/healer-log.js', fnName: 'registerHealerLog' },
 ];
 
 const _loadingPromises = new Map();
