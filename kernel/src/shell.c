@@ -27,6 +27,7 @@
 #include "pit.h"
 #include "idt.h"
 #include "snake.h"
+#include "heap.h"
 
 #define COL_PROMPT 0xFF7A00u     /* Astrion orange */
 #define COL_OK     0x4ADE80u     /* green for success-ish */
@@ -88,6 +89,7 @@ static void cmd_guess(int argc, char **argv);
 static void cmd_wipe(int argc, char **argv);
 static void cmd_paint(int argc, char **argv);
 static void cmd_snake(int argc, char **argv);
+static void cmd_heap(int argc, char **argv);
 
 static const struct cmd CMDS[] = {
     { "help",    "list available commands",          cmd_help },
@@ -103,6 +105,7 @@ static const struct cmd CMDS[] = {
     { "paint",   "drag mouse to draw ink trails",    cmd_paint },
     { "wipe",    "clear any ink trails / repaint",   cmd_wipe },
     { "snake",   "play classic Snake (arrows steer)", cmd_snake },
+    { "heap",    "kernel heap stats",                cmd_heap },
     { "panic",   "trigger int $3 (panic-screen demo)", cmd_panic },
     { "halt",    "stop the CPU forever",             cmd_halt },
     { "art",     "print Astrion ASCII banner",       cmd_art },
@@ -472,6 +475,55 @@ static void cmd_snake(int argc, char **argv) {
     console_puts(" final score = ");
     console_put_u32((uint32_t)score);
     console_puts("\n");
+}
+
+static void cmd_heap(int argc, char **argv) {
+    (void)argc; (void)argv;
+    /* Live test: allocate something, free it, show stats reflect the activity. */
+    if (argc >= 2 && streq(argv[1], "test")) {
+        console_set_color(COL_PROMPT);
+        console_puts("heap test:\n");
+        console_set_color(COL_WHITE);
+        void *blocks[8];
+        for (int i = 0; i < 8; i++) {
+            blocks[i] = kmalloc((i + 1) * 256);
+            console_puts("  alloc ");
+            console_put_u32((uint32_t)(i + 1) * 256);
+            console_puts(" -> ");
+            console_put_hex64((uint64_t)(uintptr_t)blocks[i]);
+            console_putchar('\n');
+        }
+        for (int i = 0; i < 8; i++) kfree(blocks[i]);
+        console_puts("  all freed\n");
+    }
+    console_set_color(COL_OK);
+    console_puts("kernel heap:\n");
+    console_set_color(COL_WHITE);
+    console_puts("  total:  ");
+    console_put_u64(heap_total() / 1024);
+    console_puts(" KiB\n");
+    console_puts("  used:   ");
+    console_put_u64(heap_used() / 1024);
+    console_puts(" KiB\n");
+    console_puts("  free:   ");
+    console_put_u64(heap_free() / 1024);
+    console_puts(" KiB\n");
+    console_puts("  peak:   ");
+    console_put_u64(heap_peak() / 1024);
+    console_puts(" KiB\n");
+    console_puts("  blocks: ");
+    console_put_u32(heap_block_count());
+    console_puts(" total, ");
+    console_put_u32(heap_free_blocks());
+    console_puts(" free\n");
+    console_puts("  allocs: ");
+    console_put_u64(heap_alloc_count());
+    console_puts(", frees: ");
+    console_put_u64(heap_free_count());
+    console_putchar('\n');
+    console_set_color(COL_MUTED);
+    console_puts("  (try 'heap test' to allocate + free 8 blocks)\n");
+    console_set_color(COL_WHITE);
 }
 
 /* ─── Parser ─────────────────────────────────────────────── */

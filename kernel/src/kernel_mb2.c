@@ -28,6 +28,7 @@
 #include "console.h"
 #include "shell.h"
 #include "mouse.h"
+#include "heap.h"
 
 /* ─── COM1 UART (0x3F8) — identical to boot/boot.c ────────────────── */
 
@@ -683,9 +684,25 @@ void kernel_mb2_main(uint32_t magic, uint64_t info_ptr) {
     serial_puts("\n");
     paint_boot_screen();
 
-    /* IDT first — any later fault should panic visibly, not silently
+    /* Heap before anything that would benefit from it (currently
+     * nothing — but it's cheap and sets up the contract for the
+     * next features). 32 MiB at 4 MiB physical. */
+    serial_puts("\nHEAP: initializing 32 MiB at 0x400000...\n");
+    heap_init();
+    /* Smoke test: tiny alloc + free, verify round-trip. */
+    {
+        void *a = kmalloc(64);
+        void *b = kmalloc(128);
+        kfree(a);
+        void *c = kmalloc(48);   /* should reuse a's slot via split */
+        kfree(b);
+        kfree(c);
+        serial_puts("HEAP: smoke test passed\n");
+    }
+
+    /* IDT — any later fault should panic visibly, not silently
      * triple-fault. */
-    serial_puts("\nIDT: installing 256-entry table (32 exceptions + 16 IRQs)...\n");
+    serial_puts("IDT: installing 256-entry table (32 exceptions + 16 IRQs)...\n");
     idt_install();
     serial_puts("IDT: loaded\n");
 
