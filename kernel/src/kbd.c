@@ -54,8 +54,9 @@ static volatile char    rb[64];
 static volatile uint8_t rb_head;
 static volatile uint8_t rb_tail;
 
-static int shift_held = 0;
-static int caps_lock  = 0;
+static int shift_held  = 0;
+static int caps_lock   = 0;
+static int is_extended = 0;  /* set after a 0xE0 byte, cleared after the next byte */
 
 static void rb_push(char c) {
     uint8_t next = (rb_head + 1) & (sizeof(rb) - 1);
@@ -80,13 +81,34 @@ static void kbd_isr(struct registers *r) {
     (void)r;
     uint8_t sc = inb_(KBD_DATA_PORT);
 
+    /* 0xE0 = "extended prefix". The next byte is an extended scancode
+     * (arrow keys, numpad navigation, right-ctrl, etc.). */
+    if (sc == 0xE0) { is_extended = 1; return; }
+
+    if (is_extended) {
+        is_extended = 0;
+        /* Drop release events. */
+        if (sc & 0x80) return;
+        /* Map known extended keys → KEY_* codes (>127). */
+        char c = 0;
+        switch (sc) {
+            case 0x48: c = KEY_UP;    break;
+            case 0x50: c = KEY_DOWN;  break;
+            case 0x4B: c = KEY_LEFT;  break;
+            case 0x4D: c = KEY_RIGHT; break;
+            default: return;
+        }
+        rb_push(c);
+        return;
+    }
+
     /* Track shift press/release explicitly. lshift=0x2A rshift=0x36 */
     if (sc == 0x2A || sc == 0x36)            { shift_held = 1; return; }
     if (sc == 0xAA || sc == 0xB6)            { shift_held = 0; return; }
     if (sc == 0x3A)                          { caps_lock ^= 1; return; }
 
-    /* Drop key-release events (high bit set), drop E0 prefix + extended,
-     * drop everything beyond our table. */
+    /* Drop key-release events (high bit set), drop scancodes outside
+     * our normal table. */
     if (sc & 0x80)                           return;
     if (sc >= 128)                           return;
 

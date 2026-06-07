@@ -26,6 +26,7 @@
 #include "console.h"
 #include "pit.h"
 #include "idt.h"
+#include "snake.h"
 
 #define COL_PROMPT 0xFF7A00u     /* Astrion orange */
 #define COL_OK     0x4ADE80u     /* green for success-ish */
@@ -86,6 +87,7 @@ static void cmd_uptime(int argc, char **argv);
 static void cmd_guess(int argc, char **argv);
 static void cmd_wipe(int argc, char **argv);
 static void cmd_paint(int argc, char **argv);
+static void cmd_snake(int argc, char **argv);
 
 static const struct cmd CMDS[] = {
     { "help",    "list available commands",          cmd_help },
@@ -100,6 +102,7 @@ static const struct cmd CMDS[] = {
     { "guess",   "play: guess my number 1..100",     cmd_guess },
     { "paint",   "drag mouse to draw ink trails",    cmd_paint },
     { "wipe",    "clear any ink trails / repaint",   cmd_wipe },
+    { "snake",   "play classic Snake (arrows steer)", cmd_snake },
     { "panic",   "trigger int $3 (panic-screen demo)", cmd_panic },
     { "halt",    "stop the CPU forever",             cmd_halt },
     { "art",     "print Astrion ASCII banner",       cmd_art },
@@ -454,6 +457,21 @@ static void cmd_paint(int argc, char **argv) {
     console_puts("  - drag mouse with LEFT button to leave ink\n");
     console_puts("  - cursor turns orange while drawing\n");
     console_puts("  - type 'wipe' to clear and start over\n");
+}
+
+static void cmd_snake(int argc, char **argv) {
+    (void)argc; (void)argv;
+    int score = snake_play();
+    /* Game took over the screen; repaint everything. */
+    extern void paint_boot_screen_x(void);
+    paint_boot_screen_x();
+    console_clear();
+    console_set_color(COL_PROMPT);
+    console_puts("snake:");
+    console_set_color(COL_WHITE);
+    console_puts(" final score = ");
+    console_put_u32((uint32_t)score);
+    console_puts("\n");
 }
 
 /* ─── Parser ─────────────────────────────────────────────── */
