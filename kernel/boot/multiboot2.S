@@ -24,7 +24,13 @@
  * Read order: this file -> src/kernel_mb2.c (the 64-bit entry).
  */
 
-.section .multiboot_header
+/* 2026-06-07: section flags MUST be "a", @progbits so the linker
+ * marks it ALLOC + LOAD. Without flags, ld treats the section as
+ * non-loadable and puts it past the end of all real load segments
+ * — landed at file offset 0x8010 once .text + .rodata + .data grew,
+ * and grub-file failed the < 32 KiB check. Same gotcha as lesson #196:
+ * silent linker behavior, the symptom is in CI not the source. */
+.section .multiboot_header, "a", @progbits
 .align 8
 
 multiboot_header_start:
