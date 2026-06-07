@@ -34,6 +34,11 @@ extern void isr20(void); extern void isr21(void); extern void isr22(void); exter
 extern void isr24(void); extern void isr25(void); extern void isr26(void); extern void isr27(void);
 extern void isr28(void); extern void isr29(void); extern void isr30(void); extern void isr31(void);
 
+extern void irq0(void);  extern void irq1(void);  extern void irq2(void);  extern void irq3(void);
+extern void irq4(void);  extern void irq5(void);  extern void irq6(void);  extern void irq7(void);
+extern void irq8(void);  extern void irq9(void);  extern void irq10(void); extern void irq11(void);
+extern void irq12(void); extern void irq13(void); extern void irq14(void); extern void irq15(void);
+
 struct idt_entry {
     uint16_t offset_low;     /* handler offset bits 0..15 */
     uint16_t selector;       /* code segment selector */
@@ -78,12 +83,103 @@ void idt_install(void) {
     idt_set(24, isr24);  idt_set(25, isr25);  idt_set(26, isr26);  idt_set(27, isr27);
     idt_set(28, isr28);  idt_set(29, isr29);  idt_set(30, isr30);  idt_set(31, isr31);
 
-    /* Vectors 32..255 are left zeroed — handled implicitly as
-     * "not present" which #GPs if fired before we install something. */
+    /* IRQ vectors 32..47 — populated even if their per-IRQ handler is
+     * NULL. The common irq_handler dispatches by index and sends EOI. */
+    idt_set(32, irq0);   idt_set(33, irq1);   idt_set(34, irq2);   idt_set(35, irq3);
+    idt_set(36, irq4);   idt_set(37, irq5);   idt_set(38, irq6);   idt_set(39, irq7);
+    idt_set(40, irq8);   idt_set(41, irq9);   idt_set(42, irq10);  idt_set(43, irq11);
+    idt_set(44, irq12);  idt_set(45, irq13);  idt_set(46, irq14);  idt_set(47, irq15);
+
+    /* Vectors 48..255 left zeroed for now. */
 
     idtr.limit = sizeof(idt) - 1;
     idtr.base  = (uint64_t)&idt;
     __asm__ volatile("lidt %0" : : "m"(idtr));
+}
+
+/* ─── 8259 PIC remap ─────────────────────────────────────────
+ *
+ * The legacy PIC fires IRQs at vectors 8..15 (master) + 0x70..0x77
+ * (slave) by default — overlapping CPU exceptions 8..15. Remap to
+ * 32..47 so IRQs and CPU exceptions don't collide.
+ *
+ * The remap protocol is 4 init-control-word writes per PIC, in order.
+ */
+
+#define PIC1_CMD  0x20
+#define PIC1_DATA 0x21
+#define PIC2_CMD  0xA0
+#define PIC2_DATA 0xA1
+
+static inline void outb_(uint16_t port, uint8_t val) {
+    __asm__ volatile("outb %0, %1" : : "a"(val), "Nd"(port));
+}
+static inline uint8_t inb_(uint16_t port) {
+    uint8_t val;
+    __asm__ volatile("inb %1, %0" : "=a"(val) : "Nd"(port));
+    return val;
+}
+
+/* Short I/O delay — write to unused port 0x80. Some old PICs need a
+ * few cycles between command writes. */
+static inline void io_wait(void) { outb_(0x80, 0); }
+
+void pic_remap(void) {
+    /* Save current masks. */
+    uint8_t mask1 = inb_(PIC1_DATA);
+    uint8_t mask2 = inb_(PIC2_DATA);
+
+    /* ICW1: init + ICW4 will follow. */
+    outb_(PIC1_CMD, 0x11); io_wait();
+    outb_(PIC2_CMD, 0x11); io_wait();
+    /* ICW2: vector offsets. */
+    outb_(PIC1_DATA, 0x20); io_wait();      /* IRQs 0..7  → 32..39 */
+    outb_(PIC2_DATA, 0x28); io_wait();      /* IRQs 8..15 → 40..47 */
+    /* ICW3: master tells slave at IRQ2; slave its cascade identity. */
+    outb_(PIC1_DATA, 0x04); io_wait();
+    outb_(PIC2_DATA, 0x02); io_wait();
+    /* ICW4: 8086 mode. */
+    outb_(PIC1_DATA, 0x01); io_wait();
+    outb_(PIC2_DATA, 0x01); io_wait();
+
+    /* Restore previously-saved masks. Caller can pic_unmask_irq() to
+     * enable specific lines. */
+    outb_(PIC1_DATA, mask1);
+    outb_(PIC2_DATA, mask2);
+}
+
+void pic_unmask_irq(uint8_t irq) {
+    uint16_t port = (irq < 8) ? PIC1_DATA : PIC2_DATA;
+    uint8_t  bit  = (irq < 8) ? irq : (irq - 8);
+    uint8_t  v    = inb_(port) & ~(1 << bit);
+    outb_(port, v);
+}
+
+void pic_mask_irq(uint8_t irq) {
+    uint16_t port = (irq < 8) ? PIC1_DATA : PIC2_DATA;
+    uint8_t  bit  = (irq < 8) ? irq : (irq - 8);
+    uint8_t  v    = inb_(port) | (1 << bit);
+    outb_(port, v);
+}
+
+static void pic_send_eoi(uint8_t irq) {
+    if (irq >= 8) outb_(PIC2_CMD, 0x20);
+    outb_(PIC1_CMD, 0x20);
+}
+
+/* ─── IRQ dispatch ────────────────────────────────────────── */
+
+static irq_fn irq_handlers[16];
+
+void irq_register(uint8_t irq, irq_fn fn) {
+    if (irq < 16) irq_handlers[irq] = fn;
+}
+
+void irq_handler(struct registers *r) {
+    /* vector 32..47 → IRQ 0..15 */
+    uint8_t irq = (uint8_t)(r->vector - 32);
+    if (irq < 16 && irq_handlers[irq]) irq_handlers[irq](r);
+    pic_send_eoi(irq);
 }
 
 /* ─── Panic screen + handler ────────────────────────────────── */

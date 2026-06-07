@@ -69,6 +69,75 @@ ISR_ERR   30   /* #VC  VMM communication         */
 ISR_NOERR 31
 
 /* ─── Common entry — push GP regs, call C, restore, iretq ─── */
+/* ─── IRQ stubs — hardware interrupts 0..15 → vectors 32..47 ─── */
+.macro IRQ_STUB num, vec
+.global irq\num
+irq\num:
+    pushq $0                 /* dummy error code */
+    pushq $\vec              /* vector number */
+    jmp irq_common
+.endm
+
+IRQ_STUB 0,  32   /* PIT timer       */
+IRQ_STUB 1,  33   /* keyboard        */
+IRQ_STUB 2,  34   /* cascade         */
+IRQ_STUB 3,  35
+IRQ_STUB 4,  36
+IRQ_STUB 5,  37
+IRQ_STUB 6,  38
+IRQ_STUB 7,  39
+IRQ_STUB 8,  40   /* RTC             */
+IRQ_STUB 9,  41
+IRQ_STUB 10, 42
+IRQ_STUB 11, 43
+IRQ_STUB 12, 44
+IRQ_STUB 13, 45
+IRQ_STUB 14, 46
+IRQ_STUB 15, 47
+
+/* Common IRQ entry: same register-save shape as isr_common, but calls
+ * irq_handler instead of isr_handler. irq_handler sends EOI to the PIC
+ * before returning. */
+irq_common:
+    pushq %r15
+    pushq %r14
+    pushq %r13
+    pushq %r12
+    pushq %r11
+    pushq %r10
+    pushq %r9
+    pushq %r8
+    pushq %rbp
+    pushq %rdi
+    pushq %rsi
+    pushq %rdx
+    pushq %rcx
+    pushq %rbx
+    pushq %rax
+
+    mov %rsp, %rdi
+    call irq_handler
+
+    popq %rax
+    popq %rbx
+    popq %rcx
+    popq %rdx
+    popq %rsi
+    popq %rdi
+    popq %rbp
+    popq %r8
+    popq %r9
+    popq %r10
+    popq %r11
+    popq %r12
+    popq %r13
+    popq %r14
+    popq %r15
+
+    addq $16, %rsp
+    iretq
+
+
 isr_common:
     /* Save GP registers in reverse order so the C struct layout reads
      * "natural" (rax first, r15 last) — see struct registers in idt.h. */

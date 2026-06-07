@@ -30,8 +30,16 @@ struct registers {
 } __attribute__((packed));
 
 void idt_install(void);
+void pic_remap(void);
+void pic_unmask_irq(uint8_t irq);
+void pic_mask_irq(uint8_t irq);
 
-/* C entry point called from isr.S — defined in idt.c. */
+/* C entry points called from isr.S — defined in idt.c. */
 void isr_handler(struct registers *r);
+void irq_handler(struct registers *r);
+
+/* Per-IRQ handler registration. handler(NULL) clears. */
+typedef void (*irq_fn)(struct registers *r);
+void irq_register(uint8_t irq, irq_fn fn);
 
 #endif /* ASTRION_IDT_H */

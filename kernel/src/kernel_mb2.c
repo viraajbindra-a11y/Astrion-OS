@@ -23,6 +23,7 @@
 #include <stdint.h>
 #include "fb_font.h"
 #include "idt.h"
+#include "kbd.h"
 
 /* ─── COM1 UART (0x3F8) — identical to boot/boot.c ────────────────── */
 
@@ -660,21 +661,69 @@ void kernel_mb2_main(uint32_t magic, uint64_t info_ptr) {
     serial_puts("\n");
     paint_boot_screen();
 
-    /* Install the IDT before anything that could fault. From this point
-     * on, CPU exceptions land in idt.c's isr_handler() which paints a
-     * panic screen + halts instead of triple-faulting silently. */
-    serial_puts("\nIDT: installing 256-entry table, 32 exception handlers wired...\n");
+    /* IDT first — any later fault should panic visibly, not silently
+     * triple-fault. */
+    serial_puts("\nIDT: installing 256-entry table (32 exceptions + 16 IRQs)...\n");
     idt_install();
-    serial_puts("IDT: loaded; CPU exceptions will now panic visibly\n");
+    serial_puts("IDT: loaded\n");
 
-    /* Selftest: trigger #BP (vector 3). Should land in isr_handler,
-     * paint the panic screen, halt. If this returns or triple-faults,
-     * the IDT wiring is broken. */
-    serial_puts("IDT: selftest — triggering int $3 (#BP)...\n");
-    __asm__ volatile("int $3");
+    /* Remap legacy PIC IRQs 0..15 onto vectors 32..47, then wire IRQ1
+     * (keyboard) to the kbd driver. Other IRQs stay masked. */
+    serial_puts("PIC: remapping 0..15 -> vectors 32..47...\n");
+    pic_remap();
+    /* Mask everything by default; kbd_install will unmask IRQ1. */
+    for (int i = 0; i < 16; i++) pic_mask_irq(i);
+    kbd_install();
+    serial_puts("PIC: keyboard (IRQ1) unmasked\n");
 
-    serial_puts("\nFATAL: int $3 returned to caller — IDT broken?\n");
+    /* Enable interrupts. From here, kbd ISRs fire on every keystroke. */
+    __asm__ volatile("sti");
+    serial_puts("IF set — type into the QEMU window to test\n");
+
+    /* Echo loop. Read from the keyboard ring buffer, draw each char
+     * on the framebuffer right under the boot screen status block.
+     * Backspace removes the prior glyph. Enter wraps. */
+    uint32_t echo_x0 = 60;
+    uint32_t echo_y  = boot_info.fb_height - FONT_HEIGHT * 4 - 24;
+    fb_puts(echo_x0, echo_y - FONT_HEIGHT*2 - 6,
+            "type something:", COL_ICE, 2);
+    uint32_t cx = echo_x0, cy = echo_y;
+    int scale = 2;
+    int gw = FONT_WIDTH * scale;
+    int gh = FONT_HEIGHT * scale;
+
     for (;;) {
-        __asm__ volatile("cli; hlt");
+        /* Halt-on-empty for tiny power saving + lets IRQ wake us. */
+        while (!kbd_available()) {
+            __asm__ volatile("sti; hlt");
+        }
+        char c = kbd_getchar();
+        if (!c) continue;
+
+        if (c == '\b') {
+            if (cx > echo_x0) {
+                cx -= gw;
+                /* Erase the glyph by painting it navy. */
+                fb_rect(cx, cy, gw, gh, COL_NAVY);
+            }
+            continue;
+        }
+        if (c == '\n') {
+            cx = echo_x0;
+            cy += gh + 2;
+            if (cy + gh > boot_info.fb_height - 40) cy = echo_y;
+            continue;
+        }
+        if (c >= 32 && c <= 126) {
+            fb_putchar(cx, cy, c, COL_WHITE, scale);
+            cx += gw;
+            if (cx + gw > boot_info.fb_width - 60) {
+                cx = echo_x0;
+                cy += gh + 2;
+                if (cy + gh > boot_info.fb_height - 40) cy = echo_y;
+            }
+            /* Mirror to serial too — useful for headless debugging. */
+            serial_putc(c);
+        }
     }
 }
