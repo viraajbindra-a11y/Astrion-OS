@@ -29,6 +29,7 @@
 #include "shell.h"
 #include "mouse.h"
 #include "heap.h"
+#include "fs.h"
 
 /* ─── COM1 UART (0x3F8) — identical to boot/boot.c ────────────────── */
 
@@ -699,6 +700,12 @@ void kernel_mb2_main(uint32_t magic, uint64_t info_ptr) {
         kfree(c);
         serial_puts("HEAP: smoke test passed\n");
     }
+
+    /* RAM filesystem on top of the heap. Seeds /readme.txt + /greet.sh
+     * so 'ls' has something useful before the user does anything. */
+    serial_puts("FS: initializing RAM filesystem...\n");
+    fs_init();
+    serial_puts("FS: ready\n");
 
     /* IDT — any later fault should panic visibly, not silently
      * triple-fault. */

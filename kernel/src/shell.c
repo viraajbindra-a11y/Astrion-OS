@@ -28,6 +28,7 @@
 #include "idt.h"
 #include "snake.h"
 #include "heap.h"
+#include "fs.h"
 
 #define COL_PROMPT 0xFF7A00u     /* Astrion orange */
 #define COL_OK     0x4ADE80u     /* green for success-ish */
@@ -90,6 +91,13 @@ static void cmd_wipe(int argc, char **argv);
 static void cmd_paint(int argc, char **argv);
 static void cmd_snake(int argc, char **argv);
 static void cmd_heap(int argc, char **argv);
+static void cmd_ls(int argc, char **argv);
+static void cmd_cat(int argc, char **argv);
+static void cmd_write(int argc, char **argv);
+static void cmd_append(int argc, char **argv);
+static void cmd_rm(int argc, char **argv);
+static void cmd_touch(int argc, char **argv);
+static void cmd_mkdir(int argc, char **argv);
 
 static const struct cmd CMDS[] = {
     { "help",    "list available commands",          cmd_help },
@@ -106,6 +114,13 @@ static const struct cmd CMDS[] = {
     { "wipe",    "clear any ink trails / repaint",   cmd_wipe },
     { "snake",   "play classic Snake (arrows steer)", cmd_snake },
     { "heap",    "kernel heap stats",                cmd_heap },
+    { "ls",      "list files in /",                  cmd_ls },
+    { "cat",     "print file contents",              cmd_cat },
+    { "write",   "write <file> <text...>",           cmd_write },
+    { "append",  "append <file> <text...>",          cmd_append },
+    { "rm",      "remove a file",                    cmd_rm },
+    { "touch",   "create an empty file",             cmd_touch },
+    { "mkdir",   "create a directory entry",         cmd_mkdir },
     { "panic",   "trigger int $3 (panic-screen demo)", cmd_panic },
     { "halt",    "stop the CPU forever",             cmd_halt },
     { "art",     "print Astrion ASCII banner",       cmd_art },
@@ -524,6 +539,208 @@ static void cmd_heap(int argc, char **argv) {
     console_set_color(COL_MUTED);
     console_puts("  (try 'heap test' to allocate + free 8 blocks)\n");
     console_set_color(COL_WHITE);
+}
+
+/* ─── Filesystem commands ────────────────────────────────── */
+
+static void put_pad_to(uint32_t target_col, uint32_t cur_col) {
+    while (cur_col < target_col) {
+        console_putchar(' ');
+        cur_col++;
+    }
+}
+
+static void cmd_ls(int argc, char **argv) {
+    (void)argc; (void)argv;
+    if (fs_count() == 0) {
+        console_set_color(COL_MUTED);
+        console_puts("(empty)\n");
+        console_set_color(COL_WHITE);
+        return;
+    }
+    console_set_color(COL_OK);
+    console_puts("file              kind    size\n");
+    console_set_color(COL_WHITE);
+    for (fs_node *n = fs_first(); n; n = fs_next(n)) {
+        uint32_t name_len = 0;
+        const char *p = n->name;
+        while (*p) { name_len++; p++; }
+        console_set_color(n->kind == FS_DIR ? COL_PROMPT : COL_WHITE);
+        console_puts(n->name);
+        console_set_color(COL_MUTED);
+        put_pad_to(18, name_len);
+        console_puts(n->kind == FS_DIR ? "dir" : "file");
+        put_pad_to(26, 18 + (n->kind == FS_DIR ? 3 : 4));
+        console_put_u32(n->size);
+        console_puts(" B\n");
+    }
+    console_set_color(COL_WHITE);
+    console_set_color(COL_MUTED);
+    console_puts("total: ");
+    console_put_u32(fs_count());
+    console_puts(" entries, ");
+    console_put_u32(fs_total_bytes());
+    console_puts(" bytes\n");
+    console_set_color(COL_WHITE);
+}
+
+static void cmd_cat(int argc, char **argv) {
+    if (argc < 2) {
+        console_set_color(COL_MUTED);
+        console_puts("usage: cat <file>\n");
+        console_set_color(COL_WHITE);
+        return;
+    }
+    fs_node *n = fs_find(argv[1]);
+    if (!n) {
+        console_set_color(0xF87171u);
+        console_puts("no such file: ");
+        console_puts(argv[1]);
+        console_putchar('\n');
+        console_set_color(COL_WHITE);
+        return;
+    }
+    if (n->kind != FS_FILE) {
+        console_set_color(COL_MUTED);
+        console_puts("(directory)\n");
+        console_set_color(COL_WHITE);
+        return;
+    }
+    for (uint32_t i = 0; i < n->size; i++) {
+        console_putchar((char)n->data[i]);
+    }
+    /* Ensure final newline. */
+    if (n->size == 0 || n->data[n->size - 1] != '\n') console_putchar('\n');
+}
+
+/* Reassemble argv[start..argc-1] with single spaces between tokens
+ * into a single 0-terminated buffer in caller-provided scratch. */
+static uint32_t join_argv(int start, int argc, char **argv, char *out, uint32_t cap) {
+    uint32_t pos = 0;
+    for (int i = start; i < argc; i++) {
+        const char *p = argv[i];
+        while (*p && pos + 1 < cap) out[pos++] = *p++;
+        if (i + 1 < argc && pos + 1 < cap) out[pos++] = ' ';
+    }
+    if (pos < cap) out[pos] = 0;
+    return pos;
+}
+
+static void cmd_write(int argc, char **argv) {
+    if (argc < 3) {
+        console_set_color(COL_MUTED);
+        console_puts("usage: write <file> <text...>\n");
+        console_set_color(COL_WHITE);
+        return;
+    }
+    char buf[256];
+    uint32_t n = join_argv(2, argc, argv, buf, sizeof(buf));
+    int r = fs_write(argv[1], (const uint8_t *)buf, n);
+    if (r < 0) {
+        console_set_color(0xF87171u);
+        console_puts("write failed\n");
+        console_set_color(COL_WHITE);
+        return;
+    }
+    console_set_color(COL_OK);
+    console_puts("wrote ");
+    console_set_color(COL_WHITE);
+    console_put_u32((uint32_t)r);
+    console_puts(" bytes to ");
+    console_puts(argv[1]);
+    console_putchar('\n');
+}
+
+static void cmd_append(int argc, char **argv) {
+    if (argc < 3) {
+        console_set_color(COL_MUTED);
+        console_puts("usage: append <file> <text...>\n");
+        console_set_color(COL_WHITE);
+        return;
+    }
+    char buf[256];
+    uint32_t n = join_argv(2, argc, argv, buf, sizeof(buf) - 1);
+    /* Add a newline at the end so 'append log line1' then 'cat log' is
+     * one entry per line — feels right for a log file. */
+    if (n < sizeof(buf) - 1) buf[n++] = '\n';
+    int r = fs_append(argv[1], (const uint8_t *)buf, n);
+    if (r < 0) {
+        console_set_color(0xF87171u);
+        console_puts("append failed\n");
+        console_set_color(COL_WHITE);
+        return;
+    }
+    console_set_color(COL_OK);
+    console_puts("appended ");
+    console_set_color(COL_WHITE);
+    console_put_u32((uint32_t)r);
+    console_puts(" bytes to ");
+    console_puts(argv[1]);
+    console_putchar('\n');
+}
+
+static void cmd_rm(int argc, char **argv) {
+    if (argc < 2) {
+        console_set_color(COL_MUTED);
+        console_puts("usage: rm <file>\n");
+        console_set_color(COL_WHITE);
+        return;
+    }
+    if (fs_unlink(argv[1]) != 0) {
+        console_set_color(0xF87171u);
+        console_puts("no such file: ");
+        console_puts(argv[1]);
+        console_putchar('\n');
+        console_set_color(COL_WHITE);
+        return;
+    }
+    console_set_color(COL_OK);
+    console_puts("removed ");
+    console_set_color(COL_WHITE);
+    console_puts(argv[1]);
+    console_putchar('\n');
+}
+
+static void cmd_touch(int argc, char **argv) {
+    if (argc < 2) {
+        console_set_color(COL_MUTED);
+        console_puts("usage: touch <file>\n");
+        console_set_color(COL_WHITE);
+        return;
+    }
+    fs_node *n = fs_find(argv[1]);
+    if (!n) n = fs_create(argv[1], FS_FILE);
+    if (!n) {
+        console_set_color(0xF87171u);
+        console_puts("touch failed\n");
+        console_set_color(COL_WHITE);
+        return;
+    }
+    console_set_color(COL_OK);
+    console_puts("touched ");
+    console_set_color(COL_WHITE);
+    console_puts(argv[1]);
+    console_putchar('\n');
+}
+
+static void cmd_mkdir(int argc, char **argv) {
+    if (argc < 2) {
+        console_set_color(COL_MUTED);
+        console_puts("usage: mkdir <name>\n");
+        console_set_color(COL_WHITE);
+        return;
+    }
+    if (!fs_create(argv[1], FS_DIR)) {
+        console_set_color(0xF87171u);
+        console_puts("mkdir failed (exists?)\n");
+        console_set_color(COL_WHITE);
+        return;
+    }
+    console_set_color(COL_OK);
+    console_puts("mkdir ");
+    console_set_color(COL_WHITE);
+    console_puts(argv[1]);
+    console_putchar('\n');
 }
 
 /* ─── Parser ─────────────────────────────────────────────── */
