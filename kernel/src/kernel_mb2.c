@@ -27,6 +27,7 @@
 #include "pit.h"
 #include "console.h"
 #include "shell.h"
+#include "mouse.h"
 
 /* ─── COM1 UART (0x3F8) — identical to boot/boot.c ────────────────── */
 
@@ -698,6 +699,10 @@ void kernel_mb2_main(uint32_t magic, uint64_t info_ptr) {
     kbd_install();
     serial_puts("KBD: PS/2 IRQ1 unmasked\n");
 
+    /* PS/2 mouse on IRQ12. */
+    mouse_install(boot_info.fb_width, boot_info.fb_height);
+    serial_puts("MOUSE: PS/2 aux device enabled, IRQ12 unmasked\n");
+
     /* Enable interrupts. From here, kbd + PIT ISRs fire on their own. */
     __asm__ volatile("sti");
     serial_puts("IF set — entering shell\n");
@@ -713,35 +718,40 @@ void kernel_mb2_main(uint32_t magic, uint64_t info_ptr) {
     console_init(cx0, cy0, cw, ch);
     shell_install();
 
-    /* Main loop: drain keyboard into the shell, refresh the clock at
-     * the top-right corner once per second. */
+    /* Main loop: drain keyboard into the shell, repaint mouse cursor
+     * whenever a packet arrives, refresh the clock at the top-right
+     * corner once per ~250ms. */
     uint64_t last_clock_ms = 0;
     char clkbuf[9];
 
     for (;;) {
-        /* Sleep until something interesting happens. */
-        if (!kbd_available()) {
-            __asm__ volatile("sti; hlt");
-        }
+        /* Sleep until something interesting happens (kbd OR mouse). */
+        __asm__ volatile("sti; hlt");
+
         while (kbd_available()) {
             char c = kbd_getchar();
             if (c) {
                 shell_on_key(c);
-                serial_putc(c);  /* mirror to serial for headless trace */
+                serial_putc(c);
             }
         }
+
+        /* Mouse: redraw cursor if it moved. */
+        mouse_redraw_if_dirty();
 
         /* Repaint clock at most once per ~250ms. */
         uint64_t now = pit_elapsed_ms();
         if (now - last_clock_ms >= 250) {
             last_clock_ms = now;
             pit_format_clock(clkbuf);
-            uint32_t cw_w = (FONT_WIDTH * 2) * 8;   /* "HH:MM:SS" at 2x */
+            uint32_t cw_w = (FONT_WIDTH * 2) * 8;
             uint32_t cw_h = FONT_HEIGHT * 2 + 4;
             uint32_t cw_x = boot_info.fb_width - cw_w - 30;
             uint32_t cw_y = 30;
             fb_rect(cw_x - 6, cw_y - 4, cw_w + 12, cw_h, COL_NAVY);
             fb_puts(cw_x, cw_y, clkbuf, COL_ORANGE, 2);
+            /* Redraw cursor in case clock area overpainted it. */
+            mouse_redraw_if_dirty();
         }
     }
 }

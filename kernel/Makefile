@@ -156,6 +156,7 @@ kernel-mb2:
 	$(CC) $(MB2_CFLAGS) -c src/pit.c -o $(BUILD_DIR)/pit.o
 	$(CC) $(MB2_CFLAGS) -c src/console.c -o $(BUILD_DIR)/console.o
 	$(CC) $(MB2_CFLAGS) -c src/shell.c -o $(BUILD_DIR)/shell.o
+	$(CC) $(MB2_CFLAGS) -c src/mouse.c -o $(BUILD_DIR)/mouse.o
 	$(CC) $(MB2_CFLAGS) -c src/kernel_mb2.c -o $(BUILD_DIR)/kernel_mb2.o
 	$(LD) $(MB2_LDFLAGS) -o $(BUILD_DIR)/kernel_mb2.elf \
 	    $(BUILD_DIR)/multiboot2.o \
@@ -165,6 +166,7 @@ kernel-mb2:
 	    $(BUILD_DIR)/pit.o \
 	    $(BUILD_DIR)/console.o \
 	    $(BUILD_DIR)/shell.o \
+	    $(BUILD_DIR)/mouse.o \
 	    $(BUILD_DIR)/kernel_mb2.o
 	@echo "=== ELF section layout ==="
 	objdump -h $(BUILD_DIR)/kernel_mb2.elf | head -40
