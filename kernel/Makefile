@@ -153,12 +153,18 @@ kernel-mb2:
 	$(CC) $(MB2_CFLAGS) -c src/isr.S -o $(BUILD_DIR)/isr.o
 	$(CC) $(MB2_CFLAGS) -c src/idt.c -o $(BUILD_DIR)/idt.o
 	$(CC) $(MB2_CFLAGS) -c src/kbd.c -o $(BUILD_DIR)/kbd.o
+	$(CC) $(MB2_CFLAGS) -c src/pit.c -o $(BUILD_DIR)/pit.o
+	$(CC) $(MB2_CFLAGS) -c src/console.c -o $(BUILD_DIR)/console.o
+	$(CC) $(MB2_CFLAGS) -c src/shell.c -o $(BUILD_DIR)/shell.o
 	$(CC) $(MB2_CFLAGS) -c src/kernel_mb2.c -o $(BUILD_DIR)/kernel_mb2.o
 	$(LD) $(MB2_LDFLAGS) -o $(BUILD_DIR)/kernel_mb2.elf \
 	    $(BUILD_DIR)/multiboot2.o \
 	    $(BUILD_DIR)/isr.o \
 	    $(BUILD_DIR)/idt.o \
 	    $(BUILD_DIR)/kbd.o \
+	    $(BUILD_DIR)/pit.o \
+	    $(BUILD_DIR)/console.o \
+	    $(BUILD_DIR)/shell.o \
 	    $(BUILD_DIR)/kernel_mb2.o
 	# Verify the multiboot2 header is present + first in the binary.
 	grub-file --is-x86-multiboot2 $(BUILD_DIR)/kernel_mb2.elf

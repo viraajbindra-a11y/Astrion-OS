@@ -24,6 +24,9 @@
 #include "fb_font.h"
 #include "idt.h"
 #include "kbd.h"
+#include "pit.h"
+#include "console.h"
+#include "shell.h"
 
 /* ─── COM1 UART (0x3F8) — identical to boot/boot.c ────────────────── */
 
@@ -633,6 +636,20 @@ uint32_t fb_put_hex64_x(uint32_t x, uint32_t y, uint64_t v, uint32_t color, int 
 uint32_t fb_put_u32_x(uint32_t x, uint32_t y, uint32_t v, uint32_t color, int scale) {
     return fb_put_u32(x, y, v, color, scale);
 }
+/* Used by console.c to scroll the framebuffer region. */
+uint64_t fb_addr_x(void)                 { return boot_info.fb_addr; }
+uint32_t fb_pitch_x(void)                { return boot_info.fb_pitch; }
+
+/* Used by shell.c for `mem` / `version` commands. */
+uint32_t mb_mmap_entry_count_x(void)     { return boot_info.mmap_entry_count; }
+uint32_t mb_total_available_mib_x(void)  {
+    return (uint32_t)(boot_info.total_available_bytes / (1024u * 1024u));
+}
+uint32_t mb_fb_width_x(void)             { return boot_info.fb_width; }
+uint32_t mb_fb_height_x(void)            { return boot_info.fb_height; }
+uint8_t  mb_fb_bpp_x(void)               { return boot_info.fb_bpp; }
+uint64_t mb_fb_addr_x(void)              { return boot_info.fb_addr; }
+const char *mb_bootloader_name_x(void)   { return boot_info.bootloader_name; }
 
 /* Called from boot/multiboot2.S */
 void kernel_mb2_main(uint32_t magic, uint64_t info_ptr) {
@@ -667,63 +684,64 @@ void kernel_mb2_main(uint32_t magic, uint64_t info_ptr) {
     idt_install();
     serial_puts("IDT: loaded\n");
 
-    /* Remap legacy PIC IRQs 0..15 onto vectors 32..47, then wire IRQ1
-     * (keyboard) to the kbd driver. Other IRQs stay masked. */
+    /* Remap legacy PIC IRQs 0..15 onto vectors 32..47. Mask everything
+     * by default; the drivers below unmask their own lines. */
     serial_puts("PIC: remapping 0..15 -> vectors 32..47...\n");
     pic_remap();
-    /* Mask everything by default; kbd_install will unmask IRQ1. */
     for (int i = 0; i < 16; i++) pic_mask_irq(i);
+
+    /* PIT at 100 Hz on IRQ0 → 10ms tick → live clock. */
+    pit_install(100);
+    serial_puts("PIT: 100 Hz tick installed\n");
+
+    /* PS/2 keyboard on IRQ1. */
     kbd_install();
-    serial_puts("PIC: keyboard (IRQ1) unmasked\n");
+    serial_puts("KBD: PS/2 IRQ1 unmasked\n");
 
-    /* Enable interrupts. From here, kbd ISRs fire on every keystroke. */
+    /* Enable interrupts. From here, kbd + PIT ISRs fire on their own. */
     __asm__ volatile("sti");
-    serial_puts("IF set — type into the QEMU window to test\n");
+    serial_puts("IF set — entering shell\n");
 
-    /* Echo loop. Read from the keyboard ring buffer, draw each char
-     * on the framebuffer right under the boot screen status block.
-     * Backspace removes the prior glyph. Enter wraps. */
-    uint32_t echo_x0 = 60;
-    uint32_t echo_y  = boot_info.fb_height - FONT_HEIGHT * 4 - 24;
-    fb_puts(echo_x0, echo_y - FONT_HEIGHT*2 - 6,
-            "type something:", COL_ICE, 2);
-    uint32_t cx = echo_x0, cy = echo_y;
-    int scale = 2;
-    int gw = FONT_WIDTH * scale;
-    int gh = FONT_HEIGHT * scale;
+    /* Carve out a console region below the boot info panel. Width is
+     * fb width minus 60 px margin both sides. Height runs to ~60 px
+     * before the bottom edge so the existing footer / corner marker
+     * stay visible. */
+    uint32_t cx0 = 60;
+    uint32_t cy0 = 470;
+    uint32_t cw  = boot_info.fb_width  - 120;
+    uint32_t ch  = boot_info.fb_height - cy0 - 60;
+    console_init(cx0, cy0, cw, ch);
+    shell_install();
+
+    /* Main loop: drain keyboard into the shell, refresh the clock at
+     * the top-right corner once per second. */
+    uint64_t last_clock_ms = 0;
+    char clkbuf[9];
 
     for (;;) {
-        /* Halt-on-empty for tiny power saving + lets IRQ wake us. */
-        while (!kbd_available()) {
+        /* Sleep until something interesting happens. */
+        if (!kbd_available()) {
             __asm__ volatile("sti; hlt");
         }
-        char c = kbd_getchar();
-        if (!c) continue;
+        while (kbd_available()) {
+            char c = kbd_getchar();
+            if (c) {
+                shell_on_key(c);
+                serial_putc(c);  /* mirror to serial for headless trace */
+            }
+        }
 
-        if (c == '\b') {
-            if (cx > echo_x0) {
-                cx -= gw;
-                /* Erase the glyph by painting it navy. */
-                fb_rect(cx, cy, gw, gh, COL_NAVY);
-            }
-            continue;
-        }
-        if (c == '\n') {
-            cx = echo_x0;
-            cy += gh + 2;
-            if (cy + gh > boot_info.fb_height - 40) cy = echo_y;
-            continue;
-        }
-        if (c >= 32 && c <= 126) {
-            fb_putchar(cx, cy, c, COL_WHITE, scale);
-            cx += gw;
-            if (cx + gw > boot_info.fb_width - 60) {
-                cx = echo_x0;
-                cy += gh + 2;
-                if (cy + gh > boot_info.fb_height - 40) cy = echo_y;
-            }
-            /* Mirror to serial too — useful for headless debugging. */
-            serial_putc(c);
+        /* Repaint clock at most once per ~250ms. */
+        uint64_t now = pit_elapsed_ms();
+        if (now - last_clock_ms >= 250) {
+            last_clock_ms = now;
+            pit_format_clock(clkbuf);
+            uint32_t cw_w = (FONT_WIDTH * 2) * 8;   /* "HH:MM:SS" at 2x */
+            uint32_t cw_h = FONT_HEIGHT * 2 + 4;
+            uint32_t cw_x = boot_info.fb_width - cw_w - 30;
+            uint32_t cw_y = 30;
+            fb_rect(cw_x - 6, cw_y - 4, cw_w + 12, cw_h, COL_NAVY);
+            fb_puts(cw_x, cw_y, clkbuf, COL_ORANGE, 2);
         }
     }
 }
