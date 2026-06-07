@@ -115,22 +115,29 @@ static volatile int dirty;
 static volatile int left_click_latch;
 static uint32_t sw, sh;
 
-static uint32_t saved_bg[CUR_W * CUR_H];
+/* Sized for 2x cursor (CUR_W * CUR_H * scale^2 = 11*18*4 = 792 dwords). */
+static uint32_t saved_bg[CUR_W * 2 * CUR_H * 2];
 
 /* ─── Cursor draw/erase ─────────────────────────────────── */
+
+/* Cursor is drawn at 2x — sprite is 11x18, rendered as 22x36 px so
+ * it's clearly visible against the dense bitmap-font text on screen.
+ * saved_bg is sized for 2x already. */
+#define CUR_SCALE 2
 
 static void save_bg_at(int x, int y) {
     if (!fb_present_x()) return;
     volatile uint32_t *fb = (volatile uint32_t *)fb_addr_x();
     uint32_t pitch_px = fb_pitch_x() / 4;
-    for (int row = 0; row < CUR_H; row++) {
-        for (int col = 0; col < CUR_W; col++) {
+    int w = CUR_W * CUR_SCALE, h = CUR_H * CUR_SCALE;
+    for (int row = 0; row < h; row++) {
+        for (int col = 0; col < w; col++) {
             int px = x + col, py = y + row;
             uint32_t v = 0;
             if (px >= 0 && py >= 0 && (uint32_t)px < sw && (uint32_t)py < sh) {
                 v = fb[py * pitch_px + px];
             }
-            saved_bg[row * CUR_W + col] = v;
+            saved_bg[row * w + col] = v;
         }
     }
 }
@@ -139,11 +146,12 @@ static void restore_bg_at(int x, int y) {
     if (!fb_present_x()) return;
     volatile uint32_t *fb = (volatile uint32_t *)fb_addr_x();
     uint32_t pitch_px = fb_pitch_x() / 4;
-    for (int row = 0; row < CUR_H; row++) {
-        for (int col = 0; col < CUR_W; col++) {
+    int w = CUR_W * CUR_SCALE, h = CUR_H * CUR_SCALE;
+    for (int row = 0; row < h; row++) {
+        for (int col = 0; col < w; col++) {
             int px = x + col, py = y + row;
             if (px >= 0 && py >= 0 && (uint32_t)px < sw && (uint32_t)py < sh) {
-                fb[py * pitch_px + px] = saved_bg[row * CUR_W + col];
+                fb[py * pitch_px + px] = saved_bg[row * w + col];
             }
         }
     }
@@ -153,15 +161,20 @@ static void draw_cursor_at(int x, int y) {
     if (!fb_present_x()) return;
     volatile uint32_t *fb = (volatile uint32_t *)fb_addr_x();
     uint32_t pitch_px = fb_pitch_x() / 4;
-    /* If left button is held, color the interior orange for feedback. */
     uint32_t interior = btn_left ? COL_ORANGE : COL_WHITE;
     for (int row = 0; row < CUR_H; row++) {
         for (int col = 0; col < CUR_W; col++) {
             uint8_t v = CURSOR_BMP[row][col];
             if (!v) continue;
-            int px = x + col, py = y + row;
-            if (px < 0 || py < 0 || (uint32_t)px >= sw || (uint32_t)py >= sh) continue;
-            fb[py * pitch_px + px] = (v == 2) ? COL_BLACK : interior;
+            uint32_t color = (v == 2) ? COL_BLACK : interior;
+            for (int sy = 0; sy < CUR_SCALE; sy++) {
+                for (int sx = 0; sx < CUR_SCALE; sx++) {
+                    int px = x + col * CUR_SCALE + sx;
+                    int py = y + row * CUR_SCALE + sy;
+                    if (px < 0 || py < 0 || (uint32_t)px >= sw || (uint32_t)py >= sh) continue;
+                    fb[py * pitch_px + px] = color;
+                }
+            }
         }
     }
 }
