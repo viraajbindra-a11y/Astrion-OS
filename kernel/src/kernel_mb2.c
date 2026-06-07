@@ -22,6 +22,7 @@
 
 #include <stdint.h>
 #include "fb_font.h"
+#include "idt.h"
 
 /* ─── COM1 UART (0x3F8) — identical to boot/boot.c ────────────────── */
 
@@ -605,6 +606,33 @@ static void print_summary(void) {
     serial_puts("--- ready to drive hardware ---\n");
 }
 
+/* ─── External-call wrappers for idt.c ────────────────────────────
+ *
+ * Most of the helpers above are `static` to keep the symbol surface
+ * small. idt.c needs a few of them at panic time, so expose tiny
+ * non-static wrappers here. Keeps responsibility clear: kernel_mb2.c
+ * owns the boot_info struct + fb/serial primitives; idt.c calls these
+ * narrow extern hooks at panic.
+ */
+void serial_puts_x(const char *s)        { serial_puts(s); }
+void serial_put_hex64_x(uint64_t v)      { serial_put_hex64(v); }
+int  fb_present_x(void)                  { return boot_info.fb_present; }
+uint32_t fb_width_x(void)                { return boot_info.fb_width; }
+uint32_t fb_height_x(void)               { return boot_info.fb_height; }
+void fb_fill_x(uint32_t color)           { fb_fill(color); }
+void fb_rect_x(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color) {
+    fb_rect(x, y, w, h, color);
+}
+uint32_t fb_puts_x(uint32_t x, uint32_t y, const char *s, uint32_t color, int scale) {
+    return fb_puts(x, y, s, color, scale);
+}
+uint32_t fb_put_hex64_x(uint32_t x, uint32_t y, uint64_t v, uint32_t color, int scale) {
+    return fb_put_hex64(x, y, v, color, scale);
+}
+uint32_t fb_put_u32_x(uint32_t x, uint32_t y, uint32_t v, uint32_t color, int scale) {
+    return fb_put_u32(x, y, v, color, scale);
+}
+
 /* Called from boot/multiboot2.S */
 void kernel_mb2_main(uint32_t magic, uint64_t info_ptr) {
     serial_init();
@@ -632,9 +660,20 @@ void kernel_mb2_main(uint32_t magic, uint64_t info_ptr) {
     serial_puts("\n");
     paint_boot_screen();
 
-    serial_puts("\nkernel halt (next: page allocator + IDT + font renderer)\n");
+    /* Install the IDT before anything that could fault. From this point
+     * on, CPU exceptions land in idt.c's isr_handler() which paints a
+     * panic screen + halts instead of triple-faulting silently. */
+    serial_puts("\nIDT: installing 256-entry table, 32 exception handlers wired...\n");
+    idt_install();
+    serial_puts("IDT: loaded; CPU exceptions will now panic visibly\n");
 
-    /* Halt forever. */
+    /* Selftest: trigger #BP (vector 3). Should land in isr_handler,
+     * paint the panic screen, halt. If this returns or triple-faults,
+     * the IDT wiring is broken. */
+    serial_puts("IDT: selftest — triggering int $3 (#BP)...\n");
+    __asm__ volatile("int $3");
+
+    serial_puts("\nFATAL: int $3 returned to caller — IDT broken?\n");
     for (;;) {
         __asm__ volatile("cli; hlt");
     }

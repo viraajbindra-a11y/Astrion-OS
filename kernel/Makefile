@@ -150,9 +150,14 @@ MB2_LDFLAGS = -nostdlib -T src/linker_mb2.ld -z max-page-size=4096
 kernel-mb2:
 	@mkdir -p $(BUILD_DIR)
 	$(CC) $(MB2_CFLAGS) -c boot/multiboot2.S -o $(BUILD_DIR)/multiboot2.o
+	$(CC) $(MB2_CFLAGS) -c src/isr.S -o $(BUILD_DIR)/isr.o
+	$(CC) $(MB2_CFLAGS) -c src/idt.c -o $(BUILD_DIR)/idt.o
 	$(CC) $(MB2_CFLAGS) -c src/kernel_mb2.c -o $(BUILD_DIR)/kernel_mb2.o
 	$(LD) $(MB2_LDFLAGS) -o $(BUILD_DIR)/kernel_mb2.elf \
-	    $(BUILD_DIR)/multiboot2.o $(BUILD_DIR)/kernel_mb2.o
+	    $(BUILD_DIR)/multiboot2.o \
+	    $(BUILD_DIR)/isr.o \
+	    $(BUILD_DIR)/idt.o \
+	    $(BUILD_DIR)/kernel_mb2.o
 	# Verify the multiboot2 header is present + first in the binary.
 	grub-file --is-x86-multiboot2 $(BUILD_DIR)/kernel_mb2.elf
 	@echo "Multiboot2 kernel built: $(BUILD_DIR)/kernel_mb2.elf"
