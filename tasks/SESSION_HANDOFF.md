@@ -242,3 +242,80 @@ Then pivoted to multiboot2+GRUB and shipped a working v2.0
 substrate end-to-end. v1.0 launch Dec 21 still on track. v2.0
 now has a verified independent boot path; UEFI side still needs
 real hardware to unblock. — Claude*
+
+---
+
+## Day-2 v2.0 push — 2026-06-05 → 2026-06-07
+
+**The v2.0 kernel went from "boots + prints" → "interactive OS with shell".** Every milestone has a screenshot in `tasks/` and a serial transcript captured.
+
+### What landed
+
+| # | Milestone | Files | Screenshot |
+|---|-----------|-------|------------|
+| 1 | Multiboot2 info-tag walker | `kernel/src/kernel_mb2.c` | — |
+| 2 | First pixels on the framebuffer | `kernel/src/kernel_mb2.c` | `first-pixels-2026-05-31.png` |
+| 3 | 8×12 bitmap font + boot screen | `kernel/src/fb_font.h` | `first-boot-screen-2026-06-05.png` |
+| 4 | IDT + 32 exception stubs + panic screen | `kernel/src/isr.S` `idt.{h,c}` | `first-panic-screen-2026-06-06.png` |
+| 5 | PIC remap + PS/2 keyboard echo | `kernel/src/kbd.{h,c}` | `first-keyboard-2026-06-06.png` |
+| 6 | Scrolling console + shell + PIT clock | `kernel/src/pit.{h,c} console.{h,c} shell.{h,c}` | `first-shell-2026-06-07.png` |
+| 7 | cpuid + uptime + 1..100 guess game | `kernel/src/shell.c` | `first-game-2026-06-07.png` |
+
+### Commands the shell now supports
+
+`help`, `version`, `clear`, `echo`, `mem`, `regs`, `cpuid`, `tick`,
+`uptime`, `guess`, `panic`, `halt`, `art` — 13 total, all live-tested.
+
+### Lessons earned
+
+- **#196** — `-O2` emits SSE for struct copies. Need `-mno-sse
+  -mgeneral-regs-only` or the first `boot_info.x = y` triple-faults.
+- **#197** — multiboot2 fb address is at ~4 GiB; extend the identity
+  map past 1 GiB or the first fb write #PFs.
+- **#198** — GAS `.section <name>` without explicit `"a", @progbits`
+  flags = non-ALLOC = magic ends up past file offset 32 KiB once
+  .text grows. The fix: explicit section flags in the asm.
+
+### What's running locally
+
+- v1.0 dev server (`com.astrion.devserver`) — **disabled** at the
+  launchd level (`launchctl disable gui/$(id -u)/com.astrion.devserver`).
+  Re-enable when you want it back.
+- Ollama — survives reboot, unchanged.
+- v2.0 kernel ISO — CI builds on every push to `kernel/**`. Latest
+  artifact: `gh run download <id> --name astrion-grub-iso`.
+
+### Open work — ranked
+
+1. **Page allocator** over the multiboot2 mmap. We have the data
+   (`boot_info.total_available_bytes`, 7 mmap entries). Need a
+   bump allocator + free list.
+2. **Page-fault visualizer.** Currently #PF panics with raw error
+   code; decode the error byte into "supervisor / write / present"
+   string + dump CR2.
+3. **PS/2 mouse on IRQ12.** Same shape as the keyboard work. Add
+   a `mouse.{h,c}` + sprite cursor on framebuffer.
+4. **AI command in the shell.** A stub `ai <prompt>` that prints a
+   canned reply; lays the contract for the eventual real router.
+5. **Port to Rust piece by piece.** Start with `kbd.c` and `pit.c`
+   (smallest + most isolated).
+6. **Surface Pro 6 flash** — still the open hardware unblock from
+   the previous session.
+
+### Read order for next session
+
+1. This file (Day-2 section)
+2. `tasks/lessons.md` #196 #197 #198 (most recent gotchas)
+3. `tasks/real-os-design-2026-05-25.md` — has 2026-06-07 update with
+   architecture diagram + lesson links
+4. `kernel/README.md` — local test recipe
+5. Screenshots in `tasks/first-*.png` — see how the kernel looks now
+
+---
+
+*Day-2 ended 2026-06-07. The Astrion v2.0 kernel is no longer a
+stub. It boots, parses GRUB hand-off, paints a real boot screen,
+handles every CPU exception, takes keyboard input, runs a real
+shell with 13 commands, plays a 1..100 guess game, and ticks a
+live clock. All from code we wrote, in one repo, verified live in
+QEMU with screenshots checked in. — Claude*

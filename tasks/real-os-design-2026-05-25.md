@@ -551,3 +551,70 @@ v2.0 substrate — what UEFI+gnu-efi was trying to be.
 
 CI builds both on every push to `kernel/**`. Two artifacts:
 `nova-os-kernel-iso` and `astrion-grub-iso`.
+
+---
+
+## Update 2026-06-07 — substrate is no longer a stub
+
+Two-day push transformed the v2.0 kernel from "boots + prints" into a
+real interactive OS. Every step verified live in QEMU with screenshots
+checked into `tasks/`.
+
+### What landed
+
+| Day | Milestone | Screenshot |
+|-----|-----------|------------|
+| 1   | Multiboot2 info-tag walker (mmap, fb, bootloader) | — |
+| 1   | Framebuffer pixel writes verified | `first-pixels-2026-05-31.png` |
+| 2   | Text rendering on framebuffer (8x12 bitmap font) | `first-boot-screen-2026-06-05.png` |
+| 2   | IDT + 32 exception handlers + panic screen | `first-panic-screen-2026-06-06.png` |
+| 2   | PIC remap + IRQ stubs + PS/2 keyboard echo | `first-keyboard-2026-06-06.png` |
+| 2   | Scrolling console + shell + PIT clock | `first-shell-2026-06-07.png` |
+| 2   | cpuid + uptime + 1..100 guess game | `first-game-2026-06-07.png` |
+
+### Architecture today
+
+```
+boot/multiboot2.S          — header + 32→64 mode + 4 GiB ident map
+src/kernel_mb2.c           — entry, paint, _x wrappers
+src/fb_font.h              — 8x12 bitmap, ASCII 32..126
+src/isr.S                  — 32 exception stubs + 16 IRQ stubs
+src/idt.{h,c}              — IDT install + isr_handler + irq dispatch
+                             + PIC remap + irq_register
+src/pit.{h,c}              — 8254 PIT, IRQ0 tick, format clock
+src/kbd.{h,c}              — PS/2 IRQ1, scancode→ASCII, ring buffer
+src/console.{h,c}          — scrolling text region with cursor
+src/shell.{h,c}            — line buffer + tokenizer + 13-cmd table
+```
+
+### Lessons earned
+
+- #196 — `-O2` emits SSE on struct copies; need `-mno-sse
+  -mgeneral-regs-only` or any C code silently triple-faults.
+- #197 — multiboot2 framebuffer address requires extending the
+  identity map past 1 GiB; we identity-map 4 GiB now.
+- #198 — GAS `.section` without `"a"` flag makes the section
+  non-ALLOC; the multiboot2 magic gets placed past the 32-KiB
+  ceiling once .text grows, silently. CI passed for two commits
+  then broke; objdump diagnostic caught it in one cycle.
+
+### What's next
+
+The interactive substrate makes everything below a quality-of-life
+improvement on a working base, not a "first time we can do X" jump:
+
+1. Page allocator over the mmap regions (we have the data, just need
+   a free-list and a bump allocator above it).
+2. PS/2 mouse driver on IRQ12 (same shape as keyboard).
+3. Page-fault visualizer that reads CR2 + decodes the error code so
+   the panic screen explains misses by name.
+4. AI-native command in the shell: pipe a question to a fake reasoner
+   that prints a canned diagnostic, just to fill the slot for the
+   eventual real router. Lays the contract for v2.0's AI-first promise.
+5. Port piece-by-piece to Rust, starting with the modules that are
+   smallest and most isolated (kbd.c, then pit.c, then console.c).
+
+Verifying each on real Surface Pro 6 hardware is still the open
+unblock — but we no longer need it. The kernel is enough of a system
+that bringing it up on metal is a hardware-test, not a "does anything
+at all work" question.
