@@ -52,4 +52,10 @@ fs_node  *fs_next(fs_node *n);
 uint32_t  fs_count(void);
 uint32_t  fs_total_bytes(void);
 
+/* Persistence to/from disk. Both return 0 on success, -1 on no disk
+ * or I/O error. sync writes everything in the linked list to LBA 0
+ * upward; load_from_disk does the inverse and rebuilds the list. */
+int fs_sync(void);
+int fs_load_from_disk(void);
+
 #endif

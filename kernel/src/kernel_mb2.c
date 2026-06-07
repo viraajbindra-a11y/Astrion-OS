@@ -30,6 +30,7 @@
 #include "mouse.h"
 #include "heap.h"
 #include "fs.h"
+#include "ata.h"
 
 /* ─── COM1 UART (0x3F8) — identical to boot/boot.c ────────────────── */
 
@@ -701,9 +702,19 @@ void kernel_mb2_main(uint32_t magic, uint64_t info_ptr) {
         serial_puts("HEAP: smoke test passed\n");
     }
 
-    /* RAM filesystem on top of the heap. Seeds /readme.txt + /greet.sh
-     * so 'ls' has something useful before the user does anything. */
-    serial_puts("FS: initializing RAM filesystem...\n");
+    /* ATA before FS — FS uses ata_present() at init to decide whether
+     * to seed defaults or load from disk. */
+    serial_puts("ATA: probing primary master...\n");
+    ata_init();
+    if (ata_present()) {
+        serial_puts("ATA: disk found\n");
+    } else {
+        serial_puts("ATA: no disk attached\n");
+    }
+
+    /* Filesystem. Loads from disk if present + has a valid superblock,
+     * otherwise seeds /readme.txt + /greet.sh. */
+    serial_puts("FS: initializing...\n");
     fs_init();
     serial_puts("FS: ready\n");
 

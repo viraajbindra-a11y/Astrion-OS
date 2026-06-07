@@ -29,6 +29,7 @@
 #include "snake.h"
 #include "heap.h"
 #include "fs.h"
+#include "ata.h"
 
 #define COL_PROMPT 0xFF7A00u     /* Astrion orange */
 #define COL_OK     0x4ADE80u     /* green for success-ish */
@@ -98,6 +99,8 @@ static void cmd_append(int argc, char **argv);
 static void cmd_rm(int argc, char **argv);
 static void cmd_touch(int argc, char **argv);
 static void cmd_mkdir(int argc, char **argv);
+static void cmd_sync(int argc, char **argv);
+static void cmd_disk(int argc, char **argv);
 
 static const struct cmd CMDS[] = {
     { "help",    "list available commands",          cmd_help },
@@ -121,6 +124,8 @@ static const struct cmd CMDS[] = {
     { "rm",      "remove a file",                    cmd_rm },
     { "touch",   "create an empty file",             cmd_touch },
     { "mkdir",   "create a directory entry",         cmd_mkdir },
+    { "sync",    "write all files to disk",          cmd_sync },
+    { "disk",    "show ATA disk info",               cmd_disk },
     { "panic",   "trigger int $3 (panic-screen demo)", cmd_panic },
     { "halt",    "stop the CPU forever",             cmd_halt },
     { "art",     "print Astrion ASCII banner",       cmd_art },
@@ -741,6 +746,51 @@ static void cmd_mkdir(int argc, char **argv) {
     console_set_color(COL_WHITE);
     console_puts(argv[1]);
     console_putchar('\n');
+}
+
+static void cmd_sync(int argc, char **argv) {
+    (void)argc; (void)argv;
+    if (!ata_present()) {
+        console_set_color(0xF87171u);
+        console_puts("sync: no disk attached (try '-hda astrion.disk' to QEMU)\n");
+        console_set_color(COL_WHITE);
+        return;
+    }
+    int r = fs_sync();
+    if (r != 0) {
+        console_set_color(0xF87171u);
+        console_puts("sync: write failed\n");
+        console_set_color(COL_WHITE);
+        return;
+    }
+    console_set_color(COL_OK);
+    console_puts("sync: ");
+    console_set_color(COL_WHITE);
+    console_put_u32(fs_count());
+    console_puts(" entries (");
+    console_put_u32(fs_total_bytes());
+    console_puts(" bytes) saved to disk — reboot will restore them\n");
+}
+
+static void cmd_disk(int argc, char **argv) {
+    (void)argc; (void)argv;
+    console_set_color(COL_OK);
+    console_puts("ATA primary master:\n");
+    console_set_color(COL_WHITE);
+    if (!ata_present()) {
+        console_set_color(COL_MUTED);
+        console_puts("  no disk (boot with QEMU -hda astrion.disk to enable persistence)\n");
+        console_set_color(COL_WHITE);
+        return;
+    }
+    console_puts("  model:   ");
+    console_puts(ata_model());
+    console_putchar('\n');
+    console_puts("  sectors: ");
+    console_put_u32(ata_total_sectors());
+    console_puts(" (");
+    console_put_u32((ata_total_sectors() * 512) / (1024 * 1024));
+    console_puts(" MiB)\n");
 }
 
 /* ─── Parser ─────────────────────────────────────────────── */
