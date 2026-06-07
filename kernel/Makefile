@@ -166,6 +166,12 @@ kernel-mb2:
 	    $(BUILD_DIR)/console.o \
 	    $(BUILD_DIR)/shell.o \
 	    $(BUILD_DIR)/kernel_mb2.o
+	@echo "=== ELF section layout ==="
+	objdump -h $(BUILD_DIR)/kernel_mb2.elf | head -40
+	@echo "=== ELF program headers ==="
+	readelf -l $(BUILD_DIR)/kernel_mb2.elf | head -30
+	@echo "=== multiboot2 magic search (file offset of bytes d6 50 52 e8) ==="
+	@grep -obUaP "\xd6\x50\x52\xe8" $(BUILD_DIR)/kernel_mb2.elf | head -3 || echo "magic NOT FOUND"
 	# Verify the multiboot2 header is present + first in the binary.
 	grub-file --is-x86-multiboot2 $(BUILD_DIR)/kernel_mb2.elf
 	@echo "Multiboot2 kernel built: $(BUILD_DIR)/kernel_mb2.elf"
