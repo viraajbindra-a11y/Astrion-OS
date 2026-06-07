@@ -84,6 +84,8 @@ static void cmd_art(int argc, char **argv);
 static void cmd_cpuid(int argc, char **argv);
 static void cmd_uptime(int argc, char **argv);
 static void cmd_guess(int argc, char **argv);
+static void cmd_wipe(int argc, char **argv);
+static void cmd_paint(int argc, char **argv);
 
 static const struct cmd CMDS[] = {
     { "help",    "list available commands",          cmd_help },
@@ -96,6 +98,8 @@ static const struct cmd CMDS[] = {
     { "tick",    "current PIT tick count + uptime",  cmd_tick },
     { "uptime",  "human-readable uptime",            cmd_uptime },
     { "guess",   "play: guess my number 1..100",     cmd_guess },
+    { "paint",   "drag mouse to draw ink trails",    cmd_paint },
+    { "wipe",    "clear any ink trails / repaint",   cmd_wipe },
     { "panic",   "trigger int $3 (panic-screen demo)", cmd_panic },
     { "halt",    "stop the CPU forever",             cmd_halt },
     { "art",     "print Astrion ASCII banner",       cmd_art },
@@ -427,6 +431,29 @@ static void cmd_guess(int argc, char **argv) {
     console_set_color(COL_MUTED);
     console_puts(g < target ? "higher\n" : "lower\n");
     console_set_color(COL_WHITE);
+}
+
+/* ─── wipe + paint help ─────────────────────────────────── */
+
+extern void paint_boot_screen_x(void);
+
+static void cmd_wipe(int argc, char **argv) {
+    (void)argc; (void)argv;
+    paint_boot_screen_x();   /* repaint static boot screen */
+    console_clear();         /* clear the shell region */
+    console_set_color(COL_OK);
+    console_puts("wiped.\n");
+    console_set_color(COL_WHITE);
+}
+
+static void cmd_paint(int argc, char **argv) {
+    (void)argc; (void)argv;
+    console_set_color(COL_PROMPT);
+    console_puts("paint mode:\n");
+    console_set_color(COL_WHITE);
+    console_puts("  - drag mouse with LEFT button to leave ink\n");
+    console_puts("  - cursor turns orange while drawing\n");
+    console_puts("  - type 'wipe' to clear and start over\n");
 }
 
 /* ─── Parser ─────────────────────────────────────────────── */

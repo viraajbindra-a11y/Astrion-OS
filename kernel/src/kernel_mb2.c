@@ -641,6 +641,10 @@ uint32_t fb_put_u32_x(uint32_t x, uint32_t y, uint32_t v, uint32_t color, int sc
 uint64_t fb_addr_x(void)                 { return boot_info.fb_addr; }
 uint32_t fb_pitch_x(void)                { return boot_info.fb_pitch; }
 
+/* Exposed so the shell's 'wipe' command can repaint the boot screen,
+ * clearing any drag-painted ink trails. */
+void paint_boot_screen_x(void) { paint_boot_screen(); }
+
 /* Used by shell.c for `mem` / `version` commands. */
 uint32_t mb_mmap_entry_count_x(void)     { return boot_info.mmap_entry_count; }
 uint32_t mb_total_available_mib_x(void)  {
