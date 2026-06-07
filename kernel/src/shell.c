@@ -81,6 +81,9 @@ static void cmd_tick(int argc, char **argv);
 static void cmd_panic(int argc, char **argv);
 static void cmd_halt(int argc, char **argv);
 static void cmd_art(int argc, char **argv);
+static void cmd_cpuid(int argc, char **argv);
+static void cmd_uptime(int argc, char **argv);
+static void cmd_guess(int argc, char **argv);
 
 static const struct cmd CMDS[] = {
     { "help",    "list available commands",          cmd_help },
@@ -89,7 +92,10 @@ static const struct cmd CMDS[] = {
     { "echo",    "echo <text>",                      cmd_echo },
     { "mem",     "show memory map summary",          cmd_mem },
     { "regs",    "dump CR0/CR2/CR3/CR4 + RFLAGS",    cmd_regs },
+    { "cpuid",   "CPU vendor + feature flags",       cmd_cpuid },
     { "tick",    "current PIT tick count + uptime",  cmd_tick },
+    { "uptime",  "human-readable uptime",            cmd_uptime },
+    { "guess",   "play: guess my number 1..100",     cmd_guess },
     { "panic",   "trigger int $3 (panic-screen demo)", cmd_panic },
     { "halt",    "stop the CPU forever",             cmd_halt },
     { "art",     "print Astrion ASCII banner",       cmd_art },
@@ -234,6 +240,193 @@ static void cmd_art(int argc, char **argv) {
     console_puts(" \\/__\\_|/\\___|  __/_______|__|/__/|__|_\\|\n");
     console_set_color(COL_WHITE);
     console_puts("  the AI-native operating system\n");
+}
+
+/* ─── cpuid ──────────────────────────────────────────────── */
+
+static void cpuid_raw(uint32_t leaf, uint32_t *a, uint32_t *b, uint32_t *c, uint32_t *d) {
+    __asm__ volatile("cpuid"
+        : "=a"(*a), "=b"(*b), "=c"(*c), "=d"(*d)
+        : "a"(leaf), "c"(0));
+}
+
+static void emit_flag(const char *name, int present) {
+    console_putchar(' ');
+    console_set_color(present ? COL_OK : COL_MUTED);
+    if (!present) console_putchar('!');
+    console_puts(name);
+    console_set_color(COL_WHITE);
+}
+
+static void cmd_cpuid(int argc, char **argv) {
+    (void)argc; (void)argv;
+    uint32_t a, b, c, d;
+
+    /* Leaf 0: vendor string in EBX,EDX,ECX (12 ASCII bytes). */
+    cpuid_raw(0, &a, &b, &c, &d);
+    char vendor[13];
+    *(uint32_t *)&vendor[0] = b;
+    *(uint32_t *)&vendor[4] = d;
+    *(uint32_t *)&vendor[8] = c;
+    vendor[12] = 0;
+
+    console_set_color(COL_OK);
+    console_puts("CPUID:\n");
+    console_set_color(COL_WHITE);
+    console_puts("  vendor:    ");
+    console_puts(vendor);
+    console_puts(" (max leaf ");
+    console_put_u32(a);
+    console_puts(")\n");
+
+    /* Leaf 1: family/model + feature flags in EDX/ECX. */
+    cpuid_raw(1, &a, &b, &c, &d);
+    uint32_t family = (a >> 8) & 0xF;
+    uint32_t model  = (a >> 4) & 0xF;
+    uint32_t stepping = a & 0xF;
+    if (family == 0xF) family += (a >> 20) & 0xFF;
+    if (family >= 6)   model  += ((a >> 16) & 0xF) << 4;
+
+    console_puts("  family:    ");
+    console_put_u32(family);
+    console_puts("  model: ");
+    console_put_u32(model);
+    console_puts("  stepping: ");
+    console_put_u32(stepping);
+    console_putchar('\n');
+
+    /* Brand string from extended leaves 0x80000002..4. */
+    cpuid_raw(0x80000000, &a, &b, &c, &d);
+    if (a >= 0x80000004) {
+        char brand[49] = {0};
+        uint32_t *bp = (uint32_t *)brand;
+        for (uint32_t leaf = 0x80000002; leaf <= 0x80000004; leaf++) {
+            cpuid_raw(leaf, &a, &b, &c, &d);
+            *bp++ = a; *bp++ = b; *bp++ = c; *bp++ = d;
+        }
+        /* Strip leading spaces. */
+        char *p = brand; while (*p == ' ') p++;
+        console_puts("  brand:     ");
+        console_puts(p);
+        console_putchar('\n');
+    }
+
+    /* Re-fetch leaf 1 since the brand-leaf calls clobbered ECX/EDX. */
+    cpuid_raw(1, &a, &b, &c, &d);
+    console_puts("  features: ");
+    emit_flag("fpu",    d & (1u <<  0));
+    emit_flag("tsc",    d & (1u <<  4));
+    emit_flag("msr",    d & (1u <<  5));
+    emit_flag("pae",    d & (1u <<  6));
+    emit_flag("apic",   d & (1u <<  9));
+    emit_flag("sse",    d & (1u << 25));
+    emit_flag("sse2",   d & (1u << 26));
+    console_putchar('\n');
+    console_puts("           ");
+    emit_flag("sse3",   c & (1u <<  0));
+    emit_flag("ssse3",  c & (1u <<  9));
+    emit_flag("sse4.1", c & (1u << 19));
+    emit_flag("sse4.2", c & (1u << 20));
+    emit_flag("aes",    c & (1u << 25));
+    emit_flag("avx",    c & (1u << 28));
+    emit_flag("rdrand", c & (1u << 30));
+    console_putchar('\n');
+}
+
+/* ─── uptime ─────────────────────────────────────────────── */
+
+static void cmd_uptime(int argc, char **argv) {
+    (void)argc; (void)argv;
+    char buf[9];
+    pit_format_clock(buf);
+    console_set_color(COL_OK);
+    console_puts("up ");
+    console_set_color(COL_WHITE);
+    console_puts(buf);
+    console_puts(" — ");
+    console_put_u64(pit_ticks());
+    console_puts(" ticks, ");
+    console_put_u64(pit_elapsed_ms());
+    console_puts(" ms\n");
+}
+
+/* ─── guess game ─────────────────────────────────────────── */
+
+/* Simple LCG seeded from PIT ticks — not crypto, just enough for fun. */
+static uint64_t lcg_state = 0;
+static uint32_t target;
+static int guess_active;
+static int guess_attempts;
+
+static uint32_t rand_in_range(uint32_t lo, uint32_t hi) {
+    /* Knuth LCG. */
+    lcg_state = lcg_state * 6364136223846793005ULL + 1442695040888963407ULL;
+    uint32_t r = (uint32_t)(lcg_state >> 33);
+    return lo + (r % (hi - lo + 1));
+}
+
+static int parse_u32(const char *s, uint32_t *out) {
+    uint32_t v = 0;
+    int any = 0;
+    while (*s >= '0' && *s <= '9') {
+        v = v * 10 + (uint32_t)(*s - '0');
+        s++; any = 1;
+    }
+    if (!any || *s) return 0;
+    *out = v;
+    return 1;
+}
+
+static void cmd_guess(int argc, char **argv) {
+    if (!guess_active) {
+        /* New game. Seed from current ticks. */
+        lcg_state ^= pit_ticks() * 0x9E3779B97F4A7C15ULL;
+        target = rand_in_range(1, 100);
+        guess_attempts = 0;
+        guess_active = 1;
+        console_set_color(COL_PROMPT);
+        console_puts("guess: ");
+        console_set_color(COL_WHITE);
+        console_puts("I'm thinking of a number 1..100. Type 'guess <n>'.\n");
+        return;
+    }
+    if (argc < 2) {
+        console_set_color(COL_MUTED);
+        console_puts("usage: guess <n>   (or 'guess give' to give up)\n");
+        console_set_color(COL_WHITE);
+        return;
+    }
+    if (streq(argv[1], "give")) {
+        console_set_color(COL_PROMPT);
+        console_puts("number was: ");
+        console_put_u32(target);
+        console_puts(". game ended.\n");
+        console_set_color(COL_WHITE);
+        guess_active = 0;
+        return;
+    }
+    uint32_t g;
+    if (!parse_u32(argv[1], &g)) {
+        console_set_color(COL_MUTED);
+        console_puts("not a number — try 'guess 42'\n");
+        console_set_color(COL_WHITE);
+        return;
+    }
+    guess_attempts++;
+    if (g == target) {
+        console_set_color(COL_OK);
+        console_puts("YES! ");
+        console_set_color(COL_WHITE);
+        console_puts("found it in ");
+        console_put_u32(guess_attempts);
+        console_puts(" tr");
+        console_puts(guess_attempts == 1 ? "y.\n" : "ies.\n");
+        guess_active = 0;
+        return;
+    }
+    console_set_color(COL_MUTED);
+    console_puts(g < target ? "higher\n" : "lower\n");
+    console_set_color(COL_WHITE);
 }
 
 /* ─── Parser ─────────────────────────────────────────────── */
