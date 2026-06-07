@@ -179,6 +179,26 @@ static void draw_cursor_at(int x, int y) {
     }
 }
 
+/* When the left button is held while moving, drop a small orange dot
+ * at the cursor tip. The dot is written directly to the framebuffer
+ * BEFORE we save_bg at the new position, so it gets captured and
+ * persists through subsequent cursor moves. */
+static void paint_ink_at(int x, int y) {
+    if (!fb_present_x()) return;
+    volatile uint32_t *fb = (volatile uint32_t *)fb_addr_x();
+    uint32_t pitch_px = fb_pitch_x() / 4;
+    int dot = 4;
+    /* Center the dot near the cursor tip (top-left of the arrow). */
+    for (int dy = 0; dy < dot; dy++) {
+        for (int dx = 0; dx < dot; dx++) {
+            int px = x + dx;
+            int py = y + dy;
+            if (px < 0 || py < 0 || (uint32_t)px >= sw || (uint32_t)py >= sh) continue;
+            fb[py * pitch_px + px] = COL_ORANGE;
+        }
+    }
+}
+
 void mouse_redraw_if_dirty(void) {
     if (!dirty) return;
     if (first_paint) {
@@ -188,6 +208,9 @@ void mouse_redraw_if_dirty(void) {
         first_paint = 0;
     } else if (mx != lx || my != ly) {
         restore_bg_at(lx, ly);
+        /* Paint trail BEFORE saving the new bg, so the dot gets baked
+         * into saved_bg and persists across future moves. */
+        if (btn_left) paint_ink_at(lx, ly);
         save_bg_at(mx, my);
         draw_cursor_at(mx, my);
         lx = mx; ly = my;
