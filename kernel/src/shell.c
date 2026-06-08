@@ -101,6 +101,7 @@ static void cmd_touch(int argc, char **argv);
 static void cmd_mkdir(int argc, char **argv);
 static void cmd_sync(int argc, char **argv);
 static void cmd_disk(int argc, char **argv);
+static void cmd_run(int argc, char **argv);
 
 static const struct cmd CMDS[] = {
     { "help",    "list available commands",          cmd_help },
@@ -126,6 +127,7 @@ static const struct cmd CMDS[] = {
     { "mkdir",   "create a directory entry",         cmd_mkdir },
     { "sync",    "write all files to disk",          cmd_sync },
     { "disk",    "show ATA disk info",               cmd_disk },
+    { "run",     "run a script (one cmd per line)",  cmd_run },
     { "panic",   "trigger int $3 (panic-screen demo)", cmd_panic },
     { "halt",    "stop the CPU forever",             cmd_halt },
     { "art",     "print Astrion ASCII banner",       cmd_art },
@@ -795,6 +797,8 @@ static void cmd_disk(int argc, char **argv) {
 
 /* ─── Parser ─────────────────────────────────────────────── */
 
+static uint8_t redirect_buf[2048];
+
 static void dispatch(char *cmdline) {
     /* Tokenize in place. */
     char *argv[16];
@@ -808,15 +812,112 @@ static void dispatch(char *cmdline) {
     }
     if (argc == 0) return;
 
-    for (const struct cmd *c = CMDS; c->name; c++) {
-        if (streq(argv[0], c->name)) { c->fn(argc, argv); return; }
+    /* Detect '>' redirect: argv[i] == ">" and argv[i+1] is the file. */
+    const char *redir_file = 0;
+    for (int i = 1; i + 1 < argc; i++) {
+        if (streq(argv[i], ">")) {
+            redir_file = argv[i + 1];
+            argc = i;       /* hide redirect tokens from the command */
+            break;
+        }
     }
 
-    console_set_color(0xF87171u);  /* red */
+    uint32_t cap_len = 0;
+    if (redir_file) {
+        redirect_buf[0] = 0;
+        console_set_capture(redirect_buf, sizeof(redirect_buf), &cap_len);
+    }
+
+    for (const struct cmd *c = CMDS; c->name; c++) {
+        if (streq(argv[0], c->name)) {
+            c->fn(argc, argv);
+            goto done;
+        }
+    }
+    /* Unknown — print to console regardless of capture state. */
+    if (redir_file) console_clear_capture();
+    console_set_color(0xF87171u);
     console_puts("unknown command: ");
     console_puts(argv[0]);
     console_puts(" — try 'help'\n");
     console_set_color(COL_WHITE);
+    return;
+
+done:
+    if (redir_file) {
+        console_clear_capture();
+        int r = fs_write(redir_file, redirect_buf, cap_len);
+        if (r < 0) {
+            console_set_color(0xF87171u);
+            console_puts("> redirect failed\n");
+            console_set_color(COL_WHITE);
+            return;
+        }
+        console_set_color(COL_MUTED);
+        console_puts(" -> ");
+        console_set_color(COL_WHITE);
+        console_puts(redir_file);
+        console_set_color(COL_MUTED);
+        console_puts(" (");
+        console_put_u32(cap_len);
+        console_puts(" bytes)\n");
+        console_set_color(COL_WHITE);
+    }
+}
+
+/* Run a script: walks the file line-by-line, dispatching each non-empty,
+ * non-'#'-comment line through the shell parser. */
+static void cmd_run(int argc, char **argv) {
+    if (argc < 2) {
+        console_set_color(COL_MUTED);
+        console_puts("usage: run <file>\n");
+        console_set_color(COL_WHITE);
+        return;
+    }
+    fs_node *n = fs_find(argv[1]);
+    if (!n || n->kind != FS_FILE) {
+        console_set_color(0xF87171u);
+        console_puts("run: no such file: ");
+        console_puts(argv[1]);
+        console_putchar('\n');
+        console_set_color(COL_WHITE);
+        return;
+    }
+    /* Parse + dispatch line by line. Operate on a copy because
+     * dispatch() tokenizes in place. */
+    static char line[256];
+    uint32_t line_pos = 0;
+    int line_no = 1;
+    for (uint32_t i = 0; i <= n->size; i++) {
+        char c = (i < n->size) ? (char)n->data[i] : '\n';
+        if (c == '\n' || c == '\r') {
+            line[line_pos] = 0;
+            /* Skip empty + comment lines. */
+            const char *t = line;
+            while (*t == ' ' || *t == '\t') t++;
+            if (*t && *t != '#') {
+                /* Trace-print so the user sees the script execute. */
+                console_set_color(COL_MUTED);
+                console_puts("[");
+                console_put_u32((uint32_t)line_no);
+                console_puts("] ");
+                console_set_color(COL_PROMPT);
+                console_puts(line);
+                console_putchar('\n');
+                console_set_color(COL_WHITE);
+                dispatch(line);
+            }
+            line_pos = 0;
+            line_no++;
+            continue;
+        }
+        if (line_pos + 1 < sizeof(line)) line[line_pos++] = c;
+    }
+    console_set_color(COL_OK);
+    console_puts("run: ");
+    console_set_color(COL_WHITE);
+    console_puts(argv[1]);
+    console_puts(" done\n");
 }
 
 /* ─── Public entry points ─────────────────────────────────── */

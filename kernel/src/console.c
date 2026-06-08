@@ -41,6 +41,12 @@ static uint32_t x0, y0, w_px, h_px;
 static uint32_t cx, cy;
 static uint32_t color = COL_FG_DEFLT;
 
+/* Capture (for '>' redirection). When buf is non-NULL, putchar
+ * appends there instead of drawing pixels. */
+static uint8_t  *cap_buf;
+static uint32_t  cap_cap;
+static uint32_t *cap_len_out;
+
 static void scroll_one_line(void) {
     if (!fb_present_x()) return;
     volatile uint32_t *fb = (volatile uint32_t *)fb_addr_x();
@@ -87,7 +93,27 @@ void console_backspace(void) {
     fb_rect_x(cx, cy, GW, GH, COL_BG);
 }
 
+void console_set_capture(uint8_t *buf, uint32_t cap, uint32_t *len_out) {
+    cap_buf = buf;
+    cap_cap = cap;
+    cap_len_out = len_out;
+    if (cap_len_out) *cap_len_out = 0;
+}
+
+void console_clear_capture(void) {
+    cap_buf = 0; cap_cap = 0; cap_len_out = 0;
+}
+
 void console_putchar(char c) {
+    /* Output redirect: append to capture buffer + skip pixel writes. */
+    if (cap_buf) {
+        if (cap_len_out && *cap_len_out + 1 < cap_cap) {
+            cap_buf[(*cap_len_out)++] = (uint8_t)c;
+            cap_buf[*cap_len_out] = 0;
+        }
+        return;
+    }
+
     if (c == '\n') { console_newline(); return; }
     if (c == '\b') { console_backspace(); return; }
     if (c == '\r') { cx = x0; return; }

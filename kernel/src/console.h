@@ -25,4 +25,11 @@ void     console_clear(void);
 void     console_newline(void);
 void     console_backspace(void);    /* erase prior glyph, retreats cursor */
 
+/* Output redirection: when a capture buffer is set, console_putchar
+ * APPENDS to that buffer instead of drawing on the framebuffer.
+ * Used to implement '>' in the shell. Set buf=NULL to restore
+ * normal screen output. */
+void     console_set_capture(uint8_t *buf, uint32_t cap, uint32_t *len_out);
+void     console_clear_capture(void);
+
 #endif
