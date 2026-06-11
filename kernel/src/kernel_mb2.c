@@ -549,9 +549,10 @@ static void paint_boot_screen(void) {
     fb_puts(sx, sy + rowh*4,          "addr:",   COL_ORANGE, s);
     fb_put_hex64(sx + 120, sy + rowh*4, boot_info.fb_addr, COL_WHITE, s);
 
-    /* Footer along the bottom. */
+    /* Footer along the bottom — keep this list honest; it appears in
+     * every screenshot. */
     uint32_t fy = boot_info.fb_height - FONT_HEIGHT * 2 - 24;
-    fb_puts(60, fy, "stub kernel  -  next: IDT + page allocator + drivers",
+    fb_puts(60, fy, "heap + files + disk + scripts + tasks  -  type 'help'",
             COL_MUTED, 2);
 
     /* Tiny orange corner marker for orientation. */

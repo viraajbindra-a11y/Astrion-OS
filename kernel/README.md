@@ -6,39 +6,49 @@ this — v1.0 runs on top of Linux. This directory is the multi-year project
 toward an actual kernel; see `tasks/real-os-design-2026-05-25.md` for the
 honest scope.
 
-## Status (2026-05-26)
+## Status (2026-06-10)
 
-Two boot paths live in this directory:
+The multiboot2/GRUB path is the live kernel; it is **no longer a stub**.
+What works today (each milestone has a screenshot in `tasks/first-*.png`):
 
-### Path A — UEFI / gnu-efi (`boot/boot.c`)
-- Builds cleanly in CI.
-- Boots in QEMU through UEFI firmware → runs bootloader → prints live serial.
-- Hit two stacked OVMF firmware bugs that block further work (see lesson
-  #194). Surface Pro 6 hardware will be the next test vector.
+| Subsystem | Files | Verified |
+|---|---|---|
+| Boot: GRUB → long mode → 4 GiB identity map | `boot/multiboot2.S` | ✅ |
+| Multiboot2 info parse (mmap, framebuffer) | `src/kernel_mb2.c` | ✅ |
+| Framebuffer text (8×12 font) + boot screen | `src/fb_font.h` | ✅ |
+| IDT + 32 exception handlers + panic screen | `src/isr.S`, `src/idt.{h,c}` | ✅ |
+| PIC remap + IRQ dispatch | `src/idt.c` | ✅ |
+| PIT timer @100 Hz + uptime clock | `src/pit.{h,c}` | ✅ |
+| PS/2 keyboard (incl. arrow keys) | `src/kbd.{h,c}` | ✅ |
+| PS/2 mouse + cursor sprite + drag-paint | `src/mouse.{h,c}` | ✅ |
+| Scrolling console + 25-command shell | `src/console.{h,c}`, `src/shell.{h,c}` | ✅ |
+| Snake game (PIT-timed, arrow-steered) | `src/snake.{h,c}` | ✅ |
+| Heap allocator (kmalloc/kfree/krealloc) | `src/heap.{h,c}` | ✅ |
+| RAM filesystem (ls/cat/write/append/rm) | `src/fs.{h,c}` | ✅ |
+| ATA PIO disk + persistence across reboots | `src/ata.{h,c}` + `fs_sync` | ✅ |
+| Shell scripts (`run`) + redirection (`>`) | `src/shell.c`, `src/console.c` | ✅ |
+| Cooperative scheduler (ps/spawn/kill) | `src/task.{h,c}`, `src/context_switch.S` | ✅ |
 
-### Path B — Multiboot2 / GRUB (`boot/multiboot2.S` + `src/kernel_mb2.c`) ✅ GREEN
-- Shipped 2026-05-26. End-to-end verified in QEMU.
-- GRUB loads `/boot/kernel_mb2.elf` from ISO → 32-bit entry → page tables
-  → long mode → C kernel → serial output ✓
-- No firmware archaeology. Path forward for the v2.0 substrate.
+The legacy UEFI/gnu-efi path (`boot/boot.c`, `make iso`) still builds in CI
+but is parked on two stacked OVMF firmware bugs (lesson #194). Surface Pro 6
+hardware remains its next test vector.
 
 ## Local test recipe (macOS)
 
 ```bash
 cd kernel
-make run-retrage     # Path A: UEFI via retrage OVMF (debugging the UEFI path)
-make run-grub        # Path B: Multiboot2/GRUB (the working substrate)
+make run-grub        # build + boot the kernel in QEMU
+
+# Or grab the CI artifact and boot with a persistent disk:
+gh run download <run-id> --name astrion-grub-iso
+dd if=/dev/zero of=astrion.disk bs=1M count=16
+qemu-system-x86_64 -cdrom astrion-grub.iso \
+  -drive file=astrion.disk,format=raw,if=ide -m 256M -serial stdio
 ```
 
-Expected Path B serial output:
-```
-=== Astrion v2.0 Kernel (multiboot2 path) ===
-kernel_mb2_main reached; long-mode OK
-multiboot2 magic = 0x0000000036d76289
-multiboot2 info  = 0x00000000001005f8
-magic OK — GRUB hand-off clean
-kernel halt (stub — next: parse info tags + drive framebuffer)
-```
+In the shell, try: `help`, `ls`, `write hi.sh echo hello`, `run hi.sh`,
+`ls > files.txt`, `sync` (then reboot — files persist), `spawn`, `ps`,
+`snake` (the clock + spawned ticker keep running mid-game).
 
 ## Why two OVMFs?
 

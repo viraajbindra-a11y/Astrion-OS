@@ -319,3 +319,68 @@ handles every CPU exception, takes keyboard input, runs a real
 shell with 13 commands, plays a 1..100 guess game, and ticks a
 live clock. All from code we wrote, in one repo, verified live in
 QEMU with screenshots checked in. — Claude*
+
+---
+
+## MVP sprint — 2026-06-07 → 2026-06-10
+
+**The question "is the OS an MVP yet?" got an honest "no" + a checklist.
+Then we shipped the checklist.** Five foundation pieces in one push,
+each live-verified in QEMU with screenshots in `tasks/`:
+
+| # | Piece | Files | Proof |
+|---|-------|-------|-------|
+| 1 | Heap allocator (kmalloc/kfree/krealloc/kcalloc) | `heap.{h,c}` | `heap` shell cmd; 9 allocs / 3 frees clean |
+| 2 | RAM filesystem (ls/cat/write/append/rm/touch/mkdir) | `fs.{h,c}` | `first-files-2026-06-07.png` — "cat hello → hi dad" |
+| 3 | ATA PIO + persistence across reboots | `ata.{h,c}` + `fs_sync` | `first-persistence-2026-06-07.png` — two-boot test, file survived |
+| 4 | Scripts (`run`) + output redirection (`>`) | `shell.c`, `console.c` | `first-script-2026-06-07.png` — `ls > files.txt` + `run hi.sh` |
+| 5 | Cooperative scheduler (ps/spawn/kill) | `task.{h,c}`, `context_switch.S` | `first-multitask-{ps,snake}-2026-06-10.png` — 764 switches @10s; clock + ticker alive during Snake |
+
+### MVP checklist — honest state
+
+- ✅ Memory allocator
+- ✅ Filesystem
+- ✅ Disk persistence (proven across two QEMU boots)
+- ✅ Scriptable shell (scripts persist too — they're just files)
+- ✅ Multitasking (cooperative; preemption later)
+- ❌ ELF loader / exec (apps still linked into the kernel)
+- ❌ Network (out of MVP scope)
+
+The shell has 25 commands. The footer on the boot screen now reads
+"heap + files + disk + scripts + tasks - type 'help'" instead of the
+stale "stub kernel" line.
+
+### Lessons earned this sprint
+
+- **#199** — cooperative scheduler in ~270 lines: fabricate new-task
+  stacks to mimic switched-out ones; defer stack reaping to the next
+  spawn; the context switch itself is 14 instructions.
+
+### Next open work (v2.0 kernel, ranked)
+
+1. **ELF loader** — load a flat binary or ELF from the FS and run it
+   as a task. Closes the "third-party program" gap; biggest remaining
+   MVP piece.
+2. **Page-fault visualizer** — decode the #PF error code + CR2 on the
+   panic screen.
+3. **Preemptive scheduling** — switch tasks from the PIT ISR instead
+   of waiting for yields. Needs careful ISR-stack discipline.
+4. **AI command stub** — `ai <prompt>` shell command that lays the
+   contract for the eventual on-device router (the v2.0 promise).
+5. **Rust port begins** — kbd.c and pit.c are the smallest, most
+   isolated candidates.
+6. **Surface Pro 6 flash** — still the open hardware unblock.
+
+### Screenshot collection (13, chronological)
+
+pixels → boot screen → panic → keyboard → shell → game → mouse →
+paint trail → snake → files → persistence → script → multitask(×2).
+The "from first pixel to multitasking OS in 10 days" deck is sitting
+in `tasks/first-*.png`, ready for the next Dad update.
+
+---
+
+*MVP sprint ended 2026-06-10. The v2.0 kernel now allocates memory,
+stores files, persists them across power-cycles, runs saved scripts,
+and schedules multiple tasks through real context switches. Honest
+gaps: no exec, no preemption, no network. — Claude*
