@@ -867,7 +867,7 @@ static void cmd_spawn(int argc, char **argv) {
     console_set_color(COL_WHITE);
     console_puts("ticker as tid ");
     console_put_u32((uint32_t)tid);
-    console_puts(" — green counter top-right. 'kill ");
+    console_puts(" - green counter top-right. 'kill ");
     console_put_u32((uint32_t)tid);
     console_puts("' stops it.\n");
 }
