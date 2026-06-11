@@ -31,6 +31,7 @@
 #include "heap.h"
 #include "fs.h"
 #include "ata.h"
+#include "task.h"
 
 /* ─── COM1 UART (0x3F8) — identical to boot/boot.c ────────────────── */
 
@@ -659,6 +660,34 @@ uint8_t  mb_fb_bpp_x(void)               { return boot_info.fb_bpp; }
 uint64_t mb_fb_addr_x(void)              { return boot_info.fb_addr; }
 const char *mb_bootloader_name_x(void)   { return boot_info.bootloader_name; }
 
+/* ─── Background clock task ───────────────────────────────────────
+ *
+ * First real scheduled task. Repaints HH:MM:SS in the top-right
+ * corner every ~250 ms, yielding between checks. Because it's a
+ * task (not inline in the shell loop), the clock keeps ticking
+ * while Snake runs, while scripts execute — while anything that
+ * yields holds the foreground.
+ */
+static void clock_task(void *arg) {
+    (void)arg;
+    uint64_t last = 0;
+    char clkbuf[9];
+    for (;;) {
+        uint64_t now = pit_elapsed_ms();
+        if (now - last >= 250) {
+            last = now;
+            pit_format_clock(clkbuf);
+            uint32_t cw_w = (FONT_WIDTH * 2) * 8;
+            uint32_t cw_h = FONT_HEIGHT * 2 + 4;
+            uint32_t cw_x = boot_info.fb_width - cw_w - 30;
+            uint32_t cw_y = 30;
+            fb_rect(cw_x - 6, cw_y - 4, cw_w + 12, cw_h, COL_NAVY);
+            fb_puts(cw_x, cw_y, clkbuf, COL_ORANGE, 2);
+        }
+        task_yield();
+    }
+}
+
 /* Called from boot/multiboot2.S */
 void kernel_mb2_main(uint32_t magic, uint64_t info_ptr) {
     serial_init();
@@ -757,14 +786,19 @@ void kernel_mb2_main(uint32_t magic, uint64_t info_ptr) {
     console_init(cx0, cy0, cw, ch);
     shell_install();
 
-    /* Main loop: drain keyboard into the shell, repaint mouse cursor
-     * whenever a packet arrives, refresh the clock at the top-right
-     * corner once per ~250ms. */
-    uint64_t last_clock_ms = 0;
-    char clkbuf[9];
+    /* Cooperative scheduler: adopt this context as task 0 ("shell"),
+     * then move the clock repaint into its own background task. From
+     * here on, anything long-running that calls task_yield() shares
+     * the CPU with the shell — the clock keeps ticking during Snake. */
+    tasks_init();
+    task_spawn("clock", clock_task, 0);
+    serial_puts("TASKS: scheduler up (task 0 = shell, task 1 = clock)\n");
 
+    /* Main loop = task 0. Drain keyboard into the shell, repaint the
+     * mouse cursor, then yield so background tasks get their slice.
+     * The hlt parks the CPU until the next IRQ (PIT @100 Hz at the
+     * latest), so the yield cadence is ~10 ms. */
     for (;;) {
-        /* Sleep until something interesting happens (kbd OR mouse). */
         __asm__ volatile("sti; hlt");
 
         while (kbd_available()) {
@@ -778,19 +812,7 @@ void kernel_mb2_main(uint32_t magic, uint64_t info_ptr) {
         /* Mouse: redraw cursor if it moved. */
         mouse_redraw_if_dirty();
 
-        /* Repaint clock at most once per ~250ms. */
-        uint64_t now = pit_elapsed_ms();
-        if (now - last_clock_ms >= 250) {
-            last_clock_ms = now;
-            pit_format_clock(clkbuf);
-            uint32_t cw_w = (FONT_WIDTH * 2) * 8;
-            uint32_t cw_h = FONT_HEIGHT * 2 + 4;
-            uint32_t cw_x = boot_info.fb_width - cw_w - 30;
-            uint32_t cw_y = 30;
-            fb_rect(cw_x - 6, cw_y - 4, cw_w + 12, cw_h, COL_NAVY);
-            fb_puts(cw_x, cw_y, clkbuf, COL_ORANGE, 2);
-            /* Redraw cursor in case clock area overpainted it. */
-            mouse_redraw_if_dirty();
-        }
+        /* Give background tasks (clock, spawned tickers, …) a slice. */
+        task_yield();
     }
 }

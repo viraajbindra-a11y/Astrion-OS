@@ -30,6 +30,7 @@
 #include "heap.h"
 #include "fs.h"
 #include "ata.h"
+#include "task.h"
 
 #define COL_PROMPT 0xFF7A00u     /* Astrion orange */
 #define COL_OK     0x4ADE80u     /* green for success-ish */
@@ -102,6 +103,9 @@ static void cmd_mkdir(int argc, char **argv);
 static void cmd_sync(int argc, char **argv);
 static void cmd_disk(int argc, char **argv);
 static void cmd_run(int argc, char **argv);
+static void cmd_ps(int argc, char **argv);
+static void cmd_spawn(int argc, char **argv);
+static void cmd_kill(int argc, char **argv);
 
 static const struct cmd CMDS[] = {
     { "help",    "list available commands",          cmd_help },
@@ -128,6 +132,9 @@ static const struct cmd CMDS[] = {
     { "sync",    "write all files to disk",          cmd_sync },
     { "disk",    "show ATA disk info",               cmd_disk },
     { "run",     "run a script (one cmd per line)",  cmd_run },
+    { "ps",      "list scheduler tasks",             cmd_ps },
+    { "spawn",   "spawn ticker — background counter", cmd_spawn },
+    { "kill",    "kill <tid> — stop a task",         cmd_kill },
     { "panic",   "trigger int $3 (panic-screen demo)", cmd_panic },
     { "halt",    "stop the CPU forever",             cmd_halt },
     { "art",     "print Astrion ASCII banner",       cmd_art },
@@ -793,6 +800,104 @@ static void cmd_disk(int argc, char **argv) {
     console_puts(" (");
     console_put_u32((ata_total_sectors() * 512) / (1024 * 1024));
     console_puts(" MiB)\n");
+}
+
+/* ─── Scheduler commands ─────────────────────────────────── */
+
+/* Background ticker: paints an incrementing green counter just left
+ * of the clock, ~10 updates/sec, yielding constantly. The visible
+ * proof of multitasking — it counts while you type, while scripts
+ * run, while Snake plays. */
+extern void     fb_rect_x(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color);
+extern uint32_t fb_put_u32_x(uint32_t x, uint32_t y, uint32_t v, uint32_t color, int scale);
+extern uint32_t fb_width_x(void);
+
+static void ticker_task(void *arg) {
+    (void)arg;
+    uint32_t n = 0;
+    uint64_t last = 0;
+    uint32_t x = fb_width_x() - 380;
+    for (;;) {
+        uint64_t now = pit_elapsed_ms();
+        if (now - last >= 100) {
+            last = now;
+            fb_rect_x(x - 6, 26, 150, 32, 0x1E2761u);
+            fb_put_u32_x(x, 30, n, 0x4ADE80u, 2);
+            n++;
+        }
+        task_yield();
+    }
+}
+
+static void cmd_ps(int argc, char **argv) {
+    (void)argc; (void)argv;
+    console_set_color(COL_OK);
+    console_puts("tid  name          state    switches\n");
+    console_set_color(COL_WHITE);
+    static const char *STATE_NAMES[] = { "-", "ready", "RUN", "done" };
+    struct task_info ti;
+    for (int i = 0; i < TASK_MAX; i++) {
+        if (!task_get_info(i, &ti)) continue;
+        console_put_u32((uint32_t)ti.tid);
+        console_puts("    ");
+        console_puts(ti.name);
+        uint32_t nl = 0; for (const char *p = ti.name; *p; p++) nl++;
+        for (uint32_t s = nl; s < 14; s++) console_putchar(' ');
+        console_set_color(ti.tid == task_current_tid() ? COL_PROMPT : COL_WHITE);
+        console_puts(STATE_NAMES[ti.state]);
+        console_set_color(COL_WHITE);
+        uint32_t sl = 0; for (const char *p = STATE_NAMES[ti.state]; *p; p++) sl++;
+        for (uint32_t s = sl; s < 9; s++) console_putchar(' ');
+        console_put_u64(ti.switches);
+        console_putchar('\n');
+    }
+}
+
+static void cmd_spawn(int argc, char **argv) {
+    (void)argc; (void)argv;
+    int tid = task_spawn("ticker", ticker_task, 0);
+    if (tid < 0) {
+        console_set_color(0xF87171u);
+        console_puts("spawn failed (task table full?)\n");
+        console_set_color(COL_WHITE);
+        return;
+    }
+    console_set_color(COL_OK);
+    console_puts("spawned ");
+    console_set_color(COL_WHITE);
+    console_puts("ticker as tid ");
+    console_put_u32((uint32_t)tid);
+    console_puts(" — green counter top-right. 'kill ");
+    console_put_u32((uint32_t)tid);
+    console_puts("' stops it.\n");
+}
+
+static void cmd_kill(int argc, char **argv) {
+    if (argc < 2) {
+        console_set_color(COL_MUTED);
+        console_puts("usage: kill <tid>   (see 'ps')\n");
+        console_set_color(COL_WHITE);
+        return;
+    }
+    uint32_t tid;
+    if (!parse_u32(argv[1], &tid)) {
+        console_set_color(COL_MUTED);
+        console_puts("not a number\n");
+        console_set_color(COL_WHITE);
+        return;
+    }
+    if (task_kill((int)tid) != 0) {
+        console_set_color(0xF87171u);
+        console_puts("kill: no such running task (and tid 0 is protected)\n");
+        console_set_color(COL_WHITE);
+        return;
+    }
+    console_set_color(COL_OK);
+    console_puts("killed ");
+    console_set_color(COL_WHITE);
+    console_puts("tid ");
+    console_put_u32(tid);
+    console_putchar('\n');
 }
 
 /* ─── Parser ─────────────────────────────────────────────── */

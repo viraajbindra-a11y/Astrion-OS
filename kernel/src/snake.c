@@ -16,6 +16,7 @@
 #include "kbd.h"
 #include "pit.h"
 #include "fb_font.h"
+#include "task.h"
 
 extern uint64_t fb_addr_x(void);
 extern uint32_t fb_pitch_x(void);
@@ -260,8 +261,10 @@ int snake_play(void) {
 
         if (dead) {
             draw_game_over();
-            /* Block until any key. */
+            /* Block until any key — still yielding so background
+             * tasks (the clock!) keep running over the corpse. */
             for (;;) {
+                task_yield();
                 __asm__ volatile("sti; hlt");
                 if (kbd_available()) {
                     (void)kbd_getchar();
@@ -276,6 +279,9 @@ int snake_play(void) {
             tick_game();
         }
 
+        /* Cooperative slice for the clock + any spawned tasks. The
+         * visible effect: the corner clock keeps ticking mid-game. */
+        task_yield();
         __asm__ volatile("sti; hlt");
     }
 }
