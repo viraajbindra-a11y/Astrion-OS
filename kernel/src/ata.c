@@ -1,5 +1,5 @@
 /*
- * Astrion v2.0 — ATA PIO driver
+ * Astrion v2.0 - ATA PIO driver
  *
  * Standard primary-IDE channel sits at I/O ports 0x1F0..0x1F7 (data
  * + LBA + status) and 0x3F6 (alt status + device control). We talk
@@ -12,12 +12,12 @@
  *   3. Write sector count = 1.
  *   4. Write LBA bytes 0..2 to ports 0x1F3..0x1F5.
  *   5. Send READ command (0x20) to 0x1F7.
- *   6. Spin until DRQ (bit 3 of status) — data ready.
+ *   6. Spin until DRQ (bit 3 of status) - data ready.
  *   7. Read 256 16-bit words from the data port into the caller's buf.
  *
  * Write is the same shape with command 0x30 and an outsw instead of
  * insw. After writing, we issue a FLUSH (0xE7) so QEMU commits the
- * write to the backing file immediately — otherwise the disk image
+ * write to the backing file immediately - otherwise the disk image
  * on the host doesn't see the changes until shutdown.
  */
 
@@ -107,7 +107,7 @@ void ata_init(void) {
     uint8_t status = inb_(ATA_STATUS);
     if (status == 0)        return;   /* no drive */
     if (wait_not_busy())    return;
-    /* Check sig — IDENTIFY should leave LBA1/LBA2 = 0 for ATA. */
+    /* Check sig - IDENTIFY should leave LBA1/LBA2 = 0 for ATA. */
     if (inb_(ATA_LBA1) != 0 || inb_(ATA_LBA2) != 0) return;
     if (wait_drq())         return;
 
@@ -118,7 +118,7 @@ void ata_init(void) {
     /* Total sectors (28-bit LBA) at words 60..61. */
     total_sectors = ((uint32_t)id[61] << 16) | (uint32_t)id[60];
 
-    /* Model string at words 27..46 — big-endian byte order per word. */
+    /* Model string at words 27..46 - big-endian byte order per word. */
     for (int i = 0; i < 20; i++) {
         model_str[i * 2]     = (char)(id[27 + i] >> 8);
         model_str[i * 2 + 1] = (char)(id[27 + i] & 0xFF);

@@ -1,5 +1,5 @@
 /*
- * Astrion v2.0 — PS/2 keyboard driver
+ * Astrion v2.0 - PS/2 keyboard driver
  *
  * Scancode set 1 (the default for the legacy PS/2 controller QEMU
  * emulates). On every IRQ1, read one byte from port 0x60:
@@ -9,7 +9,7 @@
  *                    buffer. Shift status latches across press/release.
  *
  * Multi-byte scancodes (0xE0 prefix for arrows / numpad etc.) are
- * dropped for now — only printable + Enter + Backspace + Tab are wired.
+ * dropped for now - only printable + Enter + Backspace + Tab are wired.
  *
  * Ring buffer is 64 bytes. Drops the oldest if full (the main loop is
  * expected to drain it every frame).
@@ -63,13 +63,13 @@ static int is_extended = 0;  /* set after a 0xE0 byte, cleared after the next by
 static void rb_push(char c) {
     /* Single-producer (this runs only in the IRQ1 ISR) / single-consumer
      * (kbd_getchar runs only in task context). The ISR must NEVER write
-     * rb_tail — that's the consumer's field. On a single core the ISR
+     * rb_tail - that's the consumer's field. On a single core the ISR
      * preempts the consumer between its read and write of rb_tail, so
      * if both touched it we'd lose updates / corrupt the index. When the
      * buffer is full we drop the NEWEST char (this one) instead. Only
      * rb_head is written here; only rb_tail in kbd_getchar. Race-free. */
     uint8_t next = (rb_head + 1) & (sizeof(rb) - 1);
-    if (next == rb_tail) return;   /* full — drop this char */
+    if (next == rb_tail) return;   /* full - drop this char */
     rb[rb_head] = c;
     rb_head = next;
 }
@@ -86,7 +86,7 @@ char kbd_getchar(void) {
 static void kbd_isr(struct registers *r) {
     (void)r;
     /* If the controller says this byte is mouse (AUX) data, it doesn't
-     * belong to us — read it to ack the line, but don't treat it as a
+     * belong to us - read it to ack the line, but don't treat it as a
      * scancode (that would inject a phantom keypress + desync the mouse
      * packet stream). On QEMU IRQ1 only ever carries keyboard bytes, so
      * this is belt-and-suspenders for real hardware. */

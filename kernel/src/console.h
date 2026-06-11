@@ -1,5 +1,5 @@
 /*
- * Astrion v2.0 — Scrolling framebuffer console
+ * Astrion v2.0 - Scrolling framebuffer console
  *
  * Manages a fixed text region on the framebuffer. Tracks cursor,
  * scrolls when the cursor would go off the bottom, and exposes

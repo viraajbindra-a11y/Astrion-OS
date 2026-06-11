@@ -1,24 +1,24 @@
 /*
- * Astrion v2.0 — In-kernel shell
+ * Astrion v2.0 - In-kernel shell
  *
  * Reads chars via shell_on_key() (called from kernel_mb2_main's
  * keyboard drain loop), echoes them through the console module,
  * and on Enter dispatches to a built-in command table.
  *
  * Commands:
- *   help              — list commands.
- *   version           — kernel + build banner.
- *   clear             — clear the console region.
- *   echo <text>       — print arguments verbatim.
- *   mem               — dump the multiboot2 memory map.
- *   regs              — dump CR0/CR2/CR3/CR4 + RFLAGS + RSP.
- *   tick              — print current PIT tick count + elapsed time.
- *   panic             — trigger int $3 for fun (panic-screen demo).
- *   halt              — cli + hlt forever.
- *   art               — print an ASCII-art Astrion banner.
+ *   help              - list commands.
+ *   version           - kernel + build banner.
+ *   clear             - clear the console region.
+ *   echo <text>       - print arguments verbatim.
+ *   mem               - dump the multiboot2 memory map.
+ *   regs              - dump CR0/CR2/CR3/CR4 + RFLAGS + RSP.
+ *   tick              - print current PIT tick count + elapsed time.
+ *   panic             - trigger int $3 for fun (panic-screen demo).
+ *   halt              - cli + hlt forever.
+ *   art               - print an ASCII-art Astrion banner.
  *
  * Each command is just a function taking (argc, argv). argv is
- * carved out of a single input line in place — no malloc, no copy.
+ * carved out of a single input line in place - no malloc, no copy.
  */
 
 #include <stdint.h>
@@ -133,8 +133,8 @@ static const struct cmd CMDS[] = {
     { "disk",    "show ATA disk info",               cmd_disk },
     { "run",     "run a script (one cmd per line)",  cmd_run },
     { "ps",      "list scheduler tasks",             cmd_ps },
-    { "spawn",   "spawn ticker — background counter", cmd_spawn },
-    { "kill",    "kill <tid> — stop a task",         cmd_kill },
+    { "spawn",   "spawn ticker - background counter", cmd_spawn },
+    { "kill",    "kill <tid> - stop a task",         cmd_kill },
     { "panic",   "trigger int $3 (panic-screen demo)", cmd_panic },
     { "halt",    "stop the CPU forever",             cmd_halt },
     { "art",     "print Astrion ASCII banner",       cmd_art },
@@ -258,14 +258,14 @@ static void cmd_tick(int argc, char **argv) {
 static void cmd_panic(int argc, char **argv) {
     (void)argc; (void)argv;
     console_set_color(COL_PROMPT);
-    console_puts("triggering int $3 — see panic screen...\n");
+    console_puts("triggering int $3 - see panic screen...\n");
     __asm__ volatile("int $3");
 }
 
 static void cmd_halt(int argc, char **argv) {
     (void)argc; (void)argv;
     console_set_color(COL_PROMPT);
-    console_puts("halting — power-cycle to reboot.\n");
+    console_puts("halting - power-cycle to reboot.\n");
     for (;;) __asm__ volatile("cli; hlt");
 }
 
@@ -382,7 +382,7 @@ static void cmd_uptime(int argc, char **argv) {
     console_puts("up ");
     console_set_color(COL_WHITE);
     console_puts(buf);
-    console_puts(" — ");
+    console_puts(" - ");
     console_put_u64(pit_ticks());
     console_puts(" ticks, ");
     console_put_u64(pit_elapsed_ms());
@@ -391,7 +391,7 @@ static void cmd_uptime(int argc, char **argv) {
 
 /* ─── guess game ─────────────────────────────────────────── */
 
-/* Simple LCG seeded from PIT ticks — not crypto, just enough for fun. */
+/* Simple LCG seeded from PIT ticks - not crypto, just enough for fun. */
 static uint64_t lcg_state = 0;
 static uint32_t target;
 static int guess_active;
@@ -447,7 +447,7 @@ static void cmd_guess(int argc, char **argv) {
     uint32_t g;
     if (!parse_u32(argv[1], &g)) {
         console_set_color(COL_MUTED);
-        console_puts("not a number — try 'guess 42'\n");
+        console_puts("not a number - try 'guess 42'\n");
         console_set_color(COL_WHITE);
         return;
     }
@@ -675,7 +675,7 @@ static void cmd_append(int argc, char **argv) {
     char buf[256];
     uint32_t n = join_argv(2, argc, argv, buf, sizeof(buf) - 1);
     /* Add a newline at the end so 'append log line1' then 'cat log' is
-     * one entry per line — feels right for a log file. */
+     * one entry per line - feels right for a log file. */
     if (n < sizeof(buf) - 1) buf[n++] = '\n';
     int r = fs_append(argv[1], (const uint8_t *)buf, n);
     if (r < 0) {
@@ -778,7 +778,7 @@ static void cmd_sync(int argc, char **argv) {
     console_put_u32(fs_count());
     console_puts(" entries (");
     console_put_u32(fs_total_bytes());
-    console_puts(" bytes) saved to disk — reboot will restore them\n");
+    console_puts(" bytes) saved to disk - reboot will restore them\n");
 }
 
 static void cmd_disk(int argc, char **argv) {
@@ -806,7 +806,7 @@ static void cmd_disk(int argc, char **argv) {
 
 /* Background ticker: paints an incrementing green counter just left
  * of the clock, ~10 updates/sec, yielding constantly. The visible
- * proof of multitasking — it counts while you type, while scripts
+ * proof of multitasking - it counts while you type, while scripts
  * run, while Snake plays. */
 extern void     fb_rect_x(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color);
 extern uint32_t fb_put_u32_x(uint32_t x, uint32_t y, uint32_t v, uint32_t color, int scale);
@@ -926,7 +926,7 @@ static void dispatch(char *cmdline) {
             break;
         }
     }
-    /* Nested redirect isn't supported — capture state + redirect_buf are
+    /* Nested redirect isn't supported - capture state + redirect_buf are
      * single-level. This happens with 'run script > out' where a script
      * line ALSO redirects. Rather than corrupt the outer capture, drop
      * the inner redirect: the command's output just flows into the
@@ -945,12 +945,12 @@ static void dispatch(char *cmdline) {
             goto done;
         }
     }
-    /* Unknown — print to console regardless of capture state. */
+    /* Unknown - print to console regardless of capture state. */
     if (redir_file) console_clear_capture();
     console_set_color(0xF87171u);
     console_puts("unknown command: ");
     console_puts(argv[0]);
-    console_puts(" — try 'help'\n");
+    console_puts(" - try 'help'\n");
     console_set_color(COL_WHITE);
     return;
 
@@ -979,7 +979,7 @@ done:
 /* Scripts can call 'run', so cmd_run is re-entrant. Two hazards the
  * depth guard closes: (1) a script that runs itself recurses forever
  * and overflows the kernel stack (task 0's 16 KiB boot stack); (2) the
- * per-call line buffer must be on the STACK, not static — a static
+ * per-call line buffer must be on the STACK, not static - a static
  * buffer would be clobbered when an inner 'run' reuses it, corrupting
  * the outer loop. Cap at 8 levels: deep enough for real script nesting,
  * shallow enough that 8 × ~300-byte frames stay well under 16 KiB. */
@@ -997,7 +997,7 @@ static void cmd_run(int argc, char **argv) {
         console_set_color(0xF87171u);
         console_puts("run: nesting too deep (max ");
         console_put_u32(RUN_MAX_DEPTH);
-        console_puts(") — recursive script?\n");
+        console_puts(") - recursive script?\n");
         console_set_color(COL_WHITE);
         return;
     }
@@ -1012,7 +1012,7 @@ static void cmd_run(int argc, char **argv) {
     }
     /* COPY the script before executing. A script line can 'rm' or
      * 'write' the script file itself, which frees / reallocs n->data
-     * out from under us — a use-after-free if we kept indexing the
+     * out from under us - a use-after-free if we kept indexing the
      * live node. Snapshot into our own heap buffer; from here the
      * file node can be deleted with no effect on this run. */
     uint32_t sz = n->size;
@@ -1099,5 +1099,5 @@ void shell_on_key(char c) {
 }
 
 void shell_tick(void) {
-    /* Reserved for future use — e.g. blinking cursor. */
+    /* Reserved for future use - e.g. blinking cursor. */
 }

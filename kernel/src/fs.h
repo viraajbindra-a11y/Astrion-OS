@@ -1,15 +1,15 @@
 /*
- * Astrion v2.0 — In-memory filesystem
+ * Astrion v2.0 - In-memory filesystem
  *
  * Single root directory + flat namespace for now (no subdirs in v1
  * of this fs; mkdir is wired but stored as a tag in the file
- * metadata so 'ls' can show <dir> entries — actual recursion comes
+ * metadata so 'ls' can show <dir> entries - actual recursion comes
  * later). Files are kmalloc'd byte buffers; the file table is a
  * single linked list of `struct fs_file` nodes.
  *
  * Names: ASCII, up to 63 chars, no path separators yet.
  *
- * API is intentionally minimal — just enough for cat / write / ls /
+ * API is intentionally minimal - just enough for cat / write / ls /
  * rm to be real, and for future ELF loader + persistence layer to
  * have a clear boundary.
  */

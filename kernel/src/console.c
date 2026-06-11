@@ -1,5 +1,5 @@
 /*
- * Astrion v2.0 — Scrolling framebuffer console
+ * Astrion v2.0 - Scrolling framebuffer console
  *
  * Backed by the kernel_mb2.c framebuffer wrappers (fb_putchar_x,
  * fb_rect_x, etc.) so we don't duplicate pixel-poke code. The
@@ -33,7 +33,7 @@ extern uint32_t fb_width_x(void);
 extern uint32_t fb_height_x(void);
 extern int      fb_present_x(void);
 
-/* From kernel_mb2.c — needed for direct fb-memmove during scroll. */
+/* From kernel_mb2.c - needed for direct fb-memmove during scroll. */
 extern uint64_t fb_addr_x(void);
 extern uint32_t fb_pitch_x(void);
 
@@ -68,7 +68,7 @@ void console_init(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
     x0 = x; y0 = y; w_px = w; h_px = h;
     cx = x0; cy = y0;
     color = COL_FG_DEFLT;
-    /* Don't clear here — caller may want the boot screen painted above
+    /* Don't clear here - caller may want the boot screen painted above
      * the console region. */
 }
 

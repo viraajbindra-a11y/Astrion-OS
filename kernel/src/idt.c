@@ -1,5 +1,5 @@
 /*
- * Astrion v2.0 — IDT installer + exception handler
+ * Astrion v2.0 - IDT installer + exception handler
  *
  * Lays out a 256-entry IDT, fills entries 0..31 with the per-vector
  * stubs from isr.S, and loads IDTR via LIDT. After this runs, any CPU
@@ -83,7 +83,7 @@ void idt_install(void) {
     idt_set(24, isr24);  idt_set(25, isr25);  idt_set(26, isr26);  idt_set(27, isr27);
     idt_set(28, isr28);  idt_set(29, isr29);  idt_set(30, isr30);  idt_set(31, isr31);
 
-    /* IRQ vectors 32..47 — populated even if their per-IRQ handler is
+    /* IRQ vectors 32..47 - populated even if their per-IRQ handler is
      * NULL. The common irq_handler dispatches by index and sends EOI. */
     idt_set(32, irq0);   idt_set(33, irq1);   idt_set(34, irq2);   idt_set(35, irq3);
     idt_set(36, irq4);   idt_set(37, irq5);   idt_set(38, irq6);   idt_set(39, irq7);
@@ -100,7 +100,7 @@ void idt_install(void) {
 /* ─── 8259 PIC remap ─────────────────────────────────────────
  *
  * The legacy PIC fires IRQs at vectors 8..15 (master) + 0x70..0x77
- * (slave) by default — overlapping CPU exceptions 8..15. Remap to
+ * (slave) by default - overlapping CPU exceptions 8..15. Remap to
  * 32..47 so IRQs and CPU exceptions don't collide.
  *
  * The remap protocol is 4 init-control-word writes per PIC, in order.
@@ -120,7 +120,7 @@ static inline uint8_t inb_(uint16_t port) {
     return val;
 }
 
-/* Short I/O delay — write to unused port 0x80. Some old PICs need a
+/* Short I/O delay - write to unused port 0x80. Some old PICs need a
  * few cycles between command writes. */
 static inline void io_wait(void) { outb_(0x80, 0); }
 
@@ -224,7 +224,7 @@ static const char *exception_name(uint32_t v) {
 }
 
 void isr_handler(struct registers *r) {
-    /* Serial first — it works even if framebuffer is wedged. */
+    /* Serial first - it works even if framebuffer is wedged. */
     serial_puts_x("\n!!! KERNEL PANIC !!!\n");
     serial_puts_x("vector  = ");
     serial_put_hex64_x(r->vector);

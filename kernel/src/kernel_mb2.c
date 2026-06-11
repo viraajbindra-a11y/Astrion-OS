@@ -1,5 +1,5 @@
 /*
- * Astrion v2.0 — Multiboot2 kernel entry
+ * Astrion v2.0 - Multiboot2 kernel entry
  *
  * Called from boot/multiboot2.S after long-mode setup.
  *
@@ -33,7 +33,7 @@
 #include "ata.h"
 #include "task.h"
 
-/* ─── COM1 UART (0x3F8) — identical to boot/boot.c ────────────────── */
+/* ─── COM1 UART (0x3F8) - identical to boot/boot.c ────────────────── */
 
 static inline void outb(uint16_t port, uint8_t val) {
     __asm__ volatile("outb %0, %1" : : "a"(val), "Nd"(port));
@@ -354,7 +354,7 @@ static void parse_info(uint64_t info_ptr) {
                 break;
             }
             default:
-                /* Tag type known by name but not parsed in detail —
+                /* Tag type known by name but not parsed in detail -
                  * the type+size line above is enough for now. */
                 break;
         }
@@ -409,7 +409,7 @@ static void fb_rect(uint32_t x0, uint32_t y0, uint32_t w, uint32_t h, uint32_t c
  *
  * Walks the 8x12 bitmap in fb_font.h and writes pixels directly to
  * the linear framebuffer. `scale` is integer (1 = native 8x12, 2 =
- * 16x24, 3 = 24x36). No kerning, no antialiasing — just bits to
+ * 16x24, 3 = 24x36). No kerning, no antialiasing - just bits to
  * pixels. Foreground color is the glyph; background is left
  * untouched so callers can pre-fill if they want.
  */
@@ -475,7 +475,7 @@ static uint32_t fb_put_u32(uint32_t x, uint32_t y, uint32_t v, uint32_t color, i
     return x;
 }
 
-/* Hex u64 at (x,y) — "0x" + 16 nibbles. Returns x past last char. */
+/* Hex u64 at (x,y) - "0x" + 16 nibbles. Returns x past last char. */
 static uint32_t fb_put_hex64(uint32_t x, uint32_t y, uint64_t v, uint32_t color, int scale) {
     static const char hex[] = "0123456789abcdef";
     int gw = FONT_WIDTH * scale;
@@ -503,7 +503,7 @@ static void paint_boot_screen(void) {
     /* Background. */
     fb_fill(COL_NAVY);
 
-    /* Orange accent bar down the left edge — the visual motif from the
+    /* Orange accent bar down the left edge - the visual motif from the
      * slideshow + landing page. */
     fb_rect(0, 0, 18, boot_info.fb_height, COL_ORANGE);
 
@@ -512,7 +512,7 @@ static void paint_boot_screen(void) {
     fb_puts(mx, my,           "Astrion v2.0",          COL_WHITE,  6);
     fb_puts(mx, my + 96,      "the AI-native kernel",  COL_ICE,    2);
 
-    /* Status block — multiboot info summary, monospaced. */
+    /* Status block - multiboot info summary, monospaced. */
     uint32_t sx = 60;
     uint32_t sy = my + 200;
     int s = 2;
@@ -549,7 +549,7 @@ static void paint_boot_screen(void) {
     fb_puts(sx, sy + rowh*4,          "addr:",   COL_ORANGE, s);
     fb_put_hex64(sx + 120, sy + rowh*4, boot_info.fb_addr, COL_WHITE, s);
 
-    /* Footer along the bottom — keep this list honest; it appears in
+    /* Footer along the bottom - keep this list honest; it appears in
      * every screenshot. */
     uint32_t fy = boot_info.fb_height - FONT_HEIGHT * 2 - 24;
     fb_puts(60, fy, "heap + files + disk + scripts + tasks  -  type 'help'",
@@ -569,9 +569,9 @@ static void paint_boot_screen(void) {
     /* Some framebuffers store BGR-ordered; both 0xFF7A00 (RGB) and
      * 0x007AFF (BGR) are acceptable matches. */
     if ((got & 0xFFFFFFu) == COL_ORANGE || (got & 0xFFFFFFu) == 0x007AFFu) {
-        serial_puts("  OK — pixel write verified\n");
+        serial_puts("  OK - pixel write verified\n");
     } else {
-        serial_puts("  WARN — readback didn't match written color\n");
+        serial_puts("  WARN - readback didn't match written color\n");
     }
 }
 
@@ -666,7 +666,7 @@ const char *mb_bootloader_name_x(void)   { return boot_info.bootloader_name; }
  * First real scheduled task. Repaints HH:MM:SS in the top-right
  * corner every ~250 ms, yielding between checks. Because it's a
  * task (not inline in the shell loop), the clock keeps ticking
- * while Snake runs, while scripts execute — while anything that
+ * while Snake runs, while scripts execute - while anything that
  * yields holds the foreground.
  */
 static void clock_task(void *arg) {
@@ -705,10 +705,10 @@ void kernel_mb2_main(uint32_t magic, uint64_t info_ptr) {
     serial_puts("\n");
 
     if (magic != 0x36d76289u) {
-        serial_puts("FATAL: magic mismatch — not a multiboot2 bootloader\n");
+        serial_puts("FATAL: magic mismatch - not a multiboot2 bootloader\n");
         for (;;) __asm__ volatile("cli; hlt");
     }
-    serial_puts("magic OK — GRUB hand-off clean\n\n");
+    serial_puts("magic OK - GRUB hand-off clean\n\n");
 
     parse_info(info_ptr);
     print_summary();
@@ -717,7 +717,7 @@ void kernel_mb2_main(uint32_t magic, uint64_t info_ptr) {
     paint_boot_screen();
 
     /* Heap before anything that would benefit from it (currently
-     * nothing — but it's cheap and sets up the contract for the
+     * nothing - but it's cheap and sets up the contract for the
      * next features). 32 MiB at 4 MiB physical. */
     serial_puts("\nHEAP: initializing 32 MiB at 0x400000...\n");
     heap_init();
@@ -732,7 +732,7 @@ void kernel_mb2_main(uint32_t magic, uint64_t info_ptr) {
         serial_puts("HEAP: smoke test passed\n");
     }
 
-    /* ATA before FS — FS uses ata_present() at init to decide whether
+    /* ATA before FS - FS uses ata_present() at init to decide whether
      * to seed defaults or load from disk. */
     serial_puts("ATA: probing primary master...\n");
     ata_init();
@@ -748,7 +748,7 @@ void kernel_mb2_main(uint32_t magic, uint64_t info_ptr) {
     fs_init();
     serial_puts("FS: ready\n");
 
-    /* IDT — any later fault should panic visibly, not silently
+    /* IDT - any later fault should panic visibly, not silently
      * triple-fault. */
     serial_puts("IDT: installing 256-entry table (32 exceptions + 16 IRQs)...\n");
     idt_install();
@@ -774,7 +774,7 @@ void kernel_mb2_main(uint32_t magic, uint64_t info_ptr) {
 
     /* Enable interrupts. From here, kbd + PIT ISRs fire on their own. */
     __asm__ volatile("sti");
-    serial_puts("IF set — entering shell\n");
+    serial_puts("IF set - entering shell\n");
 
     /* Carve out a console region below the boot info panel. Width is
      * fb width minus 60 px margin both sides. Height runs to ~60 px
@@ -790,7 +790,7 @@ void kernel_mb2_main(uint32_t magic, uint64_t info_ptr) {
     /* Cooperative scheduler: adopt this context as task 0 ("shell"),
      * then move the clock repaint into its own background task. From
      * here on, anything long-running that calls task_yield() shares
-     * the CPU with the shell — the clock keeps ticking during Snake. */
+     * the CPU with the shell - the clock keeps ticking during Snake. */
     tasks_init();
     task_spawn("clock", clock_task, 0);
     serial_puts("TASKS: scheduler up (task 0 = shell, task 1 = clock)\n");

@@ -1,5 +1,5 @@
 /*
- * Astrion v2.0 — PS/2 keyboard driver
+ * Astrion v2.0 - PS/2 keyboard driver
  *
  * Wires IRQ1 to read scancodes from port 0x60, translates US-layout
  * Set 1 scancodes to ASCII, fills a ring buffer the main loop can

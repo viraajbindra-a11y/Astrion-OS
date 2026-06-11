@@ -1,5 +1,5 @@
 /*
- * Astrion v2.0 — 8x12 bitmap font (ASCII 32-126)
+ * Astrion v2.0 - 8x12 bitmap font (ASCII 32-126)
  *
  * Stand-alone copy of the font data from gui/font.h, with the
  * types.h dependency dropped so it composes cleanly with stdint.h

@@ -1,5 +1,5 @@
 /*
- * Astrion v2.0 — ATA PIO disk driver (primary master, 28-bit LBA)
+ * Astrion v2.0 - ATA PIO disk driver (primary master, 28-bit LBA)
  *
  * Smallest possible block-device layer. No DMA, no interrupts, no
  * multi-drive support. Reads/writes 512-byte sectors via the legacy

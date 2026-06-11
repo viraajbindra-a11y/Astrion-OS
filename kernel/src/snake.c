@@ -1,5 +1,5 @@
 /*
- * Astrion v2.0 — Snake game
+ * Astrion v2.0 - Snake game
  *
  * Classic Snake: arrow keys steer, food grows you, walls + self-collide
  * end the game. Renders directly to the framebuffer in 32-px cells.
@@ -128,7 +128,7 @@ static void draw_full(void) {
 }
 
 static void draw_score(void) {
-    /* Just the number — blank then redraw. */
+    /* Just the number - blank then redraw. */
     fb_rect_x(grid_x0 + grid_cols * CELL - 280, 100, 280, 60, COL_BG);
     fb_put_u32_x(grid_x0 + grid_cols * CELL - 280, 100, (uint32_t)score, COL_FOOD, 6);
 }
@@ -261,7 +261,7 @@ int snake_play(void) {
 
         if (dead) {
             draw_game_over();
-            /* Block until any key — still yielding so background
+            /* Block until any key - still yielding so background
              * tasks (the clock!) keep running over the corpse. */
             for (;;) {
                 task_yield();

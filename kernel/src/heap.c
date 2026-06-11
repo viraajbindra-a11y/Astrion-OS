@@ -1,5 +1,5 @@
 /*
- * Astrion v2.0 — Kernel heap allocator
+ * Astrion v2.0 - Kernel heap allocator
  *
  * Layout: a single contiguous region carved into variable-size blocks
  * via an intrusive doubly-linked free-list. Each block has an 8-byte-
@@ -131,7 +131,7 @@ void *kmalloc(ksize_t bytes) {
 
 void *kcalloc(ksize_t n, ksize_t bytes) {
     /* Reject n*bytes overflow: a wrapped-small `total` would under-
-     * allocate while the caller assumes n*bytes of zeroed space — a
+     * allocate while the caller assumes n*bytes of zeroed space - a
      * classic heap-overflow primitive. */
     if (bytes != 0 && n > (~(ksize_t)0) / bytes) return 0;
     ksize_t total = n * bytes;
@@ -146,7 +146,7 @@ void kfree(void *p) {
     if (!p) return;
     struct block *b = block_from_payload(p);
     if (b->magic != MAGIC_INUSE) {
-        /* Bad free — corruption or double-free. Silently ignore so
+        /* Bad free - corruption or double-free. Silently ignore so
          * we don't take the kernel down; future panic-on-corruption
          * mode can flip this. */
         return;

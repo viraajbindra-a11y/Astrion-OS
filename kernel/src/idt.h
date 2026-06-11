@@ -1,5 +1,5 @@
 /*
- * Astrion v2.0 — IDT (Interrupt Descriptor Table) + register frame
+ * Astrion v2.0 - IDT (Interrupt Descriptor Table) + register frame
  *
  * 256-entry IDT, only vectors 0..31 wired today (CPU exceptions).
  * IRQ remap + keyboard etc. will fill 32..47 in the next step.
@@ -34,7 +34,7 @@ void pic_remap(void);
 void pic_unmask_irq(uint8_t irq);
 void pic_mask_irq(uint8_t irq);
 
-/* C entry points called from isr.S — defined in idt.c. */
+/* C entry points called from isr.S - defined in idt.c. */
 void isr_handler(struct registers *r);
 void irq_handler(struct registers *r);
 

@@ -1,5 +1,5 @@
 /*
- * Astrion v2.0 — PIT driver
+ * Astrion v2.0 - PIT driver
  *
  * The legacy 8254 PIT lives at I/O ports 0x40..0x43. Channel 0 is the
  * one wired to IRQ0; channel 2 used to be the PC speaker (we don't
@@ -26,7 +26,7 @@ static inline void outb_(uint16_t port, uint8_t val) {
 static void pit_isr(struct registers *r) {
     (void)r;
     ticks_total++;
-    /* Cheap integer ms — 1000 * ticks / hz. Cached so callers don't
+    /* Cheap integer ms - 1000 * ticks / hz. Cached so callers don't
      * pay the divide on hot paths. */
     cached_ms = (ticks_total * 1000) / tick_hz;
 }
@@ -50,7 +50,7 @@ void pit_install(uint32_t hz) {
 uint64_t pit_ticks(void)      { return ticks_total; }
 uint64_t pit_elapsed_ms(void) { return cached_ms; }
 
-/* "HH:MM:SS" — clamped to 99:59:59. */
+/* "HH:MM:SS" - clamped to 99:59:59. */
 void pit_format_clock(char buf[9]) {
     uint64_t total_s = cached_ms / 1000;
     uint32_t s = (uint32_t)(total_s % 60);

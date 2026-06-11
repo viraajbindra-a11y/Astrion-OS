@@ -1,11 +1,11 @@
 /*
- * Astrion v2.0 — Cooperative task scheduler
+ * Astrion v2.0 - Cooperative task scheduler
  *
  * Round-robin over a fixed task table. Tasks volunteer the CPU via
  * task_yield(); there is no preemption (the PIT still ticks, but
- * its ISR only counts — it never switches stacks). Single CPU.
+ * its ISR only counts - it never switches stacks). Single CPU.
  *
- * Task 0 is the boot/shell task — it's "created" by tasks_init()
+ * Task 0 is the boot/shell task - it's "created" by tasks_init()
  * adopting the current execution context, and it never exits.
  * Spawned tasks get a 16 KiB kmalloc'd stack and start in a
  * trampoline that calls fn(arg) then task_exit().

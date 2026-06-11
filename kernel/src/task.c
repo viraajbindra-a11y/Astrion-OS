@@ -1,5 +1,5 @@
 /*
- * Astrion v2.0 — Cooperative task scheduler
+ * Astrion v2.0 - Cooperative task scheduler
  *
  * See task.h for the model. The interesting part is fabricating a
  * new task's initial stack so the first context_switch into it works
@@ -17,7 +17,7 @@
  * After the pops + ret, RSP sits at the aligned top and execution is
  * inside task_entry_thunk, which calls the task's fn(arg) and then
  * task_exit(). The thunk's first call pushes 8 bytes, giving fn an
- * entry RSP ≡ 8 (mod 16) — the normal SysV alignment.
+ * entry RSP ≡ 8 (mod 16) - the normal SysV alignment.
  *
  * Stack reaping: a DONE task's stack can't be freed while we might
  * still be standing on it, so task_exit only marks the state. The
@@ -31,7 +31,7 @@
 /* context_switch.S */
 extern void context_switch(uint64_t *save_rsp_here, uint64_t load_rsp);
 
-/* Serial panic hook (kernel_mb2.c) — used if a task smashes its stack. */
+/* Serial panic hook (kernel_mb2.c) - used if a task smashes its stack. */
 extern void serial_puts_x(const char *s);
 
 #define STACK_CANARY 0xA570CA1F5704DEADULL
@@ -116,9 +116,9 @@ int task_spawn(const char *name, task_fn fn, void *arg) {
      * RSP). task_entry_thunk is entered via context_switch's `ret`, not
      * a `call`, so we fabricate one extra padding qword above the thunk
      * address: after the 6 pops + ret, RSP lands 8 below the 16-aligned
-     * top — exactly the alignment a real call site would produce. (SSE
+     * top - exactly the alignment a real call site would produce. (SSE
      * is disabled today per lesson #196, so a misaligned entry wouldn't
-     * fault yet — but the Rust port + any future movaps would, so get
+     * fault yet - but the Rust port + any future movaps would, so get
      * it right now.) */
     uint64_t top = ((uint64_t)(uintptr_t)stack + TASK_STACK_SIZE) & ~0xFULL;
     uint64_t *sp = (uint64_t *)(uintptr_t)top;
@@ -135,13 +135,13 @@ void task_yield(void) {
     /* Stack-overflow guard: if the current task (other than task 0,
      * which runs on the boot stack and has no canary) has smashed the
      * canary at the low end of its stack, it has overflowed into the
-     * adjacent heap. Don't switch away carrying corruption — report it
+     * adjacent heap. Don't switch away carrying corruption - report it
      * and halt that task. */
     struct task *cur = &tasks[current_tid];
     if (cur->stack_base && *(uint64_t *)cur->stack_base != STACK_CANARY) {
         serial_puts_x("\n!!! TASK STACK OVERFLOW: ");
         serial_puts_x(cur->name);
-        serial_puts_x(" — halting task !!!\n");
+        serial_puts_x(" - halting task !!!\n");
         cur->state = TASK_DONE;
         /* fall through to schedule someone else; never come back here */
     }

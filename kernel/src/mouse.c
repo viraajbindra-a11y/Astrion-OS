@@ -1,8 +1,8 @@
 /*
- * Astrion v2.0 — PS/2 mouse driver
+ * Astrion v2.0 - PS/2 mouse driver
  *
  * Setup sequence (standard 8042 + PS/2 aux):
- *   1. Send 0xA8 to 0x64 — enable aux device.
+ *   1. Send 0xA8 to 0x64 - enable aux device.
  *   2. Read controller config (0x20 cmd to 0x64, read at 0x60).
  *      Set bit 1 (enable IRQ12), clear bit 5 (enable aux clock).
  *      Write back via 0x60 cmd to 0x64.
@@ -50,14 +50,14 @@ static inline uint8_t inb_(uint16_t port) {
 
 /* Wait until input/output buffer is ready. */
 static void ps2_wait_input(void) {
-    /* Bit 1 of status = "input full" — wait for it to clear before
+    /* Bit 1 of status = "input full" - wait for it to clear before
      * we can send another command. */
     for (int i = 0; i < 100000; i++) {
         if ((inb_(PS2_STATUS) & 0x02) == 0) return;
     }
 }
 static int ps2_wait_output(void) {
-    /* Bit 0 of status = "output full" — wait for it to set before
+    /* Bit 0 of status = "output full" - wait for it to set before
      * reading. Bit 5 distinguishes mouse data from keyboard. */
     for (int i = 0; i < 100000; i++) {
         uint8_t s = inb_(PS2_STATUS);
@@ -120,7 +120,7 @@ static uint32_t saved_bg[CUR_W * 2 * CUR_H * 2];
 
 /* ─── Cursor draw/erase ─────────────────────────────────── */
 
-/* Cursor is drawn at 2x — sprite is 11x18, rendered as 22x36 px so
+/* Cursor is drawn at 2x - sprite is 11x18, rendered as 22x36 px so
  * it's clearly visible against the dense bitmap-font text on screen.
  * saved_bg is sized for 2x already. */
 #define CUR_SCALE 2
@@ -203,7 +203,7 @@ void mouse_redraw_if_dirty(void) {
     if (!dirty) return;
     /* Snapshot the ISR-owned position + button atomically. Without the
      * cli/sti, IRQ12 could update mx/my BETWEEN save_bg_at(mx,my) and
-     * draw_cursor_at(mx,my) — we'd save the background at one spot and
+     * draw_cursor_at(mx,my) - we'd save the background at one spot and
      * stamp the sprite at another, then the next restore_bg would paint
      * stale pixels and trail garbage across the screen. Clearing `dirty`
      * inside the critical section also avoids dropping an update that
@@ -227,7 +227,7 @@ void mouse_redraw_if_dirty(void) {
         draw_cursor_at(cx, cy);
         lx = cx; ly = cy;
     } else {
-        /* Same position — just repaint to reflect button-color change. */
+        /* Same position - just repaint to reflect button-color change. */
         draw_cursor_at(cx, cy);
     }
 }
@@ -267,7 +267,7 @@ static void mouse_isr(struct registers *r) {
     packet_phase = 0;
 
     /* Bits 6/7 of byte 0 are X/Y overflow. When set, the 8-bit delta is
-     * meaningless — drop the packet's movement (keep the button state)
+     * meaningless - drop the packet's movement (keep the button state)
      * rather than jumping the cursor by garbage. */
     if (packet[0] & 0xC0) {
         int nl = (packet[0] >> 0) & 1;
@@ -288,7 +288,7 @@ static void mouse_isr(struct registers *r) {
     int dy = (int8_t)packet[2];
 
     int nx = mx + dx;
-    int ny = my - dy;   /* PS/2 Y is +up, screen Y is +down — invert */
+    int ny = my - dy;   /* PS/2 Y is +up, screen Y is +down - invert */
     if (nx < 0) nx = 0;
     if (ny < 0) ny = 0;
     if ((uint32_t)nx >= sw) nx = sw - 1;

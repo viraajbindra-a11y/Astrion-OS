@@ -1,5 +1,5 @@
 /*
- * Astrion v2.0 — In-memory filesystem
+ * Astrion v2.0 - In-memory filesystem
  *
  * Single linked list of fs_node entries. Each file has a kmalloc'd
  * data buffer that grows via krealloc when fs_write/fs_append need
@@ -18,7 +18,7 @@
 static fs_node *root;
 static uint32_t node_count;
 
-/* tiny libc-style helpers — kept here so fs.c is self-contained. */
+/* tiny libc-style helpers - kept here so fs.c is self-contained. */
 static int sstreq(const char *a, const char *b) {
     while (*a && *b && *a == *b) { a++; b++; }
     return *a == 0 && *b == 0;
@@ -55,7 +55,7 @@ void fs_init(void) {
         "\n"
         "this is an in-kernel filesystem.\n"
         "try: ls, cat readme.txt, write log hi there\n"
-        "type 'sync' to save to disk, then reboot — files come back.\n";
+        "type 'sync' to save to disk, then reboot - files come back.\n";
     fs_write("readme.txt", (const uint8_t *)welcome, sstrlen(welcome));
 
     fs_create("greet.sh", FS_FILE);
@@ -98,7 +98,7 @@ static int ensure_capacity(fs_node *n, uint32_t need) {
     if (n->capacity >= need) return 0;
     uint32_t new_cap = n->capacity ? n->capacity : 64;
     /* Double until it fits. `need <= FS_FILE_MAX < 2^31`, so the next
-     * power of two is at most 2^31 — no uint32 overflow, no infinite
+     * power of two is at most 2^31 - no uint32 overflow, no infinite
      * loop (the old `new_cap *= 2` wrapped to 0 for need > 2^31 and
      * spun forever). */
     while (new_cap < need) new_cap *= 2;
@@ -197,7 +197,7 @@ uint32_t fs_total_bytes(void) {
  *
  * Keeping a single contiguous append-style serialization makes
  * this trivially robust for the MVP. Fragmentation, free lists,
- * journals — all later.
+ * journals - all later.
  */
 
 #define MAGIC_SB    0xA570F500u
@@ -328,7 +328,7 @@ int fs_load_from_disk(void) {
 
     /* How many bytes to slurp. node_count is now capped at 4096 and
      * total_data_bytes is a uint32, so the whole thing is computed in
-     * 64-bit and CANNOT overflow — the old all-uint32 `guess` could
+     * 64-bit and CANNOT overflow - the old all-uint32 `guess` could
      * wrap below the 8 MiB cap and defeat it. */
     uint64_t guess = (uint64_t)sb.node_count
                        * (uint64_t)(sizeof(struct node_hdr) + FS_NAME_MAX + 8)

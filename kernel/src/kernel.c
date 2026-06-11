@@ -1,10 +1,10 @@
 /**
- * NOVA OS Kernel — Main Entry Point
+ * NOVA OS Kernel - Main Entry Point
  *
  * This is where the kernel starts after the bootloader hands off control.
  * It sets up the display, input devices, and runs the desktop GUI loop.
  *
- * This is a REAL kernel — no Linux, no libraries, just our code and hardware.
+ * This is a REAL kernel - no Linux, no libraries, just our code and hardware.
  */
 
 #include "../include/types.h"
@@ -182,7 +182,7 @@ static void draw_menubar(void) {
     // Menu items
     fb_draw_string(24 + fb_text_width(app_name, 1) + 16, 6, "File  Edit  View  Help", COLOR_TEXT2, 1);
 
-    // Clock (right side) — simple static for now
+    // Clock (right side) - simple static for now
     fb_draw_string(fb_width() - 80, 6, "Astrion", COLOR_TEXT2, 1);
 }
 
@@ -250,7 +250,7 @@ static void draw_dock(void) {
 }
 
 static void draw_desktop_background(void) {
-    // Gradient wallpaper — purple/blue
+    // Gradient wallpaper - purple/blue
     for (uint32_t y = 0; y < fb_height(); y++) {
         for (uint32_t x = 0; x < fb_width(); x++) {
             uint8_t r = (uint8_t)(20 + y * 15 / fb_height() + x * 10 / fb_width());
@@ -276,7 +276,7 @@ void kernel_main(BootInfo *boot_info) {
     create_window("Welcome to Astrion", fb_width()/2 - 200, fb_height()/2 - 120, 400, 240,
         (Color){30, 30, 30, 255});
 
-    // Main event loop — this runs forever
+    // Main event loop - this runs forever
     while (1) {
         // Poll input
         mouse_poll();
