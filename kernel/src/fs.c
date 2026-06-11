@@ -89,9 +89,18 @@ fs_node *fs_create(const char *name, uint32_t kind) {
     return n;
 }
 
+/* Hard ceiling on a single file: 8 MiB. The whole heap is 32 MiB, so
+ * this keeps one file from eating it all AND bounds the doubling loop. */
+#define FS_FILE_MAX (8u * 1024 * 1024)
+
 static int ensure_capacity(fs_node *n, uint32_t need) {
+    if (need > FS_FILE_MAX) return -1;       /* refuse oversized files */
     if (n->capacity >= need) return 0;
     uint32_t new_cap = n->capacity ? n->capacity : 64;
+    /* Double until it fits. `need <= FS_FILE_MAX < 2^31`, so the next
+     * power of two is at most 2^31 — no uint32 overflow, no infinite
+     * loop (the old `new_cap *= 2` wrapped to 0 for need > 2^31 and
+     * spun forever). */
     while (new_cap < need) new_cap *= 2;
     uint8_t *nb = (uint8_t *)krealloc(n->data, new_cap);
     if (!nb) return -1;
@@ -115,6 +124,9 @@ int fs_append(const char *name, const uint8_t *data, uint32_t len) {
     fs_node *n = fs_find(name);
     if (!n) n = fs_create(name, FS_FILE);
     if (!n || n->kind != FS_FILE) return -1;
+    /* Guard size+len overflow: a wrapped sum would satisfy a small
+     * capacity and let the mmemcpy run off the end of the heap block. */
+    if (len > FS_FILE_MAX - n->size) return -1;
     if (ensure_capacity(n, n->size + len) != 0) return -1;
     mmemcpy(n->data + n->size, data, len);
     n->size += len;
@@ -192,6 +204,13 @@ uint32_t fs_total_bytes(void) {
 #define MAGIC_NODE  0xA570F510u
 #define FS_VERSION  1u
 
+/* Sanity ceilings for parsing an UNTRUSTED on-disk image. node_count
+ * and total_data_bytes come straight off the disk; without caps a
+ * crafted superblock could overflow the size math. 4096 nodes / 8 MiB
+ * is far more than the MVP ever produces. */
+#define FS_MAX_NODES 4096u
+#define FS_LOAD_MAX  (8u * 1024 * 1024)
+
 struct sb {
     uint32_t magic;
     uint32_t version;
@@ -216,6 +235,17 @@ static uint8_t *flat_buf;        /* scratch we kmalloc for serialization */
 static void cp(uint8_t *d, const uint8_t *s, uint32_t n) { for (uint32_t i = 0; i < n; i++) d[i] = s[i]; }
 static void zr(uint8_t *d, uint32_t n) { for (uint32_t i = 0; i < n; i++) d[i] = 0; }
 static uint32_t round_up(uint32_t v, uint32_t a) { return (v + a - 1) & ~(a - 1); }
+
+/* Free an entire detached node list (used to discard a partial parse
+ * or drop the old list after a successful load). */
+static void free_list(fs_node *head) {
+    while (head) {
+        fs_node *nx = head->next;
+        if (head->data) kfree(head->data);
+        kfree(head);
+        head = nx;
+    }
+}
 
 int fs_sync(void) {
     if (!ata_present()) return -1;
@@ -293,56 +323,77 @@ int fs_load_from_disk(void) {
     struct sb sb;
     cp((uint8_t *)&sb, sec_buf, sizeof(sb));
     if (sb.magic != MAGIC_SB || sb.version != FS_VERSION) return -1;
-    if (sb.node_count == 0) return 0;  /* clean disk; nothing to load */
+    if (sb.node_count == 0) return 0;            /* clean disk; nothing to load */
+    if (sb.node_count > FS_MAX_NODES) return -1; /* corrupt / hostile superblock */
 
-    /* Estimate how many bytes we need to slurp. We don't have the
-     * exact total in the superblock (per-node padding makes it
-     * imprecise), so read enough sectors to be safe: count * (header
-     * + max name) + total_data_bytes + slack. Cap at 8 MiB so we
-     * don't OOM on a corrupted superblock. */
-    uint32_t guess = sb.node_count * (uint32_t)(sizeof(struct node_hdr) + FS_NAME_MAX + 8)
-                   + sb.total_data_bytes + 4096;
-    if (guess > 8 * 1024 * 1024) return -1;
-    uint32_t bytes = round_up(guess, 512);
-    if (flat_buf) { kfree(flat_buf); flat_buf = 0; }
-    flat_buf = (uint8_t *)kmalloc(bytes);
-    if (!flat_buf) return -1;
+    /* How many bytes to slurp. node_count is now capped at 4096 and
+     * total_data_bytes is a uint32, so the whole thing is computed in
+     * 64-bit and CANNOT overflow — the old all-uint32 `guess` could
+     * wrap below the 8 MiB cap and defeat it. */
+    uint64_t guess = (uint64_t)sb.node_count
+                       * (uint64_t)(sizeof(struct node_hdr) + FS_NAME_MAX + 8)
+                   + (uint64_t)sb.total_data_bytes + 4096;
+    if (guess > FS_LOAD_MAX) return -1;
+    uint32_t bytes = round_up((uint32_t)guess, 512);
+
+    uint8_t *buf = (uint8_t *)kmalloc(bytes);
+    if (!buf) return -1;
     uint32_t lba = 1;
     for (uint32_t i = 0; i < bytes; i += 512) {
-        if (ata_read_sector(lba, flat_buf + i) != 0) return -1;
+        if (ata_read_sector(lba, buf + i) != 0) { kfree(buf); return -1; }
         lba++;
     }
 
-    /* Wipe whatever fs_init seeded so we don't double-seed. */
-    while (root) fs_unlink(root->name);
+    /* Parse into a FRESH list, leaving the existing one (the seeds, or
+     * a previously-mounted FS) untouched until we know the whole image
+     * is valid. A corrupt disk must not leave a half-built filesystem
+     * NOR double-seed on top of a partial parse (the old code wiped
+     * first, then could bail mid-loop). */
+    fs_node *saved_root  = root;
+    uint32_t saved_count = node_count;
+    root = 0;
+    node_count = 0;
 
-    uint32_t off = 0;
+    uint64_t off = 0;
+    int ok = 1;
     for (uint32_t i = 0; i < sb.node_count; i++) {
-        if (off + sizeof(struct node_hdr) > bytes) return -1;
+        if (off + sizeof(struct node_hdr) > bytes) { ok = 0; break; }
         struct node_hdr h;
-        cp((uint8_t *)&h, flat_buf + off, sizeof(h));
+        cp((uint8_t *)&h, buf + (uint32_t)off, sizeof(h));
         off += sizeof(h);
-        if (h.magic != MAGIC_NODE) return -1;
-        if (h.name_len > FS_NAME_MAX) return -1;
-        if (off + h.name_len > bytes) return -1;
+        if (h.magic != MAGIC_NODE)        { ok = 0; break; }
+        if (h.name_len > FS_NAME_MAX)     { ok = 0; break; }
+        if (off + h.name_len > bytes)     { ok = 0; break; }
+        if (h.kind != FS_FILE && h.kind != FS_DIR) { ok = 0; break; }
         char namebuf[FS_NAME_MAX + 1];
-        cp((uint8_t *)namebuf, flat_buf + off, h.name_len);
+        cp((uint8_t *)namebuf, buf + (uint32_t)off, h.name_len);
         namebuf[h.name_len] = 0;
         off += h.name_len;
 
-        fs_node *n = fs_create(namebuf, h.kind);
-        if (!n) return -1;
+        fs_node *n = fs_create(namebuf, h.kind);   /* NULL on dup name → fail */
+        if (!n) { ok = 0; break; }
         n->created_ms  = h.created_ms;
         n->modified_ms = h.modified_ms;
 
         if (h.size) {
-            if (off + h.size > bytes) return -1;
-            if (ensure_capacity(n, h.size) != 0) return -1;
-            cp(n->data, flat_buf + off, h.size);
+            if (h.size > FS_FILE_MAX)     { ok = 0; break; }
+            if (off + h.size > bytes)     { ok = 0; break; }
+            if (ensure_capacity(n, h.size) != 0) { ok = 0; break; }
+            cp(n->data, buf + (uint32_t)off, h.size);
             n->size = h.size;
             off += h.size;
         }
-        off = round_up(off, 8);
+        off = (off + 7) & ~(uint64_t)7;   /* 64-bit round-up: can't wrap under 8 MiB */
     }
+
+    kfree(buf);
+
+    if (!ok) {
+        free_list(root);            /* discard the partial parse */
+        root = saved_root;          /* restore the prior list */
+        node_count = saved_count;
+        return -1;
+    }
+    free_list(saved_root);          /* success: drop the old list */
     return 0;
 }

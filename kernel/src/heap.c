@@ -107,6 +107,11 @@ static void split_block(struct block *b, ksize_t need) {
 
 void *kmalloc(ksize_t bytes) {
     if (bytes == 0) return 0;
+    /* Guard the alignment round-up against overflow: align_up does
+     * (bytes + 15) & ~15, which wraps for bytes within 15 of the max
+     * and would return a tiny `need`. No alloc is ever that large, so
+     * reject it outright. */
+    if (bytes > HEAP_SIZE) return 0;
     ksize_t need = align_up(bytes, ALIGN);
 
     /* First-fit. */
@@ -125,6 +130,10 @@ void *kmalloc(ksize_t bytes) {
 }
 
 void *kcalloc(ksize_t n, ksize_t bytes) {
+    /* Reject n*bytes overflow: a wrapped-small `total` would under-
+     * allocate while the caller assumes n*bytes of zeroed space — a
+     * classic heap-overflow primitive. */
+    if (bytes != 0 && n > (~(ksize_t)0) / bytes) return 0;
     ksize_t total = n * bytes;
     void *p = kmalloc(total);
     if (!p) return 0;

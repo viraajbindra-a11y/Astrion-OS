@@ -31,5 +31,6 @@ void     console_backspace(void);    /* erase prior glyph, retreats cursor */
  * normal screen output. */
 void     console_set_capture(uint8_t *buf, uint32_t cap, uint32_t *len_out);
 void     console_clear_capture(void);
+int      console_capture_active(void);   /* 1 if output is being captured */
 
 #endif

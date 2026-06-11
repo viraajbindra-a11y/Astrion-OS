@@ -19,7 +19,9 @@
 #include "kbd.h"
 #include "idt.h"
 
-#define KBD_DATA_PORT 0x60
+#define KBD_DATA_PORT   0x60
+#define KBD_STATUS_PORT 0x64
+#define KBD_STAT_AUX    0x20   /* status bit 5: data is from the mouse */
 
 static inline uint8_t inb_(uint16_t port) {
     uint8_t v;
@@ -59,11 +61,15 @@ static int caps_lock   = 0;
 static int is_extended = 0;  /* set after a 0xE0 byte, cleared after the next byte */
 
 static void rb_push(char c) {
+    /* Single-producer (this runs only in the IRQ1 ISR) / single-consumer
+     * (kbd_getchar runs only in task context). The ISR must NEVER write
+     * rb_tail — that's the consumer's field. On a single core the ISR
+     * preempts the consumer between its read and write of rb_tail, so
+     * if both touched it we'd lose updates / corrupt the index. When the
+     * buffer is full we drop the NEWEST char (this one) instead. Only
+     * rb_head is written here; only rb_tail in kbd_getchar. Race-free. */
     uint8_t next = (rb_head + 1) & (sizeof(rb) - 1);
-    if (next == rb_tail) {
-        /* Full — drop oldest by advancing tail. */
-        rb_tail = (rb_tail + 1) & (sizeof(rb) - 1);
-    }
+    if (next == rb_tail) return;   /* full — drop this char */
     rb[rb_head] = c;
     rb_head = next;
 }
@@ -79,7 +85,14 @@ char kbd_getchar(void) {
 
 static void kbd_isr(struct registers *r) {
     (void)r;
+    /* If the controller says this byte is mouse (AUX) data, it doesn't
+     * belong to us — read it to ack the line, but don't treat it as a
+     * scancode (that would inject a phantom keypress + desync the mouse
+     * packet stream). On QEMU IRQ1 only ever carries keyboard bytes, so
+     * this is belt-and-suspenders for real hardware. */
+    uint8_t st = inb_(KBD_STATUS_PORT);
     uint8_t sc = inb_(KBD_DATA_PORT);
+    if (st & KBD_STAT_AUX) return;
 
     /* 0xE0 = "extended prefix". The next byte is an extended scancode
      * (arrow keys, numpad navigation, right-ctrl, etc.). */

@@ -104,6 +104,8 @@ void console_clear_capture(void) {
     cap_buf = 0; cap_cap = 0; cap_len_out = 0;
 }
 
+int console_capture_active(void) { return cap_buf != 0; }
+
 void console_putchar(char c) {
     /* Output redirect: append to capture buffer + skip pixel writes. */
     if (cap_buf) {

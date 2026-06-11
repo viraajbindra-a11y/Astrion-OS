@@ -926,6 +926,12 @@ static void dispatch(char *cmdline) {
             break;
         }
     }
+    /* Nested redirect isn't supported — capture state + redirect_buf are
+     * single-level. This happens with 'run script > out' where a script
+     * line ALSO redirects. Rather than corrupt the outer capture, drop
+     * the inner redirect: the command's output just flows into the
+     * outer capture (it's all headed to the outer's file anyway). */
+    if (redir_file && console_capture_active()) redir_file = 0;
 
     uint32_t cap_len = 0;
     if (redir_file) {
@@ -970,12 +976,28 @@ done:
     }
 }
 
-/* Run a script: walks the file line-by-line, dispatching each non-empty,
- * non-'#'-comment line through the shell parser. */
+/* Scripts can call 'run', so cmd_run is re-entrant. Two hazards the
+ * depth guard closes: (1) a script that runs itself recurses forever
+ * and overflows the kernel stack (task 0's 16 KiB boot stack); (2) the
+ * per-call line buffer must be on the STACK, not static — a static
+ * buffer would be clobbered when an inner 'run' reuses it, corrupting
+ * the outer loop. Cap at 8 levels: deep enough for real script nesting,
+ * shallow enough that 8 × ~300-byte frames stay well under 16 KiB. */
+#define RUN_MAX_DEPTH 8
+static int run_depth;
+
 static void cmd_run(int argc, char **argv) {
     if (argc < 2) {
         console_set_color(COL_MUTED);
         console_puts("usage: run <file>\n");
+        console_set_color(COL_WHITE);
+        return;
+    }
+    if (run_depth >= RUN_MAX_DEPTH) {
+        console_set_color(0xF87171u);
+        console_puts("run: nesting too deep (max ");
+        console_put_u32(RUN_MAX_DEPTH);
+        console_puts(") — recursive script?\n");
         console_set_color(COL_WHITE);
         return;
     }
@@ -988,13 +1010,29 @@ static void cmd_run(int argc, char **argv) {
         console_set_color(COL_WHITE);
         return;
     }
-    /* Parse + dispatch line by line. Operate on a copy because
-     * dispatch() tokenizes in place. */
-    static char line[256];
+    /* COPY the script before executing. A script line can 'rm' or
+     * 'write' the script file itself, which frees / reallocs n->data
+     * out from under us — a use-after-free if we kept indexing the
+     * live node. Snapshot into our own heap buffer; from here the
+     * file node can be deleted with no effect on this run. */
+    uint32_t sz = n->size;
+    uint8_t *script = (uint8_t *)kmalloc(sz ? sz : 1);
+    if (!script) {
+        console_set_color(0xF87171u);
+        console_puts("run: out of memory\n");
+        console_set_color(COL_WHITE);
+        return;
+    }
+    for (uint32_t i = 0; i < sz; i++) script[i] = n->data[i];
+
+    run_depth++;
+    /* line[] is a STACK buffer (not static) so nested 'run' calls each
+     * get their own. dispatch() tokenizes in place, hence the copy. */
+    char line[256];
     uint32_t line_pos = 0;
     int line_no = 1;
-    for (uint32_t i = 0; i <= n->size; i++) {
-        char c = (i < n->size) ? (char)n->data[i] : '\n';
+    for (uint32_t i = 0; i <= sz; i++) {
+        char c = (i < sz) ? (char)script[i] : '\n';
         if (c == '\n' || c == '\r') {
             line[line_pos] = 0;
             /* Skip empty + comment lines. */
@@ -1018,6 +1056,8 @@ static void cmd_run(int argc, char **argv) {
         }
         if (line_pos + 1 < sizeof(line)) line[line_pos++] = c;
     }
+    run_depth--;
+    kfree(script);
     console_set_color(COL_OK);
     console_puts("run: ");
     console_set_color(COL_WHITE);

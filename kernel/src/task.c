@@ -31,6 +31,11 @@
 /* context_switch.S */
 extern void context_switch(uint64_t *save_rsp_here, uint64_t load_rsp);
 
+/* Serial panic hook (kernel_mb2.c) — used if a task smashes its stack. */
+extern void serial_puts_x(const char *s);
+
+#define STACK_CANARY 0xA570CA1F5704DEADULL
+
 struct task {
     uint64_t        rsp;
     enum task_state state;
@@ -97,9 +102,27 @@ int task_spawn(const char *name, task_fn fn, void *arg) {
     t->switches = 0;
     copy_name(t->name, name);
 
-    /* Fabricate the initial frame (see file header). */
+    /* Stack-overflow canary at the LOW end of the stack (the end a
+     * deep call chain grows toward). task_yield checks it; a clobbered
+     * canary means the task blew its 16 KiB and we halt it loudly
+     * instead of letting it silently corrupt the adjacent heap block. */
+    *(uint64_t *)stack = STACK_CANARY;
+
+    /* Fabricate the initial frame so the first context_switch into this
+     * task is identical to switching back into a previously-saved one.
+     *
+     * SysV requires RSP ≡ 8 (mod 16) at a function's ENTRY (because a
+     * normal `call` pushes the 8-byte return address onto a 16-aligned
+     * RSP). task_entry_thunk is entered via context_switch's `ret`, not
+     * a `call`, so we fabricate one extra padding qword above the thunk
+     * address: after the 6 pops + ret, RSP lands 8 below the 16-aligned
+     * top — exactly the alignment a real call site would produce. (SSE
+     * is disabled today per lesson #196, so a misaligned entry wouldn't
+     * fault yet — but the Rust port + any future movaps would, so get
+     * it right now.) */
     uint64_t top = ((uint64_t)(uintptr_t)stack + TASK_STACK_SIZE) & ~0xFULL;
     uint64_t *sp = (uint64_t *)(uintptr_t)top;
+    *(--sp) = 0;                                        /* alignment pad */
     *(--sp) = (uint64_t)(uintptr_t)task_entry_thunk;   /* ret target */
     for (int i = 0; i < 6; i++) *(--sp) = 0;           /* rbp,rbx,r12..r15 */
     t->rsp = (uint64_t)(uintptr_t)sp;
@@ -109,6 +132,20 @@ int task_spawn(const char *name, task_fn fn, void *arg) {
 }
 
 void task_yield(void) {
+    /* Stack-overflow guard: if the current task (other than task 0,
+     * which runs on the boot stack and has no canary) has smashed the
+     * canary at the low end of its stack, it has overflowed into the
+     * adjacent heap. Don't switch away carrying corruption — report it
+     * and halt that task. */
+    struct task *cur = &tasks[current_tid];
+    if (cur->stack_base && *(uint64_t *)cur->stack_base != STACK_CANARY) {
+        serial_puts_x("\n!!! TASK STACK OVERFLOW: ");
+        serial_puts_x(cur->name);
+        serial_puts_x(" — halting task !!!\n");
+        cur->state = TASK_DONE;
+        /* fall through to schedule someone else; never come back here */
+    }
+
     /* Round-robin: next READY slot after current. */
     int next = -1;
     for (int i = 1; i <= TASK_MAX; i++) {

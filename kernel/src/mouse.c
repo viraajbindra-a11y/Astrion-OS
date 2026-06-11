@@ -201,24 +201,35 @@ static void paint_ink_at(int x, int y) {
 
 void mouse_redraw_if_dirty(void) {
     if (!dirty) return;
+    /* Snapshot the ISR-owned position + button atomically. Without the
+     * cli/sti, IRQ12 could update mx/my BETWEEN save_bg_at(mx,my) and
+     * draw_cursor_at(mx,my) — we'd save the background at one spot and
+     * stamp the sprite at another, then the next restore_bg would paint
+     * stale pixels and trail garbage across the screen. Clearing `dirty`
+     * inside the critical section also avoids dropping an update that
+     * lands mid-redraw. */
+    __asm__ volatile("cli");
+    int cx = mx, cy = my, held = btn_left;
+    dirty = 0;
+    __asm__ volatile("sti");
+
     if (first_paint) {
-        save_bg_at(mx, my);
-        draw_cursor_at(mx, my);
-        lx = mx; ly = my;
+        save_bg_at(cx, cy);
+        draw_cursor_at(cx, cy);
+        lx = cx; ly = cy;
         first_paint = 0;
-    } else if (mx != lx || my != ly) {
+    } else if (cx != lx || cy != ly) {
         restore_bg_at(lx, ly);
         /* Paint trail BEFORE saving the new bg, so the dot gets baked
          * into saved_bg and persists across future moves. */
-        if (btn_left) paint_ink_at(lx, ly);
-        save_bg_at(mx, my);
-        draw_cursor_at(mx, my);
-        lx = mx; ly = my;
+        if (held) paint_ink_at(lx, ly);
+        save_bg_at(cx, cy);
+        draw_cursor_at(cx, cy);
+        lx = cx; ly = cy;
     } else {
         /* Same position — just repaint to reflect button-color change. */
-        draw_cursor_at(mx, my);
+        draw_cursor_at(cx, cy);
     }
-    dirty = 0;
 }
 
 int mouse_x(void)          { return mx; }
@@ -227,8 +238,12 @@ int mouse_left_down(void)  { return btn_left; }
 int mouse_right_down(void) { return btn_right; }
 
 int mouse_take_left_click(void) {
+    /* Read-and-clear must be atomic vs IRQ12 setting the latch between
+     * the two statements (that click would be lost). */
+    __asm__ volatile("cli");
     int c = left_click_latch;
     left_click_latch = 0;
+    __asm__ volatile("sti");
     return c;
 }
 
@@ -251,6 +266,18 @@ static void mouse_isr(struct registers *r) {
     if (packet_phase < 3) return;
     packet_phase = 0;
 
+    /* Bits 6/7 of byte 0 are X/Y overflow. When set, the 8-bit delta is
+     * meaningless — drop the packet's movement (keep the button state)
+     * rather than jumping the cursor by garbage. */
+    if (packet[0] & 0xC0) {
+        int nl = (packet[0] >> 0) & 1;
+        int nr = (packet[0] >> 1) & 1;
+        if (nl && !btn_left) left_click_latch = 1;
+        btn_left = nl; btn_right = nr;
+        dirty = 1;
+        return;
+    }
+
     int new_left  = (packet[0] >> 0) & 1;
     int new_right = (packet[0] >> 1) & 1;
     if (new_left && !btn_left) left_click_latch = 1;
@@ -259,9 +286,6 @@ static void mouse_isr(struct registers *r) {
 
     int dx = (int8_t)packet[1];
     int dy = (int8_t)packet[2];
-    if (packet[0] & 0x40 || packet[0] & 0x80) {
-        /* Overflow flags — clamp the byte already gave us. */
-    }
 
     int nx = mx + dx;
     int ny = my - dy;   /* PS/2 Y is +up, screen Y is +down — invert */

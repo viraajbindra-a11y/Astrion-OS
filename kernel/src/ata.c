@@ -136,6 +136,7 @@ const char *ata_model(void)      { return model_str; }
 
 int ata_read_sector(uint32_t lba, void *buf) {
     if (!have_disk) return -1;
+    if (lba >= total_sectors) return -1;   /* never address past the disk */
     if (wait_not_busy()) return -1;
 
     outb_(ATA_DRIVE, 0xE0 | ((lba >> 24) & 0x0F));    /* master, LBA mode */
@@ -155,6 +156,7 @@ int ata_read_sector(uint32_t lba, void *buf) {
 
 int ata_write_sector(uint32_t lba, const void *buf) {
     if (!have_disk) return -1;
+    if (lba >= total_sectors) return -1;   /* never address past the disk */
     if (wait_not_busy()) return -1;
 
     outb_(ATA_DRIVE, 0xE0 | ((lba >> 24) & 0x0F));
