@@ -69,6 +69,15 @@ void tasks_init(void) {
 /* Entered via `ret` from context_switch on a task's first slice. */
 static void task_entry_thunk(void) {
     struct task *t = &tasks[current_tid];
+    /* CRITICAL for preemption: a new task is entered via context_switch's
+     * `ret`, so it inherits the switcher's interrupt flag — and the
+     * switcher just did cli() inside task_yield/schedule, so IF is OFF.
+     * A task that never voluntarily yields (and so never hits the sti in
+     * task_yield's irq_restore) would run with interrupts disabled
+     * forever, and the timer could never preempt it — it would
+     * monopolize the CPU. Enable interrupts here so every task, yielding
+     * or not, is preemptible from its very first instruction. */
+    __asm__ volatile("sti");
     t->fn(t->arg);
     task_exit();
 }
@@ -175,7 +184,6 @@ static void schedule(void) {
     if (from->state == TASK_RUNNING) from->state = TASK_READY;
     to->state = TASK_RUNNING;
     to->switches++;
-    serial_puts_x(next == 0 ? "<" : (next == 1 ? "." : "#"));  /* TEMP: switch trace */
     current_tid = next;
     context_switch(&from->rsp, to->rsp);
     /* When something switches back to us, execution resumes here. */
