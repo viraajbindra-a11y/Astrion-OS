@@ -175,7 +175,7 @@ static void schedule(void) {
     if (from->state == TASK_RUNNING) from->state = TASK_READY;
     to->state = TASK_RUNNING;
     to->switches++;
-    serial_puts_x(next == 0 ? "s" : (next == 1 ? "c" : "b"));  /* TEMP: switch trace */
+    serial_puts_x(next == 0 ? "<" : (next == 1 ? "." : "#"));  /* TEMP: switch trace */
     current_tid = next;
     context_switch(&from->rsp, to->rsp);
     /* When something switches back to us, execution resumes here. */
