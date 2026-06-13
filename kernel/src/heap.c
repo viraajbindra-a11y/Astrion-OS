@@ -16,9 +16,11 @@
  * Single doubly-linked list ordered by address. Split-on-alloc cuts a
  * block in two; coalesce-on-free merges with adjacent free neighbors.
  *
- * Concurrency: NONE. We don't have preemptive multitasking, so the
- * single-CPU + cooperative-shell + IRQ-handlers-don't-allocate
- * invariant is enough. When we get a scheduler we'll add a spinlock.
+ * Concurrency: preemption-safe. The public kmalloc/kfree/krealloc/
+ * kcalloc disable interrupts around the free-list critical section
+ * (see irq_save/irq_restore). On a single CPU the only concurrency is
+ * the timer ISR preempting a task mid-allocation, so cli IS the lock.
+ * The internal *_alloc / block_free cores assume the lock is held.
  *
  * Heap address choice:
  *   - Kernel image lives at 0x100000..~0x113000.
@@ -146,7 +148,7 @@ static void *heap_alloc(ksize_t bytes) {
     return 0;  /* OOM */
 }
 
-static void heap_free(void *p) {
+static void heap_block_free(void *p) {
     if (!p) return;
     struct block *b = block_from_payload(p);
     if (b->magic != MAGIC_INUSE) {
@@ -187,7 +189,7 @@ void *kmalloc(ksize_t bytes) {
 
 void kfree(void *p) {
     uint64_t f = irq_save();
-    heap_free(p);
+    heap_block_free(p);
     irq_restore(f);
 }
 
@@ -210,7 +212,7 @@ void *krealloc(void *p, ksize_t new_size) {
     if (!p) {
         ret = heap_alloc(new_size);
     } else if (new_size == 0) {
-        heap_free(p);
+        heap_block_free(p);
         ret = 0;
     } else {
         struct block *b = block_from_payload(p);
@@ -226,7 +228,7 @@ void *krealloc(void *p, ksize_t new_size) {
                 uint8_t *src = (uint8_t *)p;
                 uint8_t *dst = (uint8_t *)np;
                 for (ksize_t i = 0; i < b->size; i++) dst[i] = src[i];
-                heap_free(p);
+                heap_block_free(p);
                 ret = np;
             }
         }
