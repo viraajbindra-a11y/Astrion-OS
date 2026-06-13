@@ -799,8 +799,14 @@ void kernel_mb2_main(uint32_t magic, uint64_t info_ptr) {
      * mouse cursor, then yield so background tasks get their slice.
      * The hlt parks the CPU until the next IRQ (PIT @100 Hz at the
      * latest), so the yield cadence is ~10 ms. */
+    uint64_t hb_last = 0;
     for (;;) {
         __asm__ volatile("sti; hlt");
+
+        /* TEMP heartbeat: prove the main loop keeps iterating even while
+         * a non-yielding 'busy' task spins. ~1/sec to serial. */
+        uint64_t hbnow = pit_elapsed_ms();
+        if (hbnow - hb_last >= 1000) { hb_last = hbnow; serial_putc('@'); }
 
         while (kbd_available()) {
             char c = kbd_getchar();
