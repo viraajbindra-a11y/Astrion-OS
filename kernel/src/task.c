@@ -131,7 +131,23 @@ int task_spawn(const char *name, task_fn fn, void *arg) {
     return tid;
 }
 
-void task_yield(void) {
+static inline uint64_t irq_save(void) {
+    uint64_t f;
+    __asm__ volatile("pushfq; pop %0; cli" : "=r"(f) :: "memory");
+    return f;
+}
+static inline void irq_restore(uint64_t f) {
+    __asm__ volatile("push %0; popfq" :: "r"(f) : "memory", "cc");
+}
+
+/* The actual switch. MUST run with interrupts disabled (so the timer
+ * can't fire mid-switch and re-enter us). Both the voluntary path
+ * (task_yield) and the preemptive path (task_preempt, from the timer
+ * ISR) funnel through here. The same context_switch round-trips a task
+ * whether it was saved voluntarily (resumes into task_yield -> sti) or
+ * preemptively (resumes into task_preempt -> irq epilogue -> iretq),
+ * because the resume point travels with the saved stack. */
+static void schedule(void) {
     /* Stack-overflow guard: if the current task (other than task 0,
      * which runs on the boot stack and has no canary) has smashed the
      * canary at the low end of its stack, it has overflowed into the
@@ -164,9 +180,29 @@ void task_yield(void) {
     /* When something switches back to us, execution resumes here. */
 }
 
+/* Voluntary yield from task context. Wrap the switch in cli/sti so a
+ * timer tick can't preempt us mid-switch; irq_restore puts the caller's
+ * interrupt flag back (tasks run with IF on, so this re-enables it). */
+void task_yield(void) {
+    uint64_t f = irq_save();
+    schedule();
+    irq_restore(f);
+}
+
+/* Preemptive switch. Called from the timer ISR (idt.c irq_handler)
+ * AFTER the PIC has been sent EOI, with interrupts already disabled.
+ * No save/restore: when this task is later resumed and unwinds back
+ * through the ISR, iretq restores its saved interrupt flag. This is
+ * what makes a task that never calls task_yield still share the CPU. */
+void task_preempt(void) {
+    schedule();
+}
+
 void task_exit(void) {
+    uint64_t f = irq_save();
     tasks[current_tid].state = TASK_DONE;
-    task_yield();
+    schedule();
+    irq_restore(f);
     /* Unreachable while another READY task exists (task 0 always is).
      * Belt + suspenders: */
     for (;;) __asm__ volatile("sti; hlt");

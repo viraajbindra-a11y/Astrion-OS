@@ -34,9 +34,10 @@ typedef void (*task_fn)(void *arg);
 
 void tasks_init(void);                                  /* adopt caller as task 0 ("shell") */
 int  task_spawn(const char *name, task_fn fn, void *arg);  /* returns tid or -1 */
-void task_yield(void);
+void task_yield(void);                                  /* voluntary switch */
+void task_preempt(void);                                /* called by timer ISR after EOI */
 void task_exit(void);                                   /* never returns */
-int  task_kill(int tid);                                /* cooperative: never scheduled again */
+int  task_kill(int tid);                                /* never scheduled again */
 
 /* Introspection for the 'ps' shell command. */
 struct task_info {

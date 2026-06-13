@@ -64,6 +64,21 @@ static inline ksize_t align_up(ksize_t v, ksize_t a) {
     return (v + (a - 1)) & ~(a - 1);
 }
 
+/* The heap free-list is shared mutable state. Once preemption is on
+ * (lesson #201), the timer can deschedule a task mid-kmalloc and let
+ * another task corrupt the list. On a single CPU the only concurrency
+ * is interrupts, so disabling them around each critical section IS the
+ * lock. Save/restore (not bare cli/sti) so it nests safely if a caller
+ * already had interrupts off. */
+static inline uint64_t irq_save(void) {
+    uint64_t f;
+    __asm__ volatile("pushfq; pop %0; cli" : "=r"(f) :: "memory");
+    return f;
+}
+static inline void irq_restore(uint64_t f) {
+    __asm__ volatile("push %0; popfq" :: "r"(f) : "memory", "cc");
+}
+
 void heap_init(void) {
     /* Place a single huge free block covering the whole heap. */
     heap_list = (struct block *)(uintptr_t)HEAP_BASE;
@@ -105,7 +120,9 @@ static void split_block(struct block *b, ksize_t need) {
     b->size  = need;
 }
 
-void *kmalloc(ksize_t bytes) {
+/* ── Unlocked cores. Callers below hold the IRQ lock. ───────────── */
+
+static void *heap_alloc(ksize_t bytes) {
     if (bytes == 0) return 0;
     /* Guard the alignment round-up against overflow: align_up does
      * (bytes + 15) & ~15, which wraps for bytes within 15 of the max
@@ -129,20 +146,7 @@ void *kmalloc(ksize_t bytes) {
     return 0;  /* OOM */
 }
 
-void *kcalloc(ksize_t n, ksize_t bytes) {
-    /* Reject n*bytes overflow: a wrapped-small `total` would under-
-     * allocate while the caller assumes n*bytes of zeroed space - a
-     * classic heap-overflow primitive. */
-    if (bytes != 0 && n > (~(ksize_t)0) / bytes) return 0;
-    ksize_t total = n * bytes;
-    void *p = kmalloc(total);
-    if (!p) return 0;
-    uint8_t *bp = (uint8_t *)p;
-    for (ksize_t i = 0; i < total; i++) bp[i] = 0;
-    return p;
-}
-
-void kfree(void *p) {
+static void heap_free(void *p) {
     if (!p) return;
     struct block *b = block_from_payload(p);
     if (b->magic != MAGIC_INUSE) {
@@ -172,19 +176,63 @@ void kfree(void *p) {
     }
 }
 
+/* ── Public, interrupt-safe wrappers. ───────────────────────────── */
+
+void *kmalloc(ksize_t bytes) {
+    uint64_t f = irq_save();
+    void *p = heap_alloc(bytes);
+    irq_restore(f);
+    return p;
+}
+
+void kfree(void *p) {
+    uint64_t f = irq_save();
+    heap_free(p);
+    irq_restore(f);
+}
+
+void *kcalloc(ksize_t n, ksize_t bytes) {
+    /* Reject n*bytes overflow: a wrapped-small `total` would under-
+     * allocate while the caller assumes n*bytes of zeroed space - a
+     * classic heap-overflow primitive. */
+    if (bytes != 0 && n > (~(ksize_t)0) / bytes) return 0;
+    ksize_t total = n * bytes;
+    void *p = kmalloc(total);          /* locks internally */
+    if (!p) return 0;
+    uint8_t *bp = (uint8_t *)p;
+    for (ksize_t i = 0; i < total; i++) bp[i] = 0;
+    return p;
+}
+
 void *krealloc(void *p, ksize_t new_size) {
-    if (!p) return kmalloc(new_size);
-    if (new_size == 0) { kfree(p); return 0; }
-    struct block *b = block_from_payload(p);
-    if (b->magic != MAGIC_INUSE) return 0;
-    if (b->size >= new_size) return p;  /* fits in place */
-    void *np = kmalloc(new_size);
-    if (!np) return 0;
-    uint8_t *src = (uint8_t *)p;
-    uint8_t *dst = (uint8_t *)np;
-    for (ksize_t i = 0; i < b->size; i++) dst[i] = src[i];
-    kfree(p);
-    return np;
+    uint64_t f = irq_save();
+    void *ret;
+    if (!p) {
+        ret = heap_alloc(new_size);
+    } else if (new_size == 0) {
+        heap_free(p);
+        ret = 0;
+    } else {
+        struct block *b = block_from_payload(p);
+        if (b->magic != MAGIC_INUSE) {
+            ret = 0;
+        } else if (b->size >= new_size) {
+            ret = p;                   /* fits in place */
+        } else {
+            void *np = heap_alloc(new_size);
+            if (!np) {
+                ret = 0;
+            } else {
+                uint8_t *src = (uint8_t *)p;
+                uint8_t *dst = (uint8_t *)np;
+                for (ksize_t i = 0; i < b->size; i++) dst[i] = src[i];
+                heap_free(p);
+                ret = np;
+            }
+        }
+    }
+    irq_restore(f);
+    return ret;
 }
 
 ksize_t  heap_total(void)        { return stat_total; }

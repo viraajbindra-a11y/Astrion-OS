@@ -175,11 +175,25 @@ void irq_register(uint8_t irq, irq_fn fn) {
     if (irq < 16) irq_handlers[irq] = fn;
 }
 
+/* Defined in task.c — the preemptive scheduler entry. Weakly coupled
+ * here so idt.c doesn't need the full task.h. Safe to call before the
+ * scheduler is up (it no-ops when no other task is READY). */
+extern void task_preempt(void);
+
 void irq_handler(struct registers *r) {
     /* vector 32..47 → IRQ 0..15 */
     uint8_t irq = (uint8_t)(r->vector - 32);
     if (irq < 16 && irq_handlers[irq]) irq_handlers[irq](r);
     pic_send_eoi(irq);
+
+    /* Preempt on the timer tick (IRQ0), AFTER EOI so the PIC is free to
+     * deliver the next tick to whatever task we switch to. This is the
+     * line that turns cooperative multitasking into preemptive: a task
+     * that never calls task_yield() still gets descheduled every tick.
+     * We're still inside the ISR with interrupts disabled, so the switch
+     * is atomic; the task we leave resumes here later and iretq's back to
+     * its interrupted point with its own saved interrupt flag. */
+    if (irq == 0) task_preempt();
 }
 
 /* ─── Panic screen + handler ────────────────────────────────── */

@@ -105,6 +105,7 @@ static void cmd_disk(int argc, char **argv);
 static void cmd_run(int argc, char **argv);
 static void cmd_ps(int argc, char **argv);
 static void cmd_spawn(int argc, char **argv);
+static void cmd_busy(int argc, char **argv);
 static void cmd_kill(int argc, char **argv);
 
 static const struct cmd CMDS[] = {
@@ -134,6 +135,7 @@ static const struct cmd CMDS[] = {
     { "run",     "run a script (one cmd per line)",  cmd_run },
     { "ps",      "list scheduler tasks",             cmd_ps },
     { "spawn",   "spawn ticker - background counter", cmd_spawn },
+    { "busy",    "spawn a non-yielding spinner (preempt proof)", cmd_busy },
     { "kill",    "kill <tid> - stop a task",         cmd_kill },
     { "panic",   "trigger int $3 (panic-screen demo)", cmd_panic },
     { "halt",    "stop the CPU forever",             cmd_halt },
@@ -829,6 +831,26 @@ static void ticker_task(void *arg) {
     }
 }
 
+/* The PREEMPTION proof. This task NEVER calls task_yield — it just
+ * spins, burning a few million iterations between repaints. Under the
+ * old cooperative scheduler it would wedge the whole machine (the clock
+ * would freeze, the shell would go dead). Under preemption the timer
+ * forcibly deschedules it every tick, so the shell stays responsive and
+ * the clock keeps ticking while this red counter climbs. */
+static void busy_task(void *arg) {
+    (void)arg;
+    volatile uint64_t spin = 0;
+    uint32_t n = 0;
+    uint32_t x = fb_width_x() - 620;
+    for (;;) {
+        /* Burn CPU with no yield. ~8M iterations ≈ a visible beat. */
+        for (uint32_t i = 0; i < 8000000; i++) spin++;
+        fb_rect_x(x - 6, 26, 150, 32, 0x1E2761u);
+        fb_put_u32_x(x, 30, n, 0xF87171u, 2);   /* red: "I never yield" */
+        n++;
+    }
+}
+
 static void cmd_ps(int argc, char **argv) {
     (void)argc; (void)argv;
     console_set_color(COL_OK);
@@ -870,6 +892,28 @@ static void cmd_spawn(int argc, char **argv) {
     console_puts(" - green counter top-right. 'kill ");
     console_put_u32((uint32_t)tid);
     console_puts("' stops it.\n");
+}
+
+static void cmd_busy(int argc, char **argv) {
+    (void)argc; (void)argv;
+    int tid = task_spawn("busy", busy_task, 0);
+    if (tid < 0) {
+        console_set_color(0xF87171u);
+        console_puts("busy: spawn failed (task table full?)\n");
+        console_set_color(COL_WHITE);
+        return;
+    }
+    console_set_color(COL_OK);
+    console_puts("spawned ");
+    console_set_color(COL_WHITE);
+    console_puts("busy spinner as tid ");
+    console_put_u32((uint32_t)tid);
+    console_puts(" - it NEVER yields (red counter).\n");
+    console_set_color(COL_MUTED);
+    console_puts("  preemption proof: shell + clock stay alive anyway. 'kill ");
+    console_put_u32((uint32_t)tid);
+    console_puts("' stops it.\n");
+    console_set_color(COL_WHITE);
 }
 
 static void cmd_kill(int argc, char **argv) {
