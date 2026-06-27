@@ -159,12 +159,17 @@ PROG_CFLAGS = -ffreestanding -fno-stack-protector -fPIE -mno-red-zone \
               -mno-mmx -mno-sse -mno-sse2 -mno-3dnow -mgeneral-regs-only \
               -fno-asynchronous-unwind-tables -fcf-protection=none \
               -nostdlib -I include
+# Default ld -pie layout (no custom script): ld emits the dynamic
+# machinery (.dynamic/.gnu.hash/.rela.dyn) itself and separates RX/RW
+# segments. A custom script that DISCARDed .hash made ld fail with
+# "could not find section .hash". --no-dynamic-linker drops .interp;
+# we relocate the image ourselves so no real dynamic linking happens.
 PROG_LDFLAGS = -nostdlib -pie -e entry -z max-page-size=0x1000 \
-               -z noexecstack --no-dynamic-linker -T progs/hello.ld
+               -z noexecstack --no-dynamic-linker
 
 # Build the sample program, gate it, and embed it as a C array. The
 # generated src/hello_elf.h is a prerequisite of fs.o (which seeds it).
-$(BUILD_DIR)/hello.elf: progs/hello.c progs/hello.ld include/astrion_abi.h
+$(BUILD_DIR)/hello.elf: progs/hello.c include/astrion_abi.h
 	@mkdir -p $(BUILD_DIR)
 	$(CC) $(PROG_CFLAGS) -c progs/hello.c -o $(BUILD_DIR)/hello.o
 	$(LD) $(PROG_LDFLAGS) -o $@ $(BUILD_DIR)/hello.o
