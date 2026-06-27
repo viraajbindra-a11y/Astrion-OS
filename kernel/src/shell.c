@@ -31,6 +31,9 @@
 #include "fs.h"
 #include "ata.h"
 #include "task.h"
+#include "kbd.h"
+#include "elf.h"
+#include "astrion_abi.h"
 
 #define COL_PROMPT 0xFF7A00u     /* Astrion orange */
 #define COL_OK     0x4ADE80u     /* green for success-ish */
@@ -107,6 +110,7 @@ static void cmd_ps(int argc, char **argv);
 static void cmd_spawn(int argc, char **argv);
 static void cmd_busy(int argc, char **argv);
 static void cmd_kill(int argc, char **argv);
+static void cmd_exec(int argc, char **argv);
 
 static const struct cmd CMDS[] = {
     { "help",    "list available commands",          cmd_help },
@@ -133,6 +137,7 @@ static const struct cmd CMDS[] = {
     { "sync",    "write all files to disk",          cmd_sync },
     { "disk",    "show ATA disk info",               cmd_disk },
     { "run",     "run a script (one cmd per line)",  cmd_run },
+    { "exec",    "exec <file.elf> - load + run an ELF program", cmd_exec },
     { "ps",      "list scheduler tasks",             cmd_ps },
     { "spawn",   "spawn ticker - background counter", cmd_spawn },
     { "busy",    "spawn a non-yielding spinner (preempt proof)", cmd_busy },
@@ -941,6 +946,131 @@ static void cmd_kill(int argc, char **argv) {
     console_set_color(COL_WHITE);
     console_puts("tid ");
     console_put_u32(tid);
+    console_putchar('\n');
+}
+
+/* ─── exec: load + run an ELF program from a file ────────────── */
+
+/* The syscall table a loaded program receives. Every field points at a
+ * kernel function with static lifetime (kernel .text), so the table is
+ * valid for as long as any program runs. A program reaches the kernel
+ * ONLY through this — it links against nothing. */
+static int sc_getkey(void) {
+    return (int)(unsigned char)kbd_getchar();   /* non-blocking; 0 if none */
+}
+static const astrion_syscalls g_syscalls = {
+    ASTRION_ABI_VERSION, 0,
+    console_puts, console_putchar, console_put_u32,
+    sc_getkey, pit_elapsed_ms, task_yield,
+};
+
+/* Heap-allocated context handed to the spawned task: where to jump, what
+ * to free when the program exits, and the name to print. */
+struct exec_ctx {
+    void    *entry;
+    uint8_t *base;
+    char     name[32];
+};
+
+/* Runs as its own task. Calls the program's entry with the syscall table,
+ * reports the exit code, then frees the image + context. The program runs
+ * preemptibly (new tasks sti on entry, lesson #201), so even an infinite
+ * loop can't wedge the shell — and 'kill <tid>' recovers it. */
+static void exec_trampoline(void *arg) {
+    struct exec_ctx *ec = (struct exec_ctx *)arg;
+    astrion_entry fn = (astrion_entry)ec->entry;
+    uint64_t rc = fn(&g_syscalls);
+
+    console_set_color(COL_OK);
+    console_puts("exec: ");
+    console_set_color(COL_WHITE);
+    console_puts(ec->name);
+    console_puts(" exited (code ");
+    console_put_u32((uint32_t)rc);
+    console_puts(")\n");
+
+    kfree(ec->base);
+    kfree(ec);
+    /* return -> task_entry_thunk calls task_exit, which reaps the stack */
+}
+
+static void cmd_exec(int argc, char **argv) {
+    if (argc < 2) {
+        console_set_color(COL_MUTED);
+        console_puts("usage: exec <file.elf>\n");
+        console_set_color(COL_WHITE);
+        return;
+    }
+    fs_node *n = fs_find(argv[1]);
+    if (!n || n->kind != FS_FILE) {
+        console_set_color(0xF87171u);
+        console_puts("exec: no such file: ");
+        console_puts(argv[1]);
+        console_putchar('\n');
+        console_set_color(COL_WHITE);
+        return;
+    }
+    uint32_t sz = n->size;
+    if (sz == 0) {
+        console_set_color(0xF87171u);
+        console_puts("exec: empty file\n");
+        console_set_color(COL_WHITE);
+        return;
+    }
+    /* Snapshot the file bytes before parsing (same guard as cmd_run): a
+     * program is data from a file node, and the loader must only ever
+     * touch our private copy — never the live FS buffer. */
+    uint8_t *buf = (uint8_t *)kmalloc(sz);
+    if (!buf) {
+        console_set_color(0xF87171u);
+        console_puts("exec: out of memory\n");
+        console_set_color(COL_WHITE);
+        return;
+    }
+    for (uint32_t i = 0; i < sz; i++) buf[i] = n->data[i];
+
+    struct elf_image img;
+    const char *err = elf_load(buf, sz, &img);
+    kfree(buf);                       /* loader copied what it needs */
+    if (err) {
+        console_set_color(0xF87171u);
+        console_puts("exec: ");
+        console_puts(err);
+        console_putchar('\n');
+        console_set_color(COL_WHITE);
+        return;
+    }
+
+    struct exec_ctx *ec = (struct exec_ctx *)kmalloc(sizeof(*ec));
+    if (!ec) {
+        kfree(img.base);
+        console_set_color(0xF87171u);
+        console_puts("exec: out of memory\n");
+        console_set_color(COL_WHITE);
+        return;
+    }
+    ec->entry = img.entry;
+    ec->base  = img.base;
+    int ni = 0;
+    for (; argv[1][ni] && ni < 31; ni++) ec->name[ni] = argv[1][ni];
+    ec->name[ni] = 0;
+
+    int tid = task_spawn(ec->name, exec_trampoline, ec);
+    if (tid < 0) {
+        kfree(img.base);
+        kfree(ec);
+        console_set_color(0xF87171u);
+        console_puts("exec: cannot spawn task\n");
+        console_set_color(COL_WHITE);
+        return;
+    }
+    console_set_color(COL_OK);
+    console_puts("exec: ");
+    console_set_color(COL_WHITE);
+    console_puts("launched ");
+    console_puts(ec->name);
+    console_puts(" as tid ");
+    console_put_u32((uint32_t)tid);
     console_putchar('\n');
 }
 

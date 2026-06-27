@@ -139,15 +139,53 @@ run-kernel: kernel
 MB2_CFLAGS = -ffreestanding -fno-stack-protector -fno-pic -mno-red-zone \
              -Wall -Wextra -O2 -mcmodel=kernel -m64 \
              -mno-mmx -mno-sse -mno-sse2 -mno-3dnow \
-             -mgeneral-regs-only
+             -mgeneral-regs-only -I include
 # 2026-05-31: -mno-sse + -mgeneral-regs-only stop gcc from emitting SSE
 # instructions for struct copies + memset. We never enable SSE in CR0/CR4,
 # so any SSE instruction would triple-fault silently. Caught when the
 # basic-meminfo tag case stopped producing serial output mid-parse —
 # gcc had inlined a struct-field write as an SSE move.
+# -I include: shared astrion_abi.h (user-program ABI) lives in include/.
 MB2_LDFLAGS = -nostdlib -T src/linker_mb2.ld -z max-page-size=4096
 
-kernel-mb2:
+# ─── User-program build (the sample ELF that `exec` loads) ──────────
+# A freestanding ELF64 PIE: mirrors the kernel's no-SSE / no-red-zone
+# flags (a stray SSE op triple-faults — lesson #196) but adds -fPIE so
+# the loader can place it at any base and fix it with R_X86_64_RELATIVE
+# relocs. NO -mcmodel=kernel (that's for the high-half kernel; user code
+# uses the default small/PIC model). -fcf-protection=none drops endbr64.
+PROG_CFLAGS = -ffreestanding -fno-stack-protector -fPIE -mno-red-zone \
+              -Wall -Wextra -O2 -m64 \
+              -mno-mmx -mno-sse -mno-sse2 -mno-3dnow -mgeneral-regs-only \
+              -fno-asynchronous-unwind-tables -fcf-protection=none \
+              -nostdlib -I include
+PROG_LDFLAGS = -nostdlib -pie -e entry -z max-page-size=0x1000 \
+               -z noexecstack --no-dynamic-linker -T progs/hello.ld
+
+# Build the sample program, gate it, and embed it as a C array. The
+# generated src/hello_elf.h is a prerequisite of fs.o (which seeds it).
+$(BUILD_DIR)/hello.elf: progs/hello.c progs/hello.ld include/astrion_abi.h
+	@mkdir -p $(BUILD_DIR)
+	$(CC) $(PROG_CFLAGS) -c progs/hello.c -o $(BUILD_DIR)/hello.o
+	$(LD) $(PROG_LDFLAGS) -o $@ $(BUILD_DIR)/hello.o
+	@echo "=== user prog gate: must be PIE (ET_DYN) ==="
+	readelf -h $@ | grep -q 'DYN' || { echo "FAIL: hello.elf is not a PIE"; exit 1; }
+	@echo "=== user prog gate: only RELATIVE/NONE relocations ==="
+	@! { readelf -r $@ 2>/dev/null | grep -E 'R_X86_64_' | grep -Ev 'R_X86_64_(RELATIVE|NONE)'; } \
+	    || { echo "FAIL: hello.elf has a non-RELATIVE reloc (symbol/GOT/PLT)"; exit 1; }
+	@echo "=== user prog gate: no SSE instructions ==="
+	@! objdump -d $@ | grep -Eiq 'xmm|movaps|movups' \
+	    || { echo "FAIL: hello.elf contains SSE"; exit 1; }
+	@echo "user prog OK: $@"
+
+src/hello_elf.h: $(BUILD_DIR)/hello.elf
+	xxd -i -n hello_elf $(BUILD_DIR)/hello.elf > src/hello_elf.h
+	# xxd emits `unsigned int hello_elf_len`; the kernel reads it as a
+	# uint32 via the cast in fs.c. Make it const so it lands in .rodata.
+	sed -i.bak 's/^unsigned /static const unsigned /' src/hello_elf.h && rm -f src/hello_elf.h.bak
+	@echo "generated src/hello_elf.h"
+
+kernel-mb2: src/hello_elf.h
 	@mkdir -p $(BUILD_DIR)
 	$(CC) $(MB2_CFLAGS) -c boot/multiboot2.S -o $(BUILD_DIR)/multiboot2.o
 	$(CC) $(MB2_CFLAGS) -c src/isr.S -o $(BUILD_DIR)/isr.o
@@ -163,6 +201,7 @@ kernel-mb2:
 	$(CC) $(MB2_CFLAGS) -c src/ata.c -o $(BUILD_DIR)/ata.o
 	$(CC) $(MB2_CFLAGS) -c src/context_switch.S -o $(BUILD_DIR)/context_switch.o
 	$(CC) $(MB2_CFLAGS) -c src/task.c -o $(BUILD_DIR)/task.o
+	$(CC) $(MB2_CFLAGS) -c src/elf.c -o $(BUILD_DIR)/elf.o
 	$(CC) $(MB2_CFLAGS) -c src/kernel_mb2.c -o $(BUILD_DIR)/kernel_mb2.o
 	$(LD) $(MB2_LDFLAGS) -o $(BUILD_DIR)/kernel_mb2.elf \
 	    $(BUILD_DIR)/multiboot2.o \
@@ -179,6 +218,7 @@ kernel-mb2:
 	    $(BUILD_DIR)/ata.o \
 	    $(BUILD_DIR)/context_switch.o \
 	    $(BUILD_DIR)/task.o \
+	    $(BUILD_DIR)/elf.o \
 	    $(BUILD_DIR)/kernel_mb2.o
 	@echo "=== ELF section layout ==="
 	objdump -h $(BUILD_DIR)/kernel_mb2.elf | head -40

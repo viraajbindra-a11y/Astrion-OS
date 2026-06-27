@@ -14,3 +14,7 @@ js/apps/.synthetic-target.js
 # Kernel firmware (downloaded by kernel/scripts/get-ovmf.sh; ~4MB)
 kernel/firmware/
 kernel/build/
+
+# Generated at build time by `make` (xxd of the sample ELF). Regenerated
+# every build from progs/hello.c, so it's not committed.
+kernel/src/hello_elf.h

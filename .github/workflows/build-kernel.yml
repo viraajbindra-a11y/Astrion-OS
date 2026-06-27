@@ -22,10 +22,10 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y -qq \
-            build-essential gcc gnu-efi \
+            build-essential gcc gnu-efi binutils \
             xorriso mtools dosfstools \
             qemu-system-x86 ovmf nasm \
-            grub-pc-bin grub-common
+            grub-pc-bin grub-common xxd
 
       - name: Build Astrion OS kernel and UEFI ISO
         run: |

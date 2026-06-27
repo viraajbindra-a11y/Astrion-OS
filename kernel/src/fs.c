@@ -14,6 +14,7 @@
 #include "heap.h"
 #include "pit.h"
 #include "ata.h"
+#include "hello_elf.h"   /* generated: the embedded sample ELF, seeded as /hello.elf */
 
 static fs_node *root;
 static uint32_t node_count;
@@ -61,6 +62,14 @@ void fs_init(void) {
     fs_create("greet.sh", FS_FILE);
     const char *g = "echo hello from astrion\n";
     fs_write("greet.sh", (const uint8_t *)g, sstrlen(g));
+
+    /* Seed the sample program as a real file so `exec hello.elf` reads
+     * its bytes back out of the FS (exactly like cat/run) — the embedded
+     * array is only the boot seed; cmd_exec never references it. This
+     * branch runs only when NOT disk-loaded, so a user's saved copy on
+     * disk is never clobbered. */
+    fs_create("hello.elf", FS_FILE);
+    fs_write("hello.elf", hello_elf, (uint32_t)hello_elf_len);
 }
 
 fs_node *fs_find(const char *name) {
