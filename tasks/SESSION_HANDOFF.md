@@ -384,3 +384,67 @@ in `tasks/first-*.png`, ready for the next Dad update.
 stores files, persists them across power-cycles, runs saved scripts,
 and schedules multiple tasks through real context switches. Honest
 gaps: no exec, no preemption, no network. — Claude*
+
+---
+
+## Session 2026-06-13 → 2026-06-27 — MVP COMPLETE (preemption, security, exec)
+
+Three big v2.0 milestones + a security pass. The kernel crossed the MVP
+threshold: it now does everything a minimal OS must.
+
+### Preemptive multitasking (lesson #201)
+Timer ISR calls `task_preempt()` after EOI → a task that never yields
+can't freeze the box. Heap made interrupt-safe first (cli = lock on one
+CPU). **The bug that bit:** new tasks were entered via context_switch's
+`ret` and inherited IF=0 from the switcher's cli — so a non-yielding task
+ran with interrupts off forever and couldn't be preempted. Fix: `sti` in
+`task_entry_thunk`. Found by serial instrumentation, not reasoning.
+Proof: `tasks/preemption-works-2026-06-13.png` (busy spinner climbs while
+clock + ticker + shell all stay alive). New shell cmd: `busy`.
+
+### Security + robustness audit (lesson #200, commit a80b993)
+Two parallel adversarial reviewers + manual pass = 13 real bugs fixed.
+Threat model: ring-0, no privilege to escalate, so "security" = don't
+corrupt/crash on the one untrusted input (the disk). Fixed: disk-parser
+integer overflows + partial-list, kbd ring-buffer SPSC race, run-script
+use-after-free + recursion, task stack canary, frame alignment, etc.
+Proof a hostile disk (node_count=0xFFFFFFFF) is rejected cleanly:
+`tasks/security-hostile-disk-rejected-2026-06-10.png`.
+
+### exec — real ELF64 PIE loader (lesson #202, commits 406f9f5→0d65217)
+The last MVP gap. 3-way design judge-panel workflow → real ELF64 PIE
+loader (`src/elf.c`) running programs from files as preemptible tasks.
+Syscall-table ABI in `include/astrion_abi.h`; sample `progs/hello.c`
+compiled in CI with gates (PIE / RELATIVE-only relocs / no-SSE), seeded
+as `/hello.elf`; `exec <file>` shell command. **Adversarial review caught
+3 HIGH bugs** — `a + b > cap` wrap checks (incl. an arbitrary-write via
+`r_offset + 8`), all rewritten `a > cap - b`. Proof:
+`tasks/exec-elf-works-2026-06-27.png` (13.5KB ELF loaded + run + exit 0,
+clock ticking) and `tasks/exec-elf-rejects-malformed-2026-06-27.png`
+(garbage ELF → "too small", kernel survives).
+
+### MVP checklist — DONE
+- [x] memory allocator (heap, interrupt-locked)
+- [x] filesystem (RAM + ATA disk persistence)
+- [x] disk persistence (proven two-boot)
+- [x] scriptable shell (run + > redirect)
+- [x] preemptive multitasking
+- [x] exec (run a program loaded from a file)
+
+Post-MVP gaps (honest): no ring-3/userspace isolation (all ring 0, single
+RWX map — the parser is the only memory boundary), no network, Rust port
+not started. CI builds both UEFI + GRUB ISOs on every push to `kernel/**`.
+
+### Next ranked (when continuing v2.0)
+1. Ring-3 / userspace + a syscall instruction (real isolation — the ELF
+   syscall TABLE is the seam, would become real syscalls).
+2. ELF symbol/GOT support (more than RELATIVE-only PIEs).
+3. A second sample program + a tiny in-kernel "compiler"/assembler, or
+   load programs from disk (write prog.elf, sync, reboot, exec).
+4. Begin the C→Rust port (kbd.c/pit.c are the smallest, most isolated).
+5. Surface Pro 6 flash (still the open hardware unblock).
+
+*The v2.0 kernel is a real MVP OS: boots, allocates, stores files that
+survive power-cycles, runs saved scripts, schedules tasks preemptively,
+and executes ELF programs loaded from files — all from code we wrote, no
+Linux underneath. — Claude, 2026-06-27*
