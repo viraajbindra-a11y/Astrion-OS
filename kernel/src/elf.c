@@ -114,8 +114,12 @@ const char *elf_load(const uint8_t *buf, uint32_t len, struct elf_image *out) {
 
     /* 4. program-header table within the file */
     if (eh.e_phnum < 1 || eh.e_phnum > ELF_MAX_PHNUM) return "bad phnum";
-    uint64_t ph_end = (uint64_t)eh.e_phoff + (uint64_t)eh.e_phnum * PHENTSIZE;
-    if (eh.e_phoff < sizeof(Elf64_Ehdr) || ph_end > len) return "phnum past EOF";
+    /* Wrap-safe: e_phoff is unbounded attacker input, so check it against
+     * len BEFORE adding the table size (never `a + b > len`, which wraps). */
+    uint64_t ph_bytes = (uint64_t)eh.e_phnum * PHENTSIZE;   /* <= 16*56 */
+    if (eh.e_phoff < sizeof(Elf64_Ehdr) ||
+        eh.e_phoff > len || ph_bytes > len - eh.e_phoff)
+        return "phnum past EOF";
 
     /* ── PASS 1: validate every segment, compute image size, no writes ── */
     struct { uint64_t lo, hi; uint32_t flags; } seg[ELF_MAX_PHNUM];
@@ -135,11 +139,17 @@ const char *elf_load(const uint8_t *buf, uint32_t len, struct elf_image *out) {
             (ph.p_align > 0x200000 || (ph.p_align & (ph.p_align - 1)) != 0))
             return "bad p_align";
         if (ph.p_filesz > ph.p_memsz) return "filesz > memsz";
-        if ((uint64_t)ph.p_offset + ph.p_filesz > len) return "segment past EOF";
         if (ph.p_memsz > ELF_MAX_IMAGE) return "segment too big";
+        /* Wrap-safe file bound: p_offset is unbounded, so compare against
+         * len before adding p_filesz. */
+        if (ph.p_offset > len || ph.p_filesz > len - ph.p_offset)
+            return "segment past EOF";
+        /* Wrap-safe image bound: p_vaddr is unbounded — bound it first so
+         * (p_vaddr + p_memsz) can't wrap below ELF_MAX_IMAGE. */
+        if (ph.p_vaddr > ELF_MAX_IMAGE) return "vaddr too high";
 
         uint64_t lo = ph.p_vaddr;
-        uint64_t hi = ph.p_vaddr + ph.p_memsz;   /* p_memsz bounded above, no wrap */
+        uint64_t hi = ph.p_vaddr + ph.p_memsz;   /* both <= 4 MiB now, no wrap */
         if (hi > ELF_MAX_IMAGE) return "image too big";
 
         for (int j = 0; j < nseg; j++)           /* pairwise overlap reject */
@@ -170,8 +180,10 @@ const char *elf_load(const uint8_t *buf, uint32_t len, struct elf_image *out) {
         Elf64_Phdr ph;
         mcpy((uint8_t *)&ph, buf + eh.e_phoff + (uint64_t)i * PHENTSIZE, PHENTSIZE);
         if (ph.p_type != PT_LOAD) continue;
-        if ((uint64_t)ph.p_offset + ph.p_filesz > len ||
-            ph.p_vaddr + ph.p_memsz > image_hi) {
+        /* Re-verify wrap-safely before writing (pass-1 used the same eh
+         * stack copy, so this can't actually differ — defense in depth). */
+        if (ph.p_offset > len || ph.p_filesz > len - ph.p_offset ||
+            ph.p_vaddr > image_hi || ph.p_memsz > image_hi - ph.p_vaddr) {
             kfree(base);
             return "segment moved between passes";   /* should be impossible */
         }
@@ -181,7 +193,10 @@ const char *elf_load(const uint8_t *buf, uint32_t len, struct elf_image *out) {
 
     /* ── relocations: R_X86_64_RELATIVE only ── */
     if (have_dyn) {
-        if (dyn_vaddr + sizeof(Elf64_Dyn) > image_hi) { kfree(base); return "bad PT_DYNAMIC"; }
+        /* Wrap-safe: dyn_vaddr is the unbounded p_vaddr of PT_DYNAMIC. */
+        if (image_hi < sizeof(Elf64_Dyn) || dyn_vaddr > image_hi - sizeof(Elf64_Dyn)) {
+            kfree(base); return "bad PT_DYNAMIC";
+        }
 
         uint64_t rela = 0, relasz = 0, relaent = 0;
         uint8_t *dp = base + dyn_vaddr;
@@ -197,9 +212,15 @@ const char *elf_load(const uint8_t *buf, uint32_t len, struct elf_image *out) {
 
         if (relasz > 0) {
             if (relaent != RELAENT) { kfree(base); return "bad RELAENT"; }
+            if (relasz % RELAENT)   { kfree(base); return "bad RELASZ"; }
             uint64_t count = relasz / RELAENT;
             if (count > ELF_MAX_RELA) { kfree(base); return "too many relocs"; }
-            if (rela + count * RELAENT > image_hi) { kfree(base); return "rela table past image"; }
+            /* Wrap-safe: rela (DT_RELA, attacker-controlled) bounded first,
+             * then the table size, so `rela + count*24` can never wrap past
+             * the cap (lesson #200 — the disk parser had the same shape). */
+            if (rela > image_hi || count > (image_hi - rela) / RELAENT) {
+                kfree(base); return "rela table past image";
+            }
 
             for (uint64_t c = 0; c < count; c++) {
                 Elf64_Rela r;
@@ -207,10 +228,13 @@ const char *elf_load(const uint8_t *buf, uint32_t len, struct elf_image *out) {
                 uint32_t type = ELF64_R_TYPE(r.r_info);
                 if (type == R_X86_64_NONE) continue;
                 if (type != R_X86_64_RELATIVE) { kfree(base); return "unsupported reloc type"; }
-                if ((r.r_offset & 7) != 0 || r.r_offset + 8 > image_hi) {
+                /* Wrap-safe: r_offset is the write target; never `r_offset+8`. */
+                if ((r.r_offset & 7) != 0 || image_hi < 8 || r.r_offset > image_hi - 8) {
                     kfree(base); return "reloc offset out of range";
                 }
-                if (r.r_addend < 0 || (uint64_t)r.r_addend > image_hi) {
+                /* r_addend is the in-image value written (base+addend); must
+                 * point strictly inside the image. */
+                if (r.r_addend < 0 || (uint64_t)r.r_addend >= image_hi) {
                     kfree(base); return "reloc addend out of range";
                 }
                 uint64_t val = (uint64_t)(uintptr_t)base + (uint64_t)r.r_addend;
