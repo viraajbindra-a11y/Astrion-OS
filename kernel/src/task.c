@@ -112,25 +112,45 @@ static void reap_done(void) {
     }
 }
 
-int task_spawn(const char *name, task_fn fn, void *arg) {
+static inline uint64_t irq_save(void) {
+    uint64_t f;
+    __asm__ volatile("pushfq; pop %0; cli" : "=r"(f) :: "memory");
+    return f;
+}
+static inline void irq_restore(uint64_t f) {
+    __asm__ volatile("push %0; popfq" :: "r"(f) : "memory", "cc");
+}
+
+/* Spawn a task, optionally owning a ring-3 user-window allocation
+ * [upool_start, upool_start+upool_frames). The ENTIRE body runs with
+ * interrupts OFF: it reaps DONE slots (freeing kernel stacks + user frames)
+ * and builds the new slot field-by-field, and the shared tasks[] table is
+ * also walked by schedule() from the timer ISR. If a tick landed mid-build,
+ * the scheduler could switch into a half-initialized or just-freed slot ->
+ * kernel-stack corruption. The lock also makes the upool bookkeeping appear
+ * atomically with TASK_READY, so a ring-3 task that faults the instant it
+ * runs can't be reaped before its frames are recorded (which would leak them). */
+static int spawn_locked(const char *name, task_fn fn, void *arg,
+                        uint32_t upool_start, uint32_t upool_frames) {
+    uint64_t flags = irq_save();
     reap_done();
 
     int tid = -1;
     for (int i = 1; i < TASK_MAX; i++) {
         if (tasks[i].state == TASK_UNUSED) { tid = i; break; }
     }
-    if (tid < 0) return -1;
+    if (tid < 0) { irq_restore(flags); return -1; }
 
     uint8_t *stack = (uint8_t *)kmalloc(TASK_STACK_SIZE);
-    if (!stack) return -1;
+    if (!stack) { irq_restore(flags); return -1; }
 
     struct task *t = &tasks[tid];
     t->fn = fn;
     t->arg = arg;
     t->stack_base = stack;
     t->kstack_top = ((uint64_t)(uintptr_t)stack + TASK_STACK_SIZE) & ~0xFULL;
-    t->upool_start = 0;
-    t->upool_frames = 0;
+    t->upool_start = upool_start;
+    t->upool_frames = upool_frames;
     t->switches = 0;
     copy_name(t->name, name);
 
@@ -159,17 +179,21 @@ int task_spawn(const char *name, task_fn fn, void *arg) {
     for (int i = 0; i < 6; i++) *(--sp) = 0;           /* rbp,rbx,r12..r15 */
     t->rsp = (uint64_t)(uintptr_t)sp;
 
-    t->state = TASK_READY;
+    t->state = TASK_READY;        /* schedulable now — set LAST, fully built */
+    irq_restore(flags);
     return tid;
 }
 
-static inline uint64_t irq_save(void) {
-    uint64_t f;
-    __asm__ volatile("pushfq; pop %0; cli" : "=r"(f) :: "memory");
-    return f;
+int task_spawn(const char *name, task_fn fn, void *arg) {
+    return spawn_locked(name, fn, arg, 0, 0);
 }
-static inline void irq_restore(uint64_t f) {
-    __asm__ volatile("push %0; popfq" :: "r"(f) : "memory", "cc");
+
+/* Spawn a ring-3 task that owns user-window frames. Atomic with the spawn so
+ * the task can't run (and fault, and be reaped) before its frames are on
+ * record — otherwise an immediately-faulting program leaks its pool window. */
+int task_spawn_user(const char *name, task_fn fn, void *arg,
+                    uint32_t upool_start, uint32_t upool_frames) {
+    return spawn_locked(name, fn, arg, upool_start, upool_frames);
 }
 
 /* The actual switch. MUST run with interrupts disabled (so the timer
@@ -180,6 +204,13 @@ static inline void irq_restore(uint64_t f) {
  * preemptively (resumes into task_preempt -> irq epilogue -> iretq),
  * because the resume point travels with the saved stack. */
 static void schedule(void) {
+    /* Reclaim any DONE task here, not only at the next task_spawn(): a
+     * program that exits (or is fault-killed) and is never followed by a
+     * spawn would otherwise strand its kernel stack + user-window frames
+     * forever. schedule() always runs with IF=0, so this is safe; reap_done
+     * skips the current task, so we never free a stack we're standing on. */
+    reap_done();
+
     /* Stack-overflow guard: if the current task (other than task 0,
      * which runs on the boot stack and has no canary) has smashed the
      * canary at the low end of its stack, it has overflowed into the
@@ -250,7 +281,7 @@ int task_kill(int tid) {
     if (tid <= 0 || tid >= TASK_MAX) return -1;             /* can't kill shell */
     if (tasks[tid].state != TASK_READY &&
         tasks[tid].state != TASK_RUNNING) return -1;
-    if (tid == current_tid) { task_exit(); }                /* suicide */
+    if (tid == current_tid) { task_exit(); return 0; }      /* suicide (task_exit never returns) */
     tasks[tid].state = TASK_DONE;                           /* never scheduled again */
     return 0;
 }
@@ -268,11 +299,3 @@ int task_get_info(int idx, struct task_info *out) {
 int task_current_tid(void) { return current_tid; }
 
 const char *task_current_name(void) { return tasks[current_tid].name; }
-
-/* Record a ring-3 task's user-window allocation so reap_done() frees it
- * once the task is DONE. Called by exec right after task_spawn. */
-void task_set_upool(int tid, uint32_t start, uint32_t frames) {
-    if (tid <= 0 || tid >= TASK_MAX) return;
-    tasks[tid].upool_start  = start;
-    tasks[tid].upool_frames = frames;
-}

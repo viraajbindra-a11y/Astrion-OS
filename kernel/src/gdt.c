@@ -42,9 +42,14 @@ struct tss64 {
 
 static struct tss64 tss;
 
-/* Dedicated stack for NMI / #MC / #DF via IST1 — so those (which ignore IF)
- * never land on the half-switched user RSP in the sysret window. */
-static uint8_t ist1_stack[4096] __attribute__((aligned(16)));
+/* Dedicated stacks for NMI / #DF / #MC — so those (which ignore IF) never
+ * land on the half-switched user RSP in the sysret window. Each gets its OWN
+ * IST slot + stack because IST is not re-entrant: routing all three to one
+ * stack means a #MC during an NMI (etc.) would reload the same RSP and
+ * overwrite the first frame. */
+static uint8_t ist1_stack[4096] __attribute__((aligned(16)));   /* NMI  (vec 2)  */
+static uint8_t ist2_stack[4096] __attribute__((aligned(16)));   /* #DF  (vec 8)  */
+static uint8_t ist3_stack[4096] __attribute__((aligned(16)));   /* #MC  (vec 18) */
 
 /* Mirror of tss.rsp0 read by the syscall asm stub (syscall does NOT load
  * the TSS automatically; the stub switches stacks in software). */
@@ -76,7 +81,9 @@ void gdt_install(void) {
     set_tss_desc(5, (uint64_t)(uintptr_t)&tss, sizeof(struct tss64) - 1);
 
     tss.rsp0 = 0;                                            /* set per-task by scheduler */
-    tss.ist1 = (uint64_t)(uintptr_t)(ist1_stack + sizeof(ist1_stack));
+    tss.ist1 = (uint64_t)(uintptr_t)(ist1_stack + sizeof(ist1_stack));   /* NMI  */
+    tss.ist2 = (uint64_t)(uintptr_t)(ist2_stack + sizeof(ist2_stack));   /* #DF  */
+    tss.ist3 = (uint64_t)(uintptr_t)(ist3_stack + sizeof(ist3_stack));   /* #MC  */
     tss.iopb = sizeof(struct tss64);
     tss_kernel_rsp = 0;
 

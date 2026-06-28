@@ -56,9 +56,12 @@ syscall_entry:
     pushq scratch_user_rsp(%rip)         /* save user RSP   */
     pushq %rcx                           /* save user RIP   */
     pushq %r11                           /* save user RFLAGS */
-    pushq %rdi                           /* preserve user arg regs across the call */
-    pushq %rsi
-    pushq %rdx
+    pushq %rdi                           /* preserve user caller-saved regs across */
+    pushq %rsi                           /* the C call. The ABI promises we touch   */
+    pushq %rdx                           /* only RAX/RCX/R11; syscall_dispatch (SysV)*/
+    pushq %r8                            /* would otherwise scribble r8/r9/r10.      */
+    pushq %r9
+    pushq %r10
     sti                                  /* user context parked -> dispatch is preemptible */
 
     /* marshal SYSCALL(rax,rdi,rsi,rdx) -> C dispatch(no,a1,a2,a3 = rdi,rsi,rdx,rcx) */
@@ -69,6 +72,9 @@ syscall_entry:
     call syscall_dispatch                /* return value in rax */
 
     cli                                  /* epilogue must be atomic vs. preemption */
+    popq %r10
+    popq %r9
+    popq %r8
     popq %rdx
     popq %rsi
     popq %rdi

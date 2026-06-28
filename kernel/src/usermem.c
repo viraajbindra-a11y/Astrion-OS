@@ -59,6 +59,12 @@ int upool_alloc(uint32_t nframes) {
         while (k < nframes && !bit_get(s + k)) k++;
         if (k == nframes) {
             for (uint32_t j = 0; j < nframes; j++) bit_set(s + j);
+            /* Scrub the frames so a new program can't read a previous (maybe
+             * already-exited) program's leftover stack/bss bytes. Covers the
+             * whole allocation — image AND user-stack frames. */
+            uint8_t  *p   = user_pool + (uint64_t)s * USER_FRAME_SIZE;
+            uint64_t  end = (uint64_t)nframes * USER_FRAME_SIZE;
+            for (uint64_t b = 0; b < end; b++) p[b] = 0;
             return (int)s;
         }
         s += k + 1;   /* skip the occupied frame at s+k */

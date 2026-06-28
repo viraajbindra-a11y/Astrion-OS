@@ -34,6 +34,10 @@ typedef void (*task_fn)(void *arg);
 
 void tasks_init(void);                                  /* adopt caller as task 0 ("shell") */
 int  task_spawn(const char *name, task_fn fn, void *arg);  /* returns tid or -1 */
+/* Spawn a ring-3 task owning user-window frames [start, start+frames); the
+ * frame bookkeeping is recorded atomically with the spawn (no leak window). */
+int  task_spawn_user(const char *name, task_fn fn, void *arg,
+                     uint32_t upool_start, uint32_t upool_frames);
 void task_yield(void);                                  /* voluntary switch */
 void task_preempt(void);                                /* called by timer ISR after EOI */
 void task_exit(void);                                   /* never returns */
@@ -49,6 +53,5 @@ struct task_info {
 int task_get_info(int idx, struct task_info *out);      /* 1 if slot in use */
 int task_current_tid(void);
 const char *task_current_name(void);                    /* name of the running task */
-void task_set_upool(int tid, uint32_t start, uint32_t frames);  /* ring-3 bookkeeping */
 
 #endif

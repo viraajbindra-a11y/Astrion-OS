@@ -1057,7 +1057,12 @@ static void cmd_exec(int argc, char **argv) {
     ec->entry = entry_va;
     ec->user_stack_top = user_stack_top;
 
-    int tid = task_spawn(argv[1], exec_trampoline, ec);
+    /* Spawn with the pool frames recorded ATOMICALLY (task_spawn_user): the
+     * task must not be able to run, fault, and get reaped before its frames
+     * are on record, or they'd leak. rogue.elf faults the instant it runs, so
+     * this ordering matters. */
+    int tid = task_spawn_user(argv[1], exec_trampoline, ec,
+                              (uint32_t)start, total_frames);
     if (tid < 0) {
         upool_free((uint32_t)start, total_frames);
         kfree(ec);
@@ -1066,7 +1071,6 @@ static void cmd_exec(int argc, char **argv) {
         console_set_color(COL_WHITE);
         return;
     }
-    task_set_upool(tid, (uint32_t)start, total_frames);   /* reaped on exit */
 
     console_set_color(COL_OK);
     console_puts("exec: ");

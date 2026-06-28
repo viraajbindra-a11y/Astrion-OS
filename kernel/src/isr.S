@@ -115,6 +115,12 @@ irq_common:
     pushq %rbx
     pushq %rax
 
+    /* The SysV ABI requires DF=0 at every call site, but an interrupt from
+     * ring 3 inherits the user's RFLAGS.DF (unlike the syscall path, where
+     * FMASK clears it). A hostile ring-3 task could `std` then trigger a
+     * timer tick, making the kernel's C handlers run `rep movs/stos`
+     * backward through kernel memory. Clear DF before entering C. */
+    cld
     mov %rsp, %rdi
     call irq_handler
 
@@ -157,6 +163,9 @@ isr_common:
     pushq %rbx
     pushq %rax
 
+    /* Clear DF before C (a ring-3 fault inherits the user's RFLAGS.DF;
+     * see the matching note in irq_common). */
+    cld
     /* Pass the saved frame to the C handler. */
     mov %rsp, %rdi
     call isr_handler

@@ -92,14 +92,15 @@ void idt_install(void) {
 
     /* Vectors 48..255 left zeroed for now. */
 
-    /* NMI(2), #DF(8), #MC(18) run on a dedicated IST stack (TSS.ist1, set
+    /* NMI(2), #DF(8), #MC(18) each run on their OWN dedicated IST stack (set
      * up in gdt.c). These can fire even with IF=0, including in the
      * one-instruction syscall sysret window where RSP already points at the
      * user stack but CPL is still 0 — without an IST they'd push onto the
-     * user stack while in ring 0. IST forces a known-good kernel stack. */
+     * user stack while in ring 0. Separate slots so they can't clobber each
+     * other (IST is not re-entrant). */
     idt[2].ist  = 1;
-    idt[8].ist  = 1;
-    idt[18].ist = 1;
+    idt[8].ist  = 2;
+    idt[18].ist = 3;
 
     idtr.limit = sizeof(idt) - 1;
     idtr.base  = (uint64_t)&idt;
