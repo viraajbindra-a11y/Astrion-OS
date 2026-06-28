@@ -34,6 +34,11 @@ extern void context_switch(uint64_t *save_rsp_here, uint64_t load_rsp);
 /* Serial panic hook (kernel_mb2.c) - used if a task smashes its stack. */
 extern void serial_puts_x(const char *s);
 
+/* Ring-3 support (gdt.c / usermem.c). */
+extern void tss_set_rsp0(uint64_t rsp0);          /* per-task kernel stack for the CPU */
+extern void upool_free(uint32_t start, uint32_t frames);
+extern uint8_t stack_top[];                        /* boot stack top (multiboot2.S) */
+
 #define STACK_CANARY 0xA570CA1F5704DEADULL
 
 struct task {
@@ -42,6 +47,9 @@ struct task {
     task_fn         fn;
     void           *arg;
     uint8_t        *stack_base;   /* kmalloc'd; NULL for task 0 */
+    uint64_t        kstack_top;   /* 16-aligned top of this task's kernel stack (-> tss.rsp0) */
+    uint32_t        upool_start;  /* ring-3 user-window frames (0/0 if not a user task) */
+    uint32_t        upool_frames;
     uint64_t        switches;
     char            name[TASK_NAME_MAX + 1];
 };
@@ -61,6 +69,9 @@ void tasks_init(void) {
      * by the first context_switch away from it. */
     tasks[0].state = TASK_RUNNING;
     tasks[0].stack_base = 0;
+    tasks[0].kstack_top = (uint64_t)(uintptr_t)stack_top;   /* boot stack (ring-0 only) */
+    tasks[0].upool_start = 0;
+    tasks[0].upool_frames = 0;
     tasks[0].switches = 1;
     copy_name(tasks[0].name, "shell");
     current_tid = 0;
@@ -87,6 +98,15 @@ static void reap_done(void) {
         if (tasks[i].state == TASK_DONE && i != current_tid) {
             if (tasks[i].stack_base) kfree(tasks[i].stack_base);
             tasks[i].stack_base = 0;
+            /* A ring-3 task owns a SECOND allocation: its user-window frames
+             * (image + user stack). Free those here too — neither the normal
+             * exit (SYS_EXIT) nor the fault-kill path frees them, since both
+             * are standing on the kernel stack and just mark the task DONE. */
+            if (tasks[i].upool_frames) {
+                upool_free(tasks[i].upool_start, tasks[i].upool_frames);
+                tasks[i].upool_start = 0;
+                tasks[i].upool_frames = 0;
+            }
             tasks[i].state = TASK_UNUSED;
         }
     }
@@ -108,6 +128,9 @@ int task_spawn(const char *name, task_fn fn, void *arg) {
     t->fn = fn;
     t->arg = arg;
     t->stack_base = stack;
+    t->kstack_top = ((uint64_t)(uintptr_t)stack + TASK_STACK_SIZE) & ~0xFULL;
+    t->upool_start = 0;
+    t->upool_frames = 0;
     t->switches = 0;
     copy_name(t->name, name);
 
@@ -185,6 +208,12 @@ static void schedule(void) {
     to->state = TASK_RUNNING;
     to->switches++;
     current_tid = next;
+    /* Point the CPU at the INCOMING task's kernel stack BEFORE switching to
+     * it. When that task next faults / is preempted / syscalls FROM ring 3,
+     * the CPU loads tss.rsp0 — it must already be this task's own kernel
+     * stack, or two ring-3 tasks would trap onto one stack and corrupt each
+     * other. context_switch.S is TSS-agnostic, so this hook lives here. */
+    tss_set_rsp0(to->kstack_top);
     context_switch(&from->rsp, to->rsp);
     /* When something switches back to us, execution resumes here. */
 }
@@ -237,3 +266,13 @@ int task_get_info(int idx, struct task_info *out) {
 }
 
 int task_current_tid(void) { return current_tid; }
+
+const char *task_current_name(void) { return tasks[current_tid].name; }
+
+/* Record a ring-3 task's user-window allocation so reap_done() frees it
+ * once the task is DONE. Called by exec right after task_spawn. */
+void task_set_upool(int tid, uint32_t start, uint32_t frames) {
+    if (tid <= 0 || tid >= TASK_MAX) return;
+    tasks[tid].upool_start  = start;
+    tasks[tid].upool_frames = frames;
+}

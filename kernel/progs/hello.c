@@ -1,42 +1,39 @@
 /*
- * Astrion v2.0 — sample user program
+ * Astrion v2.0 — sample user program (RING 3)
  *
- * Compiled SEPARATELY from the kernel into a freestanding ELF64 PIE,
- * embedded into the kernel image as a byte array, and seeded into the
- * filesystem as /hello.elf at boot. `exec hello.elf` reads those bytes
- * back out of the file node, the kernel's ELF loader parses + loads +
- * relocates them, and calls entry() here as a preemptible task.
+ * Compiled separately into a freestanding ELF64 PIE, embedded in the
+ * kernel, and seeded as /hello.elf. `exec hello.elf` loads it into the
+ * US=1 user window and drops to ring 3 at _start. From there it reaches
+ * the kernel ONLY through the `syscall` instruction — it links against
+ * nothing and cannot touch kernel memory.
  *
- * This program links against NOTHING in the kernel — it reaches every
- * service through the syscall table it receives at entry. That's what
- * makes it a real loaded program and not a compiled-in function.
- *
- * Constraints (mirror the kernel): no libc, no SSE, no globals, no big
- * stack arrays. Keep it small + leaf-ish.
+ * _start is the ELF entry point (the loader jumps here). It calls entry()
+ * and then sys_exit() — a ring-3 program can't just `ret` into the void,
+ * so the exit syscall is how it hands control (and its code) back.
  */
-
 #include "astrion_abi.h"
 
-uint64_t entry(const astrion_syscalls *sys) {
-    /* Refuse to run against an ABI we don't understand. */
-    if (sys->abi_version != ASTRION_ABI_VERSION) return 1;
+static uint64_t entry(void) {
+    sys_puts("Hello from RING 3 - a real user-mode program!\n");
+    sys_puts("I run at CPL 3 and can only reach the kernel via `syscall`.\n");
 
-    sys->puts("Hello from a real ELF, loaded from /hello.elf!\n");
-    sys->puts("I am a separate program the kernel parsed + relocated.\n");
+    sys_puts("uptime when I started: ");
+    sys_put_u32((uint32_t)sys_uptime_ms());
+    sys_puts(" ms\n");
 
-    sys->puts("uptime when I started: ");
-    sys->put_u32((uint32_t)sys->uptime_ms());
-    sys->puts(" ms\n");
-
-    /* Tiny loop that yields — proves a loaded program can run cooperatively
-     * (and, since it runs as a task, is preemptible too). Counts to 5. */
+    /* Loop that yields: proves a ring-3 task is scheduled cooperatively
+     * (and, since it runs preemptibly, the timer can deschedule it too). */
     for (uint32_t i = 1; i <= 5; i++) {
-        sys->puts("  tick ");
-        sys->put_u32(i);
-        sys->putchar('\n');
-        sys->yield();
+        sys_puts("  tick ");
+        sys_put_u32(i);
+        sys_putchar('\n');
+        sys_yield();
     }
 
-    sys->puts("goodbye.\n");
-    return 0;   /* exit code, surfaced by the shell */
+    sys_puts("goodbye from ring 3.\n");
+    return 0;
+}
+
+void _start(void) {
+    sys_exit(entry());
 }

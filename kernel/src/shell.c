@@ -33,7 +33,7 @@
 #include "task.h"
 #include "kbd.h"
 #include "elf.h"
-#include "astrion_abi.h"
+#include "usermem.h"
 
 #define COL_PROMPT 0xFF7A00u     /* Astrion orange */
 #define COL_OK     0x4ADE80u     /* green for success-ish */
@@ -949,49 +949,34 @@ static void cmd_kill(int argc, char **argv) {
     console_putchar('\n');
 }
 
-/* ─── exec: load + run an ELF program from a file ────────────── */
+/* ─── exec: load + run an ELF program in RING 3 ──────────────────
+ *
+ * The program is loaded into the US=1 user window (usermem.c), relocated to
+ * run at its user virtual address, and started in ring 3 via enter_user().
+ * From there it reaches the kernel ONLY through the `syscall` instruction
+ * (syscall.c) — it cannot touch kernel memory, and any attempt (or a
+ * privileged instruction, or a wild pointer) traps and kills just the task,
+ * not the kernel. It runs preemptibly, so even an infinite loop can't wedge
+ * the shell; 'kill <tid>' recovers it.
+ */
+extern void enter_user(uint64_t rip, uint64_t user_stack_top);  /* usermode.S — never returns */
 
-/* The syscall table a loaded program receives. Every field points at a
- * kernel function with static lifetime (kernel .text), so the table is
- * valid for as long as any program runs. A program reaches the kernel
- * ONLY through this — it links against nothing. */
-static int sc_getkey(void) {
-    return (int)(unsigned char)kbd_getchar();   /* non-blocking; 0 if none */
-}
-static const astrion_syscalls g_syscalls = {
-    ASTRION_ABI_VERSION, 0,
-    console_puts, console_putchar, console_put_u32,
-    sc_getkey, pit_elapsed_ms, task_yield,
-};
+#define USER_STACK_FRAMES 4   /* 16 KiB ring-3 stack */
 
-/* Heap-allocated context handed to the spawned task: where to jump, what
- * to free when the program exits, and the name to print. */
+/* Heap context handed to the spawned task: where to enter ring 3 and the
+ * top of its user stack. Freed before the trampoline drops to ring 3 (it
+ * never returns), so it can't leak. */
 struct exec_ctx {
-    void    *entry;
-    uint8_t *base;
-    char     name[32];
+    uint64_t entry;            /* user VA of the program entry point */
+    uint64_t user_stack_top;   /* user VA, 16-aligned */
 };
 
-/* Runs as its own task. Calls the program's entry with the syscall table,
- * reports the exit code, then frees the image + context. The program runs
- * preemptibly (new tasks sti on entry, lesson #201), so even an infinite
- * loop can't wedge the shell — and 'kill <tid>' recovers it. */
 static void exec_trampoline(void *arg) {
     struct exec_ctx *ec = (struct exec_ctx *)arg;
-    astrion_entry fn = (astrion_entry)ec->entry;
-    uint64_t rc = fn(&g_syscalls);
-
-    console_set_color(COL_OK);
-    console_puts("exec: ");
-    console_set_color(COL_WHITE);
-    console_puts(ec->name);
-    console_puts(" exited (code ");
-    console_put_u32((uint32_t)rc);
-    console_puts(")\n");
-
-    kfree(ec->base);
-    kfree(ec);
-    /* return -> task_entry_thunk calls task_exit, which reaps the stack */
+    uint64_t entry = ec->entry;
+    uint64_t ustk  = ec->user_stack_top;
+    kfree(ec);                 /* done with it; enter_user never returns */
+    enter_user(entry, ustk);   /* iretq to CPL 3 */
 }
 
 static void cmd_exec(int argc, char **argv) {
@@ -1029,49 +1014,76 @@ static void cmd_exec(int argc, char **argv) {
     }
     for (uint32_t i = 0; i < sz; i++) buf[i] = n->data[i];
 
-    struct elf_image img;
-    const char *err = elf_load(buf, sz, &img);
-    kfree(buf);                       /* loader copied what it needs */
-    if (err) {
+    /* Size the image, then reserve user-window frames for image + stack. */
+    uint64_t span = 0;
+    const char *err = elf_probe(buf, sz, &span);
+    if (err) { kfree(buf); goto fail_msg; }
+
+    uint32_t image_frames = (uint32_t)((span + USER_FRAME_SIZE - 1) / USER_FRAME_SIZE);
+    uint32_t total_frames = image_frames + USER_STACK_FRAMES;
+    int start = upool_alloc(total_frames);
+    if (start < 0) {
+        kfree(buf);
         console_set_color(0xF87171u);
-        console_puts("exec: ");
-        console_puts(err);
-        console_putchar('\n');
+        console_puts("exec: user memory full\n");
         console_set_color(COL_WHITE);
         return;
     }
 
+    /* Load through the kernel (identity) pointer, but relocate to run at the
+     * ring-3 virtual address. The user stack sits in the frames above the
+     * image; its top is frame-aligned (= 16-aligned, as SysV wants at entry). */
+    uint8_t *dst       = upool_kptr((uint32_t)start);
+    uint64_t link_base = upool_uva((uint32_t)start);
+    uint64_t entry_va  = 0;
+    err = elf_load_at(buf, sz, dst, (uint64_t)image_frames * USER_FRAME_SIZE,
+                      link_base, &entry_va, &span);
+    kfree(buf);
+    if (err) { upool_free((uint32_t)start, total_frames); goto fail_msg; }
+
+    /* Initial user RSP. _start is a GCC-compiled function, so it expects the
+     * post-`call` alignment rsp ≡ 8 (mod 16); the frame top is 16-aligned, so
+     * bias by 8 (same reasoning as the task-stack fabrication in task.c). */
+    uint64_t user_stack_top = upool_uva((uint32_t)start + total_frames) - 8;
+
     struct exec_ctx *ec = (struct exec_ctx *)kmalloc(sizeof(*ec));
     if (!ec) {
-        kfree(img.base);
+        upool_free((uint32_t)start, total_frames);
         console_set_color(0xF87171u);
         console_puts("exec: out of memory\n");
         console_set_color(COL_WHITE);
         return;
     }
-    ec->entry = img.entry;
-    ec->base  = img.base;
-    int ni = 0;
-    for (; argv[1][ni] && ni < 31; ni++) ec->name[ni] = argv[1][ni];
-    ec->name[ni] = 0;
+    ec->entry = entry_va;
+    ec->user_stack_top = user_stack_top;
 
-    int tid = task_spawn(ec->name, exec_trampoline, ec);
+    int tid = task_spawn(argv[1], exec_trampoline, ec);
     if (tid < 0) {
-        kfree(img.base);
+        upool_free((uint32_t)start, total_frames);
         kfree(ec);
         console_set_color(0xF87171u);
         console_puts("exec: cannot spawn task\n");
         console_set_color(COL_WHITE);
         return;
     }
+    task_set_upool(tid, (uint32_t)start, total_frames);   /* reaped on exit */
+
     console_set_color(COL_OK);
     console_puts("exec: ");
     console_set_color(COL_WHITE);
     console_puts("launched ");
-    console_puts(ec->name);
-    console_puts(" as tid ");
+    console_puts(argv[1]);
+    console_puts(" in ring 3 as tid ");
     console_put_u32((uint32_t)tid);
     console_putchar('\n');
+    return;
+
+fail_msg:
+    console_set_color(0xF87171u);
+    console_puts("exec: ");
+    console_puts(err);
+    console_putchar('\n');
+    console_set_color(COL_WHITE);
 }
 
 /* ─── Parser ─────────────────────────────────────────────── */

@@ -1,23 +1,18 @@
 /*
- * Astrion v2.0 — ELF64 PIE loader (hardened two-pass)
+ * Astrion v2.0 — ELF64 PIE loader (hardened two-pass; see elf.h).
  *
- * Parses a position-independent ELF64 (ET_DYN), loads its PT_LOAD
- * segments into a fresh zero-filled region, applies R_X86_64_RELATIVE
- * relocations, and returns the entry address. Everything the loader
- * reads comes from an UNTRUSTED buffer, and on this kernel a single
- * unchecked offset writes straight into kernel memory (no ring-3, no
- * paging isolation — all RAM is one RWX identity map). So every field
- * is validated:
- *   - all size math in uint64 (no uint32 wrap, lesson #200),
- *   - hard caps on file size, image size, phnum, reloc count,
- *   - two passes: validate-only, then copy (re-verifying before each write),
- *   - entry point must land inside an executable PT_LOAD,
- *   - ONLY R_X86_64_RELATIVE relocs accepted — any symbol/GOT/PLT reloc
- *     is rejected, never silently skipped,
- *   - on any failure the partial allocation is freed; no partial state
- *     escapes.
+ * Pass 1 (elf_validate) reads nothing into memory it allocates — it only
+ * validates the headers and computes the loaded image size + entry + the
+ * PT_DYNAMIC location. Pass 2 (elf_emit) zero-fills the destination, copies
+ * PT_LOAD bytes, and applies R_X86_64_RELATIVE relocations, re-checking
+ * every bound before each write. The two callers (ring-0 kernel buffer vs.
+ * ring-3 user window) share BOTH passes; only the destination pointer and
+ * the relocation base differ. One validation path = one thing to audit.
+ *
+ * Wrap-safety rule throughout: an attacker-controlled offset is bounded
+ * against the cap FIRST, then the size is compared against the remaining
+ * space (`a > cap - b`) — never `a + b > cap`, which wraps (lesson #200/#202).
  */
-
 #include <stdint.h>
 #include "elf.h"
 #include "heap.h"
@@ -90,38 +85,40 @@ static void mcpy(uint8_t *d, const uint8_t *s, uint64_t n) {
     for (uint64_t i = 0; i < n; i++) d[i] = s[i];
 }
 
-const char *elf_load(const uint8_t *buf, uint32_t len, struct elf_image *out) {
-    /* 1. size */
+/* Validated plan handed from pass 1 to pass 2. */
+struct elf_plan {
+    uint64_t image_hi;     /* loaded image size = max(p_vaddr + p_memsz) */
+    uint64_t e_entry;
+    uint64_t e_phoff;
+    uint16_t e_phnum;
+    uint64_t dyn_vaddr;
+    int      have_dyn;
+};
+
+/* ── PASS 1: validate headers + every segment, compute image size. No writes. ── */
+static const char *elf_validate(const uint8_t *buf, uint32_t len, struct elf_plan *plan) {
     if (len < sizeof(Elf64_Ehdr)) return "too small";
     if (len > ELF_MAX_FILE)       return "too large";
 
-    /* 2. magic + identity */
     if (buf[0] != 0x7f || buf[1] != 'E' || buf[2] != 'L' || buf[3] != 'F')
         return "bad magic";
     if (buf[4] != 2) return "not 64-bit";          /* EI_CLASS = ELFCLASS64 */
     if (buf[5] != 1) return "not little-endian";   /* EI_DATA  = ELFDATA2LSB */
     if (buf[6] != 1) return "bad ELF version";     /* EI_VERSION */
-    serial_puts_x("elf: magic ok\n");
 
     Elf64_Ehdr eh;
     mcpy((uint8_t *)&eh, buf, sizeof(eh));
 
-    /* 3. header semantics */
-    if (eh.e_type != ET_DYN)        return "not a PIE (need ET_DYN)";
-    if (eh.e_machine != EM_X86_64)  return "not x86-64";
+    if (eh.e_type != ET_DYN)         return "not a PIE (need ET_DYN)";
+    if (eh.e_machine != EM_X86_64)   return "not x86-64";
     if (eh.e_phentsize != PHENTSIZE) return "bad phentsize";
-    serial_puts_x("elf: type DYN ok\n");
-
-    /* 4. program-header table within the file */
     if (eh.e_phnum < 1 || eh.e_phnum > ELF_MAX_PHNUM) return "bad phnum";
-    /* Wrap-safe: e_phoff is unbounded attacker input, so check it against
-     * len BEFORE adding the table size (never `a + b > len`, which wraps). */
+
     uint64_t ph_bytes = (uint64_t)eh.e_phnum * PHENTSIZE;   /* <= 16*56 */
     if (eh.e_phoff < sizeof(Elf64_Ehdr) ||
         eh.e_phoff > len || ph_bytes > len - eh.e_phoff)
         return "phnum past EOF";
 
-    /* ── PASS 1: validate every segment, compute image size, no writes ── */
     struct { uint64_t lo, hi; uint32_t flags; } seg[ELF_MAX_PHNUM];
     int      nseg = 0;
     uint64_t image_hi = 0;
@@ -140,12 +137,8 @@ const char *elf_load(const uint8_t *buf, uint32_t len, struct elf_image *out) {
             return "bad p_align";
         if (ph.p_filesz > ph.p_memsz) return "filesz > memsz";
         if (ph.p_memsz > ELF_MAX_IMAGE) return "segment too big";
-        /* Wrap-safe file bound: p_offset is unbounded, so compare against
-         * len before adding p_filesz. */
         if (ph.p_offset > len || ph.p_filesz > len - ph.p_offset)
             return "segment past EOF";
-        /* Wrap-safe image bound: p_vaddr is unbounded — bound it first so
-         * (p_vaddr + p_memsz) can't wrap below ELF_MAX_IMAGE. */
         if (ph.p_vaddr > ELF_MAX_IMAGE) return "vaddr too high";
 
         uint64_t lo = ph.p_vaddr;
@@ -162,45 +155,50 @@ const char *elf_load(const uint8_t *buf, uint32_t len, struct elf_image *out) {
     if (nseg == 0)                  return "no loadable segments";
     if (image_hi == 0 || image_hi > ELF_MAX_IMAGE) return "bad image size";
 
-    /* entry must land inside an EXECUTABLE loaded segment */
     int entry_ok = 0;
     for (int j = 0; j < nseg; j++)
         if (eh.e_entry >= seg[j].lo && eh.e_entry < seg[j].hi && (seg[j].flags & PF_X))
             entry_ok = 1;
     if (!entry_ok) return "entry not in an executable segment";
 
-    serial_puts_x("elf: segments + entry ok\n");
+    plan->image_hi  = image_hi;
+    plan->e_entry   = eh.e_entry;
+    plan->e_phoff   = eh.e_phoff;
+    plan->e_phnum   = eh.e_phnum;
+    plan->dyn_vaddr = dyn_vaddr;
+    plan->have_dyn  = have_dyn;
+    return 0;
+}
 
-    /* ── allocate the load region (kcalloc zero-fills bss for free) ── */
-    uint8_t *base = (uint8_t *)kcalloc(1, image_hi);
-    if (!base) return "out of memory";
+/* ── PASS 2: zero dst, copy PT_LOAD bytes, apply RELATIVE relocations. ──
+ * Writes go to dst+offset (bounded by image_hi, which the caller has already
+ * confirmed fits the destination). Relocation VALUES are write_base+addend —
+ * for ring 3 that is the user virtual address, NOT the kernel pointer, or the
+ * relocated pointers would aim a ring-3 program at kernel space. */
+static const char *elf_emit(const uint8_t *buf, uint32_t len, const struct elf_plan *plan,
+                            uint8_t *dst, uint64_t write_base) {
+    uint64_t image_hi = plan->image_hi;
 
-    /* ── PASS 2: copy file bytes, re-verifying before each write ── */
-    for (uint16_t i = 0; i < eh.e_phnum; i++) {
+    for (uint64_t i = 0; i < image_hi; i++) dst[i] = 0;   /* .bss / gaps = 0 */
+
+    for (uint16_t i = 0; i < plan->e_phnum; i++) {
         Elf64_Phdr ph;
-        mcpy((uint8_t *)&ph, buf + eh.e_phoff + (uint64_t)i * PHENTSIZE, PHENTSIZE);
+        mcpy((uint8_t *)&ph, buf + plan->e_phoff + (uint64_t)i * PHENTSIZE, PHENTSIZE);
         if (ph.p_type != PT_LOAD) continue;
-        /* Re-verify wrap-safely before writing (pass-1 used the same eh
-         * stack copy, so this can't actually differ — defense in depth). */
         if (ph.p_offset > len || ph.p_filesz > len - ph.p_offset ||
-            ph.p_vaddr > image_hi || ph.p_memsz > image_hi - ph.p_vaddr) {
-            kfree(base);
+            ph.p_vaddr > image_hi || ph.p_memsz > image_hi - ph.p_vaddr)
             return "segment moved between passes";   /* should be impossible */
-        }
         if (ph.p_filesz)
-            mcpy(base + ph.p_vaddr, buf + ph.p_offset, ph.p_filesz);
+            mcpy(dst + ph.p_vaddr, buf + ph.p_offset, ph.p_filesz);
     }
 
-    /* ── relocations: R_X86_64_RELATIVE only ── */
-    if (have_dyn) {
-        /* Wrap-safe: dyn_vaddr is the unbounded p_vaddr of PT_DYNAMIC. */
-        if (image_hi < sizeof(Elf64_Dyn) || dyn_vaddr > image_hi - sizeof(Elf64_Dyn)) {
-            kfree(base); return "bad PT_DYNAMIC";
-        }
+    if (plan->have_dyn) {
+        if (image_hi < sizeof(Elf64_Dyn) || plan->dyn_vaddr > image_hi - sizeof(Elf64_Dyn))
+            return "bad PT_DYNAMIC";
 
         uint64_t rela = 0, relasz = 0, relaent = 0;
-        uint8_t *dp = base + dyn_vaddr;
-        while (dp + sizeof(Elf64_Dyn) <= base + image_hi) {
+        uint8_t *dp = dst + plan->dyn_vaddr;
+        while (dp + sizeof(Elf64_Dyn) <= dst + image_hi) {
             Elf64_Dyn d;
             mcpy((uint8_t *)&d, dp, sizeof(d));
             if (d.d_tag == DT_NULL) break;
@@ -211,42 +209,67 @@ const char *elf_load(const uint8_t *buf, uint32_t len, struct elf_image *out) {
         }
 
         if (relasz > 0) {
-            if (relaent != RELAENT) { kfree(base); return "bad RELAENT"; }
-            if (relasz % RELAENT)   { kfree(base); return "bad RELASZ"; }
+            if (relaent != RELAENT) return "bad RELAENT";
+            if (relasz % RELAENT)   return "bad RELASZ";
             uint64_t count = relasz / RELAENT;
-            if (count > ELF_MAX_RELA) { kfree(base); return "too many relocs"; }
-            /* Wrap-safe: rela (DT_RELA, attacker-controlled) bounded first,
-             * then the table size, so `rela + count*24` can never wrap past
-             * the cap (lesson #200 — the disk parser had the same shape). */
-            if (rela > image_hi || count > (image_hi - rela) / RELAENT) {
-                kfree(base); return "rela table past image";
-            }
+            if (count > ELF_MAX_RELA) return "too many relocs";
+            if (rela > image_hi || count > (image_hi - rela) / RELAENT)
+                return "rela table past image";
 
             for (uint64_t c = 0; c < count; c++) {
                 Elf64_Rela r;
-                mcpy((uint8_t *)&r, base + rela + c * RELAENT, RELAENT);
+                mcpy((uint8_t *)&r, dst + rela + c * RELAENT, RELAENT);
                 uint32_t type = ELF64_R_TYPE(r.r_info);
                 if (type == R_X86_64_NONE) continue;
-                if (type != R_X86_64_RELATIVE) { kfree(base); return "unsupported reloc type"; }
-                /* Wrap-safe: r_offset is the write target; never `r_offset+8`. */
-                if ((r.r_offset & 7) != 0 || image_hi < 8 || r.r_offset > image_hi - 8) {
-                    kfree(base); return "reloc offset out of range";
-                }
-                /* r_addend is the in-image value written (base+addend); must
-                 * point strictly inside the image. */
-                if (r.r_addend < 0 || (uint64_t)r.r_addend >= image_hi) {
-                    kfree(base); return "reloc addend out of range";
-                }
-                uint64_t val = (uint64_t)(uintptr_t)base + (uint64_t)r.r_addend;
-                mcpy(base + r.r_offset, (uint8_t *)&val, 8);
+                if (type != R_X86_64_RELATIVE) return "unsupported reloc type";
+                if ((r.r_offset & 7) != 0 || image_hi < 8 || r.r_offset > image_hi - 8)
+                    return "reloc offset out of range";
+                if (r.r_addend < 0 || (uint64_t)r.r_addend >= image_hi)
+                    return "reloc addend out of range";
+                uint64_t val = write_base + (uint64_t)r.r_addend;
+                mcpy(dst + r.r_offset, (uint8_t *)&val, 8);
             }
-            serial_puts_x("elf: relocations applied\n");
         }
     }
+    return 0;
+}
+
+const char *elf_probe(const uint8_t *buf, uint32_t len, uint64_t *span_out) {
+    struct elf_plan plan;
+    const char *e = elf_validate(buf, len, &plan);
+    if (e) return e;
+    if (span_out) *span_out = plan.image_hi;
+    return 0;
+}
+
+const char *elf_load_at(const uint8_t *buf, uint32_t len,
+                        uint8_t *dst, uint64_t dst_cap, uint64_t link_base,
+                        uint64_t *entry_out, uint64_t *span_out) {
+    struct elf_plan plan;
+    const char *e = elf_validate(buf, len, &plan);
+    if (e) return e;
+    if (plan.image_hi > dst_cap) return "image exceeds user region";
+    e = elf_emit(buf, len, &plan, dst, link_base);
+    if (e) return e;
+    if (entry_out) *entry_out = link_base + plan.e_entry;
+    if (span_out)  *span_out  = plan.image_hi;
+    serial_puts_x("elf: loaded into ring-3 window ok\n");
+    return 0;
+}
+
+const char *elf_load(const uint8_t *buf, uint32_t len, struct elf_image *out) {
+    struct elf_plan plan;
+    const char *e = elf_validate(buf, len, &plan);
+    if (e) return e;
+
+    uint8_t *base = (uint8_t *)kcalloc(1, plan.image_hi);
+    if (!base) return "out of memory";
+
+    e = elf_emit(buf, len, &plan, base, (uint64_t)(uintptr_t)base);
+    if (e) { kfree(base); return e; }
 
     out->base  = base;
-    out->span  = image_hi;
-    out->entry = (void *)(base + eh.e_entry);
-    serial_puts_x("elf: loaded ok\n");
-    return 0;   /* success */
+    out->span  = plan.image_hi;
+    out->entry = (void *)(base + plan.e_entry);
+    return 0;
 }

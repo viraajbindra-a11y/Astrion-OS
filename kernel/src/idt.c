@@ -92,6 +92,15 @@ void idt_install(void) {
 
     /* Vectors 48..255 left zeroed for now. */
 
+    /* NMI(2), #DF(8), #MC(18) run on a dedicated IST stack (TSS.ist1, set
+     * up in gdt.c). These can fire even with IF=0, including in the
+     * one-instruction syscall sysret window where RSP already points at the
+     * user stack but CPL is still 0 — without an IST they'd push onto the
+     * user stack while in ring 0. IST forces a known-good kernel stack. */
+    idt[2].ist  = 1;
+    idt[8].ist  = 1;
+    idt[18].ist = 1;
+
     idtr.limit = sizeof(idt) - 1;
     idtr.base  = (uint64_t)&idt;
     __asm__ volatile("lidt %0" : : "m"(idtr));
@@ -219,6 +228,13 @@ extern uint32_t fb_put_u32_x(uint32_t x, uint32_t y, uint32_t v, uint32_t color,
 extern uint32_t fb_width_x(void);
 extern uint32_t fb_height_x(void);
 
+/* Ring-3 fault handling: a fault from CPL 3 kills the user task instead of
+ * panicking the kernel (console + task hooks). */
+extern void        console_puts(const char *s);
+extern void        console_set_color(uint32_t rgb);
+extern void        task_exit(void);
+extern const char *task_current_name(void);
+
 static const char *exception_name(uint32_t v) {
     static const char *names[32] = {
         "#DE divide-by-zero",     "#DB debug",              "NMI",
@@ -238,6 +254,28 @@ static const char *exception_name(uint32_t v) {
 }
 
 void isr_handler(struct registers *r) {
+    /* Did the fault come from RING 3? In long mode every interrupt pushes
+     * CS, and a user code selector has RPL 3. If so, this is a misbehaving
+     * USER program (bad pointer, privileged instruction, divide-by-zero,
+     * ...) — NOT a kernel bug. Kill that task and keep the kernel alive;
+     * this is exactly the isolation guarantee ring 3 buys us. */
+    if ((r->cs & 3) == 3) {
+        serial_puts_x("\n[ring3 fault] ");
+        serial_puts_x(exception_name((uint32_t)r->vector));
+        serial_puts_x(" from user task - killing it, kernel survives\n");
+
+        console_set_color(0xF87171u);   /* red */
+        console_puts("\n[kernel] user task '");
+        console_puts(task_current_name());
+        console_puts("' killed: ");
+        console_puts(exception_name((uint32_t)r->vector));
+        console_puts(" (ring-3 isolation held)\n");
+        console_set_color(0xFFFFFFu);
+
+        task_exit();   /* marks the task DONE, schedules away — never returns */
+        for (;;) __asm__ volatile("hlt");   /* unreachable belt-and-suspenders */
+    }
+
     /* Serial first - it works even if framebuffer is wedged. */
     serial_puts_x("\n!!! KERNEL PANIC !!!\n");
     serial_puts_x("vector  = ");

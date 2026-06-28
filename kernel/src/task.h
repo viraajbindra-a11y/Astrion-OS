@@ -48,5 +48,7 @@ struct task_info {
 };
 int task_get_info(int idx, struct task_info *out);      /* 1 if slot in use */
 int task_current_tid(void);
+const char *task_current_name(void);                    /* name of the running task */
+void task_set_upool(int tid, uint32_t start, uint32_t frames);  /* ring-3 bookkeeping */
 
 #endif

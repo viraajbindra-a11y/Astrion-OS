@@ -15,6 +15,7 @@
 #include "pit.h"
 #include "ata.h"
 #include "hello_elf.h"   /* generated: the embedded sample ELF, seeded as /hello.elf */
+#include "rogue_elf.h"   /* generated: the hostile ring-3 program, seeded as /rogue.elf */
 
 static fs_node *root;
 static uint32_t node_count;
@@ -70,6 +71,11 @@ void fs_init(void) {
      * disk is never clobbered. */
     fs_create("hello.elf", FS_FILE);
     fs_write("hello.elf", hello_elf, (uint32_t)hello_elf_len);
+
+    /* The ring-3 isolation proof: `exec rogue.elf` runs a program that tries
+     * to scribble on the kernel and gets killed for it, kernel surviving. */
+    fs_create("rogue.elf", FS_FILE);
+    fs_write("rogue.elf", rogue_elf, (uint32_t)rogue_elf_len);
 }
 
 fs_node *fs_find(const char *name) {

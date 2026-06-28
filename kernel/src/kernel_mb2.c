@@ -748,6 +748,14 @@ void kernel_mb2_main(uint32_t magic, uint64_t info_ptr) {
     fs_init();
     serial_puts("FS: ready\n");
 
+    /* GDT rebuild: replace the boot GDT (null + one ring-0 code seg) with a
+     * full set — kernel code/data, ring-3 code/data, and a TSS — so we can
+     * run user programs at CPL 3. Must precede the IDT (the IST stacks the
+     * IDT references live in the TSS) and any ring-3 entry. The kernel code
+     * selector stays 0x08, so the IDT's gates remain valid. */
+    extern void gdt_install(void);
+    gdt_install();
+
     /* IDT - any later fault should panic visibly, not silently
      * triple-fault. */
     serial_puts("IDT: installing 256-entry table (32 exceptions + 16 IRQs)...\n");
@@ -771,6 +779,14 @@ void kernel_mb2_main(uint32_t magic, uint64_t info_ptr) {
     /* PS/2 mouse on IRQ12. */
     mouse_install(boot_info.fb_width, boot_info.fb_height);
     serial_puts("MOUSE: PS/2 aux device enabled, IRQ12 unmasked\n");
+
+    /* Ring-3 plumbing: carve the US=1 user memory window, then arm the
+     * `syscall` instruction (EFER.SCE + STAR/LSTAR/FMASK). Both must be in
+     * place before the shell can `exec` a program into ring 3. */
+    extern void usermem_init(void);
+    extern void syscall_init(void);
+    usermem_init();
+    syscall_init();
 
     /* Enable interrupts. From here, kbd + PIT ISRs fire on their own. */
     __asm__ volatile("sti");

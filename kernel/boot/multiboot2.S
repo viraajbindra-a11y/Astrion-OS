@@ -69,6 +69,8 @@ multiboot_header_end:
      * which is enough to reach the QEMU framebuffer at 0xfd000000.
      * (2026-05-31: prev 1-GiB mapping caused a #PF when paint_test_pattern
      * touched fb addr; extended here.) */
+.global p4_table
+.global p3_table
 p4_table:
     .skip 4096
 p3_table:
@@ -82,9 +84,11 @@ p2_table_2:                                 /* maps 0x0_8000_0000 .. 0x0_C000_00
 p2_table_3:                                 /* maps 0x0_C000_0000 .. 0x1_0000_0000 */
     .skip 4096
 
-    /* 16 KiB stack — plenty for early boot. */
+    /* 16 KiB stack — plenty for early boot. This is task 0's (the shell's)
+     * kernel stack; .global so task.c can set tss.rsp0 for it. */
 stack_bottom:
     .skip 16384
+.global stack_top
 stack_top:
 
 

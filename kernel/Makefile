@@ -164,33 +164,38 @@ PROG_CFLAGS = -ffreestanding -fno-stack-protector -fPIE -mno-red-zone \
 # segments. A custom script that DISCARDed .hash made ld fail with
 # "could not find section .hash". --no-dynamic-linker drops .interp;
 # we relocate the image ourselves so no real dynamic linking happens.
-PROG_LDFLAGS = -nostdlib -pie -e entry -z max-page-size=0x1000 \
+PROG_LDFLAGS = -nostdlib -pie -e _start -z max-page-size=0x1000 \
                -z noexecstack --no-dynamic-linker
 
-# Build the sample program, gate it, and embed it as a C array. The
-# generated src/hello_elf.h is a prerequisite of fs.o (which seeds it).
-$(BUILD_DIR)/hello.elf: progs/hello.c include/astrion_abi.h
+# Build a user program ($1=name), gate it (PIE, RELATIVE-only relocs, no
+# SSE), and emit it. The same recipe builds hello.elf and rogue.elf — both
+# are ring-3 ELF64 PIEs the kernel loads + relocates into the user window.
+define PROG_RULE
+$(BUILD_DIR)/$(1).elf: progs/$(1).c include/astrion_abi.h
 	@mkdir -p $(BUILD_DIR)
-	$(CC) $(PROG_CFLAGS) -c progs/hello.c -o $(BUILD_DIR)/hello.o
-	$(LD) $(PROG_LDFLAGS) -o $@ $(BUILD_DIR)/hello.o
-	@echo "=== user prog gate: must be PIE (ET_DYN) ==="
-	readelf -h $@ | grep -q 'DYN' || { echo "FAIL: hello.elf is not a PIE"; exit 1; }
-	@echo "=== user prog gate: only RELATIVE/NONE relocations ==="
-	@! { readelf -r $@ 2>/dev/null | grep -E 'R_X86_64_' | grep -Ev 'R_X86_64_(RELATIVE|NONE)'; } \
-	    || { echo "FAIL: hello.elf has a non-RELATIVE reloc (symbol/GOT/PLT)"; exit 1; }
-	@echo "=== user prog gate: no SSE instructions ==="
-	@! objdump -d $@ | grep -Eiq 'xmm|movaps|movups' \
-	    || { echo "FAIL: hello.elf contains SSE"; exit 1; }
-	@echo "user prog OK: $@"
+	$$(CC) $$(PROG_CFLAGS) -c progs/$(1).c -o $(BUILD_DIR)/$(1).o
+	$$(LD) $$(PROG_LDFLAGS) -o $$@ $(BUILD_DIR)/$(1).o
+	@echo "=== user prog gate ($(1)): must be PIE (ET_DYN) ==="
+	readelf -h $$@ | grep -q 'DYN' || { echo "FAIL: $(1).elf is not a PIE"; exit 1; }
+	@echo "=== user prog gate ($(1)): only RELATIVE/NONE relocations ==="
+	@! { readelf -r $$@ 2>/dev/null | grep -E 'R_X86_64_' | grep -Ev 'R_X86_64_(RELATIVE|NONE)'; } \
+	    || { echo "FAIL: $(1).elf has a non-RELATIVE reloc (symbol/GOT/PLT)"; exit 1; }
+	@echo "=== user prog gate ($(1)): no SSE instructions ==="
+	@! objdump -d $$@ | grep -Eiq 'xmm|movaps|movups' \
+	    || { echo "FAIL: $(1).elf contains SSE"; exit 1; }
+	@echo "user prog OK: $$@"
 
-src/hello_elf.h: $(BUILD_DIR)/hello.elf
-	xxd -i -n hello_elf $(BUILD_DIR)/hello.elf > src/hello_elf.h
-	# xxd emits `unsigned int hello_elf_len`; the kernel reads it as a
-	# uint32 via the cast in fs.c. Make it const so it lands in .rodata.
-	sed -i.bak 's/^unsigned /static const unsigned /' src/hello_elf.h && rm -f src/hello_elf.h.bak
-	@echo "generated src/hello_elf.h"
+src/$(1)_elf.h: $(BUILD_DIR)/$(1).elf
+	xxd -i -n $(1)_elf $(BUILD_DIR)/$(1).elf > src/$(1)_elf.h
+	# Make the embedded array + length const so they land in .rodata.
+	sed -i.bak 's/^unsigned /static const unsigned /' src/$(1)_elf.h && rm -f src/$(1)_elf.h.bak
+	@echo "generated src/$(1)_elf.h"
+endef
 
-kernel-mb2: src/hello_elf.h
+$(eval $(call PROG_RULE,hello))
+$(eval $(call PROG_RULE,rogue))
+
+kernel-mb2: src/hello_elf.h src/rogue_elf.h
 	@mkdir -p $(BUILD_DIR)
 	$(CC) $(MB2_CFLAGS) -c boot/multiboot2.S -o $(BUILD_DIR)/multiboot2.o
 	$(CC) $(MB2_CFLAGS) -c src/isr.S -o $(BUILD_DIR)/isr.o
@@ -207,6 +212,10 @@ kernel-mb2: src/hello_elf.h
 	$(CC) $(MB2_CFLAGS) -c src/context_switch.S -o $(BUILD_DIR)/context_switch.o
 	$(CC) $(MB2_CFLAGS) -c src/task.c -o $(BUILD_DIR)/task.o
 	$(CC) $(MB2_CFLAGS) -c src/elf.c -o $(BUILD_DIR)/elf.o
+	$(CC) $(MB2_CFLAGS) -c src/gdt.c -o $(BUILD_DIR)/gdt.o
+	$(CC) $(MB2_CFLAGS) -c src/usermem.c -o $(BUILD_DIR)/usermem.o
+	$(CC) $(MB2_CFLAGS) -c src/syscall.c -o $(BUILD_DIR)/syscall.o
+	$(CC) $(MB2_CFLAGS) -c src/usermode.S -o $(BUILD_DIR)/usermode.o
 	$(CC) $(MB2_CFLAGS) -c src/kernel_mb2.c -o $(BUILD_DIR)/kernel_mb2.o
 	$(LD) $(MB2_LDFLAGS) -o $(BUILD_DIR)/kernel_mb2.elf \
 	    $(BUILD_DIR)/multiboot2.o \
@@ -224,6 +233,10 @@ kernel-mb2: src/hello_elf.h
 	    $(BUILD_DIR)/context_switch.o \
 	    $(BUILD_DIR)/task.o \
 	    $(BUILD_DIR)/elf.o \
+	    $(BUILD_DIR)/gdt.o \
+	    $(BUILD_DIR)/usermem.o \
+	    $(BUILD_DIR)/syscall.o \
+	    $(BUILD_DIR)/usermode.o \
 	    $(BUILD_DIR)/kernel_mb2.o
 	@echo "=== ELF section layout ==="
 	objdump -h $(BUILD_DIR)/kernel_mb2.elf | head -40
