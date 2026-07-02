@@ -448,3 +448,71 @@ not started. CI builds both UEFI + GRUB ISOs on every push to `kernel/**`.
 survive power-cycles, runs saved scripts, schedules tasks preemptively,
 and executes ELF programs loaded from files — all from code we wrote, no
 Linux underneath. — Claude, 2026-06-27*
+
+---
+
+## Session 2026-06-27 → 2026-07-01 — RING-3 / USERSPACE ISOLATION (post-MVP milestone #1)
+
+**The kernel got its first real privilege boundary.** Everything used to
+run in ring 0 in a single RWX address space (the parser was the only memory
+boundary). Now loaded ELF programs run in **CPL 3**, isolated from the
+kernel, reaching it ONLY through a real `syscall` instruction — and a
+hostile program that touches kernel memory is trapped by the CPU and killed
+while the kernel keeps running. This was #1 on the previous session's
+"next ranked" list.
+
+### What got built (HEAD `4ceca20`, CI-green run 28313001340)
+
+| Piece | Files |
+|-------|-------|
+| GDT rebuild + 64-bit TSS (user code/data @ DPL 3, rsp0 hook) | `src/gdt.{c,h}`, `src/usermode.S` |
+| US=1 user paging window (128 GiB VA, 2 MiB pool; id-map stays supervisor) | `src/usermem.{c,h}` |
+| syscall/sysret MSRs (SCE/STAR/LSTAR/FMASK) + entry stub + dispatch | `src/syscall.{c,h}`, `src/usermode.S` |
+| Drop-to-ring-3 (`enter_user` iretq) + syscall-number ABI + crt0 | `include/astrion_abi.h`, `progs/hello.c` |
+| Ring-3 fault → kill-task path + scheduler `rsp0` reload | `src/idt.c`, `src/task.c` |
+| The isolation proof program | `progs/rogue.c` |
+
+### Verified live in QEMU (screenshots + serial in `tasks/ring3-isolation-2026-06-27/`)
+
+- **`exec hello.elf`** → runs in CPL 3, calls `uptime`/`yield`/`puts`/`exit`
+  through real `syscall`s, prints "goodbye from ring 3", exits code 0. Clock
+  kept ticking → the kernel scheduler ran alongside the untrusted program.
+- **`exec rogue.elf`** → announces "I am ring 3, watch me scribble on the
+  kernel", writes to kernel memory at 1 MiB (US=0) → **#PF at CPL 3** →
+  `[kernel] user task 'rogue.elf' killed: #PF page fault (ring-3 isolation
+  held)`. The `astrion>` prompt survives; the next `ls` runs.
+- Serial confirms the kernel-side setup: `GDT reloaded + TSS`, `USERMEM
+  ring-3 window (US=1)`, `SYSCALL SCE on`, then the ring-3 #PF kill.
+
+### The review pattern held a THIRD time (lesson #203)
+
+Design red-team (pre-impl) flagged the substrate gaps: per-switch `rsp0`
+reload, separate IST stacks for NMI/#DF/#MC, wrap-safe user-pointer
+validation. Adversarial review (post-impl) caught two more compile-clean
+runtime bugs: the syscall stub didn't preserve r8/r9/r10 (SysV), and the
+ring-3 task recorded its user-frames AFTER becoming runnable (instant-fault
+→ leak) → made atomic under the IRQ lock (`task_spawn_user`). Same finding
+as #200 (disk) and #202 (ELF): the author who builds the mechanism can't see
+its boundary gap. All fixed in `4ceca20`.
+
+### Honest remaining gaps (post-ring-3)
+- Ring-3 tasks are isolated from the KERNEL but **not from each other**
+  (shared user window, documented in `usermem.h`). Per-process address
+  spaces (a separate PML4 per task) is the next isolation step.
+- Syscall set is 7 calls (puts/putchar/put_u32/getkey/uptime/yield/exit) —
+  no file I/O, `fork`, `mmap`, or `brk` yet. Grows as programs need it.
+- No network; Rust port not started (unchanged).
+
+### Next ranked (when continuing v2.0)
+1. Per-process address spaces (a PML4 per task) — isolate ring-3 tasks from
+   EACH OTHER, not just from the kernel. The user window is the seam.
+2. Grow the syscall set (file I/O: open/read/write/close over the FS).
+3. ELF symbol/GOT support (beyond RELATIVE-only PIEs).
+4. Load programs from disk (write prog.elf → sync → reboot → exec).
+5. Begin the C→Rust port (kbd.c/pit.c smallest, most isolated).
+6. Surface Pro 6 flash (still the open hardware unblock).
+
+*The v2.0 kernel now enforces a real CPU privilege boundary: untrusted
+programs run in ring 3, can only call the kernel through `syscall`, and get
+killed the instant they touch kernel memory — with the kernel and shell
+surviving untouched. Proven in QEMU, both directions. — Claude, 2026-07-01*
