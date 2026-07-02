@@ -20,7 +20,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 // ─── Security: rate limiter ───
 // Simple in-memory token bucket per IP. Hard cap on /api/* endpoints
@@ -1790,9 +1790,14 @@ app.post('/api/terminal/exec', async (req, res) => {
 // Spawns a real bash shell and pipes stdin/stdout over WebSocket.
 // The Terminal app connects via ws://localhost:3001
 
-const WS_PORT = 3001;
+const WS_PORT = Number(process.env.ASTRION_WS_PORT) || 3001;
 
-try {
+// The dev-preview server manager controls a single PORT; the extra terminal
+// listener on 3001 trips it. Set ASTRION_NO_TERMINAL=1 (the preview launch does)
+// to skip the terminal WS there. The real Electron build leaves it enabled.
+if (process.env.ASTRION_NO_TERMINAL) {
+  console.log('Terminal WebSocket disabled (ASTRION_NO_TERMINAL set).');
+} else try {
   // 2026-05-16: bind localhost-only by default. Was binding to all
   // interfaces (the WebSocketServer default), which on a laptop joined
   // to a WiFi means anyone on the same subnet could connect to
@@ -1802,6 +1807,17 @@ try {
   // into all-interfaces for dev / cross-machine debugging.
   const wsBindHost = process.env.ASTRION_BIND || '127.0.0.1';
   const wss = new WebSocketServer({ port: WS_PORT, host: wsBindHost });
+
+  // EADDRINUSE surfaces as an async 'error' EVENT, not a thrown exception — so the
+  // try/catch below never catches it and Node crashes the WHOLE OS server when 3001
+  // is already taken (e.g. a stale instance). The terminal is optional: log and keep
+  // serving the OS instead of dying. Override the port with ASTRION_WS_PORT if needed.
+  wss.on('error', (e) => {
+    if (e && e.code === 'EADDRINUSE')
+      console.log(`Terminal WebSocket port ${WS_PORT} already in use — terminal disabled (set ASTRION_WS_PORT to use another port).`);
+    else
+      console.log('WebSocket terminal error:', e && e.message);
+  });
 
   wss.on('connection', (ws) => {
     const shell = spawn('/bin/bash', ['-l'], {
@@ -1854,6 +1870,18 @@ try {
 // surface should only be reachable from the same machine. Set
 // ASTRION_BIND=0.0.0.0 in env to opt back in for dev / debugging.
 const apiBindHost = process.env.ASTRION_BIND || '127.0.0.1';
-app.listen(PORT, apiBindHost, () => {
+const server = app.listen(PORT, apiBindHost, () => {
   console.log(`Astrion OS server running at http://${apiBindHost}:${PORT}`);
+});
+
+// EADDRINUSE here arrives as an async 'error' EVENT (not a thrown exception), so
+// without this handler Node crashes the whole process with an unhandled-error stack
+// trace when :PORT is already taken (e.g. a duplicate launch). Report it cleanly and
+// exit non-zero so a launcher can surface a readable message instead of a crash dump.
+server.on('error', (e) => {
+  if (e && e.code === 'EADDRINUSE')
+    console.error(`Astrion OS server: port ${PORT} already in use — another instance is running. Exiting.`);
+  else
+    console.error('Astrion OS server error:', e && e.message);
+  process.exit(1);
 });
