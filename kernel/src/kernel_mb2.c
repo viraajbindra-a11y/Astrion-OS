@@ -688,8 +688,25 @@ static void clock_task(void *arg) {
 }
 
 /* Called from boot/multiboot2.S */
+/* Enable the SSE FPU so the Assistant's GPT can use hardware float. The rest
+ * of the kernel is built -mno-sse and never touches XMM; only the GPT (which
+ * runs on task 0) does. Because no other task uses XMM, its registers survive
+ * preemption without a context-switch save. Must run before any float code.
+ * (Clear CR0.EM, set CR0.MP, set CR4.OSFXSR + CR4.OSXMMEXCPT.) */
+static void enable_sse(void) {
+    uint64_t cr0, cr4;
+    __asm__ volatile("mov %%cr0, %0" : "=r"(cr0));
+    cr0 &= ~(1ULL << 2);              /* EM = 0 */
+    cr0 |=  (1ULL << 1);              /* MP = 1 */
+    __asm__ volatile("mov %0, %%cr0" :: "r"(cr0));
+    __asm__ volatile("mov %%cr4, %0" : "=r"(cr4));
+    cr4 |= (1ULL << 9) | (1ULL << 10);   /* OSFXSR | OSXMMEXCPT */
+    __asm__ volatile("mov %0, %%cr4" :: "r"(cr4));
+}
+
 void kernel_mb2_main(uint32_t magic, uint64_t info_ptr) {
     serial_init();
+    enable_sse();
     serial_puts("\n");
     serial_puts("=== Astrion v2.0 Kernel (multiboot2 path) ===\n");
     serial_puts("kernel_mb2_main reached; long-mode OK\n");

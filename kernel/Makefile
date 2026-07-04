@@ -147,8 +147,14 @@ MB2_CFLAGS = -ffreestanding -fno-stack-protector -fno-pic -mno-red-zone \
 # gcc had inlined a struct-field write as an SSE move.
 # -I include: shared astrion_abi.h (user-program ABI) lives in include/.
 MB2_LDFLAGS = -nostdlib -T src/linker_mb2.ld -z max-page-size=4096
-# libgcc provides the soft-float routines (__addsf3, __mulsf3, __divsf3, …)
-# the GPT's float math lowers to — integer-only, safe under -mno-sse.
+# The GPT (src/gpt.c) is the ONLY file that uses floating point. The rest of
+# the kernel is -mno-sse; here we allow hardware SSE/SSE2 (enabled at boot via
+# CR0/CR4) so inference uses fast hardware float instead of soft-float, and so
+# gcc can pass/return floats at all (x86-64 float ABI needs XMM). -mstackrealign
+# guards against a movaps on a not-16-aligned stack.
+GPT_CFLAGS = -ffreestanding -fno-stack-protector -fno-pic -mno-red-zone \
+             -Wall -Wextra -O2 -mcmodel=kernel -m64 \
+             -msse -msse2 -mstackrealign -I include
 LIBGCC = $(shell $(CC) -print-libgcc-file-name)
 
 # ─── User-program build (the sample ELF that `exec` loads) ──────────
@@ -208,7 +214,7 @@ kernel-mb2: src/hello_elf.h src/rogue_elf.h
 	$(CC) $(MB2_CFLAGS) -c src/console.c -o $(BUILD_DIR)/console.o
 	$(CC) $(MB2_CFLAGS) -c src/desktop.c -o $(BUILD_DIR)/desktop.o
 	$(CC) $(MB2_CFLAGS) -c src/wm.c -o $(BUILD_DIR)/wm.o
-	$(CC) $(MB2_CFLAGS) -c src/gpt.c -o $(BUILD_DIR)/gpt.o
+	$(CC) $(GPT_CFLAGS) -c src/gpt.c -o $(BUILD_DIR)/gpt.o
 	$(CC) $(MB2_CFLAGS) -c src/shell.c -o $(BUILD_DIR)/shell.o
 	$(CC) $(MB2_CFLAGS) -c src/mouse.c -o $(BUILD_DIR)/mouse.o
 	$(CC) $(MB2_CFLAGS) -c src/snake.c -o $(BUILD_DIR)/snake.o
