@@ -203,6 +203,7 @@ kernel-mb2: src/hello_elf.h src/rogue_elf.h
 	$(CC) $(MB2_CFLAGS) -c src/kbd.c -o $(BUILD_DIR)/kbd.o
 	$(CC) $(MB2_CFLAGS) -c src/pit.c -o $(BUILD_DIR)/pit.o
 	$(CC) $(MB2_CFLAGS) -c src/console.c -o $(BUILD_DIR)/console.o
+	$(CC) $(MB2_CFLAGS) -c src/desktop.c -o $(BUILD_DIR)/desktop.o
 	$(CC) $(MB2_CFLAGS) -c src/shell.c -o $(BUILD_DIR)/shell.o
 	$(CC) $(MB2_CFLAGS) -c src/mouse.c -o $(BUILD_DIR)/mouse.o
 	$(CC) $(MB2_CFLAGS) -c src/snake.c -o $(BUILD_DIR)/snake.o
@@ -224,6 +225,7 @@ kernel-mb2: src/hello_elf.h src/rogue_elf.h
 	    $(BUILD_DIR)/kbd.o \
 	    $(BUILD_DIR)/pit.o \
 	    $(BUILD_DIR)/console.o \
+	    $(BUILD_DIR)/desktop.o \
 	    $(BUILD_DIR)/shell.o \
 	    $(BUILD_DIR)/mouse.o \
 	    $(BUILD_DIR)/snake.o \

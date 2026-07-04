@@ -26,6 +26,7 @@
 #include "kbd.h"
 #include "pit.h"
 #include "console.h"
+#include "desktop.h"
 #include "shell.h"
 #include "mouse.h"
 #include "heap.h"
@@ -678,12 +679,7 @@ static void clock_task(void *arg) {
         if (now - last >= 250) {
             last = now;
             pit_format_clock(clkbuf);
-            uint32_t cw_w = (FONT_WIDTH * 2) * 8;
-            uint32_t cw_h = FONT_HEIGHT * 2 + 4;
-            uint32_t cw_x = boot_info.fb_width - cw_w - 30;
-            uint32_t cw_y = 30;
-            fb_rect(cw_x - 6, cw_y - 4, cw_w + 12, cw_h, COL_NAVY);
-            fb_puts(cw_x, cw_y, clkbuf, COL_ORANGE, 2);
+            desktop_draw_clock(clkbuf);   /* top bar, right side */
         }
         task_yield();
     }
@@ -792,14 +788,12 @@ void kernel_mb2_main(uint32_t magic, uint64_t info_ptr) {
     __asm__ volatile("sti");
     serial_puts("IF set - entering shell\n");
 
-    /* Carve out a console region below the boot info panel. Width is
-     * fb width minus 60 px margin both sides. Height runs to ~60 px
-     * before the bottom edge so the existing footer / corner marker
-     * stay visible. */
-    uint32_t cx0 = 60;
-    uint32_t cy0 = 470;
-    uint32_t cw  = boot_info.fb_width  - 120;
-    uint32_t ch  = boot_info.fb_height - cy0 - 60;
+    /* Paint the desktop (wallpaper + top bar + dock + Terminal window),
+     * then anchor the scrolling console inside the Terminal window's
+     * content rect. This replaces the old static boot-info panel. */
+    desktop_init();
+    uint32_t cx0, cy0, cw, ch;
+    desktop_terminal_rect(&cx0, &cy0, &cw, &ch);
     console_init(cx0, cy0, cw, ch);
     shell_install();
 
