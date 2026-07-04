@@ -28,6 +28,7 @@
 #include "console.h"
 #include "desktop.h"
 #include "wm.h"
+#include "gpt.h"
 #include "shell.h"
 #include "mouse.h"
 #include "heap.h"
@@ -798,6 +799,7 @@ void kernel_mb2_main(uint32_t magic, uint64_t info_ptr) {
     console_init(cx0, cy0, cw, ch);
     shell_install();
     wm_init();   /* window manager: dock apps float above the Terminal */
+    gpt_init();  /* on-device GPT (Assistant): allocate the KV-cache */
 
     /* Cooperative scheduler: adopt this context as task 0 ("shell"),
      * then move the clock repaint into its own background task. From

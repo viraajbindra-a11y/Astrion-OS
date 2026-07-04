@@ -15,6 +15,7 @@
 #include "console.h"    /* console_clear/console_puts */
 #include "snake.h"      /* snake_play */
 #include "mouse.h"      /* mouse_x/y/left_down/take_left_click/lift */
+#include "gpt.h"        /* on-device GPT for the Assistant */
 
 /* Framebuffer wrappers live in kernel_mb2.c with no header — declare them
  * here the same way console.c / mouse.c do. */
@@ -198,17 +199,59 @@ static void files_key(char c) {
     }
 }
 
-/* ─── Assistant placeholder (Tier 2 fills this in) ─── */
+/* ─── Assistant: the on-device GPT chat window ─── */
+static char     as_prompt[128];
+static int      as_plen;
+static uint32_t as_ox, as_oy;      /* streaming output cursor */
+
+static void assist_reset(void) { as_plen = 0; as_prompt[0] = 0; }
+
+static void assist_prompt_line(void) {
+    uint32_t py = cy + 60;
+    fb_rect_x(cx, py, cw, GH + 2, AC_TERM_BG);
+    fb_puts_x(cx, py, ">", AC_TEAL, 2);
+    fb_puts_x(cx + GW + 6, py, as_prompt, AC_WHITE, 2);
+    uint32_t caret = cx + GW + 6 + (uint32_t)as_plen * GW;
+    fb_rect_x(caret, py, 2, GH, AC_ORANGE);
+}
+
+/* Draw one generated char into the output area, wrapping + clipping. */
+static void assist_emit(char c) {
+    if (c == '\n') { as_ox = cx; as_oy += LINE; return; }
+    if (as_ox + GW > cx + cw) { as_ox = cx; as_oy += LINE; }
+    if (as_oy + GH > cy + ch) return;         /* full */
+    char s[2] = { c, 0 };
+    fb_puts_x(as_ox, as_oy, s, AC_WHITE, 2);
+    as_ox += GW;
+}
+
+static void assist_run(void) {
+    uint32_t oy0 = cy + 96;
+    fb_rect_x(cx, oy0, cw, (cy + ch) - oy0, AC_TERM_BG);   /* clear output */
+    as_ox = cx; as_oy = oy0;
+    mouse_lift();
+    gpt_generate(as_prompt, 220, assist_emit);
+}
+
 static void assist_draw(void) {
     fb_rect_x(cx, cy, cw, ch, AC_TERM_BG);
-    fb_puts_x(cx, cy,        "Astrion Assistant", AC_ORANGE, 3);
-    fb_puts_x(cx, cy + 60,   "On-device AI, coming online in Tier 2.", AC_WHITE, 2);
-    fb_puts_x(cx, cy + 96,   "It will understand plain-language commands", AC_MUTED, 2);
-    fb_puts_x(cx, cy + 122,  "and run real actions on the OS.", AC_MUTED, 2);
-    fb_puts_x(cx, cy + 176,  "Press ESC to close.", AC_MUTED, 2);
+    fb_puts_x(cx, cy, "Astrion Assistant", AC_ORANGE, 3);
+    fb_puts_x(cx, cy + 40, "on-device GPT  -  type a prompt, Enter generates, ESC closes",
+              AC_MUTED, 1);
+    assist_prompt_line();
 }
+
 static void assist_key(char c) {
-    if (c == 27) wm_close();
+    if (c == 27) { wm_close(); return; }
+    if (c == '\n') { if (as_plen > 0) assist_run(); return; }
+    if (c == '\b') {
+        if (as_plen > 0) { as_plen--; as_prompt[as_plen] = 0; assist_prompt_line(); }
+        return;
+    }
+    if (c >= 32 && c <= 126 && as_plen < (int)sizeof(as_prompt) - 1) {
+        as_prompt[as_plen++] = c; as_prompt[as_plen] = 0;
+        assist_prompt_line();
+    }
 }
 
 /* ─── Window chrome + lifecycle ─── */
@@ -268,6 +311,7 @@ static void open_common(enum app_kind app) {
     mouse_lift();
     save_rect(win.x, win.y, win.sw, win.sh, win.savebuf);
     win.open = 1; win.app = app;
+    if (app == APP_ASSIST) assist_reset();
     draw_frame();
     draw_content();
 }

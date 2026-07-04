@@ -147,6 +147,9 @@ MB2_CFLAGS = -ffreestanding -fno-stack-protector -fno-pic -mno-red-zone \
 # gcc had inlined a struct-field write as an SSE move.
 # -I include: shared astrion_abi.h (user-program ABI) lives in include/.
 MB2_LDFLAGS = -nostdlib -T src/linker_mb2.ld -z max-page-size=4096
+# libgcc provides the soft-float routines (__addsf3, __mulsf3, __divsf3, …)
+# the GPT's float math lowers to — integer-only, safe under -mno-sse.
+LIBGCC = $(shell $(CC) -print-libgcc-file-name)
 
 # ─── User-program build (the sample ELF that `exec` loads) ──────────
 # A freestanding ELF64 PIE: mirrors the kernel's no-SSE / no-red-zone
@@ -205,6 +208,7 @@ kernel-mb2: src/hello_elf.h src/rogue_elf.h
 	$(CC) $(MB2_CFLAGS) -c src/console.c -o $(BUILD_DIR)/console.o
 	$(CC) $(MB2_CFLAGS) -c src/desktop.c -o $(BUILD_DIR)/desktop.o
 	$(CC) $(MB2_CFLAGS) -c src/wm.c -o $(BUILD_DIR)/wm.o
+	$(CC) $(MB2_CFLAGS) -c src/gpt.c -o $(BUILD_DIR)/gpt.o
 	$(CC) $(MB2_CFLAGS) -c src/shell.c -o $(BUILD_DIR)/shell.o
 	$(CC) $(MB2_CFLAGS) -c src/mouse.c -o $(BUILD_DIR)/mouse.o
 	$(CC) $(MB2_CFLAGS) -c src/snake.c -o $(BUILD_DIR)/snake.o
@@ -228,6 +232,7 @@ kernel-mb2: src/hello_elf.h src/rogue_elf.h
 	    $(BUILD_DIR)/console.o \
 	    $(BUILD_DIR)/desktop.o \
 	    $(BUILD_DIR)/wm.o \
+	    $(BUILD_DIR)/gpt.o \
 	    $(BUILD_DIR)/shell.o \
 	    $(BUILD_DIR)/mouse.o \
 	    $(BUILD_DIR)/snake.o \
@@ -241,7 +246,8 @@ kernel-mb2: src/hello_elf.h src/rogue_elf.h
 	    $(BUILD_DIR)/usermem.o \
 	    $(BUILD_DIR)/syscall.o \
 	    $(BUILD_DIR)/usermode.o \
-	    $(BUILD_DIR)/kernel_mb2.o
+	    $(BUILD_DIR)/kernel_mb2.o \
+	    $(LIBGCC)
 	@echo "=== ELF section layout ==="
 	objdump -h $(BUILD_DIR)/kernel_mb2.elf | head -40
 	@echo "=== ELF program headers ==="
