@@ -232,6 +232,16 @@ void mouse_redraw_if_dirty(void) {
     }
 }
 
+/* Lift the cursor: restore the pixels under it and arm a fresh save+draw on
+ * the next redraw. The window manager calls this before it repaints (open /
+ * move / close a window) so the cursor's cached background can't be baked in
+ * at a stale spot and smear when the scene under it changes. */
+void mouse_lift(void) {
+    if (!first_paint) restore_bg_at(lx, ly);
+    first_paint = 1;
+    dirty = 1;
+}
+
 int mouse_x(void)          { return mx; }
 int mouse_y(void)          { return my; }
 int mouse_left_down(void)  { return btn_left; }

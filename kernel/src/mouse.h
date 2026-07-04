@@ -17,6 +17,7 @@
 
 void mouse_install(uint32_t screen_w, uint32_t screen_h);
 void mouse_redraw_if_dirty(void);   /* called from main loop */
+void mouse_lift(void);              /* restore cursor bg + force fresh redraw */
 int  mouse_x(void);
 int  mouse_y(void);
 int  mouse_left_down(void);

@@ -32,6 +32,10 @@ void desktop_terminal_rect(uint32_t *x, uint32_t *y, uint32_t *w, uint32_t *h);
 /* Draw the clock string (e.g. "12:34:56") on the right of the top bar. */
 void desktop_draw_clock(const char *hhmmss);
 
+/* Hit-test the dock; returns icon index (0=Terminal 1=Files 2=Editor
+ * 3=Snake 4=Assistant) under (x,y), or -1 if none. */
+int desktop_dock_hit(int x, int y);
+
 /* ─── Astrion palette (shared with the window manager + apps) ─── */
 #define AC_WALL_TOP  0x141A3Fu   /* wallpaper gradient top (dark navy)   */
 #define AC_WALL_BOT  0x1E2761u   /* wallpaper gradient bottom (navy)     */

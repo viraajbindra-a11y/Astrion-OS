@@ -31,6 +31,7 @@
 #include "fs.h"
 #include "ata.h"
 #include "task.h"
+#include "wm.h"
 #include "kbd.h"
 #include "elf.h"
 #include "usermem.h"
@@ -111,8 +112,14 @@ static void cmd_spawn(int argc, char **argv);
 static void cmd_busy(int argc, char **argv);
 static void cmd_kill(int argc, char **argv);
 static void cmd_exec(int argc, char **argv);
+static void cmd_files(int argc, char **argv);
+static void cmd_edit(int argc, char **argv);
+static void cmd_assistant(int argc, char **argv);
 
 static const struct cmd CMDS[] = {
+    { "files",   "open the Files browser window",    cmd_files },
+    { "edit",    "edit <file> - open the text editor", cmd_edit },
+    { "assistant","open the Assistant window",       cmd_assistant },
     { "help",    "list available commands",          cmd_help },
     { "version", "kernel + build banner",            cmd_version },
     { "clear",   "clear the console",                cmd_clear },
@@ -947,6 +954,19 @@ static void cmd_kill(int argc, char **argv) {
     console_puts("tid ");
     console_put_u32(tid);
     console_putchar('\n');
+}
+
+/* ─── window-manager app launchers ─────────────────────────────── */
+static void cmd_files(int argc, char **argv) {
+    (void)argc; (void)argv;
+    wm_open_app(1);   /* Files browser */
+}
+static void cmd_edit(int argc, char **argv) {
+    wm_open_editor(argc > 1 ? argv[1] : 0);   /* editor, optional filename */
+}
+static void cmd_assistant(int argc, char **argv) {
+    (void)argc; (void)argv;
+    wm_open_app(4);   /* Assistant (Tier 2 fills it in) */
 }
 
 /* ─── exec: load + run an ELF program in RING 3 ──────────────────

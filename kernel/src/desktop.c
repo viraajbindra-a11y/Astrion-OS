@@ -145,6 +145,24 @@ void desktop_init(void) {
 
 void desktop_repaint_chrome(void) { desktop_init(); }
 
+/* Hit-test the dock: returns the icon index (0..NICON-1) under (x,y), or -1.
+ * Mirrors draw_dock()'s layout exactly. */
+int desktop_dock_hit(int x, int y) {
+    if (!SW) return -1;
+    uint32_t dy = SH - DOCK_H;
+    if (x < 0 || y < (int)dy) return -1;
+    uint32_t total = NICON * ICON_SZ + (NICON - 1) * ICON_GAP;
+    uint32_t sx = SW / 2 - total / 2;
+    uint32_t iy = dy + 8;
+    for (uint32_t i = 0; i < NICON; i++) {
+        uint32_t ix = sx + i * (ICON_SZ + ICON_GAP);
+        if ((uint32_t)x >= ix && (uint32_t)x < ix + ICON_SZ &&
+            (uint32_t)y >= iy && (uint32_t)y < iy + ICON_SZ)
+            return (int)i;
+    }
+    return -1;
+}
+
 void desktop_terminal_rect(uint32_t *x, uint32_t *y, uint32_t *w, uint32_t *h) {
     *x = term_x; *y = term_y; *w = term_w; *h = term_h;
 }

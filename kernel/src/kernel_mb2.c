@@ -27,6 +27,7 @@
 #include "pit.h"
 #include "console.h"
 #include "desktop.h"
+#include "wm.h"
 #include "shell.h"
 #include "mouse.h"
 #include "heap.h"
@@ -796,6 +797,7 @@ void kernel_mb2_main(uint32_t magic, uint64_t info_ptr) {
     desktop_terminal_rect(&cx0, &cy0, &cw, &ch);
     console_init(cx0, cy0, cw, ch);
     shell_install();
+    wm_init();   /* window manager: dock apps float above the Terminal */
 
     /* Cooperative scheduler: adopt this context as task 0 ("shell"),
      * then move the clock repaint into its own background task. From
@@ -815,12 +817,15 @@ void kernel_mb2_main(uint32_t magic, uint64_t info_ptr) {
         while (kbd_available()) {
             char c = kbd_getchar();
             if (c) {
-                shell_on_key(c);
+                /* If an app window is open it gets the keys; otherwise the
+                 * shell does. */
+                if (!wm_handle_key(c)) shell_on_key(c);
                 serial_putc(c);
             }
         }
 
-        /* Mouse: redraw cursor if it moved. */
+        /* Mouse: dock clicks + window dragging, then repaint the cursor. */
+        wm_tick();
         mouse_redraw_if_dirty();
 
         /* Give background tasks (clock, spawned tickers, …) a slice. */

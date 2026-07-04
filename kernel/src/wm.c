@@ -1,0 +1,368 @@
+/*
+ * Astrion v2.0 — window manager + built-in apps (see wm.h).
+ *
+ * Freestanding: integer-only, no libc. Draws through the kernel_mb2.c fb_*
+ * wrappers and reads the framebuffer directly for the save/restore of the
+ * base layer under the floating window.
+ */
+#include <stdint.h>
+#include "wm.h"
+#include "desktop.h"    /* palette + desktop_dock_hit + desktop_repaint_chrome */
+#include "fb_font.h"
+#include "fs.h"
+#include "kbd.h"
+#include "heap.h"       /* kmalloc/kfree (ksize_t) */
+#include "console.h"    /* console_clear/console_puts */
+#include "snake.h"      /* snake_play */
+#include "mouse.h"      /* mouse_x/y/left_down/take_left_click/lift */
+
+/* Framebuffer wrappers live in kernel_mb2.c with no header — declare them
+ * here the same way console.c / mouse.c do. */
+extern uint64_t fb_addr_x(void);
+extern uint32_t fb_pitch_x(void);
+extern int      fb_present_x(void);
+extern uint32_t fb_width_x(void);
+extern uint32_t fb_height_x(void);
+extern void     fb_rect_x(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color);
+extern uint32_t fb_puts_x(uint32_t x, uint32_t y, const char *s, uint32_t color, int scale);
+
+/* ─── Geometry ─── */
+#define APP_W     860u
+#define APP_H     520u
+#define TITLE_H   30u
+#define PAD       12u
+#define WM_TOP    66u    /* below top bar + accent */
+#define WM_DOCK   82u    /* reserved dock height at the bottom */
+#define GW        (FONT_WIDTH  * 2)   /* content glyph cell = 16x24 */
+#define GH        (FONT_HEIGHT * 2)
+#define LINE      (GH + 2)
+
+enum app_kind { APP_NONE = 0, APP_FILES, APP_EDITOR, APP_ASSIST };
+
+static uint32_t SW, SH;
+
+/* The single floating window. */
+static struct {
+    int          open;
+    enum app_kind app;
+    uint32_t     x, y, w, h;      /* outer rect */
+    uint32_t     sw, sh;          /* saved-rect dims (incl. shadow) */
+    uint32_t    *savebuf;         /* base pixels under the window */
+} win;
+
+/* Content rect (inside the frame), recomputed on open/move. */
+static uint32_t cx, cy, cw, ch;
+
+/* Forward decls (app key handlers below close their own window on ESC). */
+static void wm_close(void);
+
+/* Drag state. */
+static int dragging, drag_ox, drag_oy, last_mx, last_my;
+
+/* ─── Small helpers ─── */
+
+static int str_len(const char *s) { int n = 0; while (s && s[n]) n++; return n; }
+static void str_copy(char *d, const char *s, int max) {
+    int i = 0; while (s && s[i] && i < max - 1) { d[i] = s[i]; i++; } d[i] = 0;
+}
+
+static void draw_border(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t c) {
+    fb_rect_x(x, y, w, 1, c); fb_rect_x(x, y + h - 1, w, 1, c);
+    fb_rect_x(x, y, 1, h, c); fb_rect_x(x + w - 1, y, 1, h, c);
+}
+
+static void save_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t *buf) {
+    if (!fb_present_x() || !buf) return;
+    volatile uint32_t *fb = (volatile uint32_t *)fb_addr_x();
+    uint32_t pitch = fb_pitch_x() / 4;
+    for (uint32_t r = 0; r < h; r++)
+        for (uint32_t c = 0; c < w; c++) {
+            uint32_t px = x + c, py = y + r, v = 0;
+            if (px < SW && py < SH) v = fb[py * pitch + px];
+            buf[r * w + c] = v;
+        }
+}
+static void restore_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t *buf) {
+    if (!fb_present_x() || !buf) return;
+    volatile uint32_t *fb = (volatile uint32_t *)fb_addr_x();
+    uint32_t pitch = fb_pitch_x() / 4;
+    for (uint32_t r = 0; r < h; r++)
+        for (uint32_t c = 0; c < w; c++) {
+            uint32_t px = x + c, py = y + r;
+            if (px < SW && py < SH) fb[py * pitch + px] = buf[r * w + c];
+        }
+}
+
+/* ─── Editor state ─── */
+static char     ed_name[64];
+static char     ed_title[80];
+static uint8_t *ed_buf;
+static uint32_t ed_len, ed_cap, ed_cursor;
+
+static void editor_open(const char *name) {
+    ed_cap = 8192;
+    ed_buf = (uint8_t *)kmalloc(ed_cap);
+    ed_len = 0; ed_cursor = 0;
+    str_copy(ed_name, (name && name[0]) ? name : "untitled.txt", sizeof(ed_name));
+    str_copy(ed_title, "Editor: ", sizeof(ed_title));
+    /* append the name to the title */
+    {
+        int t = str_len(ed_title), i = 0;
+        while (ed_name[i] && t < (int)sizeof(ed_title) - 1) ed_title[t++] = ed_name[i++];
+        ed_title[t] = 0;
+    }
+    if (!ed_buf) return;
+    fs_node *n = (name && name[0]) ? fs_find(name) : 0;
+    if (n && n->kind == FS_FILE) {
+        uint32_t k = n->size;
+        if (k > ed_cap - 1) k = ed_cap - 1;
+        for (uint32_t i = 0; i < k; i++) ed_buf[i] = n->data[i];
+        ed_len = k; ed_cursor = k;
+    }
+}
+
+static void editor_save(void) {
+    if (!ed_buf) return;
+    fs_write(ed_name, ed_buf, ed_len);
+    fs_sync();
+}
+
+static void editor_draw(void) {
+    fb_rect_x(cx, cy, cw, ch, AC_TERM_BG);
+    uint32_t gx = cx, gy = cy, caret_x = cx, caret_y = cy;
+    for (uint32_t i = 0; i <= ed_len; i++) {
+        if (i < ed_len && ed_buf[i] != '\n' && gx + GW > cx + cw) { gx = cx; gy += LINE; }
+        if (i == ed_cursor) { caret_x = gx; caret_y = gy; }
+        if (i == ed_len) break;
+        char c = ed_buf[i];
+        if (c == '\n') { gx = cx; gy += LINE; continue; }
+        if (gy + GH > cy + ch) break;
+        char s[2] = { c, 0 };
+        fb_puts_x(gx, gy, s, AC_WHITE, 2);
+        gx += GW;
+    }
+    if (caret_y + GH <= cy + ch)
+        fb_rect_x(caret_x, caret_y, 2, GH, AC_ORANGE);   /* text caret */
+}
+
+static void editor_key(char c) {
+    if (c == 27) { wm_close(); return; }   /* ESC: save + close */
+    if (c == (char)KEY_LEFT)  { if (ed_cursor > 0)      ed_cursor--; editor_draw(); return; }
+    if (c == (char)KEY_RIGHT) { if (ed_cursor < ed_len) ed_cursor++; editor_draw(); return; }
+    if (c == '\b') {
+        if (ed_cursor > 0 && ed_len > 0) {
+            for (uint32_t i = ed_cursor - 1; i < ed_len - 1; i++) ed_buf[i] = ed_buf[i + 1];
+            ed_len--; ed_cursor--;
+        }
+        editor_draw(); return;
+    }
+    if (c == '\n' || (c >= 32 && c <= 126)) {
+        if (ed_buf && ed_len + 1 < ed_cap) {
+            for (uint32_t i = ed_len; i > ed_cursor; i--) ed_buf[i] = ed_buf[i - 1];
+            ed_buf[ed_cursor] = (uint8_t)c; ed_len++; ed_cursor++;
+        }
+        editor_draw();
+    }
+}
+
+/* ─── Files state ─── */
+#define FL_MAX 64
+static char fl_names[FL_MAX][64];
+static int  fl_count, fl_sel;
+
+static void files_load(void) {
+    fl_count = 0; fl_sel = 0;
+    for (fs_node *n = fs_first(); n && fl_count < FL_MAX; n = fs_next(n)) {
+        str_copy(fl_names[fl_count], n->name, 64);
+        fl_count++;
+    }
+}
+static void files_draw(void) {
+    fb_rect_x(cx, cy, cw, ch, AC_TERM_BG);
+    fb_puts_x(cx, cy, "Files in /  (up/down, Enter opens, ESC closes)", AC_MUTED, 1);
+    uint32_t top = cy + 24;
+    for (int i = 0; i < fl_count; i++) {
+        uint32_t ry = top + (uint32_t)i * 30;
+        if (ry + 28 > cy + ch) break;
+        if (i == fl_sel) fb_rect_x(cx, ry, cw, 28, AC_PANEL);
+        fb_puts_x(cx + 8, ry + 3, fl_names[i], (i == fl_sel) ? AC_WHITE : AC_MUTED, 2);
+    }
+}
+static void files_key(char c) {
+    if (c == 27) { wm_close(); return; }
+    if (c == (char)KEY_UP)   { if (fl_sel > 0)             fl_sel--; files_draw(); return; }
+    if (c == (char)KEY_DOWN) { if (fl_sel < fl_count - 1)  fl_sel++; files_draw(); return; }
+    if (c == '\n' && fl_count > 0) {
+        char nm[64]; str_copy(nm, fl_names[fl_sel], sizeof(nm));
+        wm_open_editor(nm);
+    }
+}
+
+/* ─── Assistant placeholder (Tier 2 fills this in) ─── */
+static void assist_draw(void) {
+    fb_rect_x(cx, cy, cw, ch, AC_TERM_BG);
+    fb_puts_x(cx, cy,        "Astrion Assistant", AC_ORANGE, 3);
+    fb_puts_x(cx, cy + 60,   "On-device AI, coming online in Tier 2.", AC_WHITE, 2);
+    fb_puts_x(cx, cy + 96,   "It will understand plain-language commands", AC_MUTED, 2);
+    fb_puts_x(cx, cy + 122,  "and run real actions on the OS.", AC_MUTED, 2);
+    fb_puts_x(cx, cy + 176,  "Press ESC to close.", AC_MUTED, 2);
+}
+static void assist_key(char c) {
+    if (c == 27) wm_close();
+}
+
+/* ─── Window chrome + lifecycle ─── */
+
+static const char *title_for(enum app_kind a) {
+    switch (a) {
+        case APP_FILES:  return "Files";
+        case APP_EDITOR: return ed_title;
+        case APP_ASSIST: return "Assistant";
+        default:         return "App";
+    }
+}
+
+static void draw_frame(void) {
+    fb_rect_x(win.x + 6, win.y + 6, win.w, win.h, 0x0A0E24u);   /* shadow */
+    fb_rect_x(win.x, win.y, win.w, win.h, AC_TERM_BG);          /* body   */
+    fb_rect_x(win.x, win.y, win.w, TITLE_H, AC_PANEL);          /* title  */
+    fb_rect_x(win.x + win.w - 26, win.y + 8, 15, 15, AC_RED);   /* close  */
+    fb_puts_x(win.x + win.w - 23, win.y + 9, "x", AC_WHITE, 1);
+    fb_puts_x(win.x + 12, win.y + 8, title_for(win.app), AC_WHITE, 2);
+    draw_border(win.x, win.y, win.w, win.h, AC_BORDER);
+}
+
+static void draw_content(void) {
+    switch (win.app) {
+        case APP_EDITOR: editor_draw(); break;
+        case APP_FILES:  files_draw();  break;
+        case APP_ASSIST: assist_draw(); break;
+        default: break;
+    }
+}
+
+static void set_content_rect(void) {
+    cx = win.x + PAD; cy = win.y + TITLE_H + 10;
+    cw = win.w - 2 * PAD; ch = win.h - TITLE_H - 10 - PAD;
+}
+
+static void wm_close(void) {
+    if (!win.open) return;
+    if (win.app == APP_EDITOR) { editor_save(); if (ed_buf) { kfree(ed_buf); ed_buf = 0; } }
+    mouse_lift();
+    if (win.savebuf) {
+        restore_rect(win.x, win.y, win.sw, win.sh, win.savebuf);
+        kfree(win.savebuf); win.savebuf = 0;
+    }
+    win.open = 0; win.app = APP_NONE; dragging = 0;
+}
+
+static void open_common(enum app_kind app) {
+    if (win.open) wm_close();
+    SW = fb_width_x(); SH = fb_height_x();
+    win.w = APP_W; win.h = APP_H;
+    win.x = (SW - APP_W) / 2; win.y = WM_TOP + 4;
+    win.sw = win.w + 6; win.sh = win.h + 6;      /* include shadow */
+    win.savebuf = (uint32_t *)kmalloc(win.sw * win.sh * 4);
+    set_content_rect();
+    mouse_lift();
+    save_rect(win.x, win.y, win.sw, win.sh, win.savebuf);
+    win.open = 1; win.app = app;
+    draw_frame();
+    draw_content();
+}
+
+void wm_open_editor(const char *name) {
+    open_common(APP_NONE);          /* reserve + save base, app set below */
+    win.app = APP_EDITOR;
+    editor_open(name);
+    draw_frame();                   /* redraw title now that name is known */
+    editor_draw();
+}
+
+static void run_snake(void) {
+    if (win.open) wm_close();
+    snake_play();
+    desktop_repaint_chrome();
+    console_clear();
+    console_puts("Back from Snake. Type 'help'.\n");
+}
+
+void wm_open_app(int icon) {
+    switch (icon) {
+        case 0: wm_close();                break;   /* Terminal: dismiss overlay */
+        case 1: open_common(APP_FILES);  files_load(); files_draw(); break;
+        case 2: wm_open_editor(0);         break;
+        case 3: run_snake();               break;
+        case 4: open_common(APP_ASSIST);   break;
+        default: break;
+    }
+}
+
+/* ─── Move (drag) ─── */
+static void wm_move(int nx, int ny) {
+    if (nx < 0) nx = 0;
+    if (ny < (int)WM_TOP) ny = (int)WM_TOP;
+    if (nx + (int)win.sw > (int)SW) nx = (int)SW - (int)win.sw;
+    if (ny + (int)win.sh > (int)(SH - WM_DOCK)) ny = (int)(SH - WM_DOCK) - (int)win.sh;
+    if (nx == (int)win.x && ny == (int)win.y) return;
+    mouse_lift();
+    restore_rect(win.x, win.y, win.sw, win.sh, win.savebuf);
+    win.x = (uint32_t)nx; win.y = (uint32_t)ny;
+    set_content_rect();
+    save_rect(win.x, win.y, win.sw, win.sh, win.savebuf);
+    draw_frame();
+    draw_content();
+}
+
+/* ─── Public API ─── */
+
+void wm_init(void) {
+    SW = fb_width_x(); SH = fb_height_x();
+    win.open = 0; win.app = APP_NONE; win.savebuf = 0;
+    dragging = 0; ed_buf = 0;
+}
+
+int wm_active(void) { return win.open; }
+
+int wm_handle_key(char c) {
+    if (!win.open) return 0;
+    switch (win.app) {
+        case APP_EDITOR: editor_key(c); return 1;
+        case APP_FILES:  files_key(c);  return 1;
+        case APP_ASSIST: assist_key(c); return 1;
+        default: return 0;
+    }
+}
+
+void wm_tick(void) {
+    int mx = mouse_x(), my = mouse_y();
+    int down = mouse_left_down();
+    int click = mouse_take_left_click();
+
+    if (click) {
+        int icon = desktop_dock_hit(mx, my);
+        if (icon >= 0) { wm_open_app(icon); return; }
+        if (win.open) {
+            /* close box */
+            if (mx >= (int)(win.x + win.w - 26) && mx <= (int)(win.x + win.w - 11) &&
+                my >= (int)(win.y + 8)          && my <= (int)(win.y + 23)) {
+                wm_close(); return;
+            }
+            /* title bar → begin drag */
+            if (my >= (int)win.y && my <= (int)(win.y + TITLE_H) &&
+                mx >= (int)win.x && mx <= (int)(win.x + win.w)) {
+                dragging = 1; drag_ox = mx - (int)win.x; drag_oy = my - (int)win.y;
+                last_mx = mx; last_my = my;
+            }
+        }
+    }
+
+    if (dragging) {
+        if (!down) { dragging = 0; }
+        else if (mx != last_mx || my != last_my) {
+            wm_move(mx - drag_ox, my - drag_oy);
+            last_mx = mx; last_my = my;
+        }
+    }
+}
