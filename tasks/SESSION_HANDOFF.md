@@ -516,3 +516,65 @@ its boundary gap. All fixed in `4ceca20`.
 programs run in ring 3, can only call the kernel through `syscall`, and get
 killed the instant they touch kernel memory — with the kernel and shell
 surviving untouched. Proven in QEMU, both directions. — Claude, 2026-07-01*
+
+---
+
+## Session 2026-07-04 — MVP push: Desktop + Window manager + Apps + on-device GPT
+
+Goal (user): a demo-able July MVP of the **from-scratch kernel** (not the
+Linux desktop). Tiered plan is tasks #34–41. Progress this session:
+
+### Tier 1 — Desktop shell — DONE + QEMU-VERIFIED ✅
+- **T1.1 desktop chrome** (`fc5ba91`): wallpaper, top bar + live clock, dock,
+  Terminal window. Proof `tasks/*desktop*`.
+- **T1.2 window manager** (`59a2c99` / proof `7249c1f`, `tasks/wm-apps-2026-07-04/`):
+  one floating app window over the Terminal, title bar + close box + shadow,
+  title-bar **dragging** via save/restore of the base pixels (no back-buffer),
+  keyboard routing (open app consumes keys, else shell), dock-click launch.
+  `src/wm.c` / `wm.h`; `desktop_dock_hit()`; `mouse_lift()`.
+- **T1.3 Editor** + **T1.4 Files** (same commit, verified): Files lists `/`,
+  arrows+Enter opens a file in the Editor; Editor edits + **ESC saves to the
+  real FS** (proven: typed into `demo.txt`, `cat` printed it back, `ls` shows
+  it at 29 B). Shell launchers `files` / `edit <name>` / `assistant`.
+
+### Tier 2 — On-device GPT Assistant — BUILT + CI-GREEN + HOST-VALIDATED, ⚠ NOT visually verified
+- **A real char-level transformer runs inside the kernel** — `src/gpt.c` +
+  weights `src/gpt_weights.h` (212K params, ~830 KB f32; block 64, n_embd 64,
+  4 layers, single-head, ReLU MLP, LayerNorm; vocab 65). Trained offline in
+  pure numpy (`kernel/tools/gpt/train_gpt.py`, manual backprop **gradient-checked**)
+  on tiny-shakespeare to val ≈1.5. KV-cache → O(T)/token. Own `expf`/`sqrtf`.
+- **SSE FPU enabled at boot** (`enable_sse()` in `kernel_mb2.c`: CR0.EM=0/MP=1,
+  CR4.OSFXSR|OSXMMEXCPT) so gpt.c uses **hardware float**; only `src/gpt.c` is
+  built `-msse -msse2 -mstackrealign`, rest stays `-mno-sse`. Only task 0 uses
+  XMM, so no context-switch save needed. Commits `19bda33`, `e3c2b09` (CI green).
+- **Correctness proven on the host BEFORE boot**: `kernel/tools/gpt/host_test.c`
+  compiles the real `gpt.c` with stubbed deps + greedy-decodes; matches the
+  numpy reference **char-for-char** (`#DUKE VINCENTER:#The stand of the strange
+  of the strong of t`). The inference engine is definitely correct.
+
+### ⚠ OPEN BUG — desktop/apps don't render on the GPT build (regression)
+On `e3c2b09` in QEMU: the kernel **boots clean and the shell accepts commands**
+(serial echoes `assistant`/`ROMEO`/`ls`; reaches "TASKS: scheduler up", which is
+AFTER `desktop_init()`), but the screen shows the **pre-desktop boot screen**,
+not the windowed desktop that `7249c1f` verified. Shots in `/tmp/astrion-ai-shots`.
+Facts for the next session:
+- No back-buffer: `desktop_init()` draws straight to `boot_info.fb_addr`; it
+  runs (serial proof) yet its pixels don't appear.
+- Only runtime deltas from the working `7249c1f` are `enable_sse()` (very first
+  thing in `kernel_mb2_main`) and `gpt_init()` (kmallocs 128 KB KV-cache, AFTER
+  `desktop_init`), plus a ~830 KB bigger image + libgcc linked.
+- **Prime suspects, in order:** (1) `enable_sse()` side effect on early boot
+  render; try moving it to *after* `desktop_init`, or bisect by reverting it.
+  (2) linker/BSS layout shift from the big weights blob zeroing/moving
+  `boot_info` or desktop statics — check `objdump -h` / a fault. (3) an
+  exception during first main-loop iter (check serial for a `[ring3 fault]`/
+  panic line, and whether the clock ticks).
+- Fast repro: `gh run download <build id> --name astrion-grub-iso`; boot with
+  `-serial file` + `-monitor unix`, wait for "entering shell", screendump with
+  NO input. If boot screen → confirmed; if desktop → it was a driver/timing red
+  herring.
+
+**Everything is committed + pushed (HEAD `e3c2b09`).** Nothing lost. Next:
+root-cause the render regression (above), then finish the Assistant QEMU proof,
+then T1.5 polish → Tier 3 (per-process address spaces) → Tier 4 (real hardware).
+— Claude, 2026-07-04
