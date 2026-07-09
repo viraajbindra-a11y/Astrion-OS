@@ -81,9 +81,28 @@ static inline void irq_restore(uint64_t f) {
     __asm__ volatile("push %0; popfq" :: "r"(f) : "memory", "cc");
 }
 
+/* End of the kernel image (last section), emitted by linker_mb2.ld. The heap
+ * MUST start after this, not at a fixed address — the kernel's BSS includes a
+ * 2 MiB ring-3 user pool AND the ~830 KB GPT weights, so a hardcoded 4 MiB
+ * base collided with kernel memory once the image grew (it silently zeroed
+ * boot_info → the desktop drew nothing). Start after _kernel_end, aligned up
+ * to 2 MiB, so it can never collide again regardless of image size. */
+extern char _kernel_end[];
+
+static uint64_t g_heap_base;
+
 void heap_init(void) {
+    uint64_t end  = (uint64_t)(uintptr_t)_kernel_end;
+    g_heap_base   = (end + 0x1FFFFFULL) & ~0x1FFFFFULL;   /* align up to 2 MiB */
+
+    extern void serial_puts_x(const char *s);
+    extern void serial_put_hex64_x(uint64_t v);
+    serial_puts_x("HEAP: base after kernel end = 0x");
+    serial_put_hex64_x(g_heap_base);
+    serial_puts_x("\n");
+
     /* Place a single huge free block covering the whole heap. */
-    heap_list = (struct block *)(uintptr_t)HEAP_BASE;
+    heap_list = (struct block *)(uintptr_t)g_heap_base;
     heap_list->size  = HEAP_SIZE - HDR_SIZE;
     heap_list->magic = MAGIC_FREE;
     heap_list->flags = FLAG_FREE;

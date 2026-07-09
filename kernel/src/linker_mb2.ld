@@ -37,4 +37,10 @@ SECTIONS {
         *(COMMON)
         *(.bss*)
     }
+
+    /* End of the kernel image. heap_init() starts the heap after this so the
+     * heap never collides with kernel BSS (which holds a 2 MiB user pool and
+     * the ~830 KB GPT weights). */
+    . = ALIGN(4K);
+    _kernel_end = .;
 }
