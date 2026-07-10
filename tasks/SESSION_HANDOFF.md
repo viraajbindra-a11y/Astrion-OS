@@ -578,3 +578,23 @@ Facts for the next session:
 root-cause the render regression (above), then finish the Assistant QEMU proof,
 then T1.5 polish → Tier 3 (per-process address spaces) → Tier 4 (real hardware).
 — Claude, 2026-07-04
+
+### RESOLVED 2026-07-08 — render regression fixed, Tier 2 fully verified ✅
+The blank-desktop bug was a **heap/BSS collision** (lesson #204), not the new
+render code. `heap.c` hardcoded `HEAP_BASE = 0x400000`; the ~830 KB GPT weights
+grew the image past 4 MiB (BSS already holds a 2 MiB `user_pool`), so
+`heap_init()` overwrote `boot_info` → `desktop_init()` read `fb_width == 0` and
+drew nothing. The tell: boot screen (painted before heap_init) had correct dims,
+desktop (after) had zero. Found by reasoning — `enable_sse()` was eliminated as
+a suspect for free (it can't touch memory). **Fix (`bc44616`):** linker emits
+`_kernel_end`; heap now starts after the kernel image, aligned to 2 MiB
+(verified: `HEAP: base after kernel end = 0x600000`). Whole bug class gone.
+
+**Tier 2 now PROVEN in QEMU** (`tasks/ai-assistant-2026-07-08/`): desktop
+renders (top bar + clock + Terminal + dock), and `assistant` → type `ROMEO`
+→ Enter → the on-device GPT generates Shakespeare live
+(`: And so as the day, must brotherhood Paulina / He queen, my`), clock still
+ticking. The real neural net runs on bare metal. **Tiers 1 + 2 DONE.**
+
+Next: T1.5 visual polish → Tier 3 (per-process address spaces, ring-3 file I/O,
+page allocator) → Tier 4 (real hardware boot + MVP tag + demo deck). — Claude, 2026-07-08
