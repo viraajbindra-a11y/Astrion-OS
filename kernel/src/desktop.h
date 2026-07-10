@@ -36,6 +36,9 @@ void desktop_draw_clock(const char *hhmmss);
  * 3=Snake 4=Assistant) under (x,y), or -1 if none. */
 int desktop_dock_hit(int x, int y);
 
+/* Highlight the given dock icon as the active app (-1 = none). */
+void desktop_set_active_app(int icon);
+
 /* ─── Astrion palette (shared with the window manager + apps) ─── */
 #define AC_WALL_TOP  0x141A3Fu   /* wallpaper gradient top (dark navy)   */
 #define AC_WALL_BOT  0x1E2761u   /* wallpaper gradient bottom (navy)     */

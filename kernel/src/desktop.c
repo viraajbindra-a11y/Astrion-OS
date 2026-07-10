@@ -88,6 +88,10 @@ static const struct dock_icon g_icons[] = {
 };
 #define NICON ((uint32_t)(sizeof(g_icons) / sizeof(g_icons[0])))
 
+/* Which dock app is currently open (0..NICON-1), or -1 for none. Drives the
+ * active-icon highlight so the dock reflects what's on screen. */
+static int g_active_icon = -1;
+
 static void draw_dock(void) {
     uint32_t dy = SH - DOCK_H;
     fb_rect_x(0, dy, SW, DOCK_H, AC_BAR);
@@ -98,12 +102,25 @@ static void draw_dock(void) {
     uint32_t iy = dy + 8;
     for (uint32_t i = 0; i < NICON; i++) {
         uint32_t ix = sx + i * (ICON_SZ + ICON_GAP);
+        int active = ((int)i == g_active_icon);
+        /* Active app: orange ring behind the icon + a white label. */
+        if (active) fb_rect_x(ix - 3, iy - 3, ICON_SZ + 6, ICON_SZ + 6, AC_ORANGE);
         fb_rect_x(ix, iy, ICON_SZ, ICON_SZ, g_icons[i].color);
         char g[2] = { g_icons[i].glyph, 0 };
         fb_puts_x(ix + ICON_SZ / 2 - (FONT_WIDTH * 3) / 2,
                   iy + ICON_SZ / 2 - (FONT_HEIGHT * 3) / 2, g, AC_BAR, 3);
-        text_centered(ix + ICON_SZ / 2, iy + ICON_SZ + 5, g_icons[i].label, AC_MUTED, 1);
+        text_centered(ix + ICON_SZ / 2, iy + ICON_SZ + 5, g_icons[i].label,
+                      active ? AC_WHITE : AC_MUTED, 1);
+        /* Active app: a small dot under the label. */
+        if (active) fb_rect_x(ix + ICON_SZ / 2 - 2, iy + ICON_SZ + 18, 4, 4, AC_ORANGE);
     }
+}
+
+/* Set which dock app is highlighted (called by the window manager on open/
+ * close). -1 clears the highlight. Redraws just the dock strip. */
+void desktop_set_active_app(int icon) {
+    g_active_icon = icon;
+    draw_dock();
 }
 
 static void draw_terminal_window(void) {

@@ -236,7 +236,7 @@ static void assist_run(void) {
 static void assist_draw(void) {
     fb_rect_x(cx, cy, cw, ch, AC_TERM_BG);
     fb_puts_x(cx, cy, "Astrion Assistant", AC_ORANGE, 3);
-    fb_puts_x(cx, cy + 40, "on-device GPT  -  type a prompt, Enter generates, ESC closes",
+    fb_puts_x(cx, cy + 40, "on-device GPT  -  try:  ROMEO   or   To be   -   Enter generates, ESC closes",
               AC_MUTED, 1);
     assist_prompt_line();
 }
@@ -293,6 +293,7 @@ static void wm_close(void) {
     if (!win.open) return;
     if (win.app == APP_EDITOR) { editor_save(); if (ed_buf) { kfree(ed_buf); ed_buf = 0; } }
     mouse_lift();
+    desktop_set_active_app(-1);            /* clear dock highlight */
     if (win.savebuf) {
         restore_rect(win.x, win.y, win.sw, win.sh, win.savebuf);
         kfree(win.savebuf); win.savebuf = 0;
@@ -322,6 +323,7 @@ void wm_open_editor(const char *name) {
     editor_open(name);
     draw_frame();                   /* redraw title now that name is known */
     editor_draw();
+    desktop_set_active_app(2);      /* Editor dock icon */
 }
 
 static void run_snake(void) {
@@ -335,10 +337,11 @@ static void run_snake(void) {
 void wm_open_app(int icon) {
     switch (icon) {
         case 0: wm_close();                break;   /* Terminal: dismiss overlay */
-        case 1: open_common(APP_FILES);  files_load(); files_draw(); break;
-        case 2: wm_open_editor(0);         break;
+        case 1: open_common(APP_FILES);  files_load(); files_draw();
+                desktop_set_active_app(1); break;
+        case 2: wm_open_editor(0);         break;   /* sets its own highlight */
         case 3: run_snake();               break;
-        case 4: open_common(APP_ASSIST);   break;
+        case 4: open_common(APP_ASSIST);   desktop_set_active_app(4); break;
         default: break;
     }
 }
