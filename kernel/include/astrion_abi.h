@@ -21,7 +21,7 @@
 
 #include <stdint.h>
 
-#define ASTRION_ABI_VERSION 2u
+#define ASTRION_ABI_VERSION 3u
 
 /* Syscall numbers (RAX). */
 #define SYS_PUTS       0u   /* (const char *s)  print a NUL-terminated string */
@@ -31,6 +31,8 @@
 #define SYS_UPTIME_MS  4u   /* () -> uint64     milliseconds since boot        */
 #define SYS_YIELD      5u   /* ()               cooperatively give up the CPU  */
 #define SYS_EXIT       6u   /* (uint64 code)    terminate; never returns       */
+#define SYS_READ_FILE  7u   /* (name, buf, cap) -> int  read file into buf; -1 on error  */
+#define SYS_WRITE_FILE 8u   /* (name, buf, len) -> int  write buf to file;  -1 on error   */
 
 #ifndef ASTRION_KERNEL
 
@@ -44,6 +46,12 @@ static inline uint64_t __syscall1(uint64_t n, uint64_t a1) {
     __asm__ volatile("syscall" : "=a"(ret) : "a"(n), "D"(a1) : "rcx", "r11", "memory");
     return ret;
 }
+static inline uint64_t __syscall3(uint64_t n, uint64_t a1, uint64_t a2, uint64_t a3) {
+    uint64_t ret;
+    __asm__ volatile("syscall" : "=a"(ret)
+                     : "a"(n), "D"(a1), "S"(a2), "d"(a3) : "rcx", "r11", "memory");
+    return ret;
+}
 
 static inline void     sys_puts(const char *s)  { __syscall1(SYS_PUTS, (uint64_t)(uintptr_t)s); }
 static inline void     sys_putchar(char c)      { __syscall1(SYS_PUTCHAR, (uint64_t)(unsigned char)c); }
@@ -52,6 +60,17 @@ static inline int      sys_getkey(void)         { return (int)__syscall0(SYS_GET
 static inline uint64_t sys_uptime_ms(void)      { return __syscall0(SYS_UPTIME_MS); }
 static inline void     sys_yield(void)          { __syscall0(SYS_YIELD); }
 static inline void     sys_exit(uint64_t code)  { __syscall1(SYS_EXIT, code); for (;;) {} }
+
+/* File I/O over the kernel filesystem. Return bytes transferred, or -1.
+ * `name` and `buf` must point into the program's own memory. */
+static inline int sys_read_file(const char *name, void *buf, uint32_t cap) {
+    return (int)__syscall3(SYS_READ_FILE, (uint64_t)(uintptr_t)name,
+                           (uint64_t)(uintptr_t)buf, (uint64_t)cap);
+}
+static inline int sys_write_file(const char *name, const void *buf, uint32_t len) {
+    return (int)__syscall3(SYS_WRITE_FILE, (uint64_t)(uintptr_t)name,
+                           (uint64_t)(uintptr_t)buf, (uint64_t)len);
+}
 
 #endif /* !ASTRION_KERNEL */
 #endif /* ASTRION_ABI_H */

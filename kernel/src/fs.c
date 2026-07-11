@@ -16,6 +16,7 @@
 #include "ata.h"
 #include "hello_elf.h"   /* generated: the embedded sample ELF, seeded as /hello.elf */
 #include "rogue_elf.h"   /* generated: the hostile ring-3 program, seeded as /rogue.elf */
+#include "iodemo_elf.h"  /* generated: the ring-3 file-I/O demo, seeded as /iodemo.elf */
 
 static fs_node *root;
 static uint32_t node_count;
@@ -76,6 +77,11 @@ void fs_init(void) {
      * to scribble on the kernel and gets killed for it, kernel surviving. */
     fs_create("rogue.elf", FS_FILE);
     fs_write("rogue.elf", rogue_elf, (uint32_t)rogue_elf_len);
+
+    /* Ring-3 file I/O demo: `exec iodemo.elf` writes + reads a file from CPL 3
+     * through the read/write syscalls, then `cat ring3.txt` shows the result. */
+    fs_create("iodemo.elf", FS_FILE);
+    fs_write("iodemo.elf", iodemo_elf, (uint32_t)iodemo_elf_len);
 }
 
 fs_node *fs_find(const char *name) {

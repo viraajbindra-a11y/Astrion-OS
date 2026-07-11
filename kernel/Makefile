@@ -203,8 +203,9 @@ endef
 
 $(eval $(call PROG_RULE,hello))
 $(eval $(call PROG_RULE,rogue))
+$(eval $(call PROG_RULE,iodemo))
 
-kernel-mb2: src/hello_elf.h src/rogue_elf.h
+kernel-mb2: src/hello_elf.h src/rogue_elf.h src/iodemo_elf.h
 	@mkdir -p $(BUILD_DIR)
 	$(CC) $(MB2_CFLAGS) -c boot/multiboot2.S -o $(BUILD_DIR)/multiboot2.o
 	$(CC) $(MB2_CFLAGS) -c src/isr.S -o $(BUILD_DIR)/isr.o
