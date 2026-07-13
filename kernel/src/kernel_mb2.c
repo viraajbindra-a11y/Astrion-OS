@@ -787,6 +787,14 @@ void kernel_mb2_main(uint32_t magic, uint64_t info_ptr) {
     __asm__ volatile("sti");
     serial_puts("IF set - entering shell\n");
 
+    /* Hold the branded splash briefly so it's actually seen — boot is well
+     * under a second otherwise. The PIT is live now, so this is a real timed
+     * wait (hlt until ~1.5s elapsed), not a busy spin. */
+    {
+        uint64_t t0 = pit_elapsed_ms();
+        while (pit_elapsed_ms() - t0 < 1500) __asm__ volatile("hlt");
+    }
+
     /* Paint the desktop (wallpaper + top bar + dock + Terminal window),
      * then anchor the scrolling console inside the Terminal window's
      * content rect. This replaces the old static boot-info panel. */
