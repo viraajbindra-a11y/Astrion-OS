@@ -485,11 +485,12 @@ static void cmd_guess(int argc, char **argv) {
 /* ─── wipe + paint help ─────────────────────────────────── */
 
 extern void paint_boot_screen_x(void);
+extern void desktop_repaint_chrome(void);
 
 static void cmd_wipe(int argc, char **argv) {
     (void)argc; (void)argv;
-    paint_boot_screen_x();   /* repaint static boot screen */
-    console_clear();         /* clear the shell region */
+    desktop_repaint_chrome();   /* repaint the desktop (wallpaper/bar/dock/window) */
+    console_clear();            /* clear the shell region */
     console_set_color(COL_OK);
     console_puts("wiped.\n");
     console_set_color(COL_WHITE);
@@ -508,9 +509,8 @@ static void cmd_paint(int argc, char **argv) {
 static void cmd_snake(int argc, char **argv) {
     (void)argc; (void)argv;
     int score = snake_play();
-    /* Game took over the screen; repaint everything. */
-    extern void paint_boot_screen_x(void);
-    paint_boot_screen_x();
+    /* Game took over the screen; repaint the desktop. */
+    desktop_repaint_chrome();
     console_clear();
     console_set_color(COL_PROMPT);
     console_puts("snake:");

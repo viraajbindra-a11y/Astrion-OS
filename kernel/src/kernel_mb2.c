@@ -491,6 +491,14 @@ static uint32_t fb_put_hex64(uint32_t x, uint32_t y, uint64_t v, uint32_t color,
     return x;
 }
 
+static int bs_strlen(const char *s) { int n = 0; while (s[n]) n++; return n; }
+/* x so that string s at `scale` is horizontally centered on the screen. */
+static uint32_t bs_center_x(const char *s, int scale) {
+    int w = bs_strlen(s) * FONT_WIDTH * scale;
+    if ((uint32_t)w >= boot_info.fb_width) return 0;
+    return (boot_info.fb_width - (uint32_t)w) / 2;
+}
+
 static void paint_boot_screen(void) {
     if (!boot_info.fb_present) {
         serial_puts("boot screen: skipped (no fb)\n");
@@ -503,63 +511,35 @@ static void paint_boot_screen(void) {
 
     serial_puts("boot screen: rendering...\n");
 
-    /* Background. */
+    /* Centered branded splash — the first thing the audience sees. The old
+     * debug panel's info still goes to the serial log via print_summary(). */
+    uint32_t W = boot_info.fb_width, H = boot_info.fb_height;
+    uint32_t cx = W / 2, cyc = H / 2;
+
     fb_fill(COL_NAVY);
+    fb_rect(0, 0, 18, H, COL_ORANGE);              /* left accent motif */
 
-    /* Orange accent bar down the left edge - the visual motif from the
-     * slideshow + landing page. */
-    fb_rect(0, 0, 18, boot_info.fb_height, COL_ORANGE);
+    /* Logo emblem: orange square with a navy notch (matches the top bar). */
+    uint32_t emb = 72;
+    fb_rect(cx - emb / 2, cyc - 210, emb, emb, COL_ORANGE);
+    fb_rect(cx - emb / 2 + 20, cyc - 210 + 20, emb - 40, emb - 40, COL_NAVY);
 
-    /* Wordmark + tagline, big. */
-    uint32_t mx = 60, my = 60;
-    fb_puts(mx, my,           "Astrion v2.0",          COL_WHITE,  6);
-    fb_puts(mx, my + 96,      "the AI-native kernel",  COL_ICE,    2);
+    /* Wordmark + version + tagline, centered. */
+    fb_puts(bs_center_x("Astrion", 7), cyc - 110, "Astrion", COL_WHITE, 7);
+    fb_puts(bs_center_x("v2.0", 3), cyc - 24, "v2.0", COL_ORANGE, 3);
+    fb_puts(bs_center_x("the AI-native operating system", 2), cyc + 34,
+            "the AI-native operating system", COL_ICE, 2);
 
-    /* Status block - multiboot info summary, monospaced. */
-    uint32_t sx = 60;
-    uint32_t sy = my + 200;
-    int s = 2;
-    int rowh = FONT_HEIGHT * s + 4;
+    /* Loading bar (static fill — the splash is only up during init). */
+    uint32_t bw = 380, bx = cx - bw / 2, by = cyc + 96;
+    fb_rect(bx, by, bw, 8, 0x243056u);             /* track */
+    fb_rect(bx, by, (bw * 72) / 100, 8, COL_ORANGE);
+    fb_puts(bs_center_x("starting Astrion...", 1), by + 20, "starting Astrion...",
+            COL_MUTED, 1);
 
-    fb_puts(sx, sy,                   "boot:",   COL_ORANGE, s);
-    fb_puts(sx + 120, sy,             "GREEN  (multiboot2 + GRUB)", COL_WHITE, s);
-
-    fb_puts(sx, sy + rowh,            "mode:",   COL_ORANGE, s);
-    fb_puts(sx + 120, sy + rowh,      "long mode (x86_64)", COL_WHITE, s);
-
-    fb_puts(sx, sy + rowh*2,          "mmap:",   COL_ORANGE, s);
-    {
-        uint32_t x = sx + 120;
-        x = fb_put_u32(x, sy + rowh*2, boot_info.mmap_entry_count, COL_WHITE, s);
-        x = fb_puts(x, sy + rowh*2, " entries, ", COL_WHITE, s);
-        x = fb_put_u32(x, sy + rowh*2,
-                       (uint32_t)(boot_info.total_available_bytes / (1024*1024)),
-                       COL_WHITE, s);
-        fb_puts(x, sy + rowh*2, " MiB", COL_WHITE, s);
-    }
-
-    fb_puts(sx, sy + rowh*3,          "fb:",     COL_ORANGE, s);
-    {
-        uint32_t x = sx + 120;
-        x = fb_put_u32(x, sy + rowh*3, boot_info.fb_width,  COL_WHITE, s);
-        x = fb_puts(x, sy + rowh*3, "x", COL_WHITE, s);
-        x = fb_put_u32(x, sy + rowh*3, boot_info.fb_height, COL_WHITE, s);
-        x = fb_puts(x, sy + rowh*3, " @ ", COL_WHITE, s);
-        x = fb_put_u32(x, sy + rowh*3, (uint32_t)boot_info.fb_bpp, COL_WHITE, s);
-        fb_puts(x, sy + rowh*3, " bpp", COL_WHITE, s);
-    }
-
-    fb_puts(sx, sy + rowh*4,          "addr:",   COL_ORANGE, s);
-    fb_put_hex64(sx + 120, sy + rowh*4, boot_info.fb_addr, COL_WHITE, s);
-
-    /* Footer along the bottom - keep this list honest; it appears in
-     * every screenshot. */
-    uint32_t fy = boot_info.fb_height - FONT_HEIGHT * 2 - 24;
-    fb_puts(60, fy, "heap + files + disk + scripts + tasks  -  type 'help'",
-            COL_MUTED, 2);
-
-    /* Tiny orange corner marker for orientation. */
-    fb_rect(boot_info.fb_width - 18, boot_info.fb_height - 18, 18, 18, COL_ORANGE);
+    /* Honest capability line along the bottom (static → easy to center). */
+    const char *cap = "64-bit  -  multiboot2+GRUB  -  heap  -  files  -  preemptive tasks  -  ring-3  -  on-device GPT";
+    fb_puts(bs_center_x(cap, 1), H - 40, cap, COL_MUTED, 1);
 
     /* Read-back verification: sample one of the white text pixels. */
     volatile uint32_t *fb = (volatile uint32_t *)boot_info.fb_addr;
