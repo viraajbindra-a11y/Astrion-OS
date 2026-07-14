@@ -266,6 +266,37 @@ static int word_after(const char *s, const char *key, char *out, int cap) {
     return k > 0;
 }
 
+/* first of " into " / " to " / " in " in s; returns pointer + sets *sl to len */
+static const char *find_to(const char *s, int *sl) {
+    static const char *const seps[] = { " into ", " to ", " in " };
+    static const int lens[] = { 6, 4, 4 };
+    for (int k = 0; k < 3; k++)
+        for (int i = 0; s[i]; i++) {
+            int j = 0; while (seps[k][j] && lc(s[i + j]) == lc(seps[k][j])) j++;
+            if (!seps[k][j]) { *sl = lens[k]; return &s[i]; }
+        }
+    return 0;
+}
+
+static int name_has_ext(const char *n) {
+    for (int i = 0; n[i]; i++) if (n[i] == '.') return 1;
+    return 0;
+}
+
+/* Resolve `name`, or `name`.txt (appended in place); returns node or 0. */
+static fs_node *resolve_file(char *name, int cap) {
+    fs_node *n = fs_find(name);
+    if (n) return n;
+    if (!name_has_ext(name)) {
+        int k = 0; while (name[k]) k++;
+        const char *e = ".txt"; int j = 0;
+        while (e[j] && k < cap - 1) name[k++] = e[j++];
+        name[k] = 0;
+        n = fs_find(name);
+    }
+    return n;
+}
+
 static void assist_begin_output(void) {
     uint32_t oy0 = cy + 96;
     fb_rect_x(cx, oy0, cw, (cy + ch) - oy0, AC_TERM_BG);
@@ -288,8 +319,9 @@ static int try_intent(const char *p) {
         assist_begin_output();
         assist_say("I don't just chat - I do things, all on this machine:\n\n");
         assist_say("  make a file called notes\n");
-        assist_say("  list my files\n");
-        assist_say("  open the editor   (or snake, or files)\n");
+        assist_say("  write hello world to notes.txt\n");
+        assist_say("  read notes.txt        list my files\n");
+        assist_say("  delete notes.txt      open the editor / snake / files\n");
         assist_say("  what's my uptime\n\n");
         assist_say("or just type anything and I'll write it. No internet, ever.\n");
         return 1;
@@ -309,6 +341,36 @@ static int try_intent(const char *p) {
         }
         return 1;
     }
+    /* write TEXT to FILE — gated so creative "write a poem in X" still hits GPT */
+    if (has(p, "write") || has(p, "put ") || has(p, "save ")) {
+        int sl; const char *sep = find_to(p, &sl);
+        if (sep) {
+            char file[64]; const char *fp = sep + sl;
+            while (*fp == ' ') fp++;
+            int fk = 0; while (*fp && *fp != ' ' && fk < 63) file[fk++] = *fp++;
+            while (fk > 0 && (file[fk-1]=='.'||file[fk-1]=='!'||file[fk-1]=='?'||file[fk-1]==',')) fk--;
+            file[fk] = 0;
+            int looks_like_file = has(p, "file") || name_has_ext(file) || (fs_find(file) != 0);
+            const char *tp = p; while (*tp && *tp != ' ') tp++;   /* skip the verb */
+            while (*tp == ' ') tp++;
+            char text[128]; int tk = 0;
+            for (const char *q = tp; q < sep && tk < 127; q++) text[tk++] = *q;
+            text[tk] = 0;
+            if (file[0] && text[0] && looks_like_file) {
+                if (!name_has_ext(file)) {
+                    const char *e = ".txt"; int j = 0;
+                    while (e[j] && fk < 63) file[fk++] = e[j++];
+                    file[fk] = 0;
+                }
+                fs_write(file, (const uint8_t *)text, (uint32_t)tk);
+                fs_sync();
+                assist_begin_output();
+                assist_say("wrote to "); assist_say(file); assist_say(":\n  ");
+                assist_say(text); assist_emit('\n');
+                return 1;
+            }
+        }
+    }
     if ((has(p, "make") || has(p, "create") || has(p, "new")) && has(p, "file")) {
         char name[64];
         if (!word_after(p, "called", name, sizeof(name)) &&
@@ -326,6 +388,32 @@ static int try_intent(const char *p) {
         assist_say("made "); assist_say(name[0] ? name : "(no name)");
         assist_say("\nsay 'open the editor' to write in it.\n");
         return 1;
+    }
+    if (has(p, "delete") || has(p, "remove") || has(p, "rm ")) {
+        char name[64]; last_word(p, name, sizeof(name));
+        fs_node *n = resolve_file(name, sizeof(name));
+        assist_begin_output();
+        if (n && n->kind == FS_FILE) {
+            fs_unlink(name); fs_sync();
+            assist_say("deleted "); assist_say(name); assist_emit('\n');
+        } else {
+            assist_say("no file called "); assist_say(name); assist_emit('\n');
+        }
+        return 1;
+    }
+    if (has(p, "read") || has(p, "cat ") || has(p, "contents") ||
+        (has(p, "show") && !has(p, "file")) ||
+        ((has(p, "what") || has(p, "whats")) && has(p, "in "))) {
+        char name[64]; last_word(p, name, sizeof(name));
+        fs_node *n = resolve_file(name, sizeof(name));
+        if (n && n->kind == FS_FILE) {
+            assist_begin_output();
+            assist_say("contents of "); assist_say(name); assist_say(":\n");
+            for (uint32_t i = 0; i < n->size && i < 1024; i++) assist_emit((char)n->data[i]);
+            assist_emit('\n');
+            return 1;
+        }
+        /* no such file -> fall through (probably a chat request) */
     }
     if (has(p, "open") || has(p, "launch") || has(p, "start") ||
         has(p, "play") || has(p, "go to")) {
@@ -349,7 +437,7 @@ static void assist_run(void) {
 static void assist_draw(void) {
     fb_rect_x(cx, cy, cw, ch, AC_TERM_BG);
     fb_puts_x(cx, cy, "Astrion Assistant", AC_ORANGE, 3);
-    fb_puts_x(cx, cy + 40, "on-device - try:  make a file called notes  /  open snake  /  list my files  /  or just chat",
+    fb_puts_x(cx, cy + 40, "on-device - try:  write hi to notes.txt  /  read notes.txt  /  open snake  /  help  /  or just chat",
               AC_MUTED, 1);
     assist_prompt_line();
 }
