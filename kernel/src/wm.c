@@ -225,7 +225,120 @@ static void assist_emit(char c) {
     as_ox += GW;
 }
 
+/* ─── local command layer: the assistant DOES things, fully offline ─── */
+extern uint64_t pit_elapsed_ms(void);
+
+static char lc(char c) { return (c >= 'A' && c <= 'Z') ? (char)(c + 32) : c; }
+
+/* case-insensitive substring test */
+static int has(const char *h, const char *n) {
+    for (int i = 0; h[i]; i++) {
+        int j = 0;
+        while (n[j] && lc(h[i + j]) == lc(n[j])) j++;
+        if (!n[j]) return 1;
+    }
+    return 0;
+}
+
+/* last whitespace-delimited token of s, trailing punctuation trimmed */
+static void last_word(const char *s, char *out, int cap) {
+    int end = 0; while (s[end]) end++;
+    while (end > 0) { char c = s[end - 1];
+        if (c==' '||c=='\t'||c=='.'||c=='!'||c=='?'||c==',') end--; else break; }
+    int st = end;
+    while (st > 0 && s[st - 1] != ' ' && s[st - 1] != '\t') st--;
+    int k = 0; for (int i = st; i < end && k < cap - 1; i++) out[k++] = s[i];
+    out[k] = 0;
+}
+
+/* the word following key (case-insensitive) -> out; 1 if found + non-empty */
+static int word_after(const char *s, const char *key, char *out, int cap) {
+    const char *p = 0;
+    for (int i = 0; s[i]; i++) {
+        int j = 0; while (key[j] && lc(s[i + j]) == lc(key[j])) j++;
+        if (!key[j]) { p = &s[i + j]; break; }
+    }
+    if (!p) return 0;
+    while (*p == ' ' || *p == '\t') p++;
+    int k = 0;
+    while (*p && *p != ' ' && *p != '\t' && k < cap - 1) out[k++] = *p++;
+    out[k] = 0;
+    return k > 0;
+}
+
+static void assist_begin_output(void) {
+    uint32_t oy0 = cy + 96;
+    fb_rect_x(cx, oy0, cw, (cy + ch) - oy0, AC_TERM_BG);
+    as_ox = cx; as_oy = oy0;
+    mouse_lift();
+}
+static void assist_say(const char *s) { while (*s) assist_emit(*s++); }
+static void assist_num(uint32_t v) {
+    char b[12]; int i = 0;
+    if (!v) { assist_emit('0'); return; }
+    while (v) { b[i++] = (char)('0' + v % 10); v /= 10; }
+    while (i) assist_emit(b[--i]);
+}
+
+/* Try to handle the prompt as a real, safe, LOCAL action — the whole thesis:
+ * you talk to the OS and it DOES things, offline. Returns 1 if handled; 0
+ * falls through to the GPT for open-ended text. */
+static int try_intent(const char *p) {
+    if (has(p, "what can you") || has(p, "help") || has(p, "command")) {
+        assist_begin_output();
+        assist_say("I don't just chat - I do things, all on this machine:\n\n");
+        assist_say("  make a file called notes\n");
+        assist_say("  list my files\n");
+        assist_say("  open the editor   (or snake, or files)\n");
+        assist_say("  what's my uptime\n\n");
+        assist_say("or just type anything and I'll write it. No internet, ever.\n");
+        return 1;
+    }
+    if (has(p, "uptime") || (has(p, "how long") && has(p, "been"))) {
+        assist_begin_output();
+        assist_say("up ");
+        assist_num((uint32_t)(pit_elapsed_ms() / 1000));
+        assist_say(" seconds - running entirely on this kernel, no network.\n");
+        return 1;
+    }
+    if ((has(p, "list") || has(p, "what") || has(p, "show")) && has(p, "file")) {
+        assist_begin_output();
+        assist_say("your files:\n");
+        for (fs_node *n = fs_first(); n; n = fs_next(n)) {
+            assist_say("  "); assist_say(n->name); assist_emit('\n');
+        }
+        return 1;
+    }
+    if ((has(p, "make") || has(p, "create") || has(p, "new")) && has(p, "file")) {
+        char name[64];
+        if (!word_after(p, "called", name, sizeof(name)) &&
+            !word_after(p, "named", name, sizeof(name)))
+            last_word(p, name, sizeof(name));
+        int dot = 0; for (int i = 0; name[i]; i++) if (name[i] == '.') dot = 1;
+        if (!dot && name[0]) {
+            int k = 0; while (name[k]) k++;
+            const char *ext = ".txt"; int e = 0;
+            while (ext[e] && k < (int)sizeof(name) - 1) name[k++] = ext[e++];
+            name[k] = 0;
+        }
+        if (name[0]) { fs_create(name, FS_FILE); fs_sync(); }
+        assist_begin_output();
+        assist_say("made "); assist_say(name[0] ? name : "(no name)");
+        assist_say("\nsay 'open the editor' to write in it.\n");
+        return 1;
+    }
+    if (has(p, "open") || has(p, "launch") || has(p, "start") ||
+        has(p, "play") || has(p, "go to")) {
+        if (has(p, "editor"))  { wm_open_editor(0); return 1; }
+        if (has(p, "snake"))   { wm_open_app(3);    return 1; }
+        if (has(p, "files"))   { wm_open_app(1);    return 1; }
+        if (has(p, "terminal") || has(p, "shell")) { wm_close(); return 1; }
+    }
+    return 0;   /* -> GPT */
+}
+
 static void assist_run(void) {
+    if (try_intent(as_prompt)) return;   /* did a real action, offline */
     uint32_t oy0 = cy + 96;
     fb_rect_x(cx, oy0, cw, (cy + ch) - oy0, AC_TERM_BG);   /* clear output */
     as_ox = cx; as_oy = oy0;
@@ -236,7 +349,7 @@ static void assist_run(void) {
 static void assist_draw(void) {
     fb_rect_x(cx, cy, cw, ch, AC_TERM_BG);
     fb_puts_x(cx, cy, "Astrion Assistant", AC_ORANGE, 3);
-    fb_puts_x(cx, cy + 40, "on-device GPT  -  try:  ROMEO   or   To be   -   Enter generates, ESC closes",
+    fb_puts_x(cx, cy + 40, "on-device - try:  make a file called notes  /  open snake  /  list my files  /  or just chat",
               AC_MUTED, 1);
     assist_prompt_line();
 }
