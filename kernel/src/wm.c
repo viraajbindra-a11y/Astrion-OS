@@ -17,6 +17,8 @@
 #include "mouse.h"      /* mouse_x/y/left_down/take_left_click/lift */
 #include "gpt.h"        /* on-device GPT for the Assistant */
 #include "af.h"         /* antialiased Inter text */
+#include "task.h"       /* task_get_info — the assistant reports what's running */
+#include "ata.h"        /* ata_present — disk / persistence status */
 
 /* Framebuffer wrappers live in kernel_mb2.c with no header — declare them
  * here the same way console.c / mouse.c do. */
@@ -312,34 +314,118 @@ static void assist_num(uint32_t v) {
     while (i) assist_emit(b[--i]);
 }
 
+/* human-readable scheduler state, for "what's running" */
+static const char *task_state_name(enum task_state s) {
+    switch (s) {
+        case TASK_RUNNING: return "running";
+        case TASK_READY:   return "ready";
+        case TASK_DONE:    return "done";
+        default:           return "-";
+    }
+}
+
 /* Try to handle the prompt as a real, safe, LOCAL action — the whole thesis:
  * you talk to the OS and it DOES things, offline. Returns 1 if handled; 0
  * falls through to the GPT for open-ended text. */
 static int try_intent(const char *p) {
+    /* ─── talk about the machine: real numbers, straight from the kernel ─── */
+
+    /* who/what are you — the honest pitch */
+    if ((has(p, "who are you") || has(p, "what are you") || has(p, "who made") ||
+         has(p, "who built") || has(p, "what is this") || has(p, "introduce")) &&
+        !has(p, "running") && !has(p, "doing")) {
+        assist_begin_output();
+        assist_say("I'm Astrion's assistant. I live inside a kernel written from\n");
+        assist_say("scratch in C - no Linux under me, no internet anywhere.\n");
+        assist_say("I don't just chat: I run this machine for you. Ask me your\n");
+        assist_say("memory, what's running, or your files - or tell me to make,\n");
+        assist_say("write, append, copy, read or delete them.\n");
+        return 1;
+    }
+
+    /* memory — real heap numbers */
+    if (has(p, "memory") || has(p, "memor") || has(p, "how much ram") ||
+        has(p, "free ram") || has(p, "heap")) {
+        uint32_t usedkb = (uint32_t)(heap_used() >> 10);
+        uint32_t freekb = (uint32_t)(heap_free() >> 10);
+        assist_begin_output();
+        assist_say("memory: ");
+        assist_num(usedkb); assist_say(" KB used, ");
+        assist_num(freekb); assist_say(" KB free (");
+        assist_num(usedkb + freekb); assist_say(" KB kernel heap).\n");
+        assist_say("all on this machine - nothing in a cloud.\n");
+        return 1;
+    }
+
+    /* what's running — the real scheduler table */
+    if (has(p, "running") || has(p, "processes") || has(p, "process") ||
+        has(p, "tasks") || has(p, "what are you doing") || has(p, "jobs")) {
+        assist_begin_output();
+        assist_say("running right now:\n");
+        struct task_info ti;
+        for (int i = 0; i < TASK_MAX; i++) {
+            if (!task_get_info(i, &ti)) continue;
+            assist_say("  "); assist_num((uint32_t)ti.tid);
+            assist_say("  "); assist_say(ti.name);
+            assist_say("  ("); assist_say(task_state_name(ti.state)); assist_say(")\n");
+        }
+        assist_say("preemptive - no runaway task can freeze me.\n");
+        return 1;
+    }
+
+    /* disk / persistence */
+    if (has(p, "disk") || has(p, "storage") || has(p, "persist")) {
+        assist_begin_output();
+        if (ata_present())
+            assist_say("disk: attached. your files persist across reboots -\nsaved to the ATA disk on every change.\n");
+        else
+            assist_say("no disk this boot - files live in RAM. attach one and\nthey survive reboots.\n");
+        return 1;
+    }
+
+    /* help / capabilities */
     if (has(p, "what can you") || has(p, "help") || has(p, "command")) {
         assist_begin_output();
-        assist_say("I don't just chat - I do things, all on this machine:\n\n");
-        assist_say("  make a file called notes\n");
-        assist_say("  write hello world to notes.txt\n");
-        assist_say("  read notes.txt        list my files\n");
-        assist_say("  delete notes.txt      open the editor / snake / files\n");
-        assist_say("  what's my uptime\n\n");
+        assist_say("I run this machine, all offline:\n\n");
+        assist_say("  ask:    how much memory / what's running / who are you\n");
+        assist_say("  files:  list my files / make notes.txt / read notes.txt\n");
+        assist_say("  write:  write hi to notes.txt / append bye to notes.txt\n");
+        assist_say("  copy:   copy notes.txt to backup.txt / delete notes.txt\n");
+        assist_say("  open:   open the editor / snake / files\n\n");
         assist_say("or just type anything and I'll write it. No internet, ever.\n");
         return 1;
     }
-    if (has(p, "uptime") || (has(p, "how long") && has(p, "been"))) {
+
+    /* uptime */
+    if (has(p, "uptime") || (has(p, "how long") && has(p, "been")) ||
+        (has(p, "what") && has(p, "time"))) {
+        uint32_t secs = (uint32_t)(pit_elapsed_ms() / 1000);
         assist_begin_output();
         assist_say("up ");
-        assist_num((uint32_t)(pit_elapsed_ms() / 1000));
-        assist_say(" seconds - running entirely on this kernel, no network.\n");
+        if (secs >= 60) { assist_num(secs / 60); assist_say(" min ");
+                          assist_num(secs % 60); assist_say(" sec"); }
+        else            { assist_num(secs); assist_say(" seconds"); }
+        assist_say(" - on this kernel, no network.\n");
         return 1;
     }
-    if ((has(p, "list") || has(p, "what") || has(p, "show")) && has(p, "file")) {
+
+    /* list files — now with sizes + totals, and "how many files" */
+    if ((has(p, "list") || has(p, "what") || has(p, "show") || has(p, "how many")) &&
+        has(p, "file")) {
         assist_begin_output();
+        if (has(p, "how many")) {
+            assist_say("you have "); assist_num(fs_count());
+            assist_say(" files, "); assist_num(fs_total_bytes());
+            assist_say(" bytes total.\n");
+            return 1;
+        }
         assist_say("your files:\n");
         for (fs_node *n = fs_first(); n; n = fs_next(n)) {
-            assist_say("  "); assist_say(n->name); assist_emit('\n');
+            assist_say("  "); assist_say(n->name);
+            assist_say("  ("); assist_num(n->size); assist_say(" B)\n");
         }
+        assist_say("  = "); assist_num(fs_count()); assist_say(" files, ");
+        assist_num(fs_total_bytes()); assist_say(" bytes.\n");
         return 1;
     }
     /* write TEXT to FILE — gated so creative "write a poem in X" still hits GPT */
@@ -372,6 +458,65 @@ static int try_intent(const char *p) {
             }
         }
     }
+    /* copy FILE to NEWNAME — a real duplicate on disk */
+    if (has(p, "copy") || has(p, "duplicate")) {
+        int sl; const char *sep = find_to(p, &sl);
+        char src[64];
+        if (sep && (word_after(p, "copy", src, sizeof(src)) ||
+                    word_after(p, "duplicate", src, sizeof(src)))) {
+            char dst[64]; const char *fp = sep + sl; while (*fp == ' ') fp++;
+            int k = 0; while (*fp && *fp != ' ' && k < 63) dst[k++] = *fp++;
+            while (k > 0 && (dst[k-1]=='.'||dst[k-1]=='!'||dst[k-1]=='?'||dst[k-1]==',')) k--;
+            dst[k] = 0;
+            fs_node *sn = resolve_file(src, sizeof(src));
+            assist_begin_output();
+            if (sn && sn->kind == FS_FILE && dst[0]) {
+                static uint8_t cbuf[1024];
+                uint32_t len = sn->size < 1024 ? sn->size : 1024;
+                for (uint32_t i = 0; i < len; i++) cbuf[i] = sn->data[i];
+                if (!name_has_ext(dst)) { const char *e = ".txt"; int j = 0;
+                    while (e[j] && k < 63) dst[k++] = e[j++]; dst[k] = 0; }
+                fs_create(dst, FS_FILE);
+                fs_write(dst, cbuf, len);
+                fs_sync();
+                assist_say("copied "); assist_say(src); assist_say(" -> ");
+                assist_say(dst); assist_say(" ("); assist_num(len); assist_say(" B)\n");
+            } else {
+                assist_say("copy needs: copy <file> to <newname>\n");
+            }
+            return 1;
+        }
+    }
+
+    /* append TEXT to FILE — grow an existing note */
+    if (has(p, "append")) {
+        int sl; const char *sep = find_to(p, &sl);
+        if (sep) {
+            char file[64]; const char *fp = sep + sl; while (*fp == ' ') fp++;
+            int fk = 0; while (*fp && *fp != ' ' && fk < 63) file[fk++] = *fp++;
+            while (fk > 0 && (file[fk-1]=='.'||file[fk-1]=='!'||file[fk-1]=='?'||file[fk-1]==',')) fk--;
+            file[fk] = 0;
+            const char *tp = p; while (*tp && *tp != ' ') tp++;   /* skip the verb */
+            while (*tp == ' ') tp++;
+            char text[128]; int tk = 0;
+            for (const char *q = tp; q < sep && tk < 127; q++) text[tk++] = *q;
+            text[tk] = 0;
+            if (file[0] && text[0]) {
+                if (!name_has_ext(file)) { const char *e = ".txt"; int j = 0;
+                    while (e[j] && fk < 63) file[fk++] = e[j++]; file[fk] = 0; }
+                int existed = (fs_find(file) != 0);
+                if (!existed) fs_create(file, FS_FILE);
+                if (existed) fs_append(file, (const uint8_t *)" ", 1);
+                fs_append(file, (const uint8_t *)text, (uint32_t)tk);
+                fs_sync();
+                assist_begin_output();
+                assist_say("appended to "); assist_say(file); assist_say(":\n  ");
+                assist_say(text); assist_emit('\n');
+                return 1;
+            }
+        }
+    }
+
     if ((has(p, "make") || has(p, "create") || has(p, "new")) && has(p, "file")) {
         char name[64];
         if (!word_after(p, "called", name, sizeof(name)) &&
