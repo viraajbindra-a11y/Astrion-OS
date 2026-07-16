@@ -1,0 +1,88 @@
+
+=== Astrion v2.0 Kernel (multiboot2 path) ===
+kernel_mb2_main reached; long-mode OK
+multiboot2 magic = 0x0000000036d76289
+multiboot2 info  = 0x00000000001000b0
+magic OK - GRUB hand-off clean
+
+info total_size = 1920 bytes
+  tag #1: type=21 (load-base-addr), size=12
+  tag #2: type=1 (cmdline), size=9
+    cmdline = ""
+  tag #3: type=2 (bootloader-name), size=29
+    bootloader = "GRUB 2.12-1ubuntu7.3"
+  tag #4: type=10 (apm), size=28
+  tag #5: type=6 (mmap), size=184
+    mmap: 7 entries, entry_size=24
+      [0] addr=0x0000000000000000 len=0x000000000009fc00 type=1 (available)
+      [1] addr=0x000000000009fc00 len=0x0000000000000400 type=2 (reserved)
+      [2] addr=0x00000000000f0000 len=0x0000000000010000 type=2 (reserved)
+      [3] addr=0x0000000000100000 len=0x000000000fee0000 type=1 (available)
+      [4] addr=0x000000000ffe0000 len=0x0000000000020000 type=2 (reserved)
+      [5] addr=0x00000000fffc0000 len=0x0000000000040000 type=2 (reserved)
+      [6] addr=0x000000fd00000000 len=0x0000000300000000 type=2 (reserved)
+    available memory total = 255 MiB
+  tag #6: type=9 (elf-sections), size=724
+  tag #7: type=4 (basic-meminfo), size=16
+    mem_lower = 639 KiB, mem_upper = 260992 KiB (total ~255 MiB)
+  tag #8: type=5 (bootdev), size=20
+  tag #9: type=7 (vbe), size=784
+  tag #10: type=8 (framebuffer), size=38
+    framebuffer @ 0x00000000fd000000, 1280x800, 32 bpp, pitch=5120, type=1
+  tag #11: type=14 (acpi-rsdp-v1), size=28
+  tag #12: type=0 (end), size=8
+info walk complete: 12 tags total
+
+--- boot summary ---
+bootloader      : GRUB 2.12-1ubuntu7.3
+cmdline         : 
+RAM (basic)     : ~255 MiB
+mmap entries    : 7
+available RAM   : 255 MiB
+framebuffer     : 1280x800 @ 32 bpp, base=0x00000000fd000000
+--- ready to drive hardware ---
+
+boot screen: rendering...
+boot screen: readback @ accent = 0x0000000000ff7a00  OK - pixel write verified
+
+HEAP: initializing 32 MiB at 0x400000...
+HEAP: base after kernel end = 0x0x0000000000600000
+HEAP: smoke test passed
+ATA: probing primary master...
+ATA: no disk attached
+FS: initializing...
+FS: ready
+GDT: reloaded (kcode/kdata/ucode/udata + TSS), TR loaded
+IDT: installing 256-entry table (32 exceptions + 16 IRQs)...
+IDT: loaded
+PIC: remapping 0..15 -> vectors 32..47...
+PIT: 100 Hz tick installed
+KBD: PS/2 IRQ1 unmasked
+MOUSE: PS/2 aux device enabled, IRQ12 unmasked
+USERMEM: ring-3 window mapped at 128 GiB (US=1), 2 MiB pool
+SYSCALL: SCE on; STAR/LSTAR/FMASK programmed
+IF set - entering shell
+TASKS: scheduler up (task 0 = shell, task 1 = clock)
+ls
+write auditfile.txt helloastrion2026
+cat auditfile.txt
+ps
+busy
+ps
+exec iodemo.elfelf: loaded into ring-3 window ok
+
+exec rogue.elfelf: loaded into ring-3 window ok
+
+
+[ring3 fault] #PF page fault from user task - killing it, kernel survives
+exec hello.elfelf: loaded into ring-3 window ok
+
+uptime
+mem
+clear
+assistant
+write hello world to notes.txt
+read notes.txt
+help
+tell me a story about a fox
+snake
