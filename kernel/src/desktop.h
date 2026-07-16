@@ -39,21 +39,22 @@ int desktop_dock_hit(int x, int y);
 /* Highlight the given dock icon as the active app (-1 = none). */
 void desktop_set_active_app(int icon);
 
-/* ─── Astrion palette (shared with the window manager + apps) ─── */
-#define AC_WALL_TOP  0x141A3Fu   /* wallpaper gradient top (dark navy)   */
-#define AC_WALL_BOT  0x1E2761u   /* wallpaper gradient bottom (navy)     */
-#define AC_BAR       0x0E1330u   /* top bar + dock (near-black navy)     */
-#define AC_PANEL     0x243056u   /* window title bar                     */
-#define AC_TERM_BG   0x1E2761u   /* terminal content (matches console)   */
-#define AC_BORDER    0x3A4A7Au   /* 1px window border                    */
-#define AC_ORANGE    0xFF7A00u   /* Astrion accent                       */
+/* ─── Astrion palette — matches the web build (dark, blue accent) ─── */
+#define AC_WALL_TOP  0x1A2450u   /* wallpaper gradient top (deep blue)   */
+#define AC_WALL_BOT  0x281C4Au   /* wallpaper gradient bottom (indigo)   */
+#define AC_BAR       0x12162Cu   /* top bar + dock (near-black blue)     */
+#define AC_PANEL     0x252A42u   /* window title bar                     */
+#define AC_TERM_BG   0x171B2Eu   /* window body / terminal               */
+#define AC_BORDER    0x3A4166u   /* 1px window border                    */
+#define AC_ACCENT    0x0A84FFu   /* macOS-style blue accent              */
+#define AC_ORANGE    AC_ACCENT   /* legacy name -> now the blue accent   */
 #define AC_WHITE     0xFFFFFFu
-#define AC_MUTED     0x8B98B8u
-#define AC_RED       0xF87171u
-#define AC_YELLOW    0xFBBF24u
-#define AC_TEAL      0x34D399u
-#define AC_BLUE      0x60A5FAu
-#define AC_GREEN     0x4ADE80u
-#define AC_PURPLE    0xA78BFAu
+#define AC_MUTED     0x99A2BEu
+#define AC_RED       0xFF5F57u   /* macOS traffic lights                 */
+#define AC_YELLOW    0xFEBC2Eu
+#define AC_GREEN     0x28C840u
+#define AC_TEAL      0x64D2FFu
+#define AC_BLUE      0x0A84FFu
+#define AC_PURPLE    0xBF5AF2u
 
 #endif
