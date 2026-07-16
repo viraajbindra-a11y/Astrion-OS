@@ -444,7 +444,18 @@ static void assist_draw(void) {
 
 static void assist_key(char c) {
     if (c == 27) { wm_close(); return; }
-    if (c == '\n') { if (as_plen > 0) assist_run(); return; }
+    if (c == '\n') {
+        if (as_plen > 0) {
+            assist_run();
+            /* Reset the prompt for the next command — but only if we're still
+             * in the Assistant (an "open X" command may have switched apps). */
+            if (win.app == APP_ASSIST) {
+                as_plen = 0; as_prompt[0] = 0;
+                assist_prompt_line();
+            }
+        }
+        return;
+    }
     if (c == '\b') {
         if (as_plen > 0) { as_plen--; as_prompt[as_plen] = 0; assist_prompt_line(); }
         return;
