@@ -16,6 +16,7 @@
 #include "snake.h"      /* snake_play */
 #include "mouse.h"      /* mouse_x/y/left_down/take_left_click/lift */
 #include "gpt.h"        /* on-device GPT for the Assistant */
+#include "af.h"         /* antialiased Inter text */
 
 /* Framebuffer wrappers live in kernel_mb2.c with no header — declare them
  * here the same way console.c / mouse.c do. */
@@ -481,9 +482,9 @@ static void draw_frame(void) {
     fb_rect_x(win.x + 6, win.y + 6, win.w, win.h, 0x0A0E24u);   /* shadow */
     fb_rect_x(win.x, win.y, win.w, win.h, AC_TERM_BG);          /* body   */
     fb_rect_x(win.x, win.y, win.w, TITLE_H, AC_PANEL);          /* title  */
-    fb_rect_x(win.x + win.w - 26, win.y + 8, 15, 15, AC_RED);   /* close  */
-    fb_puts_x(win.x + win.w - 23, win.y + 9, "x", AC_WHITE, 1);
-    fb_puts_x(win.x + 12, win.y + 8, title_for(win.app), AC_WHITE, 2);
+    fb_rect_x(win.x + win.w - 27, win.y + 9, 16, 16, AC_RED);   /* close  */
+    af_draw(win.x + win.w - 23, win.y + 8, "x", AC_WHITE, AF_REG13);
+    af_draw_center(win.x + win.w / 2, win.y + 8, title_for(win.app), AC_WHITE, AF_SB16);
     draw_border(win.x, win.y, win.w, win.h, AC_BORDER);
 }
 
