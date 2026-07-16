@@ -29,6 +29,7 @@
 #include "desktop.h"
 #include "wm.h"
 #include "gpt.h"
+#include "af.h"
 #include "shell.h"
 #include "mouse.h"
 #include "heap.h"
@@ -491,14 +492,6 @@ static uint32_t fb_put_hex64(uint32_t x, uint32_t y, uint64_t v, uint32_t color,
     return x;
 }
 
-static int bs_strlen(const char *s) { int n = 0; while (s[n]) n++; return n; }
-/* x so that string s at `scale` is horizontally centered on the screen. */
-static uint32_t bs_center_x(const char *s, int scale) {
-    int w = bs_strlen(s) * FONT_WIDTH * scale;
-    if ((uint32_t)w >= boot_info.fb_width) return 0;
-    return (boot_info.fb_width - (uint32_t)w) / 2;
-}
-
 static void paint_boot_screen(void) {
     if (!boot_info.fb_present) {
         serial_puts("boot screen: skipped (no fb)\n");
@@ -524,22 +517,20 @@ static void paint_boot_screen(void) {
     fb_rect(cx - emb / 2, cyc - 210, emb, emb, COL_ORANGE);
     fb_rect(cx - emb / 2 + 20, cyc - 210 + 20, emb - 40, emb - 40, COL_NAVY);
 
-    /* Wordmark + version + tagline, centered. */
-    fb_puts(bs_center_x("Astrion", 7), cyc - 110, "Astrion", COL_WHITE, 7);
-    fb_puts(bs_center_x("v2.0", 3), cyc - 24, "v2.0", COL_ORANGE, 3);
-    fb_puts(bs_center_x("the AI-native operating system", 2), cyc + 34,
-            "the AI-native operating system", COL_ICE, 2);
+    /* Wordmark + version + tagline in antialiased Inter (like the web build). */
+    af_draw_center(cx, cyc - 122, "Astrion", COL_WHITE, AF_SB30);
+    af_draw_center(cx, cyc - 80,  "v2.0", COL_ORANGE, AF_SB16);
+    af_draw_center(cx, cyc - 42,  "the AI-native operating system", COL_ICE, AF_REG16);
 
     /* Loading bar (static fill — the splash is only up during init). */
-    uint32_t bw = 380, bx = cx - bw / 2, by = cyc + 96;
+    uint32_t bw = 380, bx = cx - bw / 2, by = cyc + 60;
     fb_rect(bx, by, bw, 8, 0x243056u);             /* track */
     fb_rect(bx, by, (bw * 72) / 100, 8, COL_ORANGE);
-    fb_puts(bs_center_x("starting Astrion...", 1), by + 20, "starting Astrion...",
-            COL_MUTED, 1);
+    af_draw_center(cx, by + 18, "starting Astrion...", COL_MUTED, AF_REG13);
 
-    /* Honest capability line along the bottom (static → easy to center). */
+    /* Honest capability line along the bottom. */
     const char *cap = "64-bit  -  multiboot2+GRUB  -  heap  -  files  -  preemptive tasks  -  ring-3  -  on-device GPT";
-    fb_puts(bs_center_x(cap, 1), H - 40, cap, COL_MUTED, 1);
+    af_draw_center(cx, H - 44, cap, COL_MUTED, AF_REG13);
 
     /* Read-back verification: sample one of the white text pixels. */
     volatile uint32_t *fb = (volatile uint32_t *)boot_info.fb_addr;
