@@ -78,6 +78,7 @@ struct window {
     uint32_t      x, y, w, h;     /* outer rect */
     uint32_t      sw, sh;         /* saved-rect dims (incl. shadow) */
     uint32_t     *savebuf;        /* pixels beneath this window at paint time */
+    uint32_t      savecap;        /* savebuf capacity in pixels (grows, never shrinks) */
 };
 static struct window wins[WM_MAX];
 static int zord[WM_MAX];      /* z-order: [0] = bottom … [zn-1] = top */
@@ -1428,7 +1429,18 @@ static void open_common(enum app_kind app) {
         w->x = (SW - w->w) / 2 + (uint32_t)(s * 26);
         w->y = WM_TOP + 4 + (uint32_t)(s * 22);
         w->sw = w->w + 6; w->sh = w->h + 6;          /* include shadow */
-        if (!w->savebuf) w->savebuf = (uint32_t *)kmalloc(w->sw * w->sh * 4);
+        /* The savebuf must hold the whole shadow-inclusive rect: save_rect
+         * writes exactly sw*sh pixels into it. The Monitor now opens at a
+         * task-count-dependent height (size_for -> mon_open_rows), so a slot
+         * reopened TALLER than last time needs a bigger buffer than the one
+         * cached here — grow it, or save_rect walks off the old end and
+         * smashes the heap. sw*sh is bounded by the screen, so *4 can't wrap. */
+        uint32_t need = w->sw * w->sh;
+        if (need > w->savecap) {
+            if (w->savebuf) kfree(w->savebuf);
+            w->savebuf = (uint32_t *)kmalloc(need * 4);
+            w->savecap = w->savebuf ? need : 0;   /* 0 if OOM: save_rect no-ops on null */
+        }
         w->open = 1;
         if (app == APP_ASSIST) assist_reset();
         if (app == APP_FILES)  files_load();
@@ -1495,7 +1507,7 @@ void wm_init(void) {
     GH = (uint32_t)af_line_height(AF_MONO);
     LINE = GH + 2;
     for (int i = 0; i < WM_MAX; i++) {
-        wins[i].open = 0; wins[i].app = APP_NONE; wins[i].savebuf = 0;
+        wins[i].open = 0; wins[i].app = APP_NONE; wins[i].savebuf = 0; wins[i].savecap = 0;
     }
     zn = 0; focus_shell = 1;
     dragging = 0; ed_buf = 0;
