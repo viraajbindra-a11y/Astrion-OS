@@ -916,6 +916,13 @@ static void cmd_sync(int argc, char **argv) {
         return;
     }
     int r = fs_sync();
+    if (r == -2) {   /* refused to protect data, not a write error */
+        console_set_color(0xF87171u);
+        console_puts("sync: refused - too many files to save back safely.\n");
+        console_puts("      nothing was written; your files are safe. delete some and retry.\n");
+        console_set_color(COL_WHITE);
+        return;
+    }
     if (r != 0) {
         console_set_color(0xF87171u);
         console_puts("sync: write failed\n");

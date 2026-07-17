@@ -34,6 +34,7 @@
 #define COL_WHITE   0xFFFFFFu
 #define COL_BLACK   0x000000u
 #define COL_ORANGE  0xFF7A00u
+#define COL_ACCENT  0x0A84FFu   /* systemBlue - matches the polished chrome */
 
 /* Forward decls from kernel_mb2.c. */
 extern uint64_t fb_addr_x(void);
@@ -161,7 +162,7 @@ static void draw_cursor_at(int x, int y) {
     if (!fb_present_x()) return;
     volatile uint32_t *fb = (volatile uint32_t *)fb_addr_x();
     uint32_t pitch_px = fb_pitch_x() / 4;
-    uint32_t interior = btn_left ? COL_ORANGE : COL_WHITE;
+    uint32_t interior = btn_left ? COL_ACCENT : COL_WHITE;
     for (int row = 0; row < CUR_H; row++) {
         for (int col = 0; col < CUR_W; col++) {
             uint8_t v = CURSOR_BMP[row][col];
@@ -179,7 +180,7 @@ static void draw_cursor_at(int x, int y) {
     }
 }
 
-/* When the left button is held while moving, drop a small orange dot
+/* When the left button is held while moving, drop a small accent-blue dot
  * at the cursor tip. The dot is written directly to the framebuffer
  * BEFORE we save_bg at the new position, so it gets captured and
  * persists through subsequent cursor moves. */
@@ -194,7 +195,7 @@ static void paint_ink_at(int x, int y) {
             int px = x + dx;
             int py = y + dy;
             if (px < 0 || py < 0 || (uint32_t)px >= sw || (uint32_t)py >= sh) continue;
-            fb[py * pitch_px + px] = COL_ORANGE;
+            fb[py * pitch_px + px] = COL_ACCENT;
         }
     }
 }

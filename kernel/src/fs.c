@@ -612,7 +612,7 @@ int fs_sync(void) {
         serial_puts_x(" bytes (cap ");
         serial_put_u64_x(FS_LOAD_MAX);
         serial_puts_x(")\n");
-        return -1;
+        return -2;   /* refused (data-safe), distinct from a real write error */
     }
     uint32_t total = round_up((uint32_t)needed, 512);
     if (flat_buf) { kfree(flat_buf); flat_buf = 0; }
