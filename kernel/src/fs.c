@@ -32,6 +32,13 @@
 #include "rogue_elf.h"   /* generated: the hostile ring-3 program, seeded as /rogue.elf */
 #include "iodemo_elf.h"  /* generated: the ring-3 file-I/O demo, seeded as /iodemo.elf */
 
+/* kernel_mb2.c owns the serial primitives; borrow the same narrow hooks
+ * elf.c and gdt.c use. The FS only ever speaks up when something is about
+ * to cost the user data: a sync we refused, or a real image we found on
+ * disk and couldn't read back. */
+extern void serial_puts_x(const char *s);
+extern void serial_put_u64_x(uint64_t v);
+
 static fs_node *nodes;          /* flat list of every node EXCEPT the root */
 static uint32_t node_count;
 static fs_node  root_node;      /* "/" - never in `nodes`, never freed */
@@ -499,6 +506,46 @@ static void cp(uint8_t *d, const uint8_t *s, uint32_t n) { for (uint32_t i = 0; 
 static void zr(uint8_t *d, uint32_t n) { for (uint32_t i = 0; i < n; i++) d[i] = 0; }
 static uint32_t round_up(uint32_t v, uint32_t a) { return (v + a - 1) & ~(a - 1); }
 
+/* ─── The one image budget ────────────────────────────────
+ *
+ * fs_sync() and fs_load_from_disk() have to agree, exactly, about which
+ * images fit - and the only way to guarantee that is to make them ask the
+ * same function the same question.
+ *
+ * They used to each do their own arithmetic, and it did not match. The
+ * loader has only two numbers off the superblock (node_count and
+ * total_data_bytes) and cannot know the real path lengths until it parses,
+ * so it budgets a worst-case FS_PATH_MAX per node. The writer knew the
+ * actual paths and summed those instead. The writer's total is therefore
+ * always the smaller one, which left a band - roughly FS_MAX_NODES nodes
+ * with short paths and more than ~6.8 MiB of data - where sync cheerfully
+ * wrote an image that the next boot's loader would refuse. And a refused
+ * load falls back to the seed files, so the refusal looked exactly like a
+ * factory reset: every file gone, no error, and the next sync writing the
+ * seeds over the top of the image that was still down there. Silent total
+ * data loss. Hence: one function, and sync asks it about the very numbers
+ * it is about to write into the superblock.
+ */
+
+/* Worst-case bytes an image advertising these numbers could occupy. Every
+ * term is widened to 64-bit BEFORE it is multiplied or added: node_count
+ * is capped at FS_MAX_NODES by image_fits() and data_bytes is a uint32, so
+ * the total tops out near 4 GiB and cannot wrap a uint64. (The old
+ * all-uint32 version could wrap back down under the 8 MiB cap and defeat
+ * it completely.) Over-estimating is the safe direction - it can only ever
+ * refuse, never under-read. */
+static uint64_t image_budget(uint32_t count, uint32_t data_bytes) {
+    return (uint64_t)count * (uint64_t)(sizeof(struct node_hdr) + FS_PATH_MAX + 8)
+         + (uint64_t)data_bytes + 4096;
+}
+
+/* Would an image advertising these numbers load back? BOTH ceilings live
+ * in here, so no caller can honour one and forget the other. */
+static int image_fits(uint32_t count, uint32_t data_bytes) {
+    if (count > FS_MAX_NODES) return 0;
+    return image_budget(count, data_bytes) <= FS_LOAD_MAX;
+}
+
 /* Free an entire detached node list (used to discard a partial parse
  * or drop the old list after a successful load). */
 static void free_list(fs_node *head) {
@@ -517,19 +564,55 @@ int fs_sync(void) {
      * sectors. That's simpler than tracking partial-sector state
      * mid-write.
      *
-     * Sizing pass. Accumulated in 64-bit and bailed out at FS_LOAD_MAX:
-     * the old uint32 `needed` could in principle wrap on a big enough
-     * tree and under-allocate flat_buf, and refusing to WRITE an image
-     * we could never read back is better than writing one that bricks
-     * the next boot. */
+     * Sizing pass. `needed` is the EXACT packed size of the image, while
+     * `count` and `data_bytes` are the two numbers the superblock is about
+     * to advertise - which are what the next boot's loader will budget
+     * from. All three accumulate in 64-bit, so none of them can wrap. */
     uint64_t needed = 0;
+    uint64_t count = 0;
+    uint64_t data_bytes = 0;
     for (fs_node *n = nodes; n; n = n->next) {
         char pbuf[FS_PATH_MAX + 1];
         uint32_t plen = fs_path(n, pbuf, sizeof(pbuf));
         if (plen == 0) return -1;                  /* unrepresentable path */
         needed += sizeof(struct node_hdr) + (uint64_t)plen + (uint64_t)n->size;
         needed = (needed + 7) & ~(uint64_t)7;
-        if (needed > FS_LOAD_MAX) return -1;       /* too big to ever load back */
+        count++;
+        data_bytes += n->size;
+        /* Stop walking once the tree is past either ceiling - purely to
+         * keep the work and the accumulators bounded. Both bails are
+         * strictly implied by the image_fits() below (`needed` is never
+         * more than image_budget()), so breaking out early can only ever
+         * refuse something image_fits() refuses too. The partial totals
+         * are then a floor, which is all the refusal needs. */
+        if (count > FS_MAX_NODES || needed > FS_LOAD_MAX) break;
+    }
+
+    /* THE check, and the only one: the same function the next boot's
+     * loader uses, handed the same numbers this sync would write into the
+     * superblock. If this passes, that load cannot fail on size. If it
+     * doesn't, sync is the thing that refuses - loudly, and leaving the
+     * image already on disk untouched - because the alternative is a boot
+     * that discards the lot without a word. Both casts are safe: the loop
+     * above bails the moment either total passes its uint32-sized cap. */
+    if (!image_fits((uint32_t)count, (uint32_t)data_bytes)) {
+        serial_puts_x("fs: SYNC REFUSED - this tree cannot be loaded back, so writing it\n"
+                      "fs: would destroy your files on the next boot. Nothing was written;\n"
+                      "fs: the image already on disk is untouched. Delete some files.\n"
+                      "fs:   nodes      = ");
+        serial_put_u64_x(count);
+        serial_puts_x(" (cap ");
+        serial_put_u64_x(FS_MAX_NODES);
+        serial_puts_x(")\n"
+                      "fs:   data bytes = ");
+        serial_put_u64_x(data_bytes);
+        serial_puts_x("\n"
+                      "fs:   would need = ");
+        serial_put_u64_x(image_budget((uint32_t)count, (uint32_t)data_bytes));
+        serial_puts_x(" bytes (cap ");
+        serial_put_u64_x(FS_LOAD_MAX);
+        serial_puts_x(")\n");
+        return -1;
     }
     uint32_t total = round_up((uint32_t)needed, 512);
     if (flat_buf) { kfree(flat_buf); flat_buf = 0; }
@@ -538,10 +621,11 @@ int fs_sync(void) {
     zr(flat_buf, total);
 
     /* Pack nodes into flat_buf. Same fs_path() calls as the sizing pass
-     * and nothing mutates in between, so `off` cannot outrun `total`. */
+     * and nothing mutates in between, so `off` cannot outrun `total`.
+     * This pass deliberately does NOT recount: the superblock below
+     * carries the very numbers image_fits() approved, so the image can't
+     * advertise something the loader was never asked about. */
     uint32_t off = 0;
-    uint32_t count = 0;
-    uint32_t total_data = 0;
     for (fs_node *n = nodes; n; n = n->next) {
         char pbuf[FS_PATH_MAX + 1];
         uint32_t plen = fs_path(n, pbuf, sizeof(pbuf));
@@ -562,17 +646,16 @@ int fs_sync(void) {
             off += n->size;
         }
         off = round_up(off, 8);
-        count++;
-        total_data += n->size;
     }
 
-    /* Build + write superblock at sector 0. */
+    /* Build + write superblock at sector 0. Both casts are the ones
+     * image_fits() just vetted. */
     zr(sec_buf, 512);
     struct sb sb;
     sb.magic = MAGIC_SB;
     sb.version = FS_VERSION;
-    sb.node_count = count;
-    sb.total_data_bytes = total_data;
+    sb.node_count = (uint32_t)count;
+    sb.total_data_bytes = (uint32_t)data_bytes;
     zr(sb.reserved, sizeof(sb.reserved));
     cp(sec_buf, (const uint8_t *)&sb, sizeof(sb));
     if (ata_write_sector(0, sec_buf) != 0) return -1;
@@ -586,34 +669,63 @@ int fs_sync(void) {
     return 0;
 }
 
+/* Say so, out loud. Past the magic+version checks the superblock is
+ * claiming "I am a v2 Astrion image", so bailing from here on means we are
+ * about to discard a real filesystem and boot the seed files in its place
+ * - and the next fs_sync() will then write those seeds straight over the
+ * image that is still sitting on the platter. That is the one thing in
+ * this file worth shouting about, so it never happens quietly again. */
+static int load_failed(const char *why) {
+    serial_puts_x("fs: !!! a v2 image IS on this disk but FAILED to load: ");
+    serial_puts_x(why);
+    serial_puts_x("\nfs: !!! booting SEED files instead. Your files are still on disk -\n"
+                  "fs: !!! do NOT sync, it would overwrite them with the seeds.\n");
+    return -1;
+}
+
 int fs_load_from_disk(void) {
     if (!ata_present()) return -1;
     if (ata_read_sector(0, sec_buf) != 0) return -1;
     struct sb sb;
     cp((uint8_t *)&sb, sec_buf, sizeof(sb));
-    if (sb.magic != MAGIC_SB || sb.version != FS_VERSION) return -1;
-    if (sb.node_count == 0) return 0;            /* clean disk; nothing to load */
-    if (sb.node_count > FS_MAX_NODES) return -1; /* corrupt / hostile superblock */
 
-    /* How many bytes to slurp. node_count is now capped at 4096 and
-     * total_data_bytes is a uint32, so the whole thing is computed in
-     * 64-bit and CANNOT overflow - the old all-uint32 `guess` could
-     * wrap below the 8 MiB cap and defeat it. v2 budgets FS_PATH_MAX
-     * per node instead of FS_NAME_MAX (the header now carries a full
-     * path), so this over-estimates by more than v1 did and rejects a
-     * little sooner. That's the safe direction: it only ever refuses to
-     * load, never under-reads. */
-    uint64_t guess = (uint64_t)sb.node_count
-                       * (uint64_t)(sizeof(struct node_hdr) + FS_PATH_MAX + 8)
-                   + (uint64_t)sb.total_data_bytes + 4096;
-    if (guess > FS_LOAD_MAX) return -1;
-    uint32_t bytes = round_up((uint32_t)guess, 512);
+    /* Nothing of ours on this platter - a blank or foreign disk. Not an
+     * error and not worth a word: fs_init seeds and moves on. */
+    if (sb.magic != MAGIC_SB) return -1;
+
+    /* A real image, but not a format we read (v1 stored leaf names, which
+     * would parse as bogus relative paths). Declining is correct; doing it
+     * silently isn't, because those files are real and the next sync lands
+     * on top of them. */
+    if (sb.version != FS_VERSION) {
+        serial_puts_x("fs: disk holds a v");
+        serial_put_u64_x(sb.version);
+        serial_puts_x(" image; this kernel reads v2 only - ignoring it and booting seeds.\n"
+                      "fs: the old image stays on disk until something syncs over it.\n");
+        return -1;
+    }
+    if (sb.node_count == 0) return 0;            /* clean disk; nothing to load */
+
+    /* How many bytes to slurp - and whether to slurp at all. Same function
+     * fs_sync() clears an image through before writing it, so our own sync
+     * can no longer produce anything that lands here. A superblock that
+     * still fails this is corrupt, hostile, or was written by a kernel with
+     * wider caps than ours. */
+    if (!image_fits(sb.node_count, sb.total_data_bytes)) {
+        serial_puts_x("fs: superblock claims ");
+        serial_put_u64_x(sb.node_count);
+        serial_puts_x(" nodes / ");
+        serial_put_u64_x(sb.total_data_bytes);
+        serial_puts_x(" data bytes\n");
+        return load_failed("that doesn't fit the load caps (corrupt, hostile, or from a wider-capped kernel)");
+    }
+    uint32_t bytes = round_up((uint32_t)image_budget(sb.node_count, sb.total_data_bytes), 512);
 
     uint8_t *buf = (uint8_t *)kmalloc(bytes);
-    if (!buf) return -1;
+    if (!buf) return load_failed("out of heap for the read buffer");
     uint32_t lba = 1;
     for (uint32_t i = 0; i < bytes; i += 512) {
-        if (ata_read_sector(lba, buf + i) != 0) { kfree(buf); return -1; }
+        if (ata_read_sector(lba, buf + i) != 0) { kfree(buf); return load_failed("disk read error"); }
         lba++;
     }
 
@@ -689,7 +801,7 @@ int fs_load_from_disk(void) {
         nodes = saved_nodes;        /* restore the prior list... */
         node_count = saved_count;
         cwd = saved_cwd;            /* ...and where we were standing in it */
-        return -1;
+        return load_failed("a record in it is malformed");
     }
     free_list(saved_nodes);         /* success: drop the old list */
     return 0;

@@ -597,10 +597,12 @@ static void print_summary(void) {
  * small. idt.c needs a few of them at panic time, so expose tiny
  * non-static wrappers here. Keeps responsibility clear: kernel_mb2.c
  * owns the boot_info struct + fb/serial primitives; idt.c calls these
- * narrow extern hooks at panic.
+ * narrow extern hooks at panic. elf.c/gdt.c/fs.c use the serial ones to
+ * report the handful of things worth reporting from a driver.
  */
 void serial_puts_x(const char *s)        { serial_puts(s); }
 void serial_put_hex64_x(uint64_t v)      { serial_put_hex64(v); }
+void serial_put_u64_x(uint64_t v)        { serial_put_u64(v); }
 int  fb_present_x(void)                  { return boot_info.fb_present; }
 uint32_t fb_width_x(void)                { return boot_info.fb_width; }
 uint32_t fb_height_x(void)               { return boot_info.fb_height; }
