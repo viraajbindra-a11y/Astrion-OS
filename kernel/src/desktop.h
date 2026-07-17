@@ -33,7 +33,7 @@ void desktop_terminal_rect(uint32_t *x, uint32_t *y, uint32_t *w, uint32_t *h);
 void desktop_draw_clock(const char *hhmmss);
 
 /* Hit-test the dock; returns icon index (0=Terminal 1=Files 2=Editor
- * 3=Snake 4=Assistant) under (x,y), or -1 if none. */
+ * 3=Snake 4=Assistant 5=Monitor) under (x,y), or -1 if none. */
 int desktop_dock_hit(int x, int y);
 
 /* Highlight the given dock icon as the active app (-1 = none). */

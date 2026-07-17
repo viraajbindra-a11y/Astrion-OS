@@ -32,6 +32,15 @@ extern void     fb_rect_x(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32
 extern uint32_t fb_puts_x(uint32_t x, uint32_t y, const char *s, uint32_t color, int scale);
 
 /* ─── Geometry ─── */
+/* One generous size for the apps that hold content of unbounded length — a
+ * file list, a document, a conversation. The window can't know how much
+ * there'll be, so it takes room and lets the content fill it.
+ *
+ * The System Monitor is NOT one of those: its content is a fixed-width mono
+ * table and a heap gauge, and both are bounded. It gets a size derived from
+ * that table instead (size_for), so its rules, its bar and its rows all end
+ * on the same right edge. At APP_W it was ~30% full — the table stranded in
+ * the left 60% and the footer rule framing 245px of nothing. */
 #define APP_W     860u
 #define APP_H     520u
 #define TITLE_H   30u
@@ -43,7 +52,7 @@ extern uint32_t fb_puts_x(uint32_t x, uint32_t y, const char *s, uint32_t color,
  * (advance, wrap, line step) is unchanged; only the glyph draw + cell differ. */
 static uint32_t GW = 12, GH = 27, LINE = 29;   /* real values set in wm_init */
 
-enum app_kind { APP_NONE = 0, APP_FILES, APP_EDITOR, APP_ASSIST };
+enum app_kind { APP_NONE = 0, APP_FILES, APP_EDITOR, APP_ASSIST, APP_MON };
 
 static uint32_t SW, SH;
 
@@ -56,8 +65,12 @@ static uint32_t SW, SH;
  * so dragging the TOP window stays cheap (restore → move → save → draw) with
  * no full repaint. Anything that changes the stack (open / close / raise)
  * calls repaint_all() instead, which is always correct — that is why the
- * console needs a backing store (console_redraw). */
-#define WM_MAX 3
+ * console needs a backing store (console_redraw).
+ *
+ * That savebuf rule is also what bounds the System Monitor's live repaint:
+ * a window may only paint over itself, because anything above it holds a
+ * savebuf snapshotted from BEFORE the paint. See mon_can_live_paint(). */
+#define WM_MAX 4
 
 struct window {
     int           open;
@@ -83,11 +96,13 @@ static void set_content_rect(struct window *w);
 
 static int slot_of(enum app_kind a) {
     switch (a) { case APP_FILES: return 0; case APP_EDITOR: return 1;
-                 case APP_ASSIST: return 2; default: return -1; }
+                 case APP_ASSIST: return 2; case APP_MON: return 3;
+                 default: return -1; }
 }
 static int icon_of(enum app_kind a) {   /* dock icon index */
     switch (a) { case APP_FILES: return 1; case APP_EDITOR: return 2;
-                 case APP_ASSIST: return 4; default: return 0; }
+                 case APP_ASSIST: return 4; case APP_MON: return 5;
+                 default: return 0; }
 }
 static struct window *topwin(void)  { return zn > 0 ? &wins[zord[zn - 1]] : 0; }
 static struct window *focused(void) { return focus_shell ? 0 : topwin(); }
@@ -944,6 +959,353 @@ static void assist_key(char c) {
     }
 }
 
+/* ─── System Monitor ───
+ *
+ * The GUI form of what the Assistant already answers in prose: the real
+ * scheduler table, the real heap, real uptime. Every number is read live
+ * from the kernel at paint time — nothing here is cached or simulated.
+ *
+ * LIVE UPDATE, AND WHY IT IS SHAPED LIKE THIS:
+ *
+ * 1. It repaints from wm_tick(), i.e. task 0's main loop — NOT from a
+ *    spawned task. A background task would be preempted into the middle
+ *    of another window's draw and interleave two apps' pixels. Every
+ *    other wm draw already happens on task 0; the monitor joins that
+ *    single thread rather than opening a second one. The clock task gets
+ *    away with being a task only because the top bar (y < 44) is a region
+ *    wm_move() can never let a window reach (it clamps to WM_TOP = 66).
+ *
+ * 2. It repaints ONLY when no window above it in z-order overlaps the
+ *    rect it is about to touch. This is forced, not lazy: `savebuf` holds
+ *    what was under a window when it was painted, so if we redrew our
+ *    numbers while covered we would (a) paint straight over the window on
+ *    top of us, and (b) leave that window's savebuf holding stale digits
+ *    to smear back on its next drag. Covered => hold the last frame; the
+ *    next raise repaints it through repaint_all() anyway.
+ *
+ * 3. Only the volatile bands (header / heap numbers / rows) clear+redraw.
+ *    The rules, labels and column header are painted once per full paint.
+ *    Fixed-width mono fields mean a shrinking number can't leave a digit
+ *    behind without the whole rect flashing.
+ */
+#define MON_REFRESH_MS 500u
+#define MON_BAR_H      10u
+#define MON_RH         (GH + 5)   /* row pitch — same rhythm as the Files rows */
+
+/* Mono column grid. AF_MONO advances exactly GW px for every glyph, so a
+ * column is just a multiple of GW and the digits line up for free. */
+#define MON_C_TID     0u
+#define MON_W_TID     2
+#define MON_C_NAME    5u          /* NAME field is 15 wide — TASK_NAME_MAX */
+#define MON_C_STATE   22u
+#define MON_C_SWEND   42u         /* right edge of the switches field */
+#define MON_W_SW      11
+
+/* MON_C_SWEND is not just the table's last column, it is the window's right
+ * edge: the window is sized to it (size_for), so the header, the heap gauge,
+ * both rules, the table and the footer all start at cx and end at cx+cw.
+ * One left edge, one right edge, nothing stranded. */
+#define MON_COLS      MON_C_SWEND
+#define MON_ROWS      6u          /* task rows before the "+N more" line */
+
+/* Vertical layout, as offsets from the top of the content rect. Text sits 8px
+ * off a rule — the rhythm files_draw already set — and every y below is
+ * derived from these, so the block moves as one if a number changes. */
+/* The heap row: three [label][value][unit] groups on one baseline. The value
+ * is the data (mono, coloured); the label and the unit are REG13 so the word
+ * "used" stops shouting as loud as the number it names. */
+#define MON_C_G1      0u          /* group anchors, in mono cells         */
+#define MON_C_G2      14u
+#define MON_C_G3      28u
+#define MON_C_MEMVAL  3u          /* value field, offset within a group   */
+#define MON_W_MEM     6           /* six digits of KB = 999 MB of heap    */
+#define MON_C_MEMUNIT 9u          /* "KB", offset within a group          */
+
+#define MON_HDR_DY    0u          /* uptime · task count                  */
+#define MON_RULE1_DY  24u
+#define MON_MEM_DY    32u         /* "Kernel heap"                        */
+#define MON_BAR_DY    54u         /* the gauge                            */
+#define MON_VAL_DY    70u         /* used / free / peak                   */
+#define MON_RULE2_DY  112u
+#define MON_COL_DY    120u        /* TID NAME STATE SWITCHES              */
+#define MON_ROW0_DY   142u        /* first task row                       */
+
+static uint64_t mon_last_ms;
+
+/* u64 -> decimal. buf needs 21 bytes. Returns the length. */
+static int u64_str(uint64_t v, char *buf) {
+    char t[24]; int n = 0;
+    if (!v) { buf[0] = '0'; buf[1] = 0; return 1; }
+    while (v) { t[n++] = (char)('0' + (int)(v % 10)); v /= 10; }
+    for (int i = 0; i < n; i++) buf[i] = t[n - 1 - i];
+    buf[n] = 0;
+    return n;
+}
+static int str_app(char *d, int at, int cap, const char *s) {
+    while (*s && at < cap - 1) d[at++] = *s++;
+    d[at] = 0; return at;
+}
+static int num_app(char *d, int at, int cap, uint64_t v) {
+    char b[24]; u64_str(v, b); return str_app(d, at, cap, b);
+}
+
+/* Do rects A and B share a pixel? Written in difference form so no
+ * coordinate is ever added — nothing can wrap past 2^32. */
+static int rects_overlap(uint32_t ax, uint32_t ay, uint32_t aw, uint32_t ah,
+                         uint32_t bx, uint32_t by, uint32_t bw, uint32_t bh) {
+    if (!aw || !ah || !bw || !bh) return 0;
+    if (ax >= bx) { if (ax - bx >= bw) return 0; } else { if (bx - ax >= aw) return 0; }
+    if (ay >= by) { if (ay - by >= bh) return 0; } else { if (by - ay >= ah) return 0; }
+    return 1;
+}
+
+/* Row geometry, derived from the content rect rather than guessed, so the
+ * layout follows if the window or the face ever changes size. */
+static uint32_t mon_mem_y(void)  { return cy + MON_MEM_DY; }
+static uint32_t mon_bar_y(void)  { return cy + MON_BAR_DY; }
+static uint32_t mon_val_y(void)  { return cy + MON_VAL_DY; }
+static uint32_t mon_rule_y(void) { return cy + MON_RULE2_DY; }
+static uint32_t mon_col_y(void)  { return cy + MON_COL_DY; }
+static uint32_t mon_row0_y(void) { return cy + MON_ROW0_DY; }
+static uint32_t mon_hint_y(void) { return cy + ch - (uint32_t)af_line_height(AF_REG13); }
+static uint32_t mon_foot_y(void) { return mon_hint_y() - 8; }
+
+/* Height the content rect needs for the chrome plus n task rows. size_for()
+ * asks for MON_ROWS; mon_fits() checks we still have room for one. */
+static uint32_t mon_ch_for(uint32_t rows) {
+    return MON_ROW0_DY + rows * MON_RH + 8 + (uint32_t)af_line_height(AF_REG13);
+}
+
+/* The content rect has to be big enough for the layout to mean anything.
+ * Everything below subtracts from ch/cw, so this is the wrap guard too. */
+static int mon_fits(void) { return cw >= MON_COLS * GW && ch >= mon_ch_for(1); }
+
+/* Draw a REG13 label sharing a BASELINE with AF_MONO text drawn at y. af_draw
+ * takes the TOP of the line box and the two faces have different ascents, so
+ * the smaller face has to drop by the difference or it floats above the digits
+ * it belongs to. Labels are the small face on purpose: the number is the data
+ * and the word is only there to say which number it is. */
+static void mon_label(uint32_t x, uint32_t y, const char *s) {
+    af_draw(x, y + (uint32_t)(af_ascent(AF_MONO) - af_ascent(AF_REG13)),
+            s, AC_MUTED, AF_REG13);
+}
+
+/* Right-align v in a cols-wide mono field, clearing the field first so a
+ * number that shrinks can't leave its old leading digits on screen. */
+static void mon_num_field(uint32_t x, uint32_t y, int cols, uint64_t v, uint32_t color) {
+    char b[24];
+    if (cols <= 0) return;
+    if (cols > 20) cols = 20;               /* b[] bound: a u64 is <= 20 digits */
+    int n = u64_str(v, b);
+    fb_rect_x(x, y, (uint32_t)cols * GW, GH, AC_TERM_BG);
+    if (n > cols) { n = cols; b[n] = 0; }   /* leading digits beat a blown field */
+    af_draw(x + (uint32_t)(cols - n) * GW, y, b, color, AF_MONO);
+}
+
+static int mon_task_count(void) {
+    struct task_info ti; int n = 0;
+    for (int i = 0; i < TASK_MAX; i++) if (task_get_info(i, &ti)) n++;
+    return n;
+}
+
+/* Header: uptime on the left, task count on the right, spanning the content
+ * rect so the rule under it frames something at both ends.
+ *
+ * No wall clock. It was here, and it was the same string the top bar shows
+ * 130px above — read together the two even disagreed by a second, because
+ * they refresh on different phases, which reads as a bug and isn't one. The
+ * top bar owns the clock. This header says the two things only the Monitor
+ * knows: how long the machine has been up, and how many tasks are in the
+ * table below. The uptime is also the liveness tell — if it is ticking, the
+ * numbers under it are this second's.
+ *
+ * Variable width, so the whole band clears — it is a line, not a table. */
+static void mon_draw_header(void) {
+    char s[64]; int k = 0;
+    uint32_t secs = (uint32_t)(pit_elapsed_ms() / 1000);
+    k = str_app(s, k, sizeof(s), "up ");
+    if (secs >= 3600) { k = num_app(s, k, sizeof(s), secs / 3600); k = str_app(s, k, sizeof(s), "h "); }
+    if (secs >= 60)   { k = num_app(s, k, sizeof(s), (secs / 60) % 60); k = str_app(s, k, sizeof(s), "m "); }
+    k = num_app(s, k, sizeof(s), secs % 60); k = str_app(s, k, sizeof(s), "s");
+
+    int n = mon_task_count();
+    char r[24]; int j = num_app(r, 0, sizeof(r), (uint64_t)n);
+    j = str_app(r, j, sizeof(r), (n == 1) ? " task" : " tasks");
+
+    uint32_t hy = cy + MON_HDR_DY;
+    fb_rect_x(cx, hy, cw, (uint32_t)af_line_height(AF_REG13), AC_TERM_BG);
+    af_draw(cx, hy, s, AC_MUTED, AF_REG13);
+    uint32_t rw = af_text_width(r, AF_REG13);
+    if (cw > rw) af_draw(cx + cw - rw, hy, r, AC_MUTED, AF_REG13);
+}
+
+/* Heap: a bar plus the three numbers that matter. The bar is the only
+ * thing here that is a picture rather than a digit — used fills from the
+ * left, and a 1px teal tick marks the high-water mark, so you can see how
+ * close this boot has ever come to the ceiling. It spans the whole content
+ * rect, which only reads as a gauge (and not as a third rule) because the
+ * table under it now reaches the same right edge. */
+static void mon_draw_mem(void) {
+    uint64_t tot = heap_total(), used = heap_used(), pk = heap_peak();
+    uint32_t by = mon_bar_y(), vy = mon_val_y();
+
+    fb_rect_x(cx, by, cw, MON_BAR_H, AC_PANEL);            /* trough */
+    if (tot) {
+        /* cw <= screen width and used <= tot < 2^32, so the u64 product
+         * cannot overflow; the divide keeps it inside the bar. */
+        uint64_t fw = (uint64_t)cw * used / tot;
+        if (fw > (uint64_t)cw) fw = cw;
+        fb_rect_x(cx, by, (uint32_t)fw, MON_BAR_H, AC_ACCENT);
+        uint64_t px = (uint64_t)cw * pk / tot;
+        if (px >= (uint64_t)cw) px = cw - 1;      /* cw >= MON_COLS*GW, so no wrap */
+        fb_rect_x(cx + (uint32_t)px, by, 1, MON_BAR_H, AC_TEAL);
+    }
+    /* KB, not bytes: the heap moves in KB and six digits of bytes is noise. */
+    mon_num_field(cx + (MON_C_G1 + MON_C_MEMVAL) * GW, vy, MON_W_MEM, used >> 10, AC_WHITE);
+    mon_num_field(cx + (MON_C_G2 + MON_C_MEMVAL) * GW, vy, MON_W_MEM, heap_free() >> 10, AC_MUTED);
+    mon_num_field(cx + (MON_C_G3 + MON_C_MEMVAL) * GW, vy, MON_W_MEM, pk >> 10, AC_TEAL);
+}
+
+/* The scheduler table, straight from task_get_info. */
+static void mon_draw_rows(void) {
+    uint32_t top = mon_row0_y(), foot = mon_foot_y();
+    if (foot <= top) return;
+    fb_rect_x(cx, top, cw, foot - top, AC_TERM_BG);
+
+    int cap = (int)((foot - top) / MON_RH);
+    int total = mon_task_count();
+    int limit = (total > cap) ? cap - 1 : cap;   /* keep a row for "+N more" */
+    if (limit < 0) limit = 0;
+
+    int cur = task_current_tid(), shown = 0;
+    struct task_info ti;
+    for (int i = 0; i < TASK_MAX && shown < limit; i++) {
+        if (!task_get_info(i, &ti)) continue;
+        uint32_t ry = top + (uint32_t)shown * MON_RH;
+        uint32_t ty = ry + (MON_RH - GH) / 2;
+
+        mon_num_field(cx + MON_C_TID * GW, ty, MON_W_TID, (uint64_t)ti.tid, AC_MUTED);
+        /* The task we are actually executing on is the only white thing —
+         * same rule the Files breadcrumb uses for the folder you're in. */
+        af_draw(cx + MON_C_NAME * GW, ty, ti.name,
+                (ti.tid == cur) ? AC_WHITE : AC_MUTED, AF_MONO);
+        af_draw(cx + MON_C_STATE * GW, ty, task_state_name(ti.state),
+                (ti.state == TASK_RUNNING) ? AC_GREEN : AC_MUTED, AF_MONO);
+        /* Switches is the column with life in it: state is nearly constant
+         * (whoever asks is by definition the one running), but this climbs. */
+        mon_num_field(cx + (MON_C_SWEND - MON_W_SW) * GW, ty, MON_W_SW,
+                      ti.switches, AC_TEAL);
+        shown++;
+    }
+    if (total > shown) {
+        char s[32]; int k = str_app(s, 0, sizeof(s), "+");
+        k = num_app(s, k, sizeof(s), (uint64_t)(total - shown));
+        k = str_app(s, k, sizeof(s), " more");
+        af_draw(cx + MON_C_NAME * GW, top + (uint32_t)shown * MON_RH, s,
+                AC_MUTED, AF_MONO);
+    }
+}
+
+/* Painted once per full paint: rules, labels, column header, footer. */
+static void mon_draw_chrome(void) {
+    fb_rect_x(cx, cy + MON_RULE1_DY, cw, 1, AC_BORDER);
+    af_draw(cx, mon_mem_y(), "Kernel heap", AC_MUTED, AF_REG13);
+
+    uint32_t vy = mon_val_y();
+    mon_label(cx + MON_C_G1 * GW, vy, "used");
+    mon_label(cx + MON_C_G2 * GW, vy, "free");
+    mon_label(cx + MON_C_G3 * GW, vy, "peak");
+    mon_label(cx + (MON_C_G1 + MON_C_MEMUNIT) * GW + 4, vy, "KB");
+    mon_label(cx + (MON_C_G2 + MON_C_MEMUNIT) * GW + 4, vy, "KB");
+    mon_label(cx + (MON_C_G3 + MON_C_MEMUNIT) * GW + 4, vy, "KB");
+
+    fb_rect_x(cx, mon_rule_y(), cw, 1, AC_BORDER);
+
+    uint32_t hy = mon_col_y();
+    af_draw(cx + MON_C_TID * GW,   hy, "TID",   AC_MUTED, AF_REG13);
+    af_draw(cx + MON_C_NAME * GW,  hy, "NAME",  AC_MUTED, AF_REG13);
+    af_draw(cx + MON_C_STATE * GW, hy, "STATE", AC_MUTED, AF_REG13);
+    /* Right-aligned to the same edge as the digits below it. */
+    uint32_t shw = af_text_width("SWITCHES", AF_REG13);
+    if (MON_C_SWEND * GW > shw)
+        af_draw(cx + MON_C_SWEND * GW - shw, hy, "SWITCHES", AC_MUTED, AF_REG13);
+
+    /* Same footer rule as Files: content framed top and bottom by one line,
+     * and the footer says KEYS — that is the whole job of this row, here and
+     * in Files. It used to also carry "live - updates while visible", which
+     * was a promise immediately taking itself back. Dropped: the ticking
+     * uptime in the header is the liveness proof, a covered window showing
+     * its last frame is simply what a covered window is, and raising it
+     * repaints it — so there is no moment where the user is shown a stale
+     * number and told it is fresh. (A "stale" badge is also unbuildable:
+     * painting one is exactly the thing a covered window cannot do.) */
+    const char *hint = "Esc closes";
+    fb_rect_x(cx, mon_foot_y(), cw, 1, AC_BORDER);
+    uint32_t hw = af_text_width(hint, AF_REG13);
+    if (cw > hw) af_draw(cx + cw - hw, mon_hint_y(), hint, AC_MUTED, AF_REG13);
+}
+
+/* Just the numbers — what a tick redraws. */
+static void mon_draw_live(void) {
+    mon_draw_header();
+    mon_draw_mem();
+    mon_draw_rows();
+}
+
+static void mon_draw(void) {
+    fb_rect_x(cx, cy, cw, ch, AC_TERM_BG);
+    if (!mon_fits()) {                      /* too small to say anything true */
+        af_draw(cx, cy, "window too small", AC_MUTED, AF_MONO);
+        return;
+    }
+    mon_draw_chrome();
+    mon_draw_live();
+}
+
+static void mon_key(char c) {
+    if (c == 27) { wm_close(); return; }    /* read-only: ESC is the only key */
+}
+
+/* May the monitor paint its own content rect right now without touching a
+ * window above it? See the header comment — this is the whole live-update
+ * contract in one function. */
+static int mon_can_live_paint(void) {
+    int s = slot_of(APP_MON);
+    if (s < 0 || !wins[s].open) return 0;
+    struct window *w = &wins[s];
+
+    int zi = -1;
+    for (int i = 0; i < zn; i++) if (zord[i] == s) { zi = i; break; }
+    if (zi < 0) return 0;
+
+    /* The rect we are about to touch = our content rect (set_content_rect). */
+    uint32_t rx = w->x + PAD, ry = w->y + TITLE_H + 10;
+    uint32_t rw = w->w - 2 * PAD, rh = w->h - TITLE_H - 10 - PAD;
+    for (int i = zi + 1; i < zn; i++) {
+        struct window *o = &wins[zord[i]];
+        /* o->sw/sh include the drop shadow, so this errs toward "covered". */
+        if (rects_overlap(rx, ry, rw, rh, o->x, o->y, o->sw, o->sh)) return 0;
+    }
+    return 1;
+}
+
+/* Called from wm_tick — task 0, same thread as every other wm draw. */
+static void mon_tick(void) {
+    int s = slot_of(APP_MON);
+    if (s < 0 || !wins[s].open) return;
+    uint64_t now = pit_elapsed_ms();
+    if (now - mon_last_ms < MON_REFRESH_MS) return;
+    /* Note we do NOT stamp mon_last_ms when covered: the first tick after
+     * the window is uncovered should refresh it immediately, not wait. */
+    if (!mon_can_live_paint()) return;
+    mon_last_ms = now;
+
+    set_content_rect(&wins[s]);
+    if (!mon_fits()) return;
+    mouse_lift();               /* don't bake the cursor into what we redraw */
+    mon_draw_live();
+}
+
 /* ─── Window chrome + lifecycle ─── */
 
 static const char *title_for(enum app_kind a) {
@@ -951,6 +1313,7 @@ static const char *title_for(enum app_kind a) {
         case APP_FILES:  return "Files";
         case APP_EDITOR: return ed_title;
         case APP_ASSIST: return "Assistant";
+        case APP_MON:    return "System Monitor";
         default:         return "App";
     }
 }
@@ -974,6 +1337,7 @@ static void draw_content(struct window *w) {
         case APP_EDITOR: editor_draw(); break;
         case APP_FILES:  files_draw();  break;
         case APP_ASSIST: assist_draw(); break;
+        case APP_MON:    mon_draw();    break;
         default: break;
     }
 }
@@ -1018,6 +1382,21 @@ static void wm_close(void) {
     close_window(w);
 }
 
+/* How big a window opens. Files / Editor / Assistant hold content of unbounded
+ * length, so they take the one generous size and let it fill. The Monitor's
+ * content is bounded and known — a MON_COLS-wide mono table and a heap gauge —
+ * so it is sized to exactly that: the table's own width sets the window's, and
+ * MON_ROWS task rows set its height. That is what puts the header, both rules,
+ * the gauge, the rows and the footer on one shared left and right edge. */
+static void size_for(enum app_kind a, uint32_t *w, uint32_t *h) {
+    if (a == APP_MON) {
+        *w = MON_COLS * GW + 2 * PAD;
+        *h = mon_ch_for(MON_ROWS) + TITLE_H + 10 + PAD;
+        return;
+    }
+    *w = APP_W; *h = APP_H;
+}
+
 static void open_common(enum app_kind app) {
     int s = slot_of(app);
     if (s < 0) return;
@@ -1025,15 +1404,16 @@ static void open_common(enum app_kind app) {
     SW = fb_width_x(); SH = fb_height_x();
     if (!w->open) {
         w->app = app;
-        w->w = APP_W; w->h = APP_H;
+        size_for(app, &w->w, &w->h);
         /* cascade so a second window doesn't land exactly on the first */
-        w->x = (SW - APP_W) / 2 + (uint32_t)(s * 26);
+        w->x = (SW - w->w) / 2 + (uint32_t)(s * 26);
         w->y = WM_TOP + 4 + (uint32_t)(s * 22);
         w->sw = w->w + 6; w->sh = w->h + 6;          /* include shadow */
         if (!w->savebuf) w->savebuf = (uint32_t *)kmalloc(w->sw * w->sh * 4);
         w->open = 1;
         if (app == APP_ASSIST) assist_reset();
         if (app == APP_FILES)  files_load();
+        if (app == APP_MON)    mon_last_ms = pit_elapsed_ms();
     }
     z_raise(s);
     focus_shell = 0;
@@ -1063,6 +1443,7 @@ void wm_open_app(int icon) {
         case 2: wm_open_editor(0);       break;
         case 3: run_snake();             break;
         case 4: open_common(APP_ASSIST); break;
+        case 5: open_common(APP_MON);    break;
         default: break;
     }
 }
@@ -1099,6 +1480,7 @@ void wm_init(void) {
     }
     zn = 0; focus_shell = 1;
     dragging = 0; ed_buf = 0;
+    mon_last_ms = 0;
 }
 
 int wm_active(void) { return focused() != 0; }
@@ -1111,6 +1493,7 @@ int wm_handle_key(char c) {
         case APP_EDITOR: editor_key(c); return 1;
         case APP_FILES:  files_key(c);  return 1;
         case APP_ASSIST: assist_key(c); return 1;
+        case APP_MON:    mon_key(c);    return 1;
         default: return 0;
     }
 }
@@ -1159,5 +1542,12 @@ void wm_tick(void) {
             wm_move(mx - drag_ox, my - drag_oy);
             last_mx = mx; last_my = my;
         }
+        return;                 /* mid-drag: leave the pixels to wm_move */
     }
+
+    /* Live numbers, last: mouse_redraw_if_dirty() runs right after us in the
+     * main loop, so the cursor goes back on top of whatever we just drew.
+     * The early returns above either end in a full repaint or cost a single
+     * ~10ms iteration that the next tick picks up — neither loses an update. */
+    mon_tick();
 }

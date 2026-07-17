@@ -72,6 +72,20 @@ static const struct dock_icon g_icons[] = {
     { "Editor",    'E', 0xFF9F0Au },   /* orange */
     { "Snake",     'S', 0x30D158u },   /* green  */
     { "Assistant", 'A', 0xBF5AF2u },   /* purple */
+    /* Teal, not pink: pink (0xFF375F) sits a hair off the traffic-light red
+     * (AC_RED 0xFF5F57) every window wears in its title bar, and a Monitor
+     * icon that is permanently red reads as an alarm that is always firing.
+     * Teal is the colour the Monitor already speaks in — switches and the
+     * heap high-water mark are both AC_TEAL — so the dock names the app in
+     * the app's own colour, and nothing in the dock means "warning".
+     *
+     * This is systemTeal, NOT AC_TEAL (0x64D2FF). AC_TEAL is right for ink
+     * on the dark window body but wrong for a tile: at ~0.58 relative
+     * luminance it is far lighter than every other icon here (0.16..0.47),
+     * and the white glyph these tiles all carry went soft on it. Every
+     * colour in this table is mid-luminance for exactly that reason — it is
+     * the rule that makes one glyph colour work for all six. */
+    { "Monitor",   'M', 0x30B0C7u },   /* teal   */
 };
 #define NICON ((uint32_t)(sizeof(g_icons) / sizeof(g_icons[0])))
 #define DOCK_IY (SH - DOCK_H + 12)

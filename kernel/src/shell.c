@@ -129,11 +129,13 @@ static void cmd_exec(int argc, char **argv);
 static void cmd_files(int argc, char **argv);
 static void cmd_edit(int argc, char **argv);
 static void cmd_assistant(int argc, char **argv);
+static void cmd_monitor(int argc, char **argv);
 
 static const struct cmd CMDS[] = {
     { "files",   "open the Files browser window",    cmd_files },
     { "edit",    "edit <file> - open the text editor", cmd_edit },
     { "assistant","open the Assistant window",       cmd_assistant },
+    { "monitor", "open the System Monitor window",   cmd_monitor },
     { "help",    "list available commands",          cmd_help },
     { "version", "kernel + build banner",            cmd_version },
     { "clear",   "clear the console",                cmd_clear },
@@ -1075,6 +1077,10 @@ static void cmd_edit(int argc, char **argv) {
 static void cmd_assistant(int argc, char **argv) {
     (void)argc; (void)argv;
     wm_open_app(4);   /* Assistant (Tier 2 fills it in) */
+}
+static void cmd_monitor(int argc, char **argv) {
+    (void)argc; (void)argv;
+    wm_open_app(5);   /* System Monitor — the GUI form of `ps` + `heap` */
 }
 
 /* ─── exec: load + run an ELF program in RING 3 ──────────────────
