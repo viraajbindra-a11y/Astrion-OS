@@ -2,6 +2,9 @@ node_modules/
 .DS_Store
 .env
 .claude/
+# ...but the agent team is project config worth versioning (settings.local.json
+# stays ignored above — it's machine-specific).
+!.claude/agents/
 
 # auto-push runtime logs (script + launchd)
 scripts/auto-push.log
