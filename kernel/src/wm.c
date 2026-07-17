@@ -37,9 +37,10 @@ extern uint32_t fb_puts_x(uint32_t x, uint32_t y, const char *s, uint32_t color,
 #define PAD       12u
 #define WM_TOP    66u    /* below top bar + accent */
 #define WM_DOCK   82u    /* reserved dock height at the bottom */
-#define GW        (FONT_WIDTH  * 2)   /* content glyph cell = 16x24 */
-#define GH        (FONT_HEIGHT * 2)
-#define LINE      (GH + 2)
+/* Content text cell — seeded from the antialiased mono face (JetBrains Mono)
+ * in wm_init(), the same trick as console.c: the editor/assistant layout math
+ * (advance, wrap, line step) is unchanged; only the glyph draw + cell differ. */
+static uint32_t GW = 12, GH = 27, LINE = 29;   /* real values set in wm_init */
 
 enum app_kind { APP_NONE = 0, APP_FILES, APP_EDITOR, APP_ASSIST };
 
@@ -142,7 +143,7 @@ static void editor_draw(void) {
         if (c == '\n') { gx = cx; gy += LINE; continue; }
         if (gy + GH > cy + ch) break;
         char s[2] = { c, 0 };
-        fb_puts_x(gx, gy, s, AC_WHITE, 2);
+        af_draw(gx, gy, s, AC_WHITE, AF_MONO);
         gx += GW;
     }
     if (caret_y + GH <= cy + ch)
@@ -183,13 +184,13 @@ static void files_load(void) {
 }
 static void files_draw(void) {
     fb_rect_x(cx, cy, cw, ch, AC_TERM_BG);
-    fb_puts_x(cx, cy, "Files in /  (up/down, Enter opens, ESC closes)", AC_MUTED, 1);
+    af_draw(cx, cy, "Files in /  (up/down, Enter opens, ESC closes)", AC_MUTED, AF_REG13);
     uint32_t top = cy + 24;
     for (int i = 0; i < fl_count; i++) {
         uint32_t ry = top + (uint32_t)i * 30;
         if (ry + 28 > cy + ch) break;
         if (i == fl_sel) fb_rect_x(cx, ry, cw, 28, AC_PANEL);
-        fb_puts_x(cx + 8, ry + 3, fl_names[i], (i == fl_sel) ? AC_WHITE : AC_MUTED, 2);
+        af_draw(cx + 8, ry + 3, fl_names[i], (i == fl_sel) ? AC_WHITE : AC_MUTED, AF_MONO);
     }
 }
 static void files_key(char c) {
@@ -212,8 +213,8 @@ static void assist_reset(void) { as_plen = 0; as_prompt[0] = 0; }
 static void assist_prompt_line(void) {
     uint32_t py = cy + 60;
     fb_rect_x(cx, py, cw, GH + 2, AC_TERM_BG);
-    fb_puts_x(cx, py, ">", AC_TEAL, 2);
-    fb_puts_x(cx + GW + 6, py, as_prompt, AC_WHITE, 2);
+    af_draw(cx, py, ">", AC_TEAL, AF_MONO);
+    af_draw(cx + GW + 6, py, as_prompt, AC_WHITE, AF_MONO);
     uint32_t caret = cx + GW + 6 + (uint32_t)as_plen * GW;
     fb_rect_x(caret, py, 2, GH, AC_ORANGE);
 }
@@ -224,7 +225,7 @@ static void assist_emit(char c) {
     if (as_ox + GW > cx + cw) { as_ox = cx; as_oy += LINE; }
     if (as_oy + GH > cy + ch) return;         /* full */
     char s[2] = { c, 0 };
-    fb_puts_x(as_ox, as_oy, s, AC_WHITE, 2);
+    af_draw(as_ox, as_oy, s, AC_WHITE, AF_MONO);
     as_ox += GW;
 }
 
@@ -582,9 +583,9 @@ static void assist_run(void) {
 
 static void assist_draw(void) {
     fb_rect_x(cx, cy, cw, ch, AC_TERM_BG);
-    fb_puts_x(cx, cy, "Astrion Assistant", AC_ORANGE, 3);
-    fb_puts_x(cx, cy + 40, "on-device - try:  write hi to notes.txt  /  read notes.txt  /  open snake  /  help  /  or just chat",
-              AC_MUTED, 1);
+    af_draw(cx, cy, "Astrion Assistant", AC_ACCENT, AF_SB16);
+    af_draw(cx, cy + 24, "on-device - try:  write hi to notes.txt  /  read notes.txt  /  open snake  /  help  /  or just chat",
+            AC_MUTED, AF_REG13);
     assist_prompt_line();
 }
 
@@ -724,6 +725,10 @@ static void wm_move(int nx, int ny) {
 
 void wm_init(void) {
     SW = fb_width_x(); SH = fb_height_x();
+    /* Seed the content cell from the mono face (same as console.c). */
+    GW = af_text_width("M", AF_MONO);
+    GH = (uint32_t)af_line_height(AF_MONO);
+    LINE = GH + 2;
     win.open = 0; win.app = APP_NONE; win.savebuf = 0;
     dragging = 0; ed_buf = 0;
 }
