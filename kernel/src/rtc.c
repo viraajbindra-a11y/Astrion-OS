@@ -1,7 +1,7 @@
 /*
  * Astrion v2.0 — CMOS real-time clock (see rtc.h).
  *
- * Reading the RTC is fiddly for two reasons, and both are handled here:
+ * Reading the RTC is fiddly for three reasons, and all three are handled here:
  *
  *  1. The chip updates itself once a second. Read it mid-update and you get
  *     garbage (e.g. 10:59:60). So we wait for the update-in-progress flag to
@@ -12,6 +12,17 @@
  *     binary, and whether hours are 24h or 12h+PM-bit. We normalise both.
  *     The PM bit must be stripped BEFORE any BCD conversion, or it corrupts
  *     the digits.
+ *
+ *  3. The chip has ONE index latch, shared by everyone. Selecting a register
+ *     and reading it are two separate port accesses, and the scheduler is
+ *     preemptive — three tasks read this clock (the top-bar clock, `date`,
+ *     and the assistant). A tick landing between the two accesses lets another
+ *     task's index win, and you read the wrong register into the wrong field:
+ *     the year lands in `sec`, and sec=26 is perfectly plausible, so it passes
+ *     validation and quietly reports a wrong time. So the pair is atomic.
+ *
+ * When the chip looks wrong we return -1 rather than guessing. A caller that
+ * gets -1 falls back to uptime, which is honest; a confident wrong date is not.
  *
  * Integer only, no libc — like the rest of the kernel.
  */
@@ -40,9 +51,38 @@ static inline uint8_t inb(uint16_t port) {
     return r;
 }
 
+/* Mask interrupts, handing back the previous IF so it can be put back exactly
+ * as it was. rtc_read runs at boot BEFORE the kernel's own `sti`, so a blind
+ * sti here would switch interrupts on early, part-way through device setup.
+ * Save and restore; never assume. */
+static inline uint64_t irq_save(void) {
+    uint64_t f;
+    __asm__ volatile("pushfq; pop %0; cli" : "=r"(f) : : "memory");
+    return f;
+}
+static inline void irq_restore(uint64_t f) {
+    if (f & 0x200) __asm__ volatile("sti" ::: "memory");   /* IF was set */
+}
+
+/* Bit 7 of the index port is the NMI-disable bit — it rides along with every
+ * register number we write. The port is write-only, so the hardware can't tell
+ * us the current setting; we shadow it here and OR it back in on every access.
+ * Writing a bare register number would clear bit 7 and silently re-enable NMI
+ * on every single clock read. Nothing else in the kernel disables NMI today,
+ * so this stays 0 — but the bit is now preserved through one choke point
+ * instead of being clobbered, so future NMI code composes correctly. */
+static uint8_t nmi_disable_bit = 0x00;
+
 static uint8_t cmos_read(uint8_t reg) {
-    outb(CMOS_ADDR, reg);
-    return inb(CMOS_DATA);
+    /* Index write + data read are ONE transaction — see note (3) up top.
+     * Deliberately narrow: the mask covers only this pair, so the bounded
+     * spin in settle() re-enables interrupts between polls and a dead chip
+     * can't hold the box silent for the whole guard count. */
+    uint64_t f = irq_save();
+    outb(CMOS_ADDR, (uint8_t)(nmi_disable_bit | (reg & 0x7F)));
+    uint8_t v = inb(CMOS_DATA);
+    irq_restore(f);
+    return v;
 }
 
 static int update_in_progress(void) { return cmos_read(REG_STA) & 0x80; }
@@ -77,14 +117,20 @@ static int raw_eq(const struct raw *a, const struct raw *b) {
 int rtc_read(struct rtc_time *t) {
     struct raw a, b;
     int tries = 8;
+    int agreed = 0;
 
     /* Read until two consecutive reads agree — see note (1) above. */
     read_raw(&a);
     do {
         b = a;
         read_raw(&a);
-        if (raw_eq(&a, &b)) break;
+        if (raw_eq(&a, &b)) { agreed = 1; break; }
     } while (--tries);
+
+    /* Eight tries and never two matching reads: the chip is changing under us
+     * every time we look, or it isn't answering sensibly. Using the last read
+     * anyway would be pretending we succeeded. */
+    if (!agreed) return -1;
 
     uint8_t regB = cmos_read(REG_STB);
     uint8_t hour = a.hour;
@@ -108,10 +154,12 @@ int rtc_read(struct rtc_time *t) {
         else if (hour == 12) hour = 0;
     }
 
-    /* The century register is only meaningful if the firmware populates it;
-     * accept it when it's plausible, otherwise assume this century. */
-    int year = (a.cent >= 19 && a.cent <= 21) ? (a.cent * 100 + a.yr)
-                                              : (2000 + a.yr);
+    /* The century register is only meaningful if the firmware populates it.
+     * If it's out of range we do NOT know the century, and assuming 2000 turns
+     * "I don't know" into a confidently wrong year with no way for the caller
+     * to tell. Fail closed instead and let them fall back to uptime. */
+    if (a.cent < 19 || a.cent > 21) return -1;
+    int year = a.cent * 100 + a.yr;
 
     t->sec = a.sec; t->min = a.min; t->hour = hour;
     t->day = a.day; t->month = a.mon; t->year = year;
