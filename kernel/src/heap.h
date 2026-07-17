@@ -21,6 +21,10 @@ typedef uint64_t ksize_t;
 
 void  heap_init(void);
 
+/* One past the last byte the heap owns (base + HEAP_SIZE). The physical frame
+ * allocator (pmm) begins its arena here so the two regions never overlap. */
+uint64_t heap_phys_end(void);
+
 void *kmalloc(ksize_t bytes);
 void *kcalloc(ksize_t n, ksize_t bytes);
 void *krealloc(void *p, ksize_t new_size);

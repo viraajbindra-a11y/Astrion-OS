@@ -115,6 +115,12 @@ void heap_init(void) {
     stat_frees  = 0;
 }
 
+/* One past the last byte the heap owns - the physical frame allocator starts
+ * its arena here, so the two never overlap. */
+uint64_t heap_phys_end(void) {
+    return g_heap_base + HEAP_SIZE;
+}
+
 static void *block_payload(struct block *b) {
     return (void *)((uintptr_t)b + HDR_SIZE);
 }

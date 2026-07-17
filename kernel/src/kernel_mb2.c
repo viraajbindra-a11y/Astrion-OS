@@ -35,6 +35,7 @@
 #include "shell.h"
 #include "mouse.h"
 #include "heap.h"
+#include "pmm.h"
 #include "fs.h"
 #include "ata.h"
 #include "task.h"
@@ -198,9 +199,25 @@ static struct {
     uint64_t total_available_bytes;
     uint32_t mmap_entry_count;
 
+    /* The type=available regions from the mmap, kept so the physical frame
+     * allocator can free exactly the real RAM and nothing reserved. */
+#define BOOT_MAX_AVAIL 24
+    uint64_t avail_base[BOOT_MAX_AVAIL];
+    uint64_t avail_len[BOOT_MAX_AVAIL];
+    uint32_t avail_count;
+
     const char *bootloader_name;
     const char *cmdline;
 } boot_info;
+
+/* Exposed for pmm.c - the available RAM regions the frame allocator draws from. */
+uint32_t boot_mmap_avail_count(void) { return boot_info.avail_count; }
+int boot_mmap_avail_region(uint32_t i, uint64_t *base, uint64_t *len) {
+    if (i >= boot_info.avail_count) return 0;
+    if (base) *base = boot_info.avail_base[i];
+    if (len)  *len  = boot_info.avail_len[i];
+    return 1;
+}
 
 static const char *tag_name(uint32_t type) {
     switch (type) {
@@ -328,7 +345,14 @@ static void parse_info(uint64_t info_ptr) {
                     serial_puts(" (");
                     serial_puts(mmap_type_name(e->type));
                     serial_puts(")\n");
-                    if (e->type == 1) avail += e->len;
+                    if (e->type == 1) {
+                        avail += e->len;
+                        if (boot_info.avail_count < BOOT_MAX_AVAIL) {
+                            uint32_t k = boot_info.avail_count++;
+                            boot_info.avail_base[k] = e->addr;
+                            boot_info.avail_len[k]  = e->len;
+                        }
+                    }
                 }
                 boot_info.total_available_bytes = avail;
                 serial_puts("    available memory total = ");
@@ -737,6 +761,12 @@ void kernel_mb2_main(uint32_t magic, uint64_t info_ptr) {
         kfree(c);
         serial_puts("HEAP: smoke test passed\n");
     }
+
+    /* Physical frame allocator over the RAM above the heap - the foundation
+     * for per-process address spaces (Tier 3). Needs the heap (for its bitmap)
+     * and the mmap (already parsed above), so it goes here. */
+    serial_puts("\nPMM: initializing physical frame allocator...\n");
+    pmm_init();
 
     /* ATA before FS - FS uses ata_present() at init to decide whether
      * to seed defaults or load from disk. */

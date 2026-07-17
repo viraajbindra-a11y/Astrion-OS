@@ -38,6 +38,7 @@
 #include "elf.h"
 #include "usermem.h"
 #include "power.h"
+#include "pmm.h"
 
 #define COL_PROMPT 0xFF7A00u     /* Astrion orange */
 #define COL_OK     0x4ADE80u     /* green for success-ish */
@@ -135,6 +136,7 @@ static void cmd_edit(int argc, char **argv);
 static void cmd_assistant(int argc, char **argv);
 static void cmd_monitor(int argc, char **argv);
 static void cmd_clip(int argc, char **argv);
+static void cmd_pmm(int argc, char **argv);
 
 static const struct cmd CMDS[] = {
     { "files",   "open the Files browser window",    cmd_files },
@@ -167,6 +169,7 @@ static const struct cmd CMDS[] = {
     { "mkdir",   "mkdir <dir> - create a directory", cmd_mkdir },
     { "sync",    "write all files to disk",          cmd_sync },
     { "clip",    "print the clipboard contents",     cmd_clip },
+    { "pmm",     "physical RAM: frame allocator stats + self-test", cmd_pmm },
     { "disk",    "show ATA disk info",               cmd_disk },
     { "run",     "run a script (one cmd per line)",  cmd_run },
     { "exec",    "exec <file.elf> - load + run an ELF program", cmd_exec },
@@ -905,6 +908,48 @@ static void cmd_mkdir(int argc, char **argv) {
     console_set_color(COL_WHITE);
     console_puts(argv[1]);
     console_putchar('\n');
+}
+
+static void cmd_pmm(int argc, char **argv) {
+    (void)argc; (void)argv;
+    uint64_t total = pmm_frames_total();
+    if (total == 0) {
+        console_set_color(0xF87171u);
+        console_puts("pmm: no free arena - allocator disabled\n");
+        console_set_color(COL_WHITE);
+        return;
+    }
+    console_puts("arena  ");
+    console_put_hex64(pmm_arena_base());
+    console_puts(" .. ");
+    console_put_hex64(pmm_arena_top());
+    console_puts("\nframes ");
+    console_put_u64(pmm_frames_free());
+    console_puts(" free / ");
+    console_put_u64(total);
+    console_puts(" (");
+    console_put_u64((pmm_frames_free() * 4096ull) / (1024 * 1024));
+    console_puts(" MiB free)\n");
+
+    /* Self-test: 8 frames come back distinct, aligned, zeroed and accounted,
+     * and freeing them restores the count exactly. */
+    uint64_t before = pmm_frames_free();
+    uint64_t f[8];
+    int ok = 1;
+    for (int i = 0; i < 8; i++) {
+        f[i] = pmm_alloc();
+        if (f[i] == 0 || (f[i] & 0xFFFull)) ok = 0;
+        else if (*(volatile uint64_t *)(uintptr_t)f[i] != 0) ok = 0;  /* zeroed */
+        for (int j = 0; j < i; j++) if (f[j] == f[i]) ok = 0;         /* distinct */
+    }
+    if (pmm_frames_free() != before - 8) ok = 0;
+    for (int i = 0; i < 8; i++) pmm_free(f[i]);
+    if (pmm_frames_free() != before) ok = 0;
+
+    if (ok) { console_set_color(COL_OK);   console_puts("self-test: PASS"); }
+    else    { console_set_color(0xF87171u); console_puts("self-test: FAIL"); }
+    console_set_color(COL_WHITE);
+    console_puts(" (alloc 8 distinct zeroed frames, free 8, count restored)\n");
 }
 
 static void cmd_sync(int argc, char **argv) {

@@ -1,0 +1,67 @@
+# Tier 3 — per-process address spaces (design + milestones)
+
+**Goal:** each ring-3 program gets its OWN page tables, so programs are isolated
+from **each other**, not just from the kernel. Today (`usermem.c`) every ring-3
+task shares one static `user_pool` mapped at 128 GiB — program A can read/write
+program B's memory. This closes that.
+
+**Guiding constraint:** paging bugs triple-fault the box. So build on verifiable
+foundations, one milestone at a time, and never ship a paging change that isn't
+booted. Milestone 1 touches NO live paging — it's pure bookkeeping over free RAM.
+
+## Current model (what we're replacing)
+- Boot page tables `p4_table`/`p3_table` (boot/multiboot2.S) identity-map low RAM.
+- `usermem.c`: static `user_pd`/`user_pt` map a static 2 MiB `user_pool` at
+  `USER_VA_BASE` (128 GiB) with US=1; `p4_table[0] |= US`. One window, shared.
+- `exec` loads a program into `upool` frames; all programs see the same VA range.
+- No physical frame allocator — everything is static BSS arrays.
+
+## Physical memory map (for the frame allocator)
+- Kernel image: low, ends at `_kernel_end`.
+- Heap: `[heap_base, heap_base + 32 MiB)`, `heap_base = _kernel_end` ↑2 MiB.
+- Usable RAM top: `0x100000 + mem_upper_kib*1024` (below the framebuffer MMIO).
+- **Free arena for the pmm: `[heap_phys_end(), ram_top)`** — above the heap,
+  below MMIO, entirely inside the identity map (so the kernel can touch any
+  frame at phys==virt: zero it, write PTEs into it, copy an ELF segment in).
+
+## Milestones (each independently booted before the next)
+
+**M1 — physical frame allocator (`pmm.c`/`pmm.h`). ← THIS STEP.**
+Bitmap over the free arena, 1 bit / 4 KiB frame; bitmap itself `kmalloc`'d at
+init. `pmm_alloc()` → zeroed physical frame (0 = OOM); `pmm_free(phys)`;
+`pmm_frames_total/free()`. A `pmm` shell command prints the arena + a
+alloc-N/free-N self-test. NO paging change — cannot triple-fault. Verifiable now.
+
+**M2 — address-space object (`vmspace.c`).**
+`vmspace_create()` → a fresh PML4 frame from pmm that COPIES the kernel's
+`p4_table` entries (kernel + identity map shared into every space), with a
+private user subtree. `vmspace_map(sp, uva, phys, flags)` walks/builds
+PDPT/PD/PT from pmm frames. `vmspace_destroy(sp)` frees the user frames + the
+private tables, never the shared kernel tables. Unit-test by building a space
+and walking it in the kernel (don't switch CR3 yet).
+
+**M3 — CR3 switch in the scheduler.**
+Each task carries a `vmspace*` (kernel tasks → the kernel space = `p4_table`).
+Context switch loads the next task's CR3 only when it changes. Kernel mappings
+are in every space, so kernel code/data/interrupts/syscalls stay reachable
+across the switch. Boot with the shell still in the kernel space (no ring-3
+change yet) to prove the switch path is inert when the space is the same.
+
+**M4 — `exec` builds a per-process space.**
+Create a vmspace, alloc image + stack frames from pmm, map them at `USER_VA_BASE`
+into that space, copy ELF segments in via the frames' identity addresses, drop
+to ring 3 with that CR3. Retire the shared `user_pool` path (keep it until M4
+is proven). `validate_user_range` + copy-in/out operate on the ACTIVE space.
+
+**M5 — proof + red-team.**
+Two programs: A writes a sentinel to its user VA; B reads the same VA and gets
+its OWN (zeroed) frame, not A's sentinel. `rogue.elf` still #PF-killed; kernel
+survives; clock keeps ticking. Adversarial pass on the page-table walker's
+bounds (every index masked to 9 bits, every intermediate frame checked for OOM).
+
+## Status
+- [ ] M1 frame allocator  ← in progress
+- [ ] M2 vmspace
+- [ ] M3 CR3 switch
+- [ ] M4 exec per-process
+- [ ] M5 proof + red-team
