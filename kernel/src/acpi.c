@@ -75,6 +75,7 @@ static uint64_t rd64(const uint8_t *p) {
 #define FADT_ACPI_ENABLE 52    /* uint8  */
 #define FADT_PM1A_CNT    64    /* uint32 */
 #define FADT_PM1B_CNT    68    /* uint32 */
+#define FADT_CENTURY     108   /* uint8: CMOS century-register index (0 = none) */
 #define FADT_X_DSDT      140   /* uint64 */
 #define FADT_X_PM1A_CNT  172   /* GAS: address at +4, 8 bytes */
 
@@ -85,6 +86,7 @@ static uint16_t g_slp_typ_a  = 0;
 static uint16_t g_slp_typ_b  = 0;
 static uint32_t g_smi_cmd    = 0;
 static uint8_t  g_acpi_enable = 0;
+static uint8_t  g_century_reg = 0;   /* CMOS century index, 0 = firmware has none */
 static int      g_s5_found   = 0;
 
 /* ─── helpers ─────────────────────────────────────────────────────── */
@@ -218,6 +220,11 @@ static int parse_dsdt_s5(uint64_t dsdt_addr) {
 static int parse_fadt(const uint8_t *fadt) {
     uint32_t len = rd32(fadt + SDT_LENGTH);
 
+    /* CMOS century-register index (single byte at offset 108). Captured up
+     * front so the RTC gets it even if the S5 hunt below comes up empty — the
+     * clock doesn't depend on poweroff. Bounded: the byte must fit the table. */
+    if (len >= FADT_CENTURY + 1) g_century_reg = fadt[FADT_CENTURY];
+
     /* Legacy 32-bit PM1a/PM1b control ports (need through offset 71). */
     if (len < FADT_PM1B_CNT + 4) return 0;
     uint32_t pm1a = rd32(fadt + FADT_PM1A_CNT);
@@ -307,3 +314,4 @@ uint32_t acpi_pm1a_cnt_port(void) { return g_pm1a_cnt; }
 uint32_t acpi_pm1b_cnt_port(void) { return g_pm1b_cnt; }
 uint16_t acpi_slp_typ_a(void)     { return g_slp_typ_a; }
 uint16_t acpi_slp_typ_b(void)     { return g_slp_typ_b; }
+uint8_t  acpi_century_reg(void)   { return g_century_reg; }

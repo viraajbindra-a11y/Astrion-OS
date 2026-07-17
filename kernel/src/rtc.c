@@ -28,6 +28,7 @@
  */
 #include <stdint.h>
 #include "rtc.h"
+#include "acpi.h"
 
 #define CMOS_ADDR 0x70
 #define CMOS_DATA 0x71
@@ -105,7 +106,13 @@ static void read_raw(struct raw *r) {
     r->day  = cmos_read(REG_DAY);
     r->mon  = cmos_read(REG_MON);
     r->yr   = cmos_read(REG_YEAR);
-    r->cent = cmos_read(REG_CENT);
+    /* The century-register index isn't architectural. Real firmware reports it
+     * in the ACPI FADT; QEMU/SeaBIOS just parks it at 0x32. Trust the FADT when
+     * it names one, fall back to 0x32 when it says "none" (0) or ACPI hasn't
+     * been parsed yet. A wrong register reads a bogus century, which rtc_read
+     * rejects (19..21) -> -1 -> uptime, so the fallback stays fail-closed. */
+    uint8_t cent_reg = acpi_century_reg();
+    r->cent = cmos_read(cent_reg ? cent_reg : REG_CENT);
 }
 
 static int raw_eq(const struct raw *a, const struct raw *b) {

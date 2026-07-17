@@ -159,6 +159,7 @@ static char     ed_name[FS_PATH_MAX + 1];
 static char     ed_title[FS_PATH_MAX + 16];
 static uint8_t *ed_buf;
 static uint32_t ed_len, ed_cap, ed_cursor;
+static int      ed_copied;   /* raise a brief "copied" cue after Ctrl+C; any next key clears it */
 
 /* Pin a possibly-relative name to the cwd AS IT IS RIGHT NOW. The editor
  * holds ed_name across many keystrokes and only writes it on ESC, so a
@@ -182,7 +183,7 @@ static void editor_open(const char *name) {
     if (ed_buf) { kfree(ed_buf); ed_buf = 0; }   /* reopening: don't leak */
     ed_cap = 8192;
     ed_buf = (uint8_t *)kmalloc(ed_cap);
-    ed_len = 0; ed_cursor = 0;
+    ed_len = 0; ed_cursor = 0; ed_copied = 0;
     abs_path_of((name && name[0]) ? name : "untitled.txt", ed_name, sizeof(ed_name));
     str_copy(ed_title, "Editor: ", sizeof(ed_title));
     /* append the name to the title */
@@ -209,6 +210,29 @@ static void editor_save(void) {
     fs_sync();
 }
 
+/* A calm "copied" chip in the bottom-right of the page — the one reassurance
+ * that Ctrl+C took, since the copy itself is invisible (the clipboard is
+ * off-screen). It's the small chrome face (Inter), not the document's mono, so
+ * it reads as the machine speaking rather than text you typed; a 2px teal edge
+ * gives it the same "here" language the Files selection uses. It never lingers
+ * or nags: the next keystroke repaints the page without it. Teal is Astrion's
+ * soft yes (the folder glyph, the prompt caret) — a quieter affirmative than
+ * the loud blue accent, which is the right register for reassurance. */
+static void editor_draw_copied(void) {
+    const char *msg = "copied";
+    uint32_t tw = af_text_width(msg, AF_REG13);
+    uint32_t lh = (uint32_t)af_line_height(AF_REG13);
+    uint32_t edge = 2, padx = 10, pady = 5, margin = 8;
+    uint32_t pw = edge + padx + tw + padx;
+    uint32_t ph = pady + lh + pady;
+    if (pw + margin > cw || ph + margin > ch) return;   /* tiny window: skip, never overhang */
+    uint32_t bx = cx + cw - pw - margin;
+    uint32_t by = cy + ch - ph - margin;
+    fb_rect_x(bx, by, pw, ph, AC_PANEL);                /* chip body   */
+    fb_rect_x(bx, by, edge, ph, AC_TEAL);               /* accent edge */
+    af_draw(bx + edge + padx, by + pady, msg, AC_TEAL, AF_REG13);
+}
+
 static void editor_draw(void) {
     fb_rect_x(cx, cy, cw, ch, AC_TERM_BG);
     uint32_t gx = cx, gy = cy, caret_x = cx, caret_y = cy;
@@ -225,10 +249,12 @@ static void editor_draw(void) {
     }
     if (caret_y + GH <= cy + ch)
         fb_rect_x(caret_x, caret_y, 2, GH, AC_ORANGE);   /* text caret */
+    if (ed_copied) editor_draw_copied();
 }
 
 static void editor_key(char c) {
     if (c == 27) { wm_close(); return; }   /* ESC: save + close */
+    ed_copied = 0;   /* any action clears the cue... (copy re-raises it below) */
     if (c == (char)KEY_LEFT)  { if (ed_cursor > 0)      ed_cursor--; editor_draw(); return; }
     if (c == (char)KEY_RIGHT) { if (ed_cursor < ed_len) ed_cursor++; editor_draw(); return; }
     if (c == KEY_CTRL_C) {   /* copy the current line (cursor's line) to clipboard */
@@ -237,7 +263,9 @@ static void editor_key(char c) {
             while (s > 0     && ed_buf[s - 1] != '\n') s--;   /* back to line start */
             while (e < ed_len && ed_buf[e]     != '\n') e++;  /* fwd to line end     */
             clipboard_set((const char *)ed_buf + s, e - s);   /* excludes the '\n'   */
+            ed_copied = 1;   /* ...except copy, which raises it */
         }
+        editor_draw();       /* repaint so the cue appears */
         return;
     }
     if (c == KEY_CTRL_V) {   /* paste the clipboard at the cursor */
@@ -300,7 +328,16 @@ enum { FL_UP = 0, FL_DIR = 1, FL_FILE = 2 };   /* also the sort rank */
 #define FL_MAX 64
 static char    fl_names[FL_MAX][FS_PATH_MAX + 1];   /* full path — the editor needs it */
 static uint8_t fl_kind[FL_MAX];
-static int     fl_count, fl_sel;
+static int     fl_count, fl_sel, fl_top;   /* fl_top = first visible row (the scroll offset) */
+
+/* When a folder holds more rows than fit, a slim scrollbar rides the right
+ * edge — position and proportion at a glance. It costs the rows a thin lane on
+ * the right (only when it's actually there), which beats a "+N more" line that
+ * would steal a whole row from the very content it's meant to reveal. */
+#define SB_W        4u                /* scrollbar width                     */
+#define SB_GAP      5u                /* breathing room between rows and bar  */
+#define SB_LANE     (SB_W + SB_GAP)
+#define SB_MINTHUMB 24u               /* a thumb still visible in a huge dir  */
 
 static int str_eq(const char *a, const char *b) {
     while (*a && *a == *b) { a++; b++; }
@@ -334,7 +371,7 @@ static int entry_after(uint8_t ka, const char *pa, uint8_t kb, const char *pb) {
  * folder, not scrolled back to the top. Otherwise the cursor takes the first
  * real row, skipping ".." so Enter never just bounces you back out. */
 static void files_load_at(const char *want) {
-    fl_count = 0; fl_sel = 0;
+    fl_count = 0; fl_sel = 0; fl_top = 0;
     fs_node *dir = fs_cwd();
 
     /* Off the root, "up" is a real place you can go, so it gets a real row. */
@@ -450,6 +487,36 @@ static void files_row_glyph(uint8_t kind, uint32_t gx, uint32_t gcy, int sel) {
         fb_rect_x(gx + 8 + k, gcy - 7 + k, 1, 1, c);
 }
 
+/* Slide the visible window so the selection is always on it. Driven from
+ * files_draw with the live row budget, so the view reconciles to the cursor
+ * however fl_sel got where it is — arrowed past an edge, or parked deep by
+ * files_load_at coming back up out of a folder. */
+static void files_ensure_visible(int vis) {
+    if (vis < 1) vis = 1;
+    if (fl_count <= vis)        { fl_top = 0; return; }   /* it all fits: no scroll */
+    if (fl_sel < fl_top)          fl_top = fl_sel;                 /* selection above view */
+    if (fl_sel >= fl_top + vis)   fl_top = fl_sel - vis + 1;       /* selection below view */
+    int maxtop = fl_count - vis;                          /* no blank tail past the end */
+    if (fl_top > maxtop) fl_top = maxtop;
+    if (fl_top < 0)      fl_top = 0;
+}
+
+/* The bar: a quiet track the height of the rows region, with a thumb sized to
+ * the fraction on screen and slid to fl_top. Only ever drawn when fl_count
+ * exceeds the page, so a folder that fits looks exactly as it did before. */
+static void files_draw_scrollbar(uint32_t rtop, int vis, uint32_t rh) {
+    uint32_t track_h = (uint32_t)vis * rh;
+    uint32_t bx = cx + cw - SB_W;
+    fb_rect_x(bx, rtop, SB_W, track_h, AC_PANEL);            /* track */
+
+    uint32_t thumb = track_h * (uint32_t)vis / (uint32_t)fl_count;
+    if (thumb < SB_MINTHUMB) thumb = SB_MINTHUMB;
+    if (thumb > track_h)     thumb = track_h;
+    uint32_t denom = (uint32_t)(fl_count - vis);            /* > 0: caller guarantees overflow */
+    uint32_t ty = rtop + (uint32_t)fl_top * (track_h - thumb) / denom;
+    fb_rect_x(bx, ty, SB_W, thumb, AC_MUTED);               /* thumb */
+}
+
 static void files_draw(void) {
     fb_rect_x(cx, cy, cw, ch, AC_TERM_BG);
 
@@ -471,14 +538,24 @@ static void files_draw(void) {
     /* The row derives from the font rather than a guess, so the rhythm
      * follows if the face ever changes: line height plus 5px of air, with
      * the text centred in it instead of riding the bottom. */
-    uint32_t rh = GH + 5;
+    uint32_t rh  = GH + 5;
     uint32_t top = cy + 32;
-    for (int i = 0; i < fl_count; i++) {
-        uint32_t ry = top + (uint32_t)i * rh;
-        if (ry + rh > foot) break;
+    int vis = (foot > top) ? (int)((foot - top) / rh) : 0;
+    if (vis < 1) vis = 1;
+    files_ensure_visible(vis);
+
+    /* More rows than fit → a scrollbar, and the rows yield it a lane so a long
+     * name can't run under the thumb. A folder that fits is untouched. */
+    int over = (fl_count > vis);
+    uint32_t rw = (over && cw > SB_LANE) ? (cw - SB_LANE) : cw;
+
+    for (int k = 0; k < vis; k++) {
+        int i = fl_top + k;
+        if (i >= fl_count) break;
+        uint32_t ry = top + (uint32_t)k * rh;
         int sel = (i == fl_sel);
         if (sel) {
-            fb_rect_x(cx, ry, cw, rh, AC_PANEL);
+            fb_rect_x(cx, ry, rw, rh, AC_PANEL);
             fb_rect_x(cx, ry, 2, rh, AC_ACCENT);   /* the selection's edge */
         }
         files_row_glyph(fl_kind[i], cx + FL_INSET, ry + rh / 2, sel);
@@ -497,6 +574,8 @@ static void files_draw(void) {
             af_draw(tx, ty, nm, sel ? AC_WHITE : AC_MUTED, AF_MONO);
         }
     }
+
+    if (over) files_draw_scrollbar(top, vis, rh);
 }
 
 /* Up one level. Backspace and the ".." row land here; ESC still closes the

@@ -36,4 +36,9 @@ uint32_t acpi_pm1b_cnt_port(void);
 uint16_t acpi_slp_typ_a(void);
 uint16_t acpi_slp_typ_b(void);
 
+/* CMOS century-register index from the FADT (offset 108), or 0 if the firmware
+ * reports none. rtc.c trusts this on real hardware and falls back to the 0x32
+ * QEMU/SeaBIOS convention when it's 0. Valid only after acpi_init(). */
+uint8_t acpi_century_reg(void);
+
 #endif

@@ -377,14 +377,14 @@ static void parse_info(uint64_t info_ptr) {
 /* ─── Framebuffer paint test ──────────────────────────────────────
  *
  * If GRUB gave us a linear 32-bpp framebuffer, paint a recognizable
- * test pattern: navy background, big orange "A" block in the middle.
+ * test pattern: navy background, big blue "A" block in the middle.
  * Then read back a few pixels and verify they stuck. This is the
  * smoke test that says "we own the display." Once it passes, we
  * can start wiring real graphics code (fonts, windows, etc.).
  */
 
 #define COL_NAVY    0x1E2761u    /* Astrion navy */
-#define COL_ORANGE  0xFF7A00u    /* Astrion orange */
+#define COL_ACCENT  0x0A84FFu    /* desktop blue accent — matches AC_ACCENT in desktop.h */
 #define COL_WHITE   0xFFFFFFu
 #define COL_ICE     0xCADCFCu    /* slideshow secondary */
 #define COL_MUTED   0x64748Bu    /* slideshow muted */
@@ -512,22 +512,22 @@ static void paint_boot_screen(void) {
     uint32_t cx = W / 2, cyc = H / 2;
 
     fb_fill(COL_NAVY);
-    fb_rect(0, 0, 18, H, COL_ORANGE);              /* left accent motif */
+    fb_rect(0, 0, 18, H, COL_ACCENT);              /* left accent motif */
 
-    /* Logo emblem: orange square with a navy notch (matches the top bar). */
+    /* Logo emblem: blue square with a navy notch (matches the top bar). */
     uint32_t emb = 72;
-    fb_rect(cx - emb / 2, cyc - 210, emb, emb, COL_ORANGE);
+    fb_rect(cx - emb / 2, cyc - 210, emb, emb, COL_ACCENT);
     fb_rect(cx - emb / 2 + 20, cyc - 210 + 20, emb - 40, emb - 40, COL_NAVY);
 
     /* Wordmark + version + tagline in antialiased Inter (like the web build). */
     af_draw_center(cx, cyc - 122, "Astrion", COL_WHITE, AF_SB30);
-    af_draw_center(cx, cyc - 80,  "v2.0", COL_ORANGE, AF_SB16);
+    af_draw_center(cx, cyc - 80,  "v2.0", COL_ACCENT, AF_SB16);
     af_draw_center(cx, cyc - 42,  "the AI-native operating system", COL_ICE, AF_REG16);
 
     /* Loading bar (static fill — the splash is only up during init). */
     uint32_t bw = 380, bx = cx - bw / 2, by = cyc + 60;
     fb_rect(bx, by, bw, 8, 0x243056u);             /* track */
-    fb_rect(bx, by, (bw * 72) / 100, 8, COL_ORANGE);
+    fb_rect(bx, by, (bw * 72) / 100, 8, COL_ACCENT);
     af_draw_center(cx, by + 18, "starting Astrion...", COL_MUTED, AF_REG13);
 
     /* Honest capability line along the bottom. */
@@ -539,12 +539,12 @@ static void paint_boot_screen(void) {
     uint32_t pitch_px = boot_info.fb_pitch / 4;
     /* A safe known-white pixel is inside the "A" of "Astrion v2.0" at ~(75, 75)
      * given 6x scale. Just sample the accent bar instead for reliability. */
-    uint32_t got = fb[20 * pitch_px + 5];   /* inside the orange accent bar */
+    uint32_t got = fb[20 * pitch_px + 5];   /* inside the blue accent bar */
     serial_puts("boot screen: readback @ accent = ");
     serial_put_hex64((uint64_t)got);
-    /* Some framebuffers store BGR-ordered; both 0xFF7A00 (RGB) and
-     * 0x007AFF (BGR) are acceptable matches. */
-    if ((got & 0xFFFFFFu) == COL_ORANGE || (got & 0xFFFFFFu) == 0x007AFFu) {
+    /* Some framebuffers store BGR-ordered; both 0x0A84FF (RGB) and
+     * 0xFF840A (BGR) are acceptable matches. */
+    if ((got & 0xFFFFFFu) == COL_ACCENT || (got & 0xFFFFFFu) == 0xFF840Au) {
         serial_puts("  OK - pixel write verified\n");
     } else {
         serial_puts("  WARN - readback didn't match written color\n");
