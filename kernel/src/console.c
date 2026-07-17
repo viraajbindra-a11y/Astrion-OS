@@ -16,13 +16,16 @@
 #include <stdint.h>
 #include "console.h"
 #include "fb_font.h"
+#include "af.h"
 
 #define COL_BG       0x1E2761u   /* same navy as the boot screen */
 #define COL_FG_DEFLT 0xFFFFFFu   /* white */
-#define SCALE        2
-#define GW           (FONT_WIDTH  * SCALE)
-#define GH           (FONT_HEIGHT * SCALE)
-#define LINE_STRIDE  (GH + 2)
+
+/* Terminal cell geometry — seeded from the antialiased mono face (JetBrains
+ * Mono) in console_init(). Kept as variables (not macros) with the SAME names
+ * the cursor/scroll/wrap/tab code below already uses, so that logic is
+ * unchanged: it still works one glyph cell at a time. */
+static uint32_t GW = 12, GH = 27, LINE_STRIDE = 29;   /* real values set at init */
 
 /* From kernel_mb2.c (exported _x wrappers). */
 extern void     fb_rect_x(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color);
@@ -65,6 +68,12 @@ static void scroll_one_line(void) {
 }
 
 void console_init(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
+    /* Derive the cell from the mono face: advance = one column, line height =
+     * one row. +2 px of leading keeps rows from touching. */
+    GW = af_text_width("M", AF_MONO);
+    GH = (uint32_t)af_line_height(AF_MONO);
+    LINE_STRIDE = GH + 2;
+
     x0 = x; y0 = y; w_px = w; h_px = h;
     cx = x0; cy = y0;
     color = COL_FG_DEFLT;
@@ -123,7 +132,7 @@ void console_putchar(char c) {
         /* Tab to next multiple of 4 chars. */
         do {
             char buf[2] = {' ', 0};
-            fb_puts_x(cx, cy, buf, color, SCALE);
+            af_draw(cx, cy, buf, color, AF_MONO);
             cx += GW;
             if (cx + GW > x0 + w_px) console_newline();
         } while (((cx - x0) / GW) % 4);
@@ -135,7 +144,7 @@ void console_putchar(char c) {
     if (cx + GW > x0 + w_px) console_newline();
 
     char buf[2] = {c, 0};
-    fb_puts_x(cx, cy, buf, color, SCALE);
+    af_draw(cx, cy, buf, color, AF_MONO);
     cx += GW;
 }
 

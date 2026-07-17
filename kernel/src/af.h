@@ -13,8 +13,9 @@
 
 #include <stdint.h>
 
-/* Faces — indices into af_faces[] in af_font.h. Keep in sync with gen_font.py. */
-enum { AF_REG13, AF_REG16, AF_SB16, AF_SB30 };
+/* Faces — indices into af_faces[] in af_font.h. Keep in sync with gen_font.py.
+ * AF_MONO is JetBrains Mono (fixed-advance) for the terminal + app interiors. */
+enum { AF_REG13, AF_REG16, AF_SB16, AF_SB30, AF_MONO };
 
 void     af_draw(uint32_t x, uint32_t y, const char *s, uint32_t color, int face);
 uint32_t af_text_width(const char *s, int face);   /* pixel advance of s */
