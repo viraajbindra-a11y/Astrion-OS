@@ -1,9 +1,10 @@
 node_modules/
 .DS_Store
 .env
-.claude/
-# ...but the agent team is project config worth versioning (settings.local.json
-# stays ignored above — it's machine-specific).
+# Ignore .claude's CONTENTS (settings.local.json is machine-specific) but not the
+# directory itself — git cannot re-include a file whose parent dir is excluded,
+# so this must be `.claude/*`, not `.claude/`, for the negation below to work.
+.claude/*
 !.claude/agents/
 
 # auto-push runtime logs (script + launchd)
