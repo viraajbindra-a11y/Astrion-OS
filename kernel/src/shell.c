@@ -34,6 +34,7 @@
 #include "task.h"
 #include "wm.h"
 #include "kbd.h"
+#include "clipboard.h"
 #include "elf.h"
 #include "usermem.h"
 #include "power.h"
@@ -133,6 +134,7 @@ static void cmd_files(int argc, char **argv);
 static void cmd_edit(int argc, char **argv);
 static void cmd_assistant(int argc, char **argv);
 static void cmd_monitor(int argc, char **argv);
+static void cmd_clip(int argc, char **argv);
 
 static const struct cmd CMDS[] = {
     { "files",   "open the Files browser window",    cmd_files },
@@ -164,6 +166,7 @@ static const struct cmd CMDS[] = {
     { "touch",   "create an empty file",             cmd_touch },
     { "mkdir",   "mkdir <dir> - create a directory", cmd_mkdir },
     { "sync",    "write all files to disk",          cmd_sync },
+    { "clip",    "print the clipboard contents",     cmd_clip },
     { "disk",    "show ATA disk info",               cmd_disk },
     { "run",     "run a script (one cmd per line)",  cmd_run },
     { "exec",    "exec <file.elf> - load + run an ELF program", cmd_exec },
@@ -928,6 +931,26 @@ static void cmd_sync(int argc, char **argv) {
     console_puts(" bytes) saved to disk - reboot will restore them\n");
 }
 
+/* Print the current clipboard - makes a copy verifiable without a second app
+ * (copy a line in the editor, then `clip` here to see it). */
+static void cmd_clip(int argc, char **argv) {
+    (void)argc; (void)argv;
+    uint32_t n = clipboard_len();
+    if (n == 0) {
+        console_set_color(COL_MUTED);
+        console_puts("clipboard is empty\n");
+        console_set_color(COL_WHITE);
+        return;
+    }
+    console_set_color(COL_MUTED);
+    console_puts("clipboard (");
+    console_put_u32(n);
+    console_puts(" bytes):\n");
+    console_set_color(COL_WHITE);
+    console_puts(clipboard_get());   /* always NUL-terminated */
+    console_putchar('\n');
+}
+
 static void cmd_disk(int argc, char **argv) {
     (void)argc; (void)argv;
     console_set_color(COL_OK);
@@ -1436,6 +1459,16 @@ void shell_on_key(char c) {
         if (line_len > 0) {
             line_len--;
             console_backspace();
+        }
+        return;
+    }
+    if (c == KEY_CTRL_V) {   /* paste the clipboard into the input line */
+        const char *p = clipboard_get();
+        for (int k = 0; p[k] && line_len < LINE_MAX - 1; k++) {
+            char ch = p[k];
+            if (ch < 32 || ch > 126) continue;   /* one printable line, no newlines */
+            line[line_len++] = ch;
+            console_putchar(ch);
         }
         return;
     }

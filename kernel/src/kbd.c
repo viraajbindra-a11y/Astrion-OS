@@ -58,6 +58,7 @@ static volatile uint8_t rb_tail;
 
 static int shift_held  = 0;
 static int caps_lock   = 0;
+static int ctrl_held   = 0;  /* left or right Ctrl, latched across press/release */
 static int is_extended = 0;  /* set after a 0xE0 byte, cleared after the next byte */
 
 static void rb_push(char c) {
@@ -100,6 +101,10 @@ static void kbd_isr(struct registers *r) {
 
     if (is_extended) {
         is_extended = 0;
+        /* Right Ctrl arrives as 0xE0 0x1D (press) / 0xE0 0x9D (release).
+         * Catch it before the release-drop below so we see the release. */
+        if (sc == 0x1D) { ctrl_held = 1; return; }
+        if (sc == 0x9D) { ctrl_held = 0; return; }
         /* Drop release events. */
         if (sc & 0x80) return;
         /* Map known extended keys → KEY_* codes (>127). */
@@ -119,11 +124,24 @@ static void kbd_isr(struct registers *r) {
     if (sc == 0x2A || sc == 0x36)            { shift_held = 1; return; }
     if (sc == 0xAA || sc == 0xB6)            { shift_held = 0; return; }
     if (sc == 0x3A)                          { caps_lock ^= 1; return; }
+    /* Left Ctrl: press 0x1D, release 0x9D. Tracked before the release-drop
+     * below so we still see the release (high bit set). */
+    if (sc == 0x1D)                          { ctrl_held = 1; return; }
+    if (sc == 0x9D)                          { ctrl_held = 0; return; }
 
     /* Drop key-release events (high bit set), drop scancodes outside
      * our normal table. */
     if (sc & 0x80)                           return;
     if (sc >= 128)                           return;
+
+    /* Ctrl held: fold the two clipboard chords into their ASCII control
+     * codes and swallow every other Ctrl+<key>, so a held Ctrl can never
+     * leak a stray letter into whatever has focus. */
+    if (ctrl_held) {
+        if (sc == 0x2E)      rb_push(KEY_CTRL_C);   /* Ctrl+C (C key) */
+        else if (sc == 0x2F) rb_push(KEY_CTRL_V);   /* Ctrl+V (V key) */
+        return;
+    }
 
     int upper = shift_held ^ caps_lock;
     char c = upper ? SC_TO_ASCII_SHIFT[sc] : SC_TO_ASCII[sc];

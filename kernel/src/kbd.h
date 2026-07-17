@@ -23,4 +23,11 @@ char kbd_getchar(void);     /* returns 0 if buffer empty (non-blocking) */
 #define KEY_LEFT   ((char)130)
 #define KEY_RIGHT  ((char)131)
 
+/* Ctrl+C / Ctrl+V are folded into their classic ASCII control codes (ETX /
+ * SYN). Both are < 32, so - like ESC (27) - they pass straight through the
+ * "printable 32..126" filters the shell and apps use for text input, and
+ * only the clipboard consumers act on them. */
+#define KEY_CTRL_C ((char)0x03)   /* copy  */
+#define KEY_CTRL_V ((char)0x16)   /* paste */
+
 #endif

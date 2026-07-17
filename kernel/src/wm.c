@@ -11,6 +11,7 @@
 #include "fb_font.h"
 #include "fs.h"
 #include "kbd.h"
+#include "clipboard.h"  /* copy the current line / paste at the cursor */
 #include "heap.h"       /* kmalloc/kfree (ksize_t) */
 #include "console.h"    /* console_clear/console_puts */
 #include "snake.h"      /* snake_play */
@@ -230,6 +231,29 @@ static void editor_key(char c) {
     if (c == 27) { wm_close(); return; }   /* ESC: save + close */
     if (c == (char)KEY_LEFT)  { if (ed_cursor > 0)      ed_cursor--; editor_draw(); return; }
     if (c == (char)KEY_RIGHT) { if (ed_cursor < ed_len) ed_cursor++; editor_draw(); return; }
+    if (c == KEY_CTRL_C) {   /* copy the current line (cursor's line) to clipboard */
+        if (ed_buf) {
+            uint32_t s = ed_cursor, e = ed_cursor;
+            while (s > 0     && ed_buf[s - 1] != '\n') s--;   /* back to line start */
+            while (e < ed_len && ed_buf[e]     != '\n') e++;  /* fwd to line end     */
+            clipboard_set((const char *)ed_buf + s, e - s);   /* excludes the '\n'   */
+        }
+        return;
+    }
+    if (c == KEY_CTRL_V) {   /* paste the clipboard at the cursor */
+        if (ed_buf) {
+            const char *p = clipboard_get();
+            uint32_t n = clipboard_len();
+            /* Insert byte-by-byte, mirroring the printable-insert path below.
+             * Wrap-safe: stop while there is no room for one more byte. */
+            for (uint32_t k = 0; k < n && ed_len < ed_cap - 1; k++) {
+                for (uint32_t i = ed_len; i > ed_cursor; i--) ed_buf[i] = ed_buf[i - 1];
+                ed_buf[ed_cursor] = (uint8_t)p[k]; ed_len++; ed_cursor++;
+            }
+            editor_draw();
+        }
+        return;
+    }
     if (c == '\b') {
         if (ed_cursor > 0 && ed_len > 0) {
             for (uint32_t i = ed_cursor - 1; i < ed_len - 1; i++) ed_buf[i] = ed_buf[i + 1];
@@ -935,6 +959,16 @@ static void assist_draw(void) {
 
 static void assist_key(char c) {
     if (c == 27) { wm_close(); return; }
+    if (c == KEY_CTRL_V) {   /* paste the clipboard into the prompt */
+        const char *p = clipboard_get();
+        for (int k = 0; p[k] && as_plen < (int)sizeof(as_prompt) - 1; k++) {
+            char ch = p[k];
+            if (ch < 32 || ch > 126) continue;   /* prompt is one printable line */
+            as_prompt[as_plen++] = ch; as_prompt[as_plen] = 0;
+        }
+        assist_prompt_line();
+        return;
+    }
     if (c == '\n') {
         if (as_plen > 0) {
             assist_run();

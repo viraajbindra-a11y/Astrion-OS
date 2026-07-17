@@ -216,6 +216,7 @@ kernel-mb2: src/hello_elf.h src/rogue_elf.h src/iodemo_elf.h
 	$(CC) $(MB2_CFLAGS) -c src/acpi.c -o $(BUILD_DIR)/acpi.o
 	$(CC) $(MB2_CFLAGS) -c src/power.c -o $(BUILD_DIR)/power.o
 	$(CC) $(MB2_CFLAGS) -c src/console.c -o $(BUILD_DIR)/console.o
+	$(CC) $(MB2_CFLAGS) -c src/clipboard.c -o $(BUILD_DIR)/clipboard.o
 	$(CC) $(MB2_CFLAGS) -c src/desktop.c -o $(BUILD_DIR)/desktop.o
 	$(CC) $(MB2_CFLAGS) -c src/wm.c -o $(BUILD_DIR)/wm.o
 	$(CC) $(MB2_CFLAGS) -c src/af.c -o $(BUILD_DIR)/af.o
@@ -244,6 +245,7 @@ kernel-mb2: src/hello_elf.h src/rogue_elf.h src/iodemo_elf.h
 	    $(BUILD_DIR)/acpi.o \
 	    $(BUILD_DIR)/power.o \
 	    $(BUILD_DIR)/console.o \
+	    $(BUILD_DIR)/clipboard.o \
 	    $(BUILD_DIR)/desktop.o \
 	    $(BUILD_DIR)/wm.o \
 	    $(BUILD_DIR)/af.o \
