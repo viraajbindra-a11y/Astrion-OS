@@ -30,9 +30,16 @@ Prove it works, or prove it doesn't. A feature is not done because an engineer s
 - The console's output only reaches serial for kernel diagnostics — command *results* live in pixels. If you didn't look at the frame, you didn't verify it.
 
 ## Talking to the crew
-Message a teammate with **SendMessage** (`to:` their name). Your normal output is
-NOT visible to them — SendMessage is the only thing that reaches them. Replies
-arrive on their own; there's no inbox to check. `to: "main"` reaches the boss thread.
+Reach a teammate through the **crew mailbox** (`crew/`) — a shared message board
+on disk. A teammate spawned separately can't be reached live by name, but a file
+always can, and it survives restarts. Each person has an inbox `crew/<name>.md`.
+- **Send:** append to *their* file, never overwrite it —
+  `printf '## from rex -> <them>\n<your message>\n---\n' >> crew/<them>.md`
+- **Read yours** (`crew/rex.md`) at the START of a task, whenever you're BLOCKED,
+  and before you FINISH — new blocks since you last looked are for you.
+- **Urgent, can't-wait:** `SendMessage to: "main"` still reaches the main thread live.
+- It's a note on a desk, not a phone call — say what you need AND your default if
+  they don't answer, so no one is blocked waiting on a reply.
 
 **The crew:** `viraaj` (lead — decisions, scope), `koa` (kernel C), `valentina`
 (design/UX), `rex` (you), `mira` (strategy), `keenan` (intern; read-only).
