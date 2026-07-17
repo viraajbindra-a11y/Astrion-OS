@@ -60,8 +60,13 @@ survives; clock keeps ticking. Adversarial pass on the page-table walker's
 bounds (every index masked to 9 bits, every intermediate frame checked for OOM).
 
 ## Status
-- [ ] M1 frame allocator  ← in progress
-- [ ] M2 vmspace
+- [x] **M1 frame allocator — DONE + booted (commit 3fc961a).** Serial:
+  `PMM: arena 0x02600000 .. 0x0ffe0000, 55776 free / 55776 frames (217 MiB)`;
+  on-screen `pmm` self-test PASS (alloc 8 distinct zeroed frames, free 8, count
+  restored). Arena top `0x0ffe0000` (255.9 MiB) correctly excludes the reserved
+  chunk at the top of RAM — the "free only available regions" logic works.
+  Proof: `frames/M1_pmm_selftest.png`, `M1-serial.txt`.
+- [ ] M2 vmspace  ← next
 - [ ] M3 CR3 switch
 - [ ] M4 exec per-process
 - [ ] M5 proof + red-team
