@@ -1505,6 +1505,12 @@ void wm_init(void) {
 int wm_active(void) { return focused() != 0; }
 
 int wm_handle_key(char c) {
+    /* The power dialog is modal: while it's up it swallows every key so nothing
+     * leaks to the shell, and Esc is the calm way out. */
+    if (desktop_power_is_open()) {
+        if (c == 27) { desktop_power_cancel(); repaint_all(); }
+        return 1;
+    }
     struct window *f = focused();
     if (!f) return 0;               /* nothing focused → the shell gets it */
     set_content_rect(f);            /* app draw fns work off cx/cy/cw/ch */
@@ -1517,12 +1523,45 @@ int wm_handle_key(char c) {
     }
 }
 
+/* Before power-off / restart, flush anything the session holds only in RAM. The
+ * editor is the one app with unsaved state — Files and the Assistant write
+ * through immediately — so saving it is what lets "your session will end" cost
+ * the user no work. */
+static void wm_prepare_for_power(void) {
+    int s = slot_of(APP_EDITOR);
+    if (s >= 0 && wins[s].open) editor_save();
+}
+
 void wm_tick(void) {
     int mx = mouse_x(), my = mouse_y();
     int down = mouse_left_down();
     int click = mouse_take_left_click();
 
+    /* The power dialog is modal: it owns every click (plus hover feedback) and
+     * nothing else in the wm runs while it's up — no dock, no drag, no live
+     * monitor repaint that would paint over the card. */
+    if (desktop_power_is_open()) {
+        if (click) {
+            int a = desktop_power_action(mx, my);
+            if (a == PWR_OFF)    { wm_prepare_for_power(); desktop_power_shutdown(0); }
+            if (a == PWR_REBOOT) { wm_prepare_for_power(); desktop_power_shutdown(1); }
+            if (a == PWR_CANCEL) repaint_all();      /* clear the dim */
+        } else if (mx != last_mx || my != last_my) {
+            /* Hover feedback. Lift the cursor before the buttons repaint beneath
+             * it — the same rule mon_tick keeps — so its cached background can't
+             * smear; the main loop redraws the cursor fresh right after. */
+            last_mx = mx; last_my = my;
+            mouse_lift();
+            desktop_power_hover(mx, my);             /* repaints only on change */
+        }
+        return;
+    }
+
     if (click) {
+        /* The power button lives in the top bar, not the dock — check it first.
+         * mouse_lift() clears the cursor so it isn't baked into the dimmed
+         * snapshot the dialog takes. */
+        if (desktop_power_hit(mx, my)) { mouse_lift(); desktop_power_open(); return; }
         int icon = desktop_dock_hit(mx, my);
         if (icon >= 0) { wm_open_app(icon); return; }
 

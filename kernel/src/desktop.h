@@ -39,6 +39,48 @@ int desktop_dock_hit(int x, int y);
 /* Highlight the given dock icon as the active app (-1 = none). */
 void desktop_set_active_app(int icon);
 
+/* ─── Power control ───
+ * A power button sits at the far right of the top bar (system chrome, not the
+ * app dock). Clicking it opens a calm, modal confirm dialog over a dimmed
+ * desktop — a misclick must never end someone's session, so turning off always
+ * takes one deliberate choice. The wm (wm.c) owns the event loop and routes
+ * clicks/keys here; desktop.c owns the drawing, the hit-testing and the power
+ * calls themselves. */
+enum { PWR_NONE = 0, PWR_OFF, PWR_REBOOT, PWR_CANCEL };
+
+/* 1 if (x,y) is on the top-bar power button. */
+int  desktop_power_hit(int x, int y);
+
+/* Is the confirm dialog currently up? (Modal: while true the wm sends every
+ * click/key here and does nothing else.) */
+int  desktop_power_is_open(void);
+
+/* Open the dialog: dim the desktop and paint the card. Call mouse_lift() first
+ * so the cursor isn't baked into the dimmed snapshot. */
+void desktop_power_open(void);
+
+/* Route a click while the dialog is open. Returns PWR_OFF / PWR_REBOOT /
+ * PWR_CANCEL for a chosen action (and marks the dialog closed), or PWR_NONE for
+ * a click on inert card space (dialog stays open). A click outside the card
+ * counts as PWR_CANCEL. The caller repaints the desktop on OFF-not-taken /
+ * CANCEL; OFF and REBOOT hand off to desktop_power_shutdown(). */
+int  desktop_power_action(int x, int y);
+
+/* Dismiss the dialog without acting (the Esc key). Marks it closed; the caller
+ * repaints the desktop to clear the dim. */
+void desktop_power_cancel(void);
+
+/* Repaint the dialog buttons with the one under (x,y) highlighted. Returns 1
+ * only when the hovered button changed, so the wm repaints on real movement and
+ * a still mouse is free. */
+int  desktop_power_hover(int x, int y);
+
+/* Carry out the choice. reboot=0 shuts down, reboot=1 restarts. Paints the
+ * full-screen "Shutting down…" / "Restarting…" screen, then calls the power
+ * mechanism. Does NOT return: on the rare hardware where poweroff falls
+ * through, it paints "safe to turn off your computer" and halts. */
+void desktop_power_shutdown(int reboot);
+
 /* ─── Astrion palette — matches the web build (dark, blue accent) ─── */
 #define AC_WALL_TOP  0x1A2450u   /* wallpaper gradient top (deep blue)   */
 #define AC_WALL_BOT  0x281C4Au   /* wallpaper gradient bottom (indigo)   */

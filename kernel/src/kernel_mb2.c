@@ -26,6 +26,7 @@
 #include "kbd.h"
 #include "pit.h"
 #include "rtc.h"
+#include "acpi.h"
 #include "console.h"
 #include "desktop.h"
 #include "wm.h"
@@ -788,6 +789,19 @@ void kernel_mb2_main(uint32_t magic, uint64_t info_ptr) {
             serial_puts(" (CMOS wall clock, no network time)\n");
         } else {
             serial_puts("RTC: no sane clock - falling back to uptime\n");
+        }
+    }
+
+    {   /* Poweroff path. Parse the ACPI tables for an S5 target and report what
+         * we found, like the clock above — on the record either way. */
+        if (acpi_init()) {
+            serial_puts("ACPI: S5 poweroff ready (PM1a_CNT=");
+            serial_put_hex64(acpi_pm1a_cnt_port());
+            serial_puts(", SLP_TYPa=");
+            serial_put_u32(acpi_slp_typ_a());
+            serial_puts(")\n");
+        } else {
+            serial_puts("ACPI: no clean S5 path - poweroff will use QEMU I/O ports\n");
         }
     }
 

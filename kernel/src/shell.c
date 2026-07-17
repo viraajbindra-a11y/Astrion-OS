@@ -36,6 +36,7 @@
 #include "kbd.h"
 #include "elf.h"
 #include "usermem.h"
+#include "power.h"
 
 #define COL_PROMPT 0xFF7A00u     /* Astrion orange */
 #define COL_OK     0x4ADE80u     /* green for success-ish */
@@ -100,6 +101,8 @@ static void cmd_regs(int argc, char **argv);
 static void cmd_tick(int argc, char **argv);
 static void cmd_panic(int argc, char **argv);
 static void cmd_halt(int argc, char **argv);
+static void cmd_shutdown(int argc, char **argv);
+static void cmd_reboot(int argc, char **argv);
 static void cmd_art(int argc, char **argv);
 static void cmd_cpuid(int argc, char **argv);
 static void cmd_uptime(int argc, char **argv);
@@ -170,6 +173,8 @@ static const struct cmd CMDS[] = {
     { "kill",    "kill <tid> - stop a task",         cmd_kill },
     { "panic",   "trigger int $3 (panic-screen demo)", cmd_panic },
     { "halt",    "stop the CPU forever",             cmd_halt },
+    { "shutdown","power the machine off (ACPI S5)",  cmd_shutdown },
+    { "reboot",  "restart the machine",              cmd_reboot },
     { "art",     "print Astrion ASCII banner",       cmd_art },
     { 0, 0, 0 },
 };
@@ -300,6 +305,24 @@ static void cmd_halt(int argc, char **argv) {
     console_set_color(COL_PROMPT);
     console_puts("halting - power-cycle to reboot.\n");
     for (;;) __asm__ volatile("cli; hlt");
+}
+
+static void cmd_shutdown(int argc, char **argv) {
+    (void)argc; (void)argv;
+    console_set_color(COL_PROMPT);
+    console_puts("shutting down...\n");
+    power_off();
+    /* Only reached if no poweroff path cut power (real hardware, no ACPI S5). */
+    console_set_color(COL_MUTED);
+    console_puts("could not power off - it is now safe to turn the machine off.\n");
+    for (;;) __asm__ volatile("cli; hlt");
+}
+
+static void cmd_reboot(int argc, char **argv) {
+    (void)argc; (void)argv;
+    console_set_color(COL_PROMPT);
+    console_puts("restarting...\n");
+    power_reboot();
 }
 
 static void cmd_art(int argc, char **argv) {
