@@ -46,20 +46,56 @@ enum app_kind { APP_NONE = 0, APP_FILES, APP_EDITOR, APP_ASSIST };
 
 static uint32_t SW, SH;
 
-/* The single floating window. */
-static struct {
-    int          open;
-    enum app_kind app;
-    uint32_t     x, y, w, h;      /* outer rect */
-    uint32_t     sw, sh;          /* saved-rect dims (incl. shadow) */
-    uint32_t    *savebuf;         /* base pixels under the window */
-} win;
+/* ─── Windows ───
+ * One window per app kind (the dock model: clicking an app opens it, or
+ * focuses it if it is already open), several open at once, stacked in
+ * z-order — the topmost is the focused one.
+ *
+ * `savebuf` holds the pixels that were beneath a window when it was painted,
+ * so dragging the TOP window stays cheap (restore → move → save → draw) with
+ * no full repaint. Anything that changes the stack (open / close / raise)
+ * calls repaint_all() instead, which is always correct — that is why the
+ * console needs a backing store (console_redraw). */
+#define WM_MAX 3
 
-/* Content rect (inside the frame), recomputed on open/move. */
+struct window {
+    int           open;
+    enum app_kind app;
+    uint32_t      x, y, w, h;     /* outer rect */
+    uint32_t      sw, sh;         /* saved-rect dims (incl. shadow) */
+    uint32_t     *savebuf;        /* pixels beneath this window at paint time */
+};
+static struct window wins[WM_MAX];
+static int zord[WM_MAX];      /* z-order: [0] = bottom … [zn-1] = top */
+static int zn;                /* number of open windows */
+static int focus_shell = 1;   /* 1 = the keyboard belongs to the terminal */
+
+/* Content rect of the window currently being drawn / keyed. */
 static uint32_t cx, cy, cw, ch;
 
-/* Forward decls (app key handlers below close their own window on ESC). */
+/* Forward decls. */
 static void wm_close(void);
+static void repaint_all(void);
+static void draw_frame(struct window *w);
+static void draw_content(struct window *w);
+static void set_content_rect(struct window *w);
+
+static int slot_of(enum app_kind a) {
+    switch (a) { case APP_FILES: return 0; case APP_EDITOR: return 1;
+                 case APP_ASSIST: return 2; default: return -1; }
+}
+static int icon_of(enum app_kind a) {   /* dock icon index */
+    switch (a) { case APP_FILES: return 1; case APP_EDITOR: return 2;
+                 case APP_ASSIST: return 4; default: return 0; }
+}
+static struct window *topwin(void)  { return zn > 0 ? &wins[zord[zn - 1]] : 0; }
+static struct window *focused(void) { return focus_shell ? 0 : topwin(); }
+static void z_remove(int slot) {
+    int k = 0;
+    for (int i = 0; i < zn; i++) if (zord[i] != slot) zord[k++] = zord[i];
+    zn = k;
+}
+static void z_raise(int slot) { z_remove(slot); zord[zn++] = slot; }
 
 /* Drag state. */
 static int dragging, drag_ox, drag_oy, last_mx, last_my;
@@ -105,6 +141,7 @@ static uint8_t *ed_buf;
 static uint32_t ed_len, ed_cap, ed_cursor;
 
 static void editor_open(const char *name) {
+    if (ed_buf) { kfree(ed_buf); ed_buf = 0; }   /* reopening: don't leak */
     ed_cap = 8192;
     ed_buf = (uint8_t *)kmalloc(ed_cap);
     ed_len = 0; ed_cursor = 0;
@@ -207,8 +244,13 @@ static void files_key(char c) {
 static char     as_prompt[128];
 static int      as_plen;
 static uint32_t as_ox, as_oy;      /* streaming output cursor */
+/* Everything the assistant has emitted for the current answer. Kept so the
+ * output can be repainted when the window moves / is raised — pixels alone
+ * can't be recovered once another window has covered them. */
+static char     as_out[3072];
+static int      as_olen;
 
-static void assist_reset(void) { as_plen = 0; as_prompt[0] = 0; }
+static void assist_reset(void) { as_plen = 0; as_prompt[0] = 0; as_olen = 0; }
 
 static void assist_prompt_line(void) {
     uint32_t py = cy + 60;
@@ -219,14 +261,29 @@ static void assist_prompt_line(void) {
     fb_rect_x(caret, py, 2, GH, AC_ORANGE);
 }
 
-/* Draw one generated char into the output area, wrapping + clipping. */
-static void assist_emit(char c) {
+/* Draw one char at the streaming cursor, wrapping + clipping. Draw only. */
+static void assist_put(char c) {
     if (c == '\n') { as_ox = cx; as_oy += LINE; return; }
     if (as_ox + GW > cx + cw) { as_ox = cx; as_oy += LINE; }
     if (as_oy + GH > cy + ch) return;         /* full */
     char s[2] = { c, 0 };
     af_draw(as_ox, as_oy, s, AC_WHITE, AF_MONO);
     as_ox += GW;
+}
+
+/* Record + draw. Everything (intent replies and streamed GPT text) goes
+ * through here, so assist_render_output() can rebuild the answer verbatim. */
+static void assist_emit(char c) {
+    if (as_olen < (int)sizeof(as_out) - 1) as_out[as_olen++] = c;
+    assist_put(c);
+}
+
+/* Repaint the output area from the recorded answer. */
+static void assist_render_output(void) {
+    uint32_t oy0 = cy + 96;
+    fb_rect_x(cx, oy0, cw, (cy + ch) - oy0, AC_TERM_BG);
+    as_ox = cx; as_oy = oy0;
+    for (int i = 0; i < as_olen; i++) assist_put(as_out[i]);
 }
 
 /* ─── local command layer: the assistant DOES things, fully offline ─── */
@@ -305,6 +362,7 @@ static void assist_begin_output(void) {
     uint32_t oy0 = cy + 96;
     fb_rect_x(cx, oy0, cw, (cy + ch) - oy0, AC_TERM_BG);
     as_ox = cx; as_oy = oy0;
+    as_olen = 0;                 /* start recording a fresh answer */
     mouse_lift();
 }
 static void assist_say(const char *s) { while (*s) assist_emit(*s++); }
@@ -574,10 +632,7 @@ static int try_intent(const char *p) {
 
 static void assist_run(void) {
     if (try_intent(as_prompt)) return;   /* did a real action, offline */
-    uint32_t oy0 = cy + 96;
-    fb_rect_x(cx, oy0, cw, (cy + ch) - oy0, AC_TERM_BG);   /* clear output */
-    as_ox = cx; as_oy = oy0;
-    mouse_lift();
+    assist_begin_output();               /* open-ended text -> on-device GPT */
     gpt_generate(as_prompt, 220, assist_emit);
 }
 
@@ -587,6 +642,7 @@ static void assist_draw(void) {
     af_draw(cx, cy + 24, "on-device - try:  write hi to notes.txt  /  read notes.txt  /  open snake  /  help  /  or just chat",
             AC_MUTED, AF_REG13);
     assist_prompt_line();
+    assist_render_output();      /* redraw the last answer from its buffer */
 }
 
 static void assist_key(char c) {
@@ -594,9 +650,12 @@ static void assist_key(char c) {
     if (c == '\n') {
         if (as_plen > 0) {
             assist_run();
-            /* Reset the prompt for the next command — but only if we're still
-             * in the Assistant (an "open X" command may have switched apps). */
-            if (win.app == APP_ASSIST) {
+            /* Reset the prompt for the next command — but only if the
+             * Assistant still has focus (an "open X" command may have raised
+             * another window, which also moves the cx/cy content rect). */
+            struct window *f = focused();
+            if (f && f->app == APP_ASSIST) {
+                set_content_rect(f);
                 as_plen = 0; as_prompt[0] = 0;
                 assist_prompt_line();
             }
@@ -624,18 +683,22 @@ static const char *title_for(enum app_kind a) {
     }
 }
 
-static void draw_frame(void) {
-    fb_rect_x(win.x + 6, win.y + 6, win.w, win.h, 0x0A0E24u);   /* shadow */
-    fb_rect_x(win.x, win.y, win.w, win.h, AC_TERM_BG);          /* body   */
-    fb_rect_x(win.x, win.y, win.w, TITLE_H, AC_PANEL);          /* title  */
-    fb_rect_x(win.x + win.w - 27, win.y + 9, 16, 16, AC_RED);   /* close  */
-    af_draw(win.x + win.w - 23, win.y + 8, "x", AC_WHITE, AF_REG13);
-    af_draw_center(win.x + win.w / 2, win.y + 8, title_for(win.app), AC_WHITE, AF_SB16);
-    draw_border(win.x, win.y, win.w, win.h, AC_BORDER);
+static void draw_frame(struct window *w) {
+    int fg = (w == focused());
+    fb_rect_x(w->x + 6, w->y + 6, w->w, w->h, 0x0A0E24u);   /* shadow */
+    fb_rect_x(w->x, w->y, w->w, w->h, AC_TERM_BG);          /* body   */
+    fb_rect_x(w->x, w->y, w->w, TITLE_H, AC_PANEL);         /* title  */
+    fb_rect_x(w->x + w->w - 27, w->y + 9, 16, 16, AC_RED);  /* close  */
+    af_draw(w->x + w->w - 23, w->y + 8, "x", AC_WHITE, AF_REG13);
+    /* the focused window gets a white title + accent border; others dim */
+    af_draw_center(w->x + w->w / 2, w->y + 8, title_for(w->app),
+                   fg ? AC_WHITE : AC_MUTED, AF_SB16);
+    draw_border(w->x, w->y, w->w, w->h, fg ? AC_ACCENT : AC_BORDER);
 }
 
-static void draw_content(void) {
-    switch (win.app) {
+static void draw_content(struct window *w) {
+    set_content_rect(w);
+    switch (w->app) {
         case APP_EDITOR: editor_draw(); break;
         case APP_FILES:  files_draw();  break;
         case APP_ASSIST: assist_draw(); break;
@@ -643,82 +706,112 @@ static void draw_content(void) {
     }
 }
 
-static void set_content_rect(void) {
-    cx = win.x + PAD; cy = win.y + TITLE_H + 10;
-    cw = win.w - 2 * PAD; ch = win.h - TITLE_H - 10 - PAD;
+static void set_content_rect(struct window *w) {
+    cx = w->x + PAD; cy = w->y + TITLE_H + 10;
+    cw = w->w - 2 * PAD; ch = w->h - TITLE_H - 10 - PAD;
+}
+
+/* Repaint the world from state: desktop chrome, the terminal (from its
+ * backing store), then every window bottom-to-top. Each window's savebuf is
+ * snapshotted BEFORE it is drawn, so the top window can later be dragged by
+ * restore→move→save without repainting anything else. */
+static void repaint_all(void) {
+    SW = fb_width_x(); SH = fb_height_x();
+    desktop_repaint_chrome();
+    console_redraw();
+    struct window *f = focused();
+    desktop_set_active_app(f ? icon_of(f->app) : 0);
+    mouse_lift();
+    for (int i = 0; i < zn; i++) {
+        struct window *w = &wins[zord[i]];
+        save_rect(w->x, w->y, w->sw, w->sh, w->savebuf);
+        draw_frame(w);
+        draw_content(w);
+    }
+}
+
+static void close_window(struct window *w) {
+    if (!w || !w->open) return;
+    if (w->app == APP_EDITOR) { editor_save(); if (ed_buf) { kfree(ed_buf); ed_buf = 0; } }
+    z_remove(slot_of(w->app));
+    w->open = 0;
+    dragging = 0;
+    if (zn == 0) focus_shell = 1;
+    repaint_all();
 }
 
 static void wm_close(void) {
-    if (!win.open) return;
-    if (win.app == APP_EDITOR) { editor_save(); if (ed_buf) { kfree(ed_buf); ed_buf = 0; } }
-    mouse_lift();
-    desktop_set_active_app(-1);            /* clear dock highlight */
-    if (win.savebuf) {
-        restore_rect(win.x, win.y, win.sw, win.sh, win.savebuf);
-        kfree(win.savebuf); win.savebuf = 0;
-    }
-    win.open = 0; win.app = APP_NONE; dragging = 0;
+    struct window *w = focused();
+    if (!w) w = topwin();
+    close_window(w);
 }
 
 static void open_common(enum app_kind app) {
-    if (win.open) wm_close();
+    int s = slot_of(app);
+    if (s < 0) return;
+    struct window *w = &wins[s];
     SW = fb_width_x(); SH = fb_height_x();
-    win.w = APP_W; win.h = APP_H;
-    win.x = (SW - APP_W) / 2; win.y = WM_TOP + 4;
-    win.sw = win.w + 6; win.sh = win.h + 6;      /* include shadow */
-    win.savebuf = (uint32_t *)kmalloc(win.sw * win.sh * 4);
-    set_content_rect();
-    mouse_lift();
-    save_rect(win.x, win.y, win.sw, win.sh, win.savebuf);
-    win.open = 1; win.app = app;
-    if (app == APP_ASSIST) assist_reset();
-    draw_frame();
-    draw_content();
+    if (!w->open) {
+        w->app = app;
+        w->w = APP_W; w->h = APP_H;
+        /* cascade so a second window doesn't land exactly on the first */
+        w->x = (SW - APP_W) / 2 + (uint32_t)(s * 26);
+        w->y = WM_TOP + 4 + (uint32_t)(s * 22);
+        w->sw = w->w + 6; w->sh = w->h + 6;          /* include shadow */
+        if (!w->savebuf) w->savebuf = (uint32_t *)kmalloc(w->sw * w->sh * 4);
+        w->open = 1;
+        if (app == APP_ASSIST) assist_reset();
+        if (app == APP_FILES)  files_load();
+    }
+    z_raise(s);
+    focus_shell = 0;
+    repaint_all();
 }
 
 void wm_open_editor(const char *name) {
-    open_common(APP_NONE);          /* reserve + save base, app set below */
-    win.app = APP_EDITOR;
-    editor_open(name);
-    draw_frame();                   /* redraw title now that name is known */
-    editor_draw();
-    desktop_set_active_app(2);      /* Editor dock icon */
+    editor_open(name);              /* load the file first so the title is right */
+    open_common(APP_EDITOR);
 }
 
 static void run_snake(void) {
-    if (win.open) wm_close();
-    snake_play();
-    desktop_repaint_chrome();
+    snake_play();                   /* takes over the screen until ESC */
     console_clear();
     console_puts("Back from Snake. Type 'help'.\n");
+    repaint_all();                  /* restore desktop + any open windows */
 }
 
 void wm_open_app(int icon) {
     switch (icon) {
-        case 0: wm_close();                break;   /* Terminal: dismiss overlay */
-        case 1: open_common(APP_FILES);  files_load(); files_draw();
-                desktop_set_active_app(1); break;
-        case 2: wm_open_editor(0);         break;   /* sets its own highlight */
-        case 3: run_snake();               break;
-        case 4: open_common(APP_ASSIST);   desktop_set_active_app(4); break;
+        case 0:   /* Terminal: hand the keyboard back to the shell */
+            focus_shell = 1;
+            desktop_set_active_app(0);
+            if (zn) repaint_all();          /* redraw titles/borders as unfocused */
+            break;
+        case 1: open_common(APP_FILES);  break;
+        case 2: wm_open_editor(0);       break;
+        case 3: run_snake();             break;
+        case 4: open_common(APP_ASSIST); break;
         default: break;
     }
 }
 
 /* ─── Move (drag) ─── */
+/* Only ever the TOP window: a click raises before it drags, so restoring this
+ * window's savebuf can never erase a window above it. */
 static void wm_move(int nx, int ny) {
+    struct window *w = topwin();
+    if (!w) return;
     if (nx < 0) nx = 0;
     if (ny < (int)WM_TOP) ny = (int)WM_TOP;
-    if (nx + (int)win.sw > (int)SW) nx = (int)SW - (int)win.sw;
-    if (ny + (int)win.sh > (int)(SH - WM_DOCK)) ny = (int)(SH - WM_DOCK) - (int)win.sh;
-    if (nx == (int)win.x && ny == (int)win.y) return;
+    if (nx + (int)w->sw > (int)SW) nx = (int)SW - (int)w->sw;
+    if (ny + (int)w->sh > (int)(SH - WM_DOCK)) ny = (int)(SH - WM_DOCK) - (int)w->sh;
+    if (nx == (int)w->x && ny == (int)w->y) return;
     mouse_lift();
-    restore_rect(win.x, win.y, win.sw, win.sh, win.savebuf);
-    win.x = (uint32_t)nx; win.y = (uint32_t)ny;
-    set_content_rect();
-    save_rect(win.x, win.y, win.sw, win.sh, win.savebuf);
-    draw_frame();
-    draw_content();
+    restore_rect(w->x, w->y, w->sw, w->sh, w->savebuf);
+    w->x = (uint32_t)nx; w->y = (uint32_t)ny;
+    save_rect(w->x, w->y, w->sw, w->sh, w->savebuf);
+    draw_frame(w);
+    draw_content(w);
 }
 
 /* ─── Public API ─── */
@@ -729,15 +822,20 @@ void wm_init(void) {
     GW = af_text_width("M", AF_MONO);
     GH = (uint32_t)af_line_height(AF_MONO);
     LINE = GH + 2;
-    win.open = 0; win.app = APP_NONE; win.savebuf = 0;
+    for (int i = 0; i < WM_MAX; i++) {
+        wins[i].open = 0; wins[i].app = APP_NONE; wins[i].savebuf = 0;
+    }
+    zn = 0; focus_shell = 1;
     dragging = 0; ed_buf = 0;
 }
 
-int wm_active(void) { return win.open; }
+int wm_active(void) { return focused() != 0; }
 
 int wm_handle_key(char c) {
-    if (!win.open) return 0;
-    switch (win.app) {
+    struct window *f = focused();
+    if (!f) return 0;               /* nothing focused → the shell gets it */
+    set_content_rect(f);            /* app draw fns work off cx/cy/cw/ch */
+    switch (f->app) {
         case APP_EDITOR: editor_key(c); return 1;
         case APP_FILES:  files_key(c);  return 1;
         case APP_ASSIST: assist_key(c); return 1;
@@ -753,18 +851,33 @@ void wm_tick(void) {
     if (click) {
         int icon = desktop_dock_hit(mx, my);
         if (icon >= 0) { wm_open_app(icon); return; }
-        if (win.open) {
+
+        /* The topmost window under the pointer takes the click. */
+        for (int i = zn - 1; i >= 0; i--) {
+            int slot = zord[i];
+            struct window *w = &wins[slot];
+            if (mx < (int)w->x || mx > (int)(w->x + w->w) ||
+                my < (int)w->y || my > (int)(w->y + w->h)) continue;
+            if (i != zn - 1 || focus_shell) {   /* click-to-focus: raise it */
+                z_raise(slot); focus_shell = 0; repaint_all();
+            }
             /* close box */
-            if (mx >= (int)(win.x + win.w - 26) && mx <= (int)(win.x + win.w - 11) &&
-                my >= (int)(win.y + 8)          && my <= (int)(win.y + 23)) {
+            if (mx >= (int)(w->x + w->w - 27) && mx <= (int)(w->x + w->w - 11) &&
+                my >= (int)(w->y + 9)         && my <= (int)(w->y + 25)) {
                 wm_close(); return;
             }
             /* title bar → begin drag */
-            if (my >= (int)win.y && my <= (int)(win.y + TITLE_H) &&
-                mx >= (int)win.x && mx <= (int)(win.x + win.w)) {
-                dragging = 1; drag_ox = mx - (int)win.x; drag_oy = my - (int)win.y;
+            if (my >= (int)w->y && my <= (int)(w->y + TITLE_H)) {
+                dragging = 1; drag_ox = mx - (int)w->x; drag_oy = my - (int)w->y;
                 last_mx = mx; last_my = my;
             }
+            return;
+        }
+        /* clicked the desktop / terminal → give the keyboard to the shell */
+        if (!focus_shell) {
+            focus_shell = 1;
+            desktop_set_active_app(0);
+            if (zn) repaint_all();
         }
     }
 

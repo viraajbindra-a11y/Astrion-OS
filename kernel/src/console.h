@@ -25,6 +25,10 @@ void     console_clear(void);
 void     console_newline(void);
 void     console_backspace(void);    /* erase prior glyph, retreats cursor */
 
+/* Repaint the whole console region from its backing store. Needed when
+ * something (an overlapping window) has drawn over the terminal. */
+void     console_redraw(void);
+
 /* Output redirection: when a capture buffer is set, console_putchar
  * APPENDS to that buffer instead of drawing on the framebuffer.
  * Used to implement '>' in the shell. Set buf=NULL to restore

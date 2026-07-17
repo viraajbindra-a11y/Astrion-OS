@@ -44,6 +44,53 @@ static uint32_t x0, y0, w_px, h_px;
 static uint32_t cx, cy;
 static uint32_t color = COL_FG_DEFLT;
 
+/* ─── Backing store ───
+ * Every drawn cell is also recorded here so the console can be repainted from
+ * state (console_redraw). Needed as soon as windows can overlap the terminal:
+ * pixels alone can't be recovered once something is drawn on top of them. */
+#define CON_MAX_COLS 160
+#define CON_MAX_ROWS 48
+static char     g_ch[CON_MAX_ROWS][CON_MAX_COLS];
+static uint32_t g_fg[CON_MAX_ROWS][CON_MAX_COLS];
+
+static void grid_clear(void) {
+    for (uint32_t r = 0; r < CON_MAX_ROWS; r++)
+        for (uint32_t c = 0; c < CON_MAX_COLS; c++) g_ch[r][c] = 0;
+}
+/* Record c at the current cursor cell (call before cx advances). */
+static void grid_put(char c) {
+    if (!GW || !LINE_STRIDE) return;
+    uint32_t col = (cx - x0) / GW, row = (cy - y0) / LINE_STRIDE;
+    if (row < CON_MAX_ROWS && col < CON_MAX_COLS) { g_ch[row][col] = c; g_fg[row][col] = color; }
+}
+static void grid_scroll(void) {
+    for (uint32_t r = 0; r + 1 < CON_MAX_ROWS; r++)
+        for (uint32_t c = 0; c < CON_MAX_COLS; c++) {
+            g_ch[r][c] = g_ch[r + 1][c]; g_fg[r][c] = g_fg[r + 1][c];
+        }
+    for (uint32_t c = 0; c < CON_MAX_COLS; c++) g_ch[CON_MAX_ROWS - 1][c] = 0;
+}
+static void grid_clear_cell(void) {
+    if (!GW || !LINE_STRIDE) return;
+    uint32_t col = (cx - x0) / GW, row = (cy - y0) / LINE_STRIDE;
+    if (row < CON_MAX_ROWS && col < CON_MAX_COLS) g_ch[row][col] = 0;
+}
+
+/* Repaint the whole console region from the backing store. */
+void console_redraw(void) {
+    if (!fb_present_x() || !w_px) return;
+    fb_rect_x(x0, y0, w_px, h_px, COL_BG);
+    for (uint32_t r = 0; r < CON_MAX_ROWS; r++)
+        for (uint32_t c = 0; c < CON_MAX_COLS; c++) {
+            char ch = g_ch[r][c];
+            if (!ch) continue;
+            uint32_t px = x0 + c * GW, py = y0 + r * LINE_STRIDE;
+            if (px + GW > x0 + w_px || py + GH > y0 + h_px) continue;
+            char s[2] = { ch, 0 };
+            af_draw(px, py, s, g_fg[r][c], AF_MONO);
+        }
+}
+
 /* Capture (for '>' redirection). When buf is non-NULL, putchar
  * appends there instead of drawing pixels. */
 static uint8_t  *cap_buf;
@@ -64,6 +111,7 @@ static void scroll_one_line(void) {
     }
     /* Clear the freed bottom strip. */
     fb_rect_x(x0, y0 + h_px - LINE_STRIDE, w_px, LINE_STRIDE, COL_BG);
+    grid_scroll();
     cy -= LINE_STRIDE;
 }
 
@@ -83,6 +131,7 @@ void console_init(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
 
 void console_clear(void) {
     fb_rect_x(x0, y0, w_px, h_px, COL_BG);
+    grid_clear();
     cx = x0;
     cy = y0;
 }
@@ -100,6 +149,7 @@ void console_backspace(void) {
     if (cx <= x0) return;
     cx -= GW;
     fb_rect_x(cx, cy, GW, GH, COL_BG);
+    grid_clear_cell();
 }
 
 void console_set_capture(uint8_t *buf, uint32_t cap, uint32_t *len_out) {
@@ -133,6 +183,7 @@ void console_putchar(char c) {
         do {
             char buf[2] = {' ', 0};
             af_draw(cx, cy, buf, color, AF_MONO);
+            grid_put(' ');
             cx += GW;
             if (cx + GW > x0 + w_px) console_newline();
         } while (((cx - x0) / GW) % 4);
@@ -145,6 +196,7 @@ void console_putchar(char c) {
 
     char buf[2] = {c, 0};
     af_draw(cx, cy, buf, color, AF_MONO);
+    grid_put(c);
     cx += GW;
 }
 
