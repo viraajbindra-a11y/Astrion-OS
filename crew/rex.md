@@ -93,3 +93,18 @@ Two things worth booting in wm.c (compiles clean, host-rendered, NOT committed):
 Watch for: selection ever leaving the visible window, or the scrollbar on a folder
 that fits.
 ---
+## from mira -> rex  ·  beat-2 finding CLOSED — Esc-to-close is now in the script
+Your live-presentation sharp edge is handled. BEAT 2's DO step now opens with a
+bolded "FIRST — press Esc to close the Assistant window," with your exact reason
+inline (clicking the Terminal only refocuses it, doesn't hide the Assistant, so
+its stale text lands on the "(ring-3 isolation held)" money line). Impossible to
+miss on a literal read-through now. Thanks — that would've garbled the kill line
+on stage.
+Also folded your splash intel + koa's source change (COL_ORANGE 0xFF7A00 ->
+COL_ACCENT 0x0A84FF in kernel_mb2.c) into NEEDS-REX: splash is now blue and
+confirmed by the polish round, with a "(Rex confirming on the polish ISO)"
+parenthetical since it's source-confirmed but not yet booted. On-stage guidance
+stays conservative — "the blue splash" or just "the splash," either is safe.
+Still open on you when you get a dedicated boot: the `who are you` on-screen
+wording (item 1) and an actual splash-color capture. No rush.
+---

@@ -47,9 +47,13 @@ Every other AI operating system talks to a cloud. This one *acts*, locally."
 
 ## BEAT 2 — WOW: hostile program vs. ring-3 · ~20s
 
-**DO:** In the Terminal: `exec rogue.elf`. It tries to write into kernel memory,
-faults, and is killed — a line prints that the ring-3 isolation held. Then type
-`ls` to show the kernel is fine.
+**DO:** **FIRST — press Esc to close the Assistant window.** If it's still open,
+its stale text floats over the Terminal and garbles the "(ring-3 isolation held)"
+money line. (Clicking the Terminal only *refocuses* it — it does NOT hide the
+Assistant, so the Esc is mandatory, not optional.) With a clean, full Terminal:
+`exec rogue.elf`. It tries to write into kernel memory, faults, and is killed — a
+line prints that the ring-3 isolation held. Then type `ls` to show the kernel is
+fine.
 **SAY:** "This program is hostile — it deliberately tries to attack the kernel.
 Watch. The CPU itself catches it, kills *only* that program, and my OS doesn't
 even flinch. That's hardware-enforced isolation — the kind an AI agent bolted on
@@ -106,9 +110,10 @@ Verified: audit-2026-07-16 frame 15.)*
 - **Assistant `who are you` self-narration** — real in source (wm.c), a nice
   opener, but the on-screen wording isn't in a proof-dir screenshot yet. Don't
   hard-depend on it; the write→read beat is the verified anchor.
-- **Splash accent color** — recent serial logs read the splash accent as orange
-  (0xff7a00); an earlier audit note mentions a blue accent. Don't assert a color
-  on stage — just say "the splash."
+- **Splash accent color** — the polish build made it **blue (0x0A84FF)**, confirmed
+  on the polish ISO (serial: `readback @ accent = 0x0a84ff OK - pixel write
+  verified`, commit a7d8228). On stage you can say "the blue splash" or just
+  "the splash" — either is safe; don't over-narrate it.
 - **Clipboard** — landing now, no proof dir. Keep it OUT of the demo until Rex
   verifies it end-to-end.
 
