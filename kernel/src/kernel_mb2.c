@@ -25,6 +25,7 @@
 #include "idt.h"
 #include "kbd.h"
 #include "pit.h"
+#include "rtc.h"
 #include "console.h"
 #include "desktop.h"
 #include "wm.h"
@@ -646,12 +647,28 @@ const char *mb_bootloader_name_x(void)   { return boot_info.bootloader_name; }
 static void clock_task(void *arg) {
     (void)arg;
     uint64_t last = 0;
-    char clkbuf[9];
+    char clkbuf[32];
     for (;;) {
         uint64_t now = pit_elapsed_ms();
         if (now - last >= 250) {
             last = now;
-            pit_format_clock(clkbuf);
+            struct rtc_time t;
+            if (rtc_read(&t) == 0) {
+                /* "Jul 07  14:32:05" — the real wall clock, off the CMOS chip.
+                 * Day is always 2 digits so the string width never changes;
+                 * desktop_draw_clock clears exactly the width it draws, and a
+                 * shrinking string would leave a sliver of the old one. */
+                const char *m = rtc_month_name(t.month);
+                int k = 0;
+                clkbuf[k++] = m[0]; clkbuf[k++] = m[1]; clkbuf[k++] = m[2];
+                clkbuf[k++] = ' ';
+                clkbuf[k++] = (char)('0' + (t.day / 10) % 10);
+                clkbuf[k++] = (char)('0' + t.day % 10);
+                clkbuf[k++] = ' '; clkbuf[k++] = ' ';
+                rtc_format_time(&t, clkbuf + k);
+            } else {
+                pit_format_clock(clkbuf);      /* no usable RTC -> uptime */
+            }
             desktop_draw_clock(clkbuf);   /* top bar, right side */
         }
         task_yield();
@@ -757,6 +774,20 @@ void kernel_mb2_main(uint32_t magic, uint64_t info_ptr) {
     /* PIT at 100 Hz on IRQ0 → 10ms tick → live clock. */
     pit_install(100);
     serial_puts("PIT: 100 Hz tick installed\n");
+
+    {   /* Wall clock. Report it at boot so the date is on the record. */
+        struct rtc_time t;
+        if (rtc_read(&t) == 0) {
+            char d[11], c[9];
+            rtc_format_date(&t, d);
+            rtc_format_time(&t, c);
+            serial_puts("RTC: "); serial_puts(d);
+            serial_puts(" "); serial_puts(c);
+            serial_puts(" (CMOS wall clock, no network time)\n");
+        } else {
+            serial_puts("RTC: no sane clock - falling back to uptime\n");
+        }
+    }
 
     /* PS/2 keyboard on IRQ1. */
     kbd_install();

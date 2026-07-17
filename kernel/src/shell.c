@@ -25,6 +25,7 @@
 #include "shell.h"
 #include "console.h"
 #include "pit.h"
+#include "rtc.h"
 #include "idt.h"
 #include "snake.h"
 #include "heap.h"
@@ -92,6 +93,7 @@ static void cmd_halt(int argc, char **argv);
 static void cmd_art(int argc, char **argv);
 static void cmd_cpuid(int argc, char **argv);
 static void cmd_uptime(int argc, char **argv);
+static void cmd_date(int argc, char **argv);
 static void cmd_guess(int argc, char **argv);
 static void cmd_wipe(int argc, char **argv);
 static void cmd_paint(int argc, char **argv);
@@ -129,6 +131,7 @@ static const struct cmd CMDS[] = {
     { "cpuid",   "CPU vendor + feature flags",       cmd_cpuid },
     { "tick",    "current PIT tick count + uptime",  cmd_tick },
     { "uptime",  "human-readable uptime",            cmd_uptime },
+    { "date",    "real date + time (CMOS RTC)",      cmd_date },
     { "guess",   "play: guess my number 1..100",     cmd_guess },
     { "paint",   "drag mouse to draw ink trails",    cmd_paint },
     { "wipe",    "clear any ink trails / repaint",   cmd_wipe },
@@ -387,6 +390,30 @@ static void cmd_cpuid(int argc, char **argv) {
 }
 
 /* ─── uptime ─────────────────────────────────────────────── */
+
+static void cmd_date(int argc, char **argv) {
+    (void)argc; (void)argv;
+    struct rtc_time t;
+    if (rtc_read(&t) != 0) {
+        console_puts("date: no sane RTC on this machine\n");
+        return;
+    }
+    char d[11], c[9];
+    rtc_format_date(&t, d);
+    rtc_format_time(&t, c);
+    console_set_color(COL_OK);
+    console_puts(rtc_month_name(t.month));
+    console_puts(" ");
+    console_put_u32((uint32_t)t.day);
+    console_puts(", ");
+    console_put_u32((uint32_t)t.year);
+    console_set_color(COL_WHITE);
+    console_puts("  ");
+    console_puts(c);
+    console_puts("   (");
+    console_puts(d);
+    console_puts(" - CMOS clock, no network time)\n");
+}
 
 static void cmd_uptime(int argc, char **argv) {
     (void)argc; (void)argv;

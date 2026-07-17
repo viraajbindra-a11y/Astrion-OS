@@ -19,6 +19,7 @@
 #include "af.h"         /* antialiased Inter text */
 #include "task.h"       /* task_get_info — the assistant reports what's running */
 #include "ata.h"        /* ata_present — disk / persistence status */
+#include "rtc.h"        /* rtc_read — the assistant knows the real date */
 
 /* Framebuffer wrappers live in kernel_mb2.c with no header — declare them
  * here the same way console.c / mouse.c do. */
@@ -455,9 +456,27 @@ static int try_intent(const char *p) {
         return 1;
     }
 
+    /* date / time — the real wall clock, not uptime */
+    if (has(p, "date") || has(p, "what day") ||
+        (has(p, "time") && !has(p, "uptime"))) {
+        struct rtc_time t;
+        assist_begin_output();
+        if (rtc_read(&t) == 0) {
+            char c[9];
+            rtc_format_time(&t, c);
+            assist_say("it's "); assist_say(c);
+            assist_say(" on ");  assist_say(rtc_month_name(t.month));
+            assist_emit(' ');    assist_num((uint32_t)t.day);
+            assist_say(", ");    assist_num((uint32_t)t.year);
+            assist_say("\nstraight off the clock chip - I never asked a server.\n");
+        } else {
+            assist_say("my clock chip isn't answering - I only know uptime.\n");
+        }
+        return 1;
+    }
+
     /* uptime */
-    if (has(p, "uptime") || (has(p, "how long") && has(p, "been")) ||
-        (has(p, "what") && has(p, "time"))) {
+    if (has(p, "uptime") || (has(p, "how long") && has(p, "been"))) {
         uint32_t secs = (uint32_t)(pit_elapsed_ms() / 1000);
         assist_begin_output();
         assist_say("up ");

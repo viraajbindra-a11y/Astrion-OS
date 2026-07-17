@@ -212,6 +212,7 @@ kernel-mb2: src/hello_elf.h src/rogue_elf.h src/iodemo_elf.h
 	$(CC) $(MB2_CFLAGS) -c src/idt.c -o $(BUILD_DIR)/idt.o
 	$(CC) $(MB2_CFLAGS) -c src/kbd.c -o $(BUILD_DIR)/kbd.o
 	$(CC) $(MB2_CFLAGS) -c src/pit.c -o $(BUILD_DIR)/pit.o
+	$(CC) $(MB2_CFLAGS) -c src/rtc.c -o $(BUILD_DIR)/rtc.o
 	$(CC) $(MB2_CFLAGS) -c src/console.c -o $(BUILD_DIR)/console.o
 	$(CC) $(MB2_CFLAGS) -c src/desktop.c -o $(BUILD_DIR)/desktop.o
 	$(CC) $(MB2_CFLAGS) -c src/wm.c -o $(BUILD_DIR)/wm.o
@@ -237,6 +238,7 @@ kernel-mb2: src/hello_elf.h src/rogue_elf.h src/iodemo_elf.h
 	    $(BUILD_DIR)/idt.o \
 	    $(BUILD_DIR)/kbd.o \
 	    $(BUILD_DIR)/pit.o \
+	    $(BUILD_DIR)/rtc.o \
 	    $(BUILD_DIR)/console.o \
 	    $(BUILD_DIR)/desktop.o \
 	    $(BUILD_DIR)/wm.o \
