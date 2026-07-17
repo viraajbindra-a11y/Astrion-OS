@@ -90,9 +90,14 @@ static int copy_user_name(uint64_t uptr, char *out, int outcap) {
 }
 
 /* SYS_READ_FILE: copy up to `cap` bytes of file `name` into user `buf`. The
- * kernel (CPL 0) can read the US=1 user pages once the range is validated. */
+ * kernel (CPL 0) can read the US=1 user pages once the range is validated.
+ *
+ * `name` may be a path ("/a/b.txt"); a relative one resolves against the
+ * shell's cwd, exactly like a program launched from that directory would
+ * expect. The buffer is FS_PATH_MAX so a legal path can't be silently
+ * truncated into a DIFFERENT legal path. */
 static uint64_t sys_read_file(uint64_t name_ptr, uint64_t buf_ptr, uint64_t cap) {
-    char name[FS_NAME_MAX + 1];
+    char name[FS_PATH_MAX + 1];
     if (!copy_user_name(name_ptr, name, sizeof(name)))       return (uint64_t)-1;
     if (cap > MAX_SYSCALL_LEN) cap = MAX_SYSCALL_LEN;
     if (!validate_user_range(buf_ptr, cap))                  return (uint64_t)-1;
@@ -108,7 +113,7 @@ static uint64_t sys_read_file(uint64_t name_ptr, uint64_t buf_ptr, uint64_t cap)
 /* SYS_WRITE_FILE: write `len` bytes of user `buf` to file `name` (created if
  * absent), then persist. Validates the whole user range before reading it. */
 static uint64_t sys_write_file(uint64_t name_ptr, uint64_t buf_ptr, uint64_t len) {
-    char name[FS_NAME_MAX + 1];
+    char name[FS_PATH_MAX + 1];
     if (!copy_user_name(name_ptr, name, sizeof(name)))       return (uint64_t)-1;
     if (len > MAX_SYSCALL_LEN)                               return (uint64_t)-1;
     if (!validate_user_range(buf_ptr, len))                  return (uint64_t)-1;

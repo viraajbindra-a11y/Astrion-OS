@@ -136,17 +136,37 @@ static void restore_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_
 }
 
 /* ─── Editor state ─── */
-static char     ed_name[64];
-static char     ed_title[80];
+/* ed_name holds a PATH now, not a bare name (Files hands it a full one),
+ * so both buffers are sized off FS_PATH_MAX. */
+static char     ed_name[FS_PATH_MAX + 1];
+static char     ed_title[FS_PATH_MAX + 16];
 static uint8_t *ed_buf;
 static uint32_t ed_len, ed_cap, ed_cursor;
+
+/* Pin a possibly-relative name to the cwd AS IT IS RIGHT NOW. The editor
+ * holds ed_name across many keystrokes and only writes it on ESC, so a
+ * 'cd' in the terminal in between would otherwise silently redirect the
+ * save into a different directory. Absolute names are taken as-is. */
+static void abs_path_of(const char *name, char *out, int cap) {
+    if (cap <= 0) return;
+    out[0] = 0;
+    if (!name || !name[0]) return;
+    if (name[0] == '/') { str_copy(out, name, cap); return; }
+    char base[FS_PATH_MAX + 1];
+    if (fs_cwd_path(base, sizeof(base)) == 0) { str_copy(out, name, cap); return; }
+    int t = 0;
+    for (int i = 0; base[i] && t < cap - 1; i++) out[t++] = base[i];
+    if (t > 0 && out[t - 1] != '/' && t < cap - 1) out[t++] = '/';   /* "/" needs no second slash */
+    for (int i = 0; name[i] && t < cap - 1; i++) out[t++] = name[i];
+    out[t] = 0;
+}
 
 static void editor_open(const char *name) {
     if (ed_buf) { kfree(ed_buf); ed_buf = 0; }   /* reopening: don't leak */
     ed_cap = 8192;
     ed_buf = (uint8_t *)kmalloc(ed_cap);
     ed_len = 0; ed_cursor = 0;
-    str_copy(ed_name, (name && name[0]) ? name : "untitled.txt", sizeof(ed_name));
+    abs_path_of((name && name[0]) ? name : "untitled.txt", ed_name, sizeof(ed_name));
     str_copy(ed_title, "Editor: ", sizeof(ed_title));
     /* append the name to the title */
     {
@@ -155,7 +175,9 @@ static void editor_open(const char *name) {
         ed_title[t] = 0;
     }
     if (!ed_buf) return;
-    fs_node *n = (name && name[0]) ? fs_find(name) : 0;
+    /* Load through the SAME anchored path we'll save to, so open and save
+     * can never disagree about which file this is. */
+    fs_node *n = (name && name[0]) ? fs_find(ed_name) : 0;
     if (n && n->kind == FS_FILE) {
         uint32_t k = n->size;
         if (k > ed_cap - 1) k = ed_cap - 1;
@@ -208,35 +230,261 @@ static void editor_key(char c) {
     }
 }
 
-/* ─── Files state ─── */
-#define FL_MAX 64
-static char fl_names[FL_MAX][64];
-static int  fl_count, fl_sel;
+/* ─── Files state ───
+ *
+ * A directory browser over the shell's cwd. Entries are stored as FULL
+ * paths: a leaf name no longer identifies a file (two directories can
+ * each hold a "notes.txt"), and handing the editor an absolute path means
+ * it opens the right one no matter where the cwd has wandered since. The
+ * ROW still shows only the leaf — every row in a folder shares the same
+ * prefix, so printing it on each one is noise the breadcrumb already
+ * covered.
+ *
+ * Navigation moves the machine-wide cwd (fs_chdir), because that is the
+ * model fs.h commits to: one cwd, shared by the shell, the Assistant and
+ * ring-3 programs. Files showing a different "here" than `pwd` would be a
+ * lie. Every key reloads from fs_cwd(), so the view can't drift from it.
+ */
+enum { FL_UP = 0, FL_DIR = 1, FL_FILE = 2 };   /* also the sort rank */
 
-static void files_load(void) {
+/* Row geometry, as a rule rather than a set of literals. The gutter is
+ * built so the glyph can never crowd the name: 12px in from the row edge
+ * (which also clears the selection bar), a 14px box for the glyph, then a
+ * full 10px of air before the text starts. Every glyph is centred on
+ * FL_INSET + FL_GLYPH/2, so folders, files and ".." share one axis. */
+#define FL_INSET  12u    /* row edge  -> glyph box */
+#define FL_GLYPH  14u    /* glyph box width        */
+#define FL_GAP    10u    /* glyph box -> name      */
+#define FL_TEXT   (FL_INSET + FL_GLYPH + FL_GAP)
+
+#define FL_MAX 64
+static char    fl_names[FL_MAX][FS_PATH_MAX + 1];   /* full path — the editor needs it */
+static uint8_t fl_kind[FL_MAX];
+static int     fl_count, fl_sel;
+
+static int str_eq(const char *a, const char *b) {
+    while (*a && *a == *b) { a++; b++; }
+    return *a == *b;
+}
+/* The last component of a path — what the row actually prints. */
+static const char *leaf_of(const char *path) {
+    const char *l = path;
+    for (const char *p = path; *p; p++) if (*p == '/') l = p + 1;
+    return l;
+}
+static char lower_c(char c) { return (c >= 'A' && c <= 'Z') ? (char)(c + 32) : c; }
+static int name_cmp(const char *a, const char *b) {
+    for (;;) {
+        char x = lower_c(*a), y = lower_c(*b);
+        if (x != y) return (int)(unsigned char)x - (int)(unsigned char)y;
+        if (!x) return 0;
+        a++; b++;
+    }
+}
+/* Sort key: rank first (up < dir < file), then name. Folders landing above
+ * files is the real signal — the glyph only confirms what the order
+ * already told you. FL_UP being rank 0 pins ".." first for free. */
+static int entry_after(uint8_t ka, const char *pa, uint8_t kb, const char *pb) {
+    if (ka != kb) return ka > kb;
+    return name_cmp(leaf_of(pa), leaf_of(pb)) > 0;
+}
+
+/* Load the cwd's children. If `want` (a full path) turns up in the list the
+ * cursor parks on it — coming back up from a folder should land you on that
+ * folder, not scrolled back to the top. Otherwise the cursor takes the first
+ * real row, skipping ".." so Enter never just bounces you back out. */
+static void files_load_at(const char *want) {
     fl_count = 0; fl_sel = 0;
-    for (fs_node *n = fs_first(); n && fl_count < FL_MAX; n = fs_next(n)) {
-        str_copy(fl_names[fl_count], n->name, 64);
+    fs_node *dir = fs_cwd();
+
+    /* Off the root, "up" is a real place you can go, so it gets a real row. */
+    if (dir != fs_root() && dir->parent) {
+        if (fs_path(dir->parent, fl_names[fl_count], FS_PATH_MAX + 1)) {
+            fl_kind[fl_count] = FL_UP; fl_count++;
+        }
+    }
+    for (fs_node *n = fs_first_in(dir); n && fl_count < FL_MAX; n = fs_next_in(dir, n)) {
+        /* fs_path returns 0 only if the path can't fit, which fs.c refuses
+         * to create in the first place - skip rather than show a blank row. */
+        if (fs_path(n, fl_names[fl_count], FS_PATH_MAX + 1) == 0) continue;
+        fl_kind[fl_count] = (n->kind == FS_DIR) ? FL_DIR : FL_FILE;
         fl_count++;
     }
-}
-static void files_draw(void) {
-    fb_rect_x(cx, cy, cw, ch, AC_TERM_BG);
-    af_draw(cx, cy, "Files in /  (up/down, Enter opens, ESC closes)", AC_MUTED, AF_REG13);
-    uint32_t top = cy + 24;
-    for (int i = 0; i < fl_count; i++) {
-        uint32_t ry = top + (uint32_t)i * 30;
-        if (ry + 28 > cy + ch) break;
-        if (i == fl_sel) fb_rect_x(cx, ry, cw, 28, AC_PANEL);
-        af_draw(cx + 8, ry + 3, fl_names[i], (i == fl_sel) ? AC_WHITE : AC_MUTED, AF_MONO);
+
+    /* Insertion sort. FL_MAX is 64 and this runs once per directory change,
+     * so the O(n^2) is cheaper than the string compares a path walk does. */
+    for (int i = 1; i < fl_count; i++) {
+        char key[FS_PATH_MAX + 1]; str_copy(key, fl_names[i], FS_PATH_MAX + 1);
+        uint8_t kk = fl_kind[i];
+        int j = i - 1;
+        while (j >= 0 && entry_after(fl_kind[j], fl_names[j], kk, key)) {
+            str_copy(fl_names[j + 1], fl_names[j], FS_PATH_MAX + 1);
+            fl_kind[j + 1] = fl_kind[j];
+            j--;
+        }
+        str_copy(fl_names[j + 1], key, FS_PATH_MAX + 1);
+        fl_kind[j + 1] = kk;
+    }
+
+    if (fl_count > 1 && fl_kind[0] == FL_UP) fl_sel = 1;
+    if (want && want[0]) {
+        for (int i = 0; i < fl_count; i++)
+            if (fl_kind[i] != FL_UP && str_eq(fl_names[i], want)) { fl_sel = i; break; }
     }
 }
+static void files_load(void) { files_load_at(0); }
+
+/* Where you are, drawn as a path you can read left to right: the folder
+ * you are actually in is the only white thing, everything behind it
+ * recedes. AF_REG13 throughout — this is chrome, not content.
+ *
+ * The separators wanted to be AC_BORDER (structure, not text) and that
+ * failed on contact: AC_BORDER is a fine 1px rule because a rule is 100%
+ * coverage, but an antialiased glyph is mostly PARTIAL coverage, so the
+ * same hex lands near 1.7:1 on AC_TERM_BG and the slashes dissolve. A
+ * path with invisible separators is just words in a row. They're muted
+ * alongside the ancestors instead — two levels that you can read beats
+ * three that you can't. */
+static void files_draw_crumb(uint32_t bx, uint32_t by) {
+    char path[FS_PATH_MAX + 1];
+    if (fs_cwd_path(path, sizeof(path)) == 0) { path[0] = '/'; path[1] = 0; }
+
+    /* At the root the separator IS the current folder, so it goes white. */
+    if (path[0] == '/' && path[1] == 0) {
+        af_draw(bx, by, "/", AC_WHITE, AF_REG13);
+        return;
+    }
+
+    int last = 0;                       /* index of the final '/' */
+    for (int i = 0; path[i]; i++) if (path[i] == '/') last = i;
+
+    uint32_t x = bx;
+    int i = 0;
+    while (path[i]) {
+        if (path[i] == '/') {
+            af_draw(x, by, "/", AC_MUTED, AF_REG13);
+            x += af_text_width("/", AF_REG13);
+            i++;
+            continue;
+        }
+        char comp[FS_NAME_MAX + 1];
+        int j = i, k = 0;
+        while (path[j] && path[j] != '/') { if (k < FS_NAME_MAX) comp[k++] = path[j]; j++; }
+        comp[k] = 0;
+        af_draw(x, by, comp, (i - 1 == last) ? AC_WHITE : AC_MUTED, AF_REG13);
+        x += af_text_width(comp, AF_REG13);
+        i = j;
+    }
+}
+
+/* The kind glyph. gx is the left of the 14px box, gcy the row's optical
+ * centre — every glyph is built outward from that one point so they all
+ * sit on a shared axis. A folder is a filled tab-and-body; a file is a
+ * hollow portrait page. Solid-vs-outline reads faster at this size than
+ * any two silhouettes would, and it survives being 14px tall. */
+static void files_row_glyph(uint8_t kind, uint32_t gx, uint32_t gcy, int sel) {
+    uint32_t mid = gx + FL_GLYPH / 2;                       /* the shared axis */
+    if (kind == FL_UP) {
+        for (uint32_t k = 0; k < 7; k++)                    /* head */
+            fb_rect_x(mid - k, gcy - 7 + k, 1 + k * 2, 1, AC_MUTED);
+        fb_rect_x(mid - 2, gcy - 1, 5, 8, AC_MUTED);        /* shaft */
+        return;
+    }
+    if (kind == FL_DIR) {
+        fb_rect_x(gx, gcy - 6, 6, 2, AC_TEAL);              /* tab  */
+        fb_rect_x(gx, gcy - 4, FL_GLYPH, 10, AC_TEAL);      /* body */
+        return;
+    }
+    /* A page with a folded corner. An empty outline is legible but says
+     * nothing; the fold is what makes it read as a file rather than a box.
+     * Drawn as edges + a 1px stair because we have no diagonals — at 14px
+     * the stair IS the fold. AC_BORDER keeps it quiet (files are the
+     * default and shouldn't compete with the folders above them), but it
+     * would sink into AC_PANEL, so a selected row lifts it to stay seen. */
+    uint32_t c = sel ? AC_MUTED : AC_BORDER;
+    fb_rect_x(gx + 1, gcy - 7,  8,  1, c);        /* top, stopping at the fold */
+    fb_rect_x(gx + 1, gcy - 7,  1, 14, c);        /* left  */
+    fb_rect_x(gx + 1, gcy + 6, 12,  1, c);        /* bottom */
+    fb_rect_x(gx + 12, gcy - 3, 1, 10, c);        /* right, below the fold */
+    for (uint32_t k = 0; k < 5; k++)              /* the fold itself */
+        fb_rect_x(gx + 8 + k, gcy - 7 + k, 1, 1, c);
+}
+
+static void files_draw(void) {
+    fb_rect_x(cx, cy, cw, ch, AC_TERM_BG);
+
+    /* Header: where you are, and nothing else. */
+    files_draw_crumb(cx, cy);
+    fb_rect_x(cx, cy + 24, cw, 1, AC_BORDER);
+
+    /* Footer: the keys. These sit at the foot rather than beside the
+     * breadcrumb because up there a 39-character hint out-shouted the one
+     * short string the row exists to say. Same rule as the header, so the
+     * content is framed top and bottom by the same 1px line. */
+    const char *hint = "Enter opens   Backspace up   Esc closes";
+    uint32_t fy   = cy + ch - (uint32_t)af_line_height(AF_REG13);
+    uint32_t foot = fy - 8;                        /* the footer's rule */
+    fb_rect_x(cx, foot, cw, 1, AC_BORDER);
+    uint32_t hw = af_text_width(hint, AF_REG13);
+    if (cw > hw) af_draw(cx + cw - hw, fy, hint, AC_MUTED, AF_REG13);
+
+    /* The row derives from the font rather than a guess, so the rhythm
+     * follows if the face ever changes: line height plus 5px of air, with
+     * the text centred in it instead of riding the bottom. */
+    uint32_t rh = GH + 5;
+    uint32_t top = cy + 32;
+    for (int i = 0; i < fl_count; i++) {
+        uint32_t ry = top + (uint32_t)i * rh;
+        if (ry + rh > foot) break;
+        int sel = (i == fl_sel);
+        if (sel) {
+            fb_rect_x(cx, ry, cw, rh, AC_PANEL);
+            fb_rect_x(cx, ry, 2, rh, AC_ACCENT);   /* the selection's edge */
+        }
+        files_row_glyph(fl_kind[i], cx + FL_INSET, ry + rh / 2, sel);
+
+        uint32_t tx = cx + FL_TEXT, ty = ry + (rh - GH) / 2;
+        const char *nm = leaf_of(fl_names[i]);
+        if (fl_kind[i] == FL_UP) {
+            af_draw(tx, ty, "..", sel ? AC_WHITE : AC_MUTED, AF_MONO);
+        } else if (fl_kind[i] == FL_DIR) {
+            /* The trailing '/' says "this opens into something" before the
+             * colour or the glyph has to. Teal holds through selection —
+             * the accent bar carries that, so colour is free to mean kind. */
+            af_draw(tx, ty, nm, AC_TEAL, AF_MONO);
+            af_draw(tx + af_text_width(nm, AF_MONO), ty, "/", AC_TEAL, AF_MONO);
+        } else {
+            af_draw(tx, ty, nm, sel ? AC_WHITE : AC_MUTED, AF_MONO);
+        }
+    }
+}
+
+/* Up one level. Backspace and the ".." row land here; ESC still closes the
+ * window — "up" and "leave" must never be the same key. */
+static void files_up(void) {
+    fs_node *dir = fs_cwd();
+    if (dir == fs_root() || !dir->parent) return;      /* already home */
+    char here[FS_PATH_MAX + 1];
+    if (fs_path(dir, here, sizeof(here)) == 0) here[0] = 0;
+    if (fs_chdir("..") != 0) return;
+    files_load_at(here);                               /* land on where we were */
+    files_draw();
+}
+
 static void files_key(char c) {
     if (c == 27) { wm_close(); return; }
     if (c == (char)KEY_UP)   { if (fl_sel > 0)             fl_sel--; files_draw(); return; }
     if (c == (char)KEY_DOWN) { if (fl_sel < fl_count - 1)  fl_sel++; files_draw(); return; }
+    if (c == '\b') { files_up(); return; }
     if (c == '\n' && fl_count > 0) {
-        char nm[64]; str_copy(nm, fl_names[fl_sel], sizeof(nm));
+        if (fl_kind[fl_sel] == FL_UP) { files_up(); return; }
+        char nm[FS_PATH_MAX + 1]; str_copy(nm, fl_names[fl_sel], sizeof(nm));
+        if (fl_kind[fl_sel] == FL_DIR) {
+            /* A directory is not text — descend into it instead of handing
+             * the editor an empty buffer that would no-op on save. */
+            if (fs_chdir(nm) == 0) { files_load(); files_draw(); }
+            return;
+        }
         wm_open_editor(nm);
     }
 }
@@ -498,8 +746,13 @@ static int try_intent(const char *p) {
             return 1;
         }
         assist_say("your files:\n");
+        /* Whole tree, by full path - a leaf name on its own would be a lie
+         * now that /a/notes.txt and /b/notes.txt can both exist. */
         for (fs_node *n = fs_first(); n; n = fs_next(n)) {
-            assist_say("  "); assist_say(n->name);
+            char path[FS_PATH_MAX + 1];
+            if (fs_path(n, path, sizeof(path)) == 0) continue;
+            assist_say("  "); assist_say(path);
+            if (n->kind == FS_DIR) { assist_say("/\n"); continue; }
             assist_say("  ("); assist_num(n->size); assist_say(" B)\n");
         }
         assist_say("  = "); assist_num(fs_count()); assist_say(" files, ");

@@ -65,9 +65,19 @@ static int starts_with(const char *s, const char *p) {
     return 1;
 }
 
+/* The prompt carries the cwd - "astrion:/> " at the root, "astrion:/notes> "
+ * inside a directory. It's the cheapest possible proof that `cd` moved us
+ * somewhere real. */
 static void print_prompt(void) {
+    char path[FS_PATH_MAX + 1];
     console_set_color(COL_PROMPT);
-    console_puts("astrion> ");
+    console_puts("astrion");
+    console_set_color(COL_MUTED);
+    console_putchar(':');
+    if (fs_cwd_path(path, sizeof(path)) == 0) path[0] = 0;   /* can't happen; be safe */
+    console_puts(path);
+    console_set_color(COL_PROMPT);
+    console_puts("> ");
     console_set_color(COL_WHITE);
 }
 
@@ -100,6 +110,8 @@ static void cmd_paint(int argc, char **argv);
 static void cmd_snake(int argc, char **argv);
 static void cmd_heap(int argc, char **argv);
 static void cmd_ls(int argc, char **argv);
+static void cmd_cd(int argc, char **argv);
+static void cmd_pwd(int argc, char **argv);
 static void cmd_cat(int argc, char **argv);
 static void cmd_write(int argc, char **argv);
 static void cmd_append(int argc, char **argv);
@@ -137,13 +149,15 @@ static const struct cmd CMDS[] = {
     { "wipe",    "clear any ink trails / repaint",   cmd_wipe },
     { "snake",   "play classic Snake (arrows steer)", cmd_snake },
     { "heap",    "kernel heap stats",                cmd_heap },
-    { "ls",      "list files in /",                  cmd_ls },
+    { "ls",      "list this directory (or ls <dir>)", cmd_ls },
+    { "cd",      "cd <dir> - change directory (.. = up)", cmd_cd },
+    { "pwd",     "print the current directory",      cmd_pwd },
     { "cat",     "print file contents",              cmd_cat },
     { "write",   "write <file> <text...>",           cmd_write },
     { "append",  "append <file> <text...>",          cmd_append },
-    { "rm",      "remove a file",                    cmd_rm },
+    { "rm",      "remove a file or empty directory", cmd_rm },
     { "touch",   "create an empty file",             cmd_touch },
-    { "mkdir",   "create a directory entry",         cmd_mkdir },
+    { "mkdir",   "mkdir <dir> - create a directory", cmd_mkdir },
     { "sync",    "write all files to disk",          cmd_sync },
     { "disk",    "show ATA disk info",               cmd_disk },
     { "run",     "run a script (one cmd per line)",  cmd_run },
@@ -605,38 +619,81 @@ static void put_pad_to(uint32_t target_col, uint32_t cur_col) {
     }
 }
 
+/* ls lists ONE directory - the cwd by default, or `ls <dir>`. The totals
+ * at the bottom are that directory's, not the whole disk's. */
 static void cmd_ls(int argc, char **argv) {
-    (void)argc; (void)argv;
-    if (fs_count() == 0) {
+    fs_node *dir = fs_cwd();
+    if (argc >= 2) {
+        dir = fs_find(argv[1]);
+        if (!dir || dir->kind != FS_DIR) {
+            console_set_color(0xF87171u);
+            console_puts("ls: not a directory: ");
+            console_puts(argv[1]);
+            console_putchar('\n');
+            console_set_color(COL_WHITE);
+            return;
+        }
+    }
+    if (!fs_first_in(dir)) {
         console_set_color(COL_MUTED);
         console_puts("(empty)\n");
         console_set_color(COL_WHITE);
         return;
     }
     console_set_color(COL_OK);
-    console_puts("file              kind    size\n");
+    console_puts("name              kind    size\n");
     console_set_color(COL_WHITE);
-    for (fs_node *n = fs_first(); n; n = fs_next(n)) {
+    uint32_t count = 0, bytes = 0;
+    for (fs_node *n = fs_first_in(dir); n; n = fs_next_in(dir, n)) {
         uint32_t name_len = 0;
         const char *p = n->name;
         while (*p) { name_len++; p++; }
         console_set_color(n->kind == FS_DIR ? COL_PROMPT : COL_WHITE);
         console_puts(n->name);
+        /* A trailing '/' marks a directory you can actually cd into. */
+        if (n->kind == FS_DIR) { console_putchar('/'); name_len++; }
         console_set_color(COL_MUTED);
         put_pad_to(18, name_len);
         console_puts(n->kind == FS_DIR ? "dir" : "file");
         put_pad_to(26, 18 + (n->kind == FS_DIR ? 3 : 4));
         console_put_u32(n->size);
         console_puts(" B\n");
+        count++;
+        bytes += n->size;
     }
-    console_set_color(COL_WHITE);
     console_set_color(COL_MUTED);
     console_puts("total: ");
-    console_put_u32(fs_count());
+    console_put_u32(count);
     console_puts(" entries, ");
-    console_put_u32(fs_total_bytes());
+    console_put_u32(bytes);
     console_puts(" bytes\n");
     console_set_color(COL_WHITE);
+}
+
+static void cmd_pwd(int argc, char **argv) {
+    (void)argc; (void)argv;
+    char path[FS_PATH_MAX + 1];
+    if (fs_cwd_path(path, sizeof(path)) == 0) {
+        console_set_color(0xF87171u);
+        console_puts("pwd: path too long\n");
+        console_set_color(COL_WHITE);
+        return;
+    }
+    console_puts(path);
+    console_putchar('\n');
+}
+
+static void cmd_cd(int argc, char **argv) {
+    /* Bare 'cd' goes home, and home is '/'. */
+    const char *target = (argc >= 2) ? argv[1] : "/";
+    if (fs_chdir(target) != 0) {
+        console_set_color(0xF87171u);
+        console_puts("cd: not a directory: ");
+        console_puts(target);
+        console_putchar('\n');
+        console_set_color(COL_WHITE);
+        return;
+    }
 }
 
 static void cmd_cat(int argc, char **argv) {
@@ -741,9 +798,29 @@ static void cmd_rm(int argc, char **argv) {
         console_set_color(COL_WHITE);
         return;
     }
-    if (fs_unlink(argv[1]) != 0) {
+    /* Look first so the failure can say WHICH failure it was: a missing
+     * path and a directory that still has things in it are different
+     * problems, and fs_unlink returns -1 for both. */
+    fs_node *n = fs_find(argv[1]);
+    if (!n) {
         console_set_color(0xF87171u);
         console_puts("no such file: ");
+        console_puts(argv[1]);
+        console_putchar('\n');
+        console_set_color(COL_WHITE);
+        return;
+    }
+    if (n->kind == FS_DIR && fs_first_in(n)) {
+        console_set_color(0xF87171u);
+        console_puts("rm: directory not empty: ");
+        console_puts(argv[1]);
+        console_putchar('\n');
+        console_set_color(COL_WHITE);
+        return;
+    }
+    if (fs_unlink(argv[1]) != 0) {
+        console_set_color(0xF87171u);
+        console_puts("rm: cannot remove ");
         console_puts(argv[1]);
         console_putchar('\n');
         console_set_color(COL_WHITE);
@@ -781,13 +858,17 @@ static void cmd_touch(int argc, char **argv) {
 static void cmd_mkdir(int argc, char **argv) {
     if (argc < 2) {
         console_set_color(COL_MUTED);
-        console_puts("usage: mkdir <name>\n");
+        console_puts("usage: mkdir <dir>\n");
         console_set_color(COL_WHITE);
         return;
     }
+    /* Only the last component is created - 'mkdir a/b' needs a to exist.
+     * (No -p yet.) */
     if (!fs_create(argv[1], FS_DIR)) {
         console_set_color(0xF87171u);
-        console_puts("mkdir failed (exists?)\n");
+        console_puts("mkdir failed: ");
+        console_puts(argv[1]);
+        console_puts(fs_find(argv[1]) ? " (exists)\n" : " (bad path?)\n");
         console_set_color(COL_WHITE);
         return;
     }

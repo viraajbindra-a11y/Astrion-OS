@@ -18,6 +18,13 @@ js/apps/.synthetic-target.js
 kernel/firmware/
 kernel/build/
 
+# Font sources + generation intermediates. The TTFs (~1.1MB) are fetched at
+# generation time per kernel/tools/font/README.md; the atlas that actually
+# builds is committed at kernel/src/af_font.h.
+kernel/tools/font/*.ttf
+kernel/tools/font/af_font.h
+kernel/tools/font/af_preview.png
+
 # Generated at build time by `make` (xxd of the sample ELF). Regenerated
 # every build from progs/hello.c, so it's not committed.
 kernel/src/hello_elf.h
