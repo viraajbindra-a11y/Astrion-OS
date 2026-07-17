@@ -1006,7 +1006,12 @@ static void assist_key(char c) {
  * both rules, the table and the footer all start at cx and end at cx+cw.
  * One left edge, one right edge, nothing stranded. */
 #define MON_COLS      MON_C_SWEND
-#define MON_ROWS      6u          /* task rows before the "+N more" line */
+/* The table's row budget is set at open from the tasks actually present
+ * (mon_open_rows), not a constant — so the window fits the machine you have
+ * instead of a guessed worst case. These bound it: never shorter than a
+ * readable table, never so tall it reaches the dock on a modest screen. */
+#define MON_ROWS_MIN  3u
+#define MON_ROWS_MAX  10u
 
 /* Vertical layout, as offsets from the top of the content rect. Text sits 8px
  * off a rule — the rhythm files_draw already set — and every y below is
@@ -1071,7 +1076,7 @@ static uint32_t mon_hint_y(void) { return cy + ch - (uint32_t)af_line_height(AF_
 static uint32_t mon_foot_y(void) { return mon_hint_y() - 8; }
 
 /* Height the content rect needs for the chrome plus n task rows. size_for()
- * asks for MON_ROWS; mon_fits() checks we still have room for one. */
+ * asks for mon_open_rows(); mon_fits() checks we still have room for one. */
 static uint32_t mon_ch_for(uint32_t rows) {
     return MON_ROW0_DY + rows * MON_RH + 8 + (uint32_t)af_line_height(AF_REG13);
 }
@@ -1382,16 +1387,30 @@ static void wm_close(void) {
     close_window(w);
 }
 
+/* Rows the Monitor window opens with: the tasks present right now plus one
+ * line of headroom. The +1 matters — with a table sized to exactly N, the
+ * first task that spawns while you're watching would instantly displace a
+ * visible row into "+1 more"; the spare line lets it slot into empty space
+ * instead. One empty row reads as "room for the next task"; four empty rows
+ * read as a bug, which is the guessed-worst-case sizing this replaces. */
+static uint32_t mon_open_rows(void) {
+    uint32_t n = (uint32_t)mon_task_count() + 1u;
+    if (n < MON_ROWS_MIN) n = MON_ROWS_MIN;
+    if (n > MON_ROWS_MAX) n = MON_ROWS_MAX;
+    return n;
+}
+
 /* How big a window opens. Files / Editor / Assistant hold content of unbounded
  * length, so they take the one generous size and let it fill. The Monitor's
  * content is bounded and known — a MON_COLS-wide mono table and a heap gauge —
  * so it is sized to exactly that: the table's own width sets the window's, and
- * MON_ROWS task rows set its height. That is what puts the header, both rules,
- * the gauge, the rows and the footer on one shared left and right edge. */
+ * the live task count (mon_open_rows) sets its height. That is what puts the
+ * header, both rules, the gauge, the rows and the footer on one shared left and
+ * right edge, with no dead band under the last task. */
 static void size_for(enum app_kind a, uint32_t *w, uint32_t *h) {
     if (a == APP_MON) {
         *w = MON_COLS * GW + 2 * PAD;
-        *h = mon_ch_for(MON_ROWS) + TITLE_H + 10 + PAD;
+        *h = mon_ch_for(mon_open_rows()) + TITLE_H + 10 + PAD;
         return;
     }
     *w = APP_W; *h = APP_H;
