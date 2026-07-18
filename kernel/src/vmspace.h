@@ -9,12 +9,11 @@
  * two processes mapping the same user virtual address land on different frames.
  *
  * The user region lives under PML4[0] (USER_VA_BASE = 128 GiB, same 512-GiB
- * PML4 slot as the identity map). vmspace_create shares that slot; the first
- * vmspace_map FORKS it into a private PDPT - copying the identity entries so
- * the kernel stays mapped, but dropping the old shared user window so this
- * space starts isolated. Every table below the fork is allocated from the pmm
- * and owned by this space; vmspace_destroy frees exactly those, never a shared
- * kernel table.
+ * PML4 slot as the identity map). vmspace_create FORKS that slot into a private
+ * PDPT immediately - copying the identity entries so the kernel stays mapped,
+ * but dropping the old shared user window so this space starts isolated from
+ * birth. Every table below the fork is allocated from the pmm and owned by this
+ * space; vmspace_destroy frees exactly those, never a shared kernel table.
  *
  * M2 only BUILDS and WALKS tables - it never loads CR3. Activation is M3. So
  * nothing here can fault: it is all bookkeeping in fresh, un-activated frames.

@@ -244,3 +244,45 @@ where a live-CR3 free would bite, so please confirm on the pmm-balance +
 no-triple-fault checks across BOTH the normal exit AND the rogue kill.
 Evidence I want if it fails: serial log + the pmm before/after numbers.
 ---
+## from koa -> rex  ·  Tier 3 M5b hardening (F1/F2/F3) — needs a boot
+Landed the 3 latent items from the independent review (tasks/tier3-address-spaces/
+M5b-INDEPENDENT-REVIEW.md). Static-reasoned + syntax/-O2-codegen verified only —
+I have NOT booted it. Touches: task.c, task.h(none), shell.c, vmspace.c/h.
+
+WHAT CHANGED (one-liners):
+ - F1: exec_ctx (the ring-3 tasks arg) is now freed by reap_done via a new
+   per-task `free_arg` flag (set ONLY by task_spawn_user_space). exec_trampoline
+   no longer kfrees it. Single free-path -> covers a normal exit AND a
+   kill-before-run, no double-free, never frees a kernel tasks non-heap arg.
+ - F2: vmspace_map no longer builds a kernel-less PDPT on a not-present PML4[0];
+   it refuses (return -1). Dead code today, now fail-safe.
+ - F3: vmspace_create now FORKS PML4[0] into a private PDPT at CREATE (was: first
+   map). Every space is isolated at USER_VA_BASE from birth — never transiently
+   exposes the shared user window. map/destroy adjusted to match.
+
+REGRESSION CHECKS (please re-run from CI, same rig as your M4 audit):
+ 1. isotest x3: PASS, same VA -> DISTINCT frames (fa != fb), 55776 before/after.
+ 2. exec hello.elf: prints under its own CR3, exits code 0, no kernel #PF/panic.
+ 3. exec rogue.elf: still #PF-KILLED ("isolation held"), space reclaimed, kernel
+    survives, clock keeps ticking. Exactly ONE ring-3 fault in serial.
+ 4. vmtest / vmswitch: self-test PASS, pmm balances (before==after).
+ 5. pmm returns to 55776 baseline after the WHOLE sequence. Single boot banner.
+
+F1-SPECIFIC (the free moved to reap — the thing most likely to bite):
+ 6. exec any prog, let it run + exit clean, then check pmm AND heap both balance
+    back to baseline (the ec is 16 heap bytes now reclaimed by reap, not the
+    trampoline). Do it a few times in a row — no slow heap drift per exec.
+ 7. If you can force a kill-before-run (spawn-heavy + immediate `kill <tid>` on an
+    exec task while READY): heap should still balance (thats the exact leak F1
+    fixes). Hard to hit under preemption — dont sweat it if you cant.
+
+F3 — WHAT I COULD NOT RULE OUT STATICALLY (one thing, cosmetic):
+ The per-space frame COUNT is unchanged (5 for a 1-page map: PML4+PDPT+PD+PT+leaf)
+ and balance holds — but the PDPT now allocs at create instead of first-map, so
+ the EXACT hex frame addresses may rotate by one slot vs your M4 notes
+ (e.g. "run1 A=0x2616000"). Thats EXPECTED, not a regression. Please gate on
+ balance (before==after) + A!=B + distinct sentinels, NOT on specific hex.
+ Everything else about F3 I believe is airtight by static trace (isolation only
+ gets stronger; no freed-live-CR3 window — destroy caller/gating untouched), but
+ Id like the boot to confirm no triple-fault on create-forked spaces.
+---

@@ -47,6 +47,7 @@ struct task {
     enum task_state state;
     task_fn         fn;
     void           *arg;
+    int             free_arg;     /* 1 => arg is a heap block this task OWNS; reap kfrees it (F1) */
     uint8_t        *stack_base;   /* kmalloc'd; NULL for task 0 */
     uint64_t        kstack_top;   /* 16-aligned top of this task's kernel stack (-> tss.rsp0) */
     uint64_t        cr3;          /* address space to activate on switch-in (kernel_cr3 = default) */
@@ -137,6 +138,16 @@ static void reap_done(void) {
                 vmspace_destroy(tasks[i].space);
                 tasks[i].space = 0;
             }
+            /* A task may OWN its arg on the heap: the exec path kmallocs an
+             * exec_ctx and hands it in as arg (free_arg=1). Free it HERE — the
+             * single free-path for that block, covering BOTH a normal exit and a
+             * kill-before-run (the exec trampoline no longer frees it, so there
+             * is no double-free). free_arg is 0 for every other task (kernel
+             * tasks pass non-heap args), so we never kfree a non-heap pointer. */
+            if (tasks[i].free_arg && tasks[i].arg) {
+                kfree(tasks[i].arg);
+                tasks[i].arg = 0;
+            }
             tasks[i].user_top = 0;
             tasks[i].state = TASK_UNUSED;
         }
@@ -171,7 +182,8 @@ static inline void load_cr3(uint64_t cr3) {
  * runs can't be reaped before its frames are recorded (which would leak them). */
 static int spawn_locked(const char *name, task_fn fn, void *arg,
                         uint32_t upool_start, uint32_t upool_frames,
-                        uint64_t cr3, vmspace_t *space, uint64_t user_top) {
+                        uint64_t cr3, vmspace_t *space, uint64_t user_top,
+                        int free_arg) {
     uint64_t flags = irq_save();
     reap_done();
 
@@ -187,6 +199,11 @@ static int spawn_locked(const char *name, task_fn fn, void *arg,
     struct task *t = &tasks[tid];
     t->fn = fn;
     t->arg = arg;
+    /* free_arg records whether `arg` is a heap block this task owns; reap frees
+     * it (F1). Set under the SAME lock, before READY, exactly like space/user_top
+     * below - so a task reaped before it ever runs (kill-before-run) still has
+     * correct arg ownership on record. */
+    t->free_arg = free_arg;
     t->stack_base = stack;
     t->kstack_top = ((uint64_t)(uintptr_t)stack + TASK_STACK_SIZE) & ~0xFULL;
     /* Bind the address space now, under the lock, before the task is READY - so
@@ -236,7 +253,7 @@ static int spawn_locked(const char *name, task_fn fn, void *arg,
 }
 
 int task_spawn(const char *name, task_fn fn, void *arg) {
-    return spawn_locked(name, fn, arg, 0, 0, kernel_cr3, 0, 0);
+    return spawn_locked(name, fn, arg, 0, 0, kernel_cr3, 0, 0, 0);
 }
 
 /* Spawn a ring-3 task that owns user-window frames. Atomic with the spawn so
@@ -245,7 +262,7 @@ int task_spawn(const char *name, task_fn fn, void *arg) {
  * Stays on the kernel space + shared user window until M4 rewires exec. */
 int task_spawn_user(const char *name, task_fn fn, void *arg,
                     uint32_t upool_start, uint32_t upool_frames) {
-    return spawn_locked(name, fn, arg, upool_start, upool_frames, kernel_cr3, 0, 0);
+    return spawn_locked(name, fn, arg, upool_start, upool_frames, kernel_cr3, 0, 0, 0);
 }
 
 /* Spawn a kernel task bound to a given address space (its vmspace PML4 phys).
@@ -254,17 +271,19 @@ int task_spawn_user(const char *name, task_fn fn, void *arg,
  * here (space == 0): the caller (the vmswitch self-test) manages its lifetime,
  * so reap must not double-free it. */
 int task_spawn_in_space(const char *name, task_fn fn, void *arg, uint64_t cr3) {
-    return spawn_locked(name, fn, arg, 0, 0, cr3, 0, 0);
+    return spawn_locked(name, fn, arg, 0, 0, cr3, 0, 0, 0);
 }
 
 /* Spawn a ring-3 task that OWNS a per-process address space (M4 exec). Binds the
  * task to space's PML4 as its CR3 AND records space for teardown, so reap frees
- * it once the task leaves the runnable set. user_top bounds the task's own
+ * it once the task leaves the runnable set. It ALSO takes ownership of `arg` (the
+ * heap exec_ctx): free_arg=1 tells reap to kfree it, so the ctx is reclaimed even
+ * if the task is killed before it ever runs (F1). user_top bounds the task's own
  * syscall pointer validation. See task.h. */
 int task_spawn_user_space(const char *name, task_fn fn, void *arg,
                           struct vmspace *space, uint64_t user_top) {
     if (!space) return -1;
-    return spawn_locked(name, fn, arg, 0, 0, space->pml4_phys, space, user_top);
+    return spawn_locked(name, fn, arg, 0, 0, space->pml4_phys, space, user_top, 1);
 }
 
 /* The actual switch. MUST run with interrupts disabled (so the timer

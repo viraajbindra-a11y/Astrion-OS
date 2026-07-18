@@ -1068,9 +1068,9 @@ static void cmd_vmswitch(int argc, char **argv) {
     uint64_t space_cr3 = 0, seen = 0, cnt_before = vmsw_counter;
     int ok = 1, mapped = 0, finished = 0, tid = -1;
 
-    /* Build a space that GENUINELY differs from the kernel space: mapping one
-     * page at USER_VA_BASE forks PML4[0] into a private PDPT, so its PML4 phys is
-     * a fresh frame != kernel_cr3. (If it matched kernel_cr3, "switching" would
+    /* Build a space that GENUINELY differs from the kernel space: vmspace_create
+     * mints a fresh PML4 frame (and forks PML4[0] into a private PDPT), so its
+     * PML4 phys is != kernel_cr3. (If it matched kernel_cr3, "switching" would
      * prove nothing.) The page frame is owned by the space and freed by destroy. */
     vmspace_t *sp = vmspace_create();
     if (!sp) ok = 0;
@@ -1503,9 +1503,11 @@ extern void enter_user(uint64_t rip, uint64_t user_stack_top);  /* usermode.S �
 
 #define USER_STACK_FRAMES 4   /* 16 KiB ring-3 stack */
 
-/* Heap context handed to the spawned task: where to enter ring 3 and the
- * top of its user stack. Freed before the trampoline drops to ring 3 (it
- * never returns), so it can't leak. */
+/* Heap context handed to the spawned task: where to enter ring 3 and the top of
+ * its user stack. The task OWNS it — task_spawn_user_space records free_arg=1, so
+ * reap_done frees it when the task leaves the runnable set. That one free-path
+ * covers a normal exit AND a kill-before-run (this ctx never being read), with no
+ * double-free (F1). */
 struct exec_ctx {
     uint64_t entry;            /* user VA of the program entry point */
     uint64_t user_stack_top;   /* user VA, 16-aligned */
@@ -1515,7 +1517,10 @@ static void exec_trampoline(void *arg) {
     struct exec_ctx *ec = (struct exec_ctx *)arg;
     uint64_t entry = ec->entry;
     uint64_t ustk  = ec->user_stack_top;
-    kfree(ec);                 /* done with it; enter_user never returns */
+    /* Do NOT free ec here. The task owns it (free_arg=1) and reap_done reclaims
+     * it when the task leaves the runnable set — one free-path that also covers a
+     * task killed before it ever runs (F1). We've copied the two fields we need
+     * into locals, so enter_user (which never returns) doesn't touch ec. */
     enter_user(entry, ustk);   /* iretq to CPL 3 */
 }
 

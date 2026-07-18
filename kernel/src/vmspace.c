@@ -10,7 +10,9 @@
  * The boot tables (boot/multiboot2.S): PML4[0] -> p3_table -> PDPT[0..3] -> four
  * 2 MiB-huge-page PDs identity-mapping the low 4 GiB (US=0). usermem_init added
  * the old shared user window at p3_table[128]. Every space copies PML4[0], then
- * forks p3_table into a private PDPT the first time it maps a user page.
+ * immediately forks p3_table into a PRIVATE PDPT (dropping [128]) at CREATE time,
+ * so a space is isolated at USER_VA_BASE from birth - it never transiently
+ * exposes the shared user window between create and its first map.
  */
 #include <stdint.h>
 #include "vmspace.h"
@@ -53,8 +55,22 @@ vmspace_t *vmspace_create(void) {
     volatile uint64_t *pml4 = (volatile uint64_t *)(uintptr_t)pml4_phys;
     for (int i = 0; i < 512; i++) pml4[i] = p4_table[i];
 
+    /* Fork PML4[0] into a PRIVATE PDPT right here, at creation - so the space is
+     * isolated at USER_VA_BASE from its very first breath, never transiently
+     * exposing the shared user window (p3_table[128]) in the gap between create
+     * and the first vmspace_map. Copy the boot PDPT verbatim so the identity
+     * entries [0..3] (US=0) ride along and keep the kernel mapped, then drop the
+     * shared window at [128]. Volatile dest keeps -O2 from lowering the copy to a
+     * memcpy() call (freestanding: no libc mem* symbols). */
+    uint64_t pdpt_phys = pmm_alloc();          /* zeroed 4 KiB frame */
+    if (!pdpt_phys) { pmm_free(pml4_phys); return 0; }
+    volatile uint64_t *pdpt = (volatile uint64_t *)(uintptr_t)pdpt_phys;
+    for (int i = 0; i < 512; i++) pdpt[i] = p3_table[i];
+    pdpt[USER_PDPT_IDX] = 0;                              /* drop shared window     */
+    pml4[0] = pdpt_phys | PTE_P | PTE_W | PTE_US;         /* PML4[0] -> private PDPT */
+
     vmspace_t *sp = (vmspace_t *)kmalloc(sizeof *sp);
-    if (!sp) { pmm_free(pml4_phys); return 0; }
+    if (!sp) { pmm_free(pdpt_phys); pmm_free(pml4_phys); return 0; }
     sp->pml4_phys = pml4_phys;
     return sp;
 }
@@ -74,34 +90,25 @@ int vmspace_map(vmspace_t *sp, uint64_t uva, uint64_t phys, uint64_t flags) {
     if (!sp) return -1;
     /* Keep every user mapping inside PML4[0]'s slot: at/above USER_VA_BASE and
      * below 512 GiB. That guarantees the PDPT index is >= 128 (never an
-     * identity slot 0..3) and that this is the only PML4 entry we ever fork. */
+     * identity slot 0..3) and that this is the only PML4 entry we ever touch. */
     if (uva < USER_VA_BASE || uva >= PML4_SLOT_SIZE) return -1;
 
     uint64_t *pml4 = as_table(sp->pml4_phys);
     uint64_t i4 = idx4(uva);   /* == 0 for the user region */
 
-    /* Level 4 -> 3: fork the shared boot PDPT into a private one the first time.
-     * Copy it (identity entries [0..3] must survive) but drop the old shared
-     * user window so this space starts isolated at USER_VA_BASE. */
-    uint64_t pdpt_phys;
-    if (pml4[i4] & PTE_P) {
-        pdpt_phys = pml4[i4] & PTE_ADDR_MASK;
-        if (pdpt_phys == ((uint64_t)(uintptr_t)p3_table)) {
-            uint64_t priv = pmm_alloc();
-            if (!priv) return -1;
-            /* volatile dest: keep -O2 from lowering the copy to memcpy(). */
-            volatile uint64_t *npdpt = (volatile uint64_t *)(uintptr_t)priv;
-            for (int i = 0; i < 512; i++) npdpt[i] = p3_table[i];
-            npdpt[USER_PDPT_IDX] = 0;                        /* drop shared window */
-            pml4[i4] = priv | PTE_P | PTE_W | PTE_US;       /* override PML4[0]   */
-            pdpt_phys = priv;
-        }
-    } else {
-        uint64_t priv = pmm_alloc();
-        if (!priv) return -1;
-        pml4[i4] = priv | PTE_P | PTE_W | PTE_US;
-        pdpt_phys = priv;
-    }
+    /* Level 4 -> 3: PML4[0] was forked into a PRIVATE PDPT by vmspace_create, so
+     * here it is always present and never the shared boot p3_table. Refuse both
+     * other cases rather than build into them - this is the fail-safe guard:
+     *   - not present: would need a fresh kernel-less PDPT, whose task would
+     *     triple-fault on the first instruction after the CR3 load (F2);
+     *   - still == p3_table: writing a private PD into it would corrupt the
+     *     shared boot PDPT, aliasing every space at once (F3).
+     * Both are unreachable today (create always forks); the guard makes them
+     * safe if a future USER_VA_BASE/slot change ever reaches here. */
+    uint64_t e4 = pml4[i4];
+    if (!(e4 & PTE_P)) return -1;
+    uint64_t pdpt_phys = e4 & PTE_ADDR_MASK;
+    if (pdpt_phys == ((uint64_t)(uintptr_t)p3_table)) return -1;
 
     /* Level 3 -> 2 -> 1: allocate the private PD and PT as needed. */
     uint64_t pd_phys = ensure_table(as_table(pdpt_phys), idx3(uva));
@@ -140,9 +147,14 @@ void vmspace_destroy(vmspace_t *sp) {
     uint64_t *pml4 = as_table(sp->pml4_phys);
 
     /* Only PML4[0] is ever ours to unwind: the user region lives there, and it
-     * is the one entry vmspace_map forks. Every other PML4 slot is a shared
-     * kernel mapping we must leave alone. If [0] still points at the shared
-     * boot PDPT, this space never mapped a user page - nothing private to free. */
+     * is the one entry we fork (now in vmspace_create). Every other PML4 slot is
+     * a shared kernel mapping we must leave alone. Since create always forks, [0]
+     * is a PRIVATE PDPT here (!= the shared boot p3_table) - the guard below is a
+     * defensive backstop, no longer the empty/mapped discriminator it once was. A
+     * created-but-never-mapped space still unwinds correctly inside the walk: its
+     * identity entries [0..3] equal p3_table[i3] and are skipped, [128] is 0 and
+     * skipped, so only the private PDPT + PML4 (the two frames create allocated)
+     * come back - the pmm balances even for a space that never mapped a page. */
     uint64_t e4 = pml4[0];
     if ((e4 & PTE_P) && (e4 & PTE_ADDR_MASK) != ((uint64_t)(uintptr_t)p3_table)) {
         uint64_t *pdpt = as_table(e4 & PTE_ADDR_MASK);
