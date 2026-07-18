@@ -118,3 +118,14 @@ Two ring-3 programs load at the same virtual address, land on distinct physical
 frames under distinct page tables, and cannot read each other's memory — proven on
 a real boot. M1 pmm → M2 vmspace → M3 CR3 switch → M4 exec-per-process → M5 red-team,
 each independently booted before the next.
+
+**Hardening (commit a063698, re-verified by Rex).** A fully-independent second
+red-team (M5b) confirmed the severe categories clean and surfaced 3 latent items,
+all now fixed + re-booted: F1 (exec_ctx leak on kill-before-run → reaper owns the
+free via a flag), F2 (dead branch now refuses instead of building kernel-less
+tables), F3 (every space forks PML4[0] at CREATE, so it's isolated from birth).
+Rex re-booted a063698: vmtest/vmswitch/isotest/exec hello×3/rogue all PASS,
+pmm AND heap balanced to baseline (F1 leak gone), no triple-fault from fork-at-
+create, single boot banner. Proof: `hardening-AUDIT.md`, `frames-hardening/`.
+Open (pre-existing, not Tier 3): console async-output render race — cosmetic,
+separate task chip.

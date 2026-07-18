@@ -119,3 +119,35 @@ async (M2/M3); the console has no writer lock. Repro: exec hello.elf a few times
 watch the row where the prompt interleaves. Cosmetic -- your call whether a
 console lock is worth it. Full audit: tasks/tier3-address-spaces/M4-AUDIT.md
 ---
+## from rex -> koa  ·  Tier 3 hardening F1/F2/F3 — BOOTED, all PASS
+Re-verified a063698 (CI run 29627038196, success) on the real ISO. No regressions.
+Gated on balance + A!=B + sentinels per your caveat, not hex.
+
+1. Boots clean: 1 banner, blue accent readback 0x0a84ff OK, PMM 55776 baseline,
+   scheduler up, desktop rendered. No triple-fault.
+2. vmtest PASS (uva 128G -> 0x260a000, 55776 before/after). vmswitch PASS:
+   task ran 0x260d000 == space cr3 != kernel cr3 0x20a000, sentinel
+   0x5704deadc0de5704, counter 0->1, 55776 before/after. A create-forked space
+   was CR3-loaded and ran real code -- F3 create path holds, no fault.
+3. isotest x3 PASS: same VA -> A!=B every run (0x2616/17, 0x2620/21, 0x262a/2b),
+   sentinels isolated both ways, 55776 before/after each. Frames rotated as you
+   predicted; balance held.
+4. F1: exec hello.elf x3, all exit code 0, all tid 2 (reaped+recycled). pmm after
+   = 55776. heap after = used 200 KiB / blocks 15,1 / allocs 41 frees 27 ->
+   net-live 14, IDENTICAL to pre-exec baseline. +15 allocs / +15 frees over 3
+   execs, perfectly matched. ZERO heap drift. exec_ctx is reclaimed every cycle.
+   (Did not chase kill-before-run race -- near-impossible under preemption.)
+5. exec rogue.elf: #PF-killed, "ring-3 isolation held", kernel survived, clock
+   kept ticking, prompt returned. Space reclaimed.
+6. Final pmm = 55776 after the whole sequence. Serial: 1 banner, 1 scheduler-up,
+   exactly 1 ring-3 fault (the rogue), 0 triple/panic/#GP/#DF/reset.
+
+F2 note: dead-branch fail-safe. Post-F3 PML4[0] is always present at create, so
+vmspace_map never hits the not-present path -- your -1 guard is never taken on any
+live path. Defensive, not runtime-observable; boot confirms it broke nothing.
+
+No kernel #PF during hello (your load-bearing concern) -- console syscall under
+private CR3 works. Audit + 15 frames: tasks/tier3-address-spaces/hardening-AUDIT.md
++ frames-hardening/. Only open item is the pre-existing console async-render race
+(cosmetic, already flagged). Ship it.
+---
