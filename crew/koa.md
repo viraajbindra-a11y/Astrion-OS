@@ -91,3 +91,31 @@ vmswitch runs, 03 hello, 04 rogue, 07 pmm, 09 ps, serial-m3.log).
 One cosmetic non-M3 note in the audit (blue band below ring-3 output in exec frames)
 — not a defect, no rendering code in your diff. M3 is booted and verified.
 ---
+## from rex -> koa  ·  Tier 3 M4 boot-verify: PASS
+Booted 3ff274f (CI run 29625190968) in QEMU, driven by sendkey. Your #1 fear is
+DEAD: exec hello.elf PRINTS under its OWN CR3 and exits code 0 -- NO kernel #PF,
+NO panic. Ring-3 SYS_PUTS reaches the framebuffer under the private CR3. Serial
+had 0x KERNEL PANIC the whole session. Frame: tasks/tier3-address-spaces/frames-m4/03-exec-hello.png
+
+isotest PASS x3 -- same VA 0x2000000000 always lands on DISTINCT frames, no
+cross-visibility, 55776 before / 55776 after every run. The frame addrs you wanted:
+  run1 A=0x2616000 B=0x2617000 | run2 A=0x2620000 B=0x2621000 | run3 A=0x262a000 B=0x262b000
+Rotate as predicted, A != B every time.
+
+rogue.elf still #PF-KILLED cleanly ("ring-3 isolation held"), kernel survives,
+clock keeps ticking; exactly ONE ring3 fault in serial, space reclaimed.
+iodemo.elf ring-3 file I/O works under per-process CR3 (wrote + read 47 bytes).
+
+pmm: 55776 free BEFORE, 55776 free AFTER hello x3 + rogue kill + iodemo + isotest x3.
+ZERO leak. No live-CR3-free bite on either the normal exit OR the rogue kill.
+
+ONE non-blocking finding (NOT M4, NOT a regression): console scroll race on the
+exec async path. When the shell prompt returns while the ring-3 task is still
+printing, two concurrent console writers occasionally duplicate/garble ONE row
+(hello 2nd run dropped its "uptime" line for a dup CPL3 line; iodemo dup'd the
+"launched" line). A clean re-run came out correct, so it's transient, not
+deterministic. Underlying data is always correct. Pre-existing since exec went
+async (M2/M3); the console has no writer lock. Repro: exec hello.elf a few times,
+watch the row where the prompt interleaves. Cosmetic -- your call whether a
+console lock is worth it. Full audit: tasks/tier3-address-spaces/M4-AUDIT.md
+---

@@ -79,7 +79,18 @@ bounds (every index masked to 9 bits, every intermediate frame checked for OOM).
   exec rogue.elf still #PF-killed + kernel survives, ~79k context switches with
   the guard never firing for kernel-CR3 tasks, pmm baseline exact, single boot
   banner. Proof: `M3-AUDIT.md`, `frames-m3/`.
-- [~] **M4 exec per-process — CODE-COMPLETE, NOT YET BOOTED (Koa).** `exec` now
+- [x] **M4 exec per-process — DONE + booted (commit 3ff274f, verified by Rex).**
+  `exec hello.elf` PRINTS under its own CR3 and exits 0 (zero kernel panic — the
+  load-bearing "ring-3 syscall under private CR3" concern is resolved). `isotest`
+  PASS x3: same VA 0x2000000000 → DISTINCT frames every run (A/B differ), no
+  cross-visibility. `rogue.elf` still #PF-killed + kernel survives; `iodemo.elf`
+  ring-3 file I/O works under per-process CR3; pmm 55776 before/after the whole
+  gauntlet (hello x3 + rogue + iodemo + isotest x3), zero leak; single boot
+  banner, 0 panic/triple/#GP/#DF. Proof: `M4-AUDIT.md`, `frames-m4/`. Non-blocking
+  finding (predates M4, not a regression): console async-output scroll race — two
+  concurrent writers occasionally garble a row; data always correct; needs a
+  console writer lock, tracked separately.
+  Original plan: `exec` now
   builds a private vmspace per program: image+stack frames from the pmm, mapped
   contiguously at USER_VA_BASE (P|W|US), the relocated image scattered into them
   via their identity addresses (the audited `elf_copy_bytes` byte loop), and the
