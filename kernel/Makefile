@@ -226,6 +226,7 @@ kernel-mb2: src/hello_elf.h src/rogue_elf.h src/iodemo_elf.h
 	$(CC) $(MB2_CFLAGS) -c src/snake.c -o $(BUILD_DIR)/snake.o
 	$(CC) $(MB2_CFLAGS) -c src/heap.c -o $(BUILD_DIR)/heap.o
 	$(CC) $(MB2_CFLAGS) -c src/pmm.c -o $(BUILD_DIR)/pmm.o
+	$(CC) $(MB2_CFLAGS) -c src/vmspace.c -o $(BUILD_DIR)/vmspace.o
 	$(CC) $(MB2_CFLAGS) -c src/fs.c -o $(BUILD_DIR)/fs.o
 	$(CC) $(MB2_CFLAGS) -c src/ata.c -o $(BUILD_DIR)/ata.o
 	$(CC) $(MB2_CFLAGS) -c src/context_switch.S -o $(BUILD_DIR)/context_switch.o
@@ -256,6 +257,7 @@ kernel-mb2: src/hello_elf.h src/rogue_elf.h src/iodemo_elf.h
 	    $(BUILD_DIR)/snake.o \
 	    $(BUILD_DIR)/heap.o \
 	    $(BUILD_DIR)/pmm.o \
+	    $(BUILD_DIR)/vmspace.o \
 	    $(BUILD_DIR)/fs.o \
 	    $(BUILD_DIR)/ata.o \
 	    $(BUILD_DIR)/context_switch.o \

@@ -39,6 +39,7 @@
 #include "usermem.h"
 #include "power.h"
 #include "pmm.h"
+#include "vmspace.h"
 
 #define COL_PROMPT 0xFF7A00u     /* Astrion orange */
 #define COL_OK     0x4ADE80u     /* green for success-ish */
@@ -137,6 +138,7 @@ static void cmd_assistant(int argc, char **argv);
 static void cmd_monitor(int argc, char **argv);
 static void cmd_clip(int argc, char **argv);
 static void cmd_pmm(int argc, char **argv);
+static void cmd_vmtest(int argc, char **argv);
 
 static const struct cmd CMDS[] = {
     { "files",   "open the Files browser window",    cmd_files },
@@ -170,6 +172,7 @@ static const struct cmd CMDS[] = {
     { "sync",    "write all files to disk",          cmd_sync },
     { "clip",    "print the clipboard contents",     cmd_clip },
     { "pmm",     "physical RAM: frame allocator stats + self-test", cmd_pmm },
+    { "vmtest",  "per-process address space: build + walk self-test", cmd_vmtest },
     { "disk",    "show ATA disk info",               cmd_disk },
     { "run",     "run a script (one cmd per line)",  cmd_run },
     { "exec",    "exec <file.elf> - load + run an ELF program", cmd_exec },
@@ -950,6 +953,66 @@ static void cmd_pmm(int argc, char **argv) {
     else    { console_set_color(0xF87171u); console_puts("self-test: FAIL"); }
     console_set_color(COL_WHITE);
     console_puts(" (alloc 8 distinct zeroed frames, free 8, count restored)\n");
+}
+
+static void cmd_vmtest(int argc, char **argv) {
+    (void)argc; (void)argv;
+    if (pmm_frames_total() == 0) {
+        console_set_color(0xF87171u);
+        console_puts("vmtest: pmm disabled - no address spaces without frames\n");
+        console_set_color(COL_WHITE);
+        return;
+    }
+
+    /* Build a private space, map one page at the user base, and prove the walk
+     * lands on our frame - all without ever loading CR3 (that's M3). Then
+     * destroy it and confirm every frame came back (no leak). */
+    const uint64_t uva      = USER_VA_BASE;
+    const uint64_t sentinel = 0xA57210C0DEF00DULL;
+    uint64_t before = pmm_frames_free();
+    uint64_t frame = 0, mapped = 0, miss = 1;
+    int ok = 1;
+
+    vmspace_t *sp = vmspace_create();
+    if (!sp) ok = 0;
+
+    if (ok) {
+        frame = pmm_alloc();               /* the page this uva will back onto */
+        if (!frame) ok = 0;
+    }
+    if (ok) {
+        *(volatile uint64_t *)(uintptr_t)frame = sentinel;   /* mark the frame */
+        if (vmspace_map(sp, uva, frame, PTE_P | PTE_W | PTE_US) != 0) ok = 0;
+    }
+    if (ok) {
+        mapped = vmspace_translate(sp, uva);                 /* must be our frame */
+        miss   = vmspace_translate(sp, uva + 0x100000);      /* a hole -> 0 */
+        if (mapped != frame) ok = 0;
+        if (miss   != 0)     ok = 0;
+        if (*(volatile uint64_t *)(uintptr_t)frame != sentinel) ok = 0;  /* frame intact */
+    }
+
+    if (sp) vmspace_destroy(sp);   /* frees leaf frame + PT/PD/PDPT + PML4 + handle */
+
+    uint64_t after = pmm_frames_free();
+    if (after != before) ok = 0;   /* every frame must return - no leak */
+
+    console_puts("uva    ");
+    console_put_hex64(uva);
+    console_puts(" -> ");
+    console_put_hex64(mapped);
+    console_puts(" (frame ");
+    console_put_hex64(frame);
+    console_puts(")\nframes ");
+    console_put_u64(before);
+    console_puts(" before / ");
+    console_put_u64(after);
+    console_puts(" after\n");
+
+    if (ok) { console_set_color(COL_OK);    console_puts("self-test: PASS"); }
+    else    { console_set_color(0xF87171u); console_puts("self-test: FAIL"); }
+    console_set_color(COL_WHITE);
+    console_puts(" (create, map uva=128G, translate hit + miss, destroy, no leak)\n");
 }
 
 static void cmd_sync(int argc, char **argv) {
