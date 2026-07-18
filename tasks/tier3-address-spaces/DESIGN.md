@@ -71,6 +71,14 @@ bounds (every index masked to 9 bits, every intermediate frame checked for OOM).
   every time (zero drift = no leak / no double-free), fresh frames rotated per
   run and all reclaimed to baseline, `pmm` byte-identical before/after, no fault,
   single boot banner, no regression. Proof: `M2-AUDIT.md`, `frames-m2/`.
-- [ ] M3 CR3 switch  ← next (highest triple-fault risk — activation)
-- [ ] M4 exec per-process
+- [x] **M3 CR3 switch — DONE + booted (commit 35260dc, verified by Rex).**
+  NO TRIPLE-FAULT. `vmswitch` PASS x3: `task ran == space cr3 != kernel cr3`
+  (kernel 0x20a000, spaces 0x2600000/0x2605000/0x260a000 — a task genuinely ran
+  under different page tables), sentinel written, counter 0→1→2→3, frames
+  55776 before/after every run (no leak). No regression: exec hello.elf exits 0,
+  exec rogue.elf still #PF-killed + kernel survives, ~79k context switches with
+  the guard never firing for kernel-CR3 tasks, pmm baseline exact, single boot
+  banner. Proof: `M3-AUDIT.md`, `frames-m3/`.
+- [ ] M4 exec per-process  ← next (wire exec to build a vmspace → two ring-3
+  programs isolated from EACH OTHER; retire the shared usermem window)
 - [ ] M5 proof + red-team
