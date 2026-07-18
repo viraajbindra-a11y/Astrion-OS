@@ -64,7 +64,7 @@ void syscall_init(void) {
 static void sys_puts_user(uint64_t uptr) {
     if (!validate_user_range(uptr, 1)) return;
     const char *p = (const char *)(uintptr_t)uptr;
-    uint64_t max = usermem_window_end() - uptr;
+    uint64_t max = usermem_active_top() - uptr;   /* validated: uptr <= this process's top */
     if (max > 65536ull) max = 65536ull;
     for (uint64_t i = 0; i < max; i++) {
         char c = p[i];
@@ -81,7 +81,7 @@ static int copy_user_name(uint64_t uptr, char *out, int outcap) {
     if (outcap <= 0) return 0;
     if (!validate_user_range(uptr, 1)) { out[0] = 0; return 0; }
     const char *p = (const char *)(uintptr_t)uptr;
-    uint64_t max = usermem_window_end() - uptr;   /* uptr <= end (validated) */
+    uint64_t max = usermem_active_top() - uptr;   /* uptr <= this process's top (validated) */
     if (max > (uint64_t)(outcap - 1)) max = (uint64_t)(outcap - 1);
     int i = 0;
     for (; i < (int)max; i++) { char c = p[i]; out[i] = c; if (!c) return 1; }

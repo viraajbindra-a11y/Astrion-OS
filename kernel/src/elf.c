@@ -85,6 +85,11 @@ static void mcpy(uint8_t *d, const uint8_t *s, uint64_t n) {
     for (uint64_t i = 0; i < n; i++) d[i] = s[i];
 }
 
+/* Public alias over the exact same byte loop (see elf.h): the exec path copies a
+ * relocated image, page by page, into scattered per-process frames through this
+ * one audited primitive rather than open-coding a second copy loop. */
+void elf_copy_bytes(uint8_t *dst, const uint8_t *src, uint64_t n) { mcpy(dst, src, n); }
+
 /* Validated plan handed from pass 1 to pass 2. */
 struct elf_plan {
     uint64_t image_hi;     /* loaded image size = max(p_vaddr + p_memsz) */

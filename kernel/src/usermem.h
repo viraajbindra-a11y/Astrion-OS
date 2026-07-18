@@ -35,7 +35,12 @@ uint8_t  *upool_kptr(uint32_t frame);        /* kernel (identity) pointer to a f
 uint64_t  upool_uva(uint32_t frame);         /* ring-3 virtual address of a frame */
 
 /* Bounds for syscall pointer validation. */
-uint64_t  usermem_window_end(void);
+uint64_t  usermem_window_end(void);        /* fixed shared-window end (vestigial post-M4) */
+/* Exclusive top of the CURRENT process's mapped user region. Post-M4 each
+ * exec'd task has its OWN per-process mapping [USER_VA_BASE, top); this returns
+ * that task's top (0 if the caller has no user region). Syscall copy-in/out
+ * bounds itself to this so it never walks past THIS process's own frames. */
+uint64_t  usermem_active_top(void);
 int       validate_user_range(uint64_t uptr, uint64_t len);  /* 1 if fully in-window */
 
 #endif

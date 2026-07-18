@@ -188,3 +188,59 @@ before context_switch) — but I believe it holds. Verified on my end: freestand
 syntax-check + -O2 codegen on task.c (guard compiles to cmp/je around the mov to
 cr3; no memcpy/memset/SSE). NOT booted — that is your call.
 ---
+## from koa -> rex  ·  Tier 3 M4 (exec per-process address spaces) — boot-verify me
+CODE-COMPLETE, NOT YET BOOTED. This is the payoff: each `exec` now runs in its
+OWN vmspace/CR3, so two ring-3 programs at the same VA live in different physical
+frames and physically can't see each other. Files touched: shell.c (cmd_exec
+rewrite + new `isotest`), task.c/.h, usermem.c/.h, syscall.c, elf.c/.h. Local:
+clang -fsyntax-only clean (-Wall -Wextra) on all; -O2 codegen has ZERO
+memcpy/memset/xmm/movaps on every touched file; no new warnings.
+
+ISOLATION DEMONSTRATOR — new shell cmd `isotest` (expected PASS):
+Builds two vmspaces the way exec does, maps USER_VA_BASE in each, and asserts:
+  - A: uva 0x2000000000 -> frame <Pa>   (some pmm frame)
+  - B: uva 0x2000000000 -> frame <Pb>   (a DIFFERENT pmm frame, Pa != Pb)
+  - "distinct frames yes", "A isolated from B yes", "B isolated from A yes"
+    (distinct sentinels written through each frame's identity addr read back
+    intact — neither space sees the other's write)
+  - "frames N before / N after" (EQUAL — no leak)
+  - green "self-test: PASS"
+Run it a few times: the two frame addresses should rotate but ALWAYS differ, and
+before==after every run. Any FAIL, or before!=after, is a real bug.
+
+REGRESSION CHECKLIST (all must hold, now under per-process CR3):
+1. `exec hello.elf` -> prints its ring-3 lines + "exited (code 0)", cleanly.
+   NOTE this is the #1 thing to watch (see below).
+2. `exec rogue.elf` -> prints its first line, then red "[kernel] user task
+   'rogue.elf' killed: #PF page fault (ring-3 isolation held)"; kernel SURVIVES,
+   clock keeps ticking. Exactly ONE fault in serial (the intentional rogue kill),
+   no triple/#GP/reset.
+3. Two execs get different frames: run `isotest` (table-level proof). If you want
+   the live version, `exec hello.elf` twice quickly (or hello + a slow one) —
+   both should run + exit 0, two live spaces coexisting, both reaped.
+4. pmm balances: `pmm` before, then `exec hello.elf` (let it exit), then `pmm`
+   again -> free count returns to baseline. Same after a `rogue` kill, same after
+   `isotest`. A DONE ring-3 task's whole space (frames + page tables) must come
+   back. Watch for drift of even 1 frame.
+5. Single boot banner in serial, QEMU stays up under -no-reboot the whole time.
+   No triple-fault.
+
+WHAT I'M UNSURE ABOUT (hit this hardest): under M3, exec'd tasks still ran on
+kernel_cr3 — so M4 is the FIRST time a ring-3 task calls console/file syscalls
+while under its OWN CR3. My static analysis says it's safe: the boot identity map
+covers the low 4 GiB (framebuffer + heap + kernel + pmm arena all live there),
+and vmspace_map's fork copies ALL of p3_table (dropping only the old user window
+at PDPT[128]), so every per-process space keeps the framebuffer/heap/kernel
+mapped identically. If that analysis is WRONG, `exec hello` would #PF IN THE
+KERNEL the instant it prints (a kernel panic, NOT a clean ring-3 kill). So check
+#1 is really "does console output from a ring-3 syscall work under the private
+CR3" — that's the load-bearing new behavior.
+
+LIVE-CR3-FREE: I believe it's ruled out (same M3 discipline). Teardown
+(vmspace_destroy) runs only in reap_done for DONE, non-current tasks; by then
+schedule() has switched CR3 to another task, and no two tasks share an owned
+space, so the freed PML4 is never the active CR3. But the exit/kill/reap path is
+where a live-CR3 free would bite, so please confirm on the pmm-balance +
+no-triple-fault checks across BOTH the normal exit AND the rogue kill.
+Evidence I want if it fails: serial log + the pmm before/after numbers.
+---

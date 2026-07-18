@@ -37,4 +37,11 @@ const char *elf_load_at(const uint8_t *buf, uint32_t len,
                         uint8_t *dst, uint64_t dst_cap, uint64_t link_base,
                         uint64_t *entry_out, uint64_t *span_out);
 
+/* The loader's internal byte-copy, exposed as ONE audited copy path so the exec
+ * path can scatter a relocated image into non-contiguous per-process frames
+ * through the same loop the loader uses. Byte-granular on purpose: under the
+ * -mgeneral-regs-only build this stays a scalar loop, never lowered to a memcpy
+ * CALL or an SSE move (a fixed word-count copy is the shape that lowers). */
+void elf_copy_bytes(uint8_t *dst, const uint8_t *src, uint64_t n);
+
 #endif

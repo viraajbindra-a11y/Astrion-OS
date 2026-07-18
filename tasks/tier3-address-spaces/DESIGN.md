@@ -79,6 +79,19 @@ bounds (every index masked to 9 bits, every intermediate frame checked for OOM).
   exec rogue.elf still #PF-killed + kernel survives, ~79k context switches with
   the guard never firing for kernel-CR3 tasks, pmm baseline exact, single boot
   banner. Proof: `M3-AUDIT.md`, `frames-m3/`.
-- [ ] M4 exec per-process  ← next (wire exec to build a vmspace → two ring-3
-  programs isolated from EACH OTHER; retire the shared usermem window)
+- [~] **M4 exec per-process — CODE-COMPLETE, NOT YET BOOTED (Koa).** `exec` now
+  builds a private vmspace per program: image+stack frames from the pmm, mapped
+  contiguously at USER_VA_BASE (P|W|US), the relocated image scattered into them
+  via their identity addresses (the audited `elf_copy_bytes` byte loop), and the
+  ring-3 task spawned via `task_spawn_user_space` bound to that space's CR3 and
+  OWNING it. Teardown reuses the M3 discipline exactly: `reap_done` calls
+  `vmspace_destroy` only for DONE, non-current tasks — by then schedule() has
+  loaded a different CR3, so a live CR3 is never freed (no two tasks share an
+  owned space). Syscalls validate against the per-process extent
+  (`task_current_user_top` → `usermem_active_top`), not the old shared window;
+  the shared `user_pool` path is now vestigial for exec (kept, unused). New
+  `isotest` shell cmd proves two spaces map the same VA to DISTINCT frames with
+  no cross-visibility, balancing the pmm. Verified locally: clang -fsyntax-only
+  clean (-Wall -Wextra), -O2 codegen has zero memcpy/memset/xmm across every
+  touched file. Awaiting Rex boot-verify before checking this box.
 - [ ] M5 proof + red-team

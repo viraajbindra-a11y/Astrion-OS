@@ -140,6 +140,7 @@ static void cmd_clip(int argc, char **argv);
 static void cmd_pmm(int argc, char **argv);
 static void cmd_vmtest(int argc, char **argv);
 static void cmd_vmswitch(int argc, char **argv);
+static void cmd_isotest(int argc, char **argv);
 
 static const struct cmd CMDS[] = {
     { "files",   "open the Files browser window",    cmd_files },
@@ -175,6 +176,7 @@ static const struct cmd CMDS[] = {
     { "pmm",     "physical RAM: frame allocator stats + self-test", cmd_pmm },
     { "vmtest",  "per-process address space: build + walk self-test", cmd_vmtest },
     { "vmswitch","scheduler-driven CR3 switch into a vmspace + back", cmd_vmswitch },
+    { "isotest", "prove two per-process spaces isolate the same VA", cmd_isotest },
     { "disk",    "show ATA disk info",               cmd_disk },
     { "run",     "run a script (one cmd per line)",  cmd_run },
     { "exec",    "exec <file.elf> - load + run an ELF program", cmd_exec },
@@ -1154,6 +1156,103 @@ static void cmd_vmswitch(int argc, char **argv) {
     console_puts(" (scheduler switched CR3 into a vmspace task and back, no leak)\n");
 }
 
+/* ---- isotest: prove two per-process spaces ISOLATE the same VA (Tier 3, M4) --
+ *
+ * Builds two vmspaces exactly the way exec does — create, then map one page at
+ * USER_VA_BASE — and proves the isolation exec now delivers, without switching
+ * CR3 (the page-table walk IS the MMU's own translation):
+ *   1. translate(A, USER_VA_BASE) != translate(B, USER_VA_BASE): the SAME user
+ *      virtual address resolves to DIFFERENT physical frames in the two spaces.
+ *   2. distinct sentinels written through each frame read back intact — neither
+ *      space can observe the other's write at that address (different RAM).
+ *   3. destroying both returns the pmm to its exact baseline: no leak.
+ * The LIVE runtime form of this is `exec` itself — two programs at the same
+ * USER_VA_BASE, each under its own CR3, physically unable to see each other. */
+
+#define ISO_SENT_A 0xA11CE55A9E27ED11ULL
+#define ISO_SENT_B 0xB0B0CAFE5AFE5111ULL
+
+static void cmd_isotest(int argc, char **argv) {
+    (void)argc; (void)argv;
+    if (pmm_frames_total() == 0) {
+        console_set_color(0xF87171u);
+        console_puts("isotest: pmm disabled - no address spaces without frames\n");
+        console_set_color(COL_WHITE);
+        return;
+    }
+
+    uint64_t before = pmm_frames_free();
+    vmspace_t *A = 0, *B = 0;
+    uint64_t pa = 0, pb = 0, fa = 0, fb = 0;
+    int ok = 1, a_mapped = 0, b_mapped = 0;
+    int a_sees_a = 0, b_sees_b = 0, a_isolated = 0, b_isolated = 0;
+
+    A = vmspace_create();
+    B = vmspace_create();
+    if (!A || !B) ok = 0;
+
+    if (ok) {
+        pa = pmm_alloc();
+        pb = pmm_alloc();
+        if (!pa || !pb) ok = 0;
+    }
+    if (ok) {
+        if (vmspace_map(A, USER_VA_BASE, pa, PTE_P | PTE_W | PTE_US) == 0) a_mapped = 1; else ok = 0;
+        if (vmspace_map(B, USER_VA_BASE, pb, PTE_P | PTE_W | PTE_US) == 0) b_mapped = 1; else ok = 0;
+    }
+    if (ok) {
+        fa = vmspace_translate(A, USER_VA_BASE);
+        fb = vmspace_translate(B, USER_VA_BASE);
+        if (fa == 0 || fb == 0) ok = 0;
+        if (fa == fb)           ok = 0;   /* same VA MUST land on different frames */
+    }
+    if (ok) {
+        /* Write a distinct sentinel through each frame's identity address, then
+         * read both back. If the two USER_VA_BASE mappings aliased the same RAM,
+         * B's write would clobber A's frame and this would catch it. */
+        *(volatile uint64_t *)(uintptr_t)fa = ISO_SENT_A;
+        *(volatile uint64_t *)(uintptr_t)fb = ISO_SENT_B;
+        a_sees_a   = (*(volatile uint64_t *)(uintptr_t)fa == ISO_SENT_A);
+        b_sees_b   = (*(volatile uint64_t *)(uintptr_t)fb == ISO_SENT_B);
+        a_isolated = (*(volatile uint64_t *)(uintptr_t)fa != ISO_SENT_B);  /* A never sees B's write */
+        b_isolated = (*(volatile uint64_t *)(uintptr_t)fb != ISO_SENT_A);  /* B never sees A's write */
+        if (!(a_sees_a && b_sees_b && a_isolated && b_isolated)) ok = 0;
+    }
+
+    if (A) vmspace_destroy(A);   /* frees each space's PML4 + tables + its leaf frame */
+    if (B) vmspace_destroy(B);
+    if (pa && !a_mapped) pmm_free(pa);   /* orphaned leaf: destroy didn't own it */
+    if (pb && !b_mapped) pmm_free(pb);
+
+    uint64_t after = pmm_frames_free();
+    if (after != before) ok = 0;   /* every frame must return - no leak */
+
+    console_puts("A: uva ");
+    console_put_hex64(USER_VA_BASE);
+    console_puts(" -> frame ");
+    console_put_hex64(fa);
+    console_puts("\nB: uva ");
+    console_put_hex64(USER_VA_BASE);
+    console_puts(" -> frame ");
+    console_put_hex64(fb);
+    console_puts("\ndistinct frames    ");
+    console_puts(fa != fb ? "yes" : "no");
+    console_puts("\nA isolated from B  ");
+    console_puts(a_isolated ? "yes" : "no");
+    console_puts("\nB isolated from A  ");
+    console_puts(b_isolated ? "yes" : "no");
+    console_puts("\nframes ");
+    console_put_u64(before);
+    console_puts(" before / ");
+    console_put_u64(after);
+    console_puts(" after\n");
+
+    if (ok) { console_set_color(COL_OK);    console_puts("self-test: PASS"); }
+    else    { console_set_color(0xF87171u); console_puts("self-test: FAIL"); }
+    console_set_color(COL_WHITE);
+    console_puts(" (two spaces, same VA -> distinct frames, no cross-visibility, no leak)\n");
+}
+
 static void cmd_sync(int argc, char **argv) {
     (void)argc; (void)argv;
     if (!ata_present()) {
@@ -1383,15 +1482,22 @@ static void cmd_monitor(int argc, char **argv) {
     wm_open_app(5);   /* System Monitor — the GUI form of `ps` + `heap` */
 }
 
-/* ─── exec: load + run an ELF program in RING 3 ──────────────────
+/* ─── exec: load + run an ELF program in its OWN address space (Tier 3, M4) ──
  *
- * The program is loaded into the US=1 user window (usermem.c), relocated to
- * run at its user virtual address, and started in ring 3 via enter_user().
- * From there it reaches the kernel ONLY through the `syscall` instruction
- * (syscall.c) — it cannot touch kernel memory, and any attempt (or a
- * privileged instruction, or a wild pointer) traps and kills just the task,
- * not the kernel. It runs preemptibly, so even an infinite loop can't wedge
- * the shell; 'kill <tid>' recovers it.
+ * Each exec builds a PRIVATE vmspace: image + user-stack frames come from the
+ * pmm, are mapped at USER_VA_BASE (P|W|US) into THAT space, and the relocated
+ * image is copied into them via their identity addresses. The ring-3 task runs
+ * under that space's CR3 (task_spawn_user_space), so two programs loaded at the
+ * same virtual address live on different physical frames under different page
+ * tables — they physically cannot see each other's memory. (The old shared
+ * user_pool at 128 GiB is retired for exec; usermem.c stays only as the now-
+ * vestigial window + the syscall-validation helpers.)
+ *
+ * From ring 3 the program reaches the kernel ONLY through `syscall` (syscall.c);
+ * it cannot touch kernel memory, and any fault (bad pointer, privileged insn,
+ * div0) traps and kills just that task — the fault happens in its OWN space now,
+ * and reap reclaims the space. It runs preemptibly, so even an infinite loop
+ * can't wedge the shell; 'kill <tid>' recovers it.
  */
 extern void enter_user(uint64_t rip, uint64_t user_stack_top);  /* usermode.S — never returns */
 
@@ -1411,6 +1517,42 @@ static void exec_trampoline(void *arg) {
     uint64_t ustk  = ec->user_stack_top;
     kfree(ec);                 /* done with it; enter_user never returns */
     enter_user(entry, ustk);   /* iretq to CPL 3 */
+}
+
+/* Build the per-process address space `exec` runs a program in. Allocate the
+ * image + user-stack frames from the pmm and map them CONTIGUOUSLY at
+ * USER_VA_BASE (P|W|US) into a fresh vmspace; copy the already-relocated image
+ * (`img`, laid out as if based at USER_VA_BASE) into the image frames via their
+ * identity (phys == kernel-ptr) addresses. Stack frames stay as pmm_alloc handed
+ * them out — zeroed. Because the frames are mapped exactly [0, total_frames)
+ * with no gaps, [USER_VA_BASE, USER_VA_BASE + total_frames*4K) is fully backed.
+ *
+ * On success *out_sp owns every frame + private table (all reclaimed by
+ * vmspace_destroy when the task is reaped). On failure nothing leaks: the
+ * current un-mapped leaf is freed and the partial space destroyed here, and an
+ * error string is returned. Never loads CR3 — the space is inert until a task
+ * bound to it is scheduled in. */
+static const char *exec_build_space(const uint8_t *img,
+                                    uint32_t image_frames, uint32_t total_frames,
+                                    vmspace_t **out_sp) {
+    vmspace_t *sp = vmspace_create();
+    if (!sp) return "out of physical memory";
+
+    for (uint32_t i = 0; i < total_frames; i++) {
+        uint64_t fr = pmm_alloc();                     /* zeroed identity-mapped frame */
+        if (!fr) { vmspace_destroy(sp); return "out of physical memory"; }
+        if (i < image_frames)
+            elf_copy_bytes((uint8_t *)(uintptr_t)fr,
+                           img + (uint64_t)i * USER_FRAME_SIZE, USER_FRAME_SIZE);
+        uint64_t uva = USER_VA_BASE + (uint64_t)i * USER_FRAME_SIZE;
+        if (vmspace_map(sp, uva, fr, PTE_P | PTE_W | PTE_US) != 0) {
+            pmm_free(fr);          /* not installed -> destroy won't own it */
+            vmspace_destroy(sp);   /* reclaims every already-mapped frame + tables */
+            return "cannot map user page";
+        }
+    }
+    *out_sp = sp;
+    return 0;
 }
 
 static void cmd_exec(int argc, char **argv) {
@@ -1448,41 +1590,51 @@ static void cmd_exec(int argc, char **argv) {
     }
     for (uint32_t i = 0; i < sz; i++) buf[i] = n->data[i];
 
-    /* Size the image, then reserve user-window frames for image + stack. */
+    /* Size the image, then work out how many frames image + stack need. */
     uint64_t span = 0;
     const char *err = elf_probe(buf, sz, &span);
     if (err) { kfree(buf); goto fail_msg; }
 
     uint32_t image_frames = (uint32_t)((span + USER_FRAME_SIZE - 1) / USER_FRAME_SIZE);
     uint32_t total_frames = image_frames + USER_STACK_FRAMES;
-    int start = upool_alloc(total_frames);
-    if (start < 0) {
+
+    /* Relocate the image into a temporary CONTIGUOUS kernel buffer, based at
+     * USER_VA_BASE (where it will run in its own space). The audited loader
+     * writes to one contiguous dst; the per-process frames are not physically
+     * contiguous, so this buffer is the bridge — it lets us reuse elf_load_at
+     * untouched, then scatter the result into the frames page by page. kcalloc
+     * zeroes it, so the tail of the last image page (span..img_cap) is 0. */
+    uint64_t img_cap = (uint64_t)image_frames * USER_FRAME_SIZE;
+    uint8_t *img = (uint8_t *)kcalloc(1, img_cap);
+    if (!img) {
         kfree(buf);
         console_set_color(0xF87171u);
-        console_puts("exec: user memory full\n");
+        console_puts("exec: out of memory\n");
         console_set_color(COL_WHITE);
         return;
     }
-
-    /* Load through the kernel (identity) pointer, but relocate to run at the
-     * ring-3 virtual address. The user stack sits in the frames above the
-     * image; its top is frame-aligned (= 16-aligned, as SysV wants at entry). */
-    uint8_t *dst       = upool_kptr((uint32_t)start);
-    uint64_t link_base = upool_uva((uint32_t)start);
-    uint64_t entry_va  = 0;
-    err = elf_load_at(buf, sz, dst, (uint64_t)image_frames * USER_FRAME_SIZE,
-                      link_base, &entry_va, &span);
+    uint64_t entry_va = 0;
+    err = elf_load_at(buf, sz, img, img_cap, USER_VA_BASE, &entry_va, &span);
     kfree(buf);
-    if (err) { upool_free((uint32_t)start, total_frames); goto fail_msg; }
+    if (err) { kfree(img); goto fail_msg; }
+
+    /* Build the private space: alloc + map the frames, copy the image in. */
+    vmspace_t *sp = 0;
+    err = exec_build_space(img, image_frames, total_frames, &sp);
+    kfree(img);                    /* copied into the frames; the bridge is done */
+    if (err) goto fail_msg;
 
     /* Initial user RSP. _start is a GCC-compiled function, so it expects the
-     * post-`call` alignment rsp ≡ 8 (mod 16); the frame top is 16-aligned, so
-     * bias by 8 (same reasoning as the task-stack fabrication in task.c). */
-    uint64_t user_stack_top = upool_uva((uint32_t)start + total_frames) - 8;
+     * post-`call` alignment rsp ≡ 8 (mod 16); the region top is frame-aligned
+     * (16-aligned), so bias by 8 (same reasoning as task.c's stack fabrication).
+     * user_top is the exclusive top of the mapped region — the bound this
+     * process's own syscall pointers validate against. */
+    uint64_t user_top       = USER_VA_BASE + (uint64_t)total_frames * USER_FRAME_SIZE;
+    uint64_t user_stack_top = user_top - 8;
 
     struct exec_ctx *ec = (struct exec_ctx *)kmalloc(sizeof(*ec));
     if (!ec) {
-        upool_free((uint32_t)start, total_frames);
+        vmspace_destroy(sp);       /* not spawned -> never a live CR3 -> safe to free */
         console_set_color(0xF87171u);
         console_puts("exec: out of memory\n");
         console_set_color(COL_WHITE);
@@ -1491,14 +1643,14 @@ static void cmd_exec(int argc, char **argv) {
     ec->entry = entry_va;
     ec->user_stack_top = user_stack_top;
 
-    /* Spawn with the pool frames recorded ATOMICALLY (task_spawn_user): the
-     * task must not be able to run, fault, and get reaped before its frames
-     * are on record, or they'd leak. rogue.elf faults the instant it runs, so
-     * this ordering matters. */
-    int tid = task_spawn_user(argv[1], exec_trampoline, ec,
-                              (uint32_t)start, total_frames);
+    /* Spawn the ring-3 task bound to sp's CR3, with sp OWNED by the task so reap
+     * destroys it on exit/kill. The binding is recorded ATOMICALLY under the
+     * spawn lock, before the task is READY: rogue.elf faults the instant it
+     * runs, so the space must be on record (or it would leak) before it can be
+     * scheduled, faulted, and reaped. */
+    int tid = task_spawn_user_space(argv[1], exec_trampoline, ec, sp, user_top);
     if (tid < 0) {
-        upool_free((uint32_t)start, total_frames);
+        vmspace_destroy(sp);
         kfree(ec);
         console_set_color(0xF87171u);
         console_puts("exec: cannot spawn task\n");

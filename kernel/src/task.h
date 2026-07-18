@@ -45,6 +45,15 @@ int  task_spawn_user(const char *name, task_fn fn, void *arg,
  * per-process space because the kernel half is mapped identically in every
  * space; it never touches the private user region. cr3 == 0 means "kernel". */
 int  task_spawn_in_space(const char *name, task_fn fn, void *arg, uint64_t cr3);
+/* Spawn a RING-3 task that OWNS a per-process address space (M4 exec). Runs
+ * under space's CR3 from its first slice (bound under the spawn lock, before
+ * READY). The task owns `space`: when it exits or is #PF-killed and leaves the
+ * runnable set, reap destroys it (frames back to the pmm) — never while its CR3
+ * is live. `user_top` is the exclusive top of its mapped user region, used to
+ * validate this process's own syscall pointers. Returns tid or -1. */
+struct vmspace;   /* opaque here; task.c pulls the full type */
+int  task_spawn_user_space(const char *name, task_fn fn, void *arg,
+                           struct vmspace *space, uint64_t user_top);
 void task_yield(void);                                  /* voluntary switch */
 void task_preempt(void);                                /* called by timer ISR after EOI */
 void task_exit(void);                                   /* never returns */
@@ -60,6 +69,11 @@ struct task_info {
 int task_get_info(int idx, struct task_info *out);      /* 1 if slot in use */
 int task_current_tid(void);
 const char *task_current_name(void);                    /* name of the running task */
+/* Exclusive top of the CURRENT task's mapped user region (USER_VA_BASE + its
+ * image+stack span), or 0 if it has none (kernel tasks). validate_user_range
+ * uses this so each ring-3 task's syscall pointers are checked against ITS OWN
+ * per-process mapping, not a shared window. */
+uint64_t task_current_user_top(void);
 
 /* The kernel's own CR3 (boot PML4 phys), captured once at tasks_init from the
  * boot context. Every task with no private address space runs on this. */

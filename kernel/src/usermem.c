@@ -13,6 +13,10 @@
 #include "usermem.h"
 
 extern void serial_puts_x(const char *s);
+/* Per-process user extent lives on the running task (task.c). Pulled by extern
+ * (matching this file's style) rather than including task.h, to keep the shared
+ * user-window module decoupled from the scheduler's internals. */
+extern uint64_t task_current_user_top(void);
 
 /* Boot page tables (boot/multiboot2.S, made global there). */
 extern uint64_t p4_table[512];
@@ -84,14 +88,23 @@ uint64_t usermem_window_end(void) {
     return USER_VA_BASE + (uint64_t)USER_POOL_FRAMES * USER_FRAME_SIZE;
 }
 
+/* Post-M4 the "window" is per-process: the exec'd task's mapped region is
+ * [USER_VA_BASE, task_current_user_top()), allocated contiguously and with no
+ * holes (exec maps every image+stack frame or fails whole), so this single top
+ * fully describes what's reachable. 0 => the caller has no user region. */
+uint64_t usermem_active_top(void) { return task_current_user_top(); }
+
 /* Wrap-safe: never compute uptr+len (it would wrap for huge len and pass).
- * Reject by length cap, low bound, high bound, then remaining-space — in
- * that order, each comparison subtraction-free of attacker-controlled sums. */
+ * Validate against the CURRENT process's own mapping (usermem_active_top), not
+ * the old shared window — a ring-3 task runs in its own CR3, so its pointers
+ * resolve in ITS space. Reject by no-region, length cap, low bound, high bound,
+ * then remaining-space — each comparison subtraction-free of attacker sums. */
 int validate_user_range(uint64_t uptr, uint64_t len) {
-    uint64_t end = usermem_window_end();
+    uint64_t top = usermem_active_top();
+    if (top == 0)              return 0;   /* caller has no user region (kernel task) */
     if (len > MAX_SYSCALL_LEN) return 0;
     if (uptr < USER_VA_BASE)   return 0;
-    if (uptr > end)            return 0;
-    if (len > end - uptr)      return 0;
+    if (uptr > top)            return 0;
+    if (len > top - uptr)      return 0;
     return 1;
 }

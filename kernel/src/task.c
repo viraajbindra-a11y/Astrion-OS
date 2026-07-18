@@ -27,6 +27,7 @@
 #include <stdint.h>
 #include "task.h"
 #include "heap.h"
+#include "vmspace.h"   /* per-process address space owned by a ring-3 task (M4) */
 
 /* context_switch.S */
 extern void context_switch(uint64_t *save_rsp_here, uint64_t load_rsp);
@@ -49,6 +50,8 @@ struct task {
     uint8_t        *stack_base;   /* kmalloc'd; NULL for task 0 */
     uint64_t        kstack_top;   /* 16-aligned top of this task's kernel stack (-> tss.rsp0) */
     uint64_t        cr3;          /* address space to activate on switch-in (kernel_cr3 = default) */
+    vmspace_t      *space;        /* per-process space this task OWNS; reaped on exit (0 = none) */
+    uint64_t        user_top;     /* exclusive top of its mapped user region (0 = no user region) */
     uint32_t        upool_start;  /* ring-3 user-window frames (0/0 if not a user task) */
     uint32_t        upool_frames;
     uint64_t        switches;
@@ -84,6 +87,8 @@ void tasks_init(void) {
     tasks[0].stack_base = 0;
     tasks[0].kstack_top = (uint64_t)(uintptr_t)stack_top;   /* boot stack (ring-0 only) */
     tasks[0].cr3 = kernel_cr3;                              /* the kernel space */
+    tasks[0].space = 0;
+    tasks[0].user_top = 0;
     tasks[0].upool_start = 0;
     tasks[0].upool_frames = 0;
     tasks[0].switches = 1;
@@ -121,6 +126,18 @@ static void reap_done(void) {
                 tasks[i].upool_start = 0;
                 tasks[i].upool_frames = 0;
             }
+            /* A ring-3 task from M4 exec OWNS a per-process address space. Free it
+             * HERE (frames + private page tables back to the pmm). This is the
+             * ONLY place page tables are freed, and it is safe: reap runs only for
+             * DONE tasks other than the current one, and a task's CR3 is active
+             * only while THAT task is current — so by the time we reap it, the
+             * schedule() that made it non-current has already loaded a different
+             * CR3. We never free page tables a live CR3 still points at. */
+            if (tasks[i].space) {
+                vmspace_destroy(tasks[i].space);
+                tasks[i].space = 0;
+            }
+            tasks[i].user_top = 0;
             tasks[i].state = TASK_UNUSED;
         }
     }
@@ -154,7 +171,7 @@ static inline void load_cr3(uint64_t cr3) {
  * runs can't be reaped before its frames are recorded (which would leak them). */
 static int spawn_locked(const char *name, task_fn fn, void *arg,
                         uint32_t upool_start, uint32_t upool_frames,
-                        uint64_t cr3) {
+                        uint64_t cr3, vmspace_t *space, uint64_t user_top) {
     uint64_t flags = irq_save();
     reap_done();
 
@@ -177,6 +194,12 @@ static int spawn_locked(const char *name, task_fn fn, void *arg,
      * addr is never 0) is a safe "default to the kernel space" sentinel, so no
      * task can ever reach schedule() with a bogus cr3 of 0. */
     t->cr3 = cr3 ? cr3 : kernel_cr3;
+    /* The owned space + user extent are recorded under the SAME lock, before the
+     * task is READY: a ring-3 task that faults on its very first instruction can
+     * be reaped, and reap must find its space on record (or it would leak) and its
+     * user_top set (or its own syscalls couldn't be validated). */
+    t->space = space;
+    t->user_top = user_top;
     t->upool_start = upool_start;
     t->upool_frames = upool_frames;
     t->switches = 0;
@@ -213,7 +236,7 @@ static int spawn_locked(const char *name, task_fn fn, void *arg,
 }
 
 int task_spawn(const char *name, task_fn fn, void *arg) {
-    return spawn_locked(name, fn, arg, 0, 0, kernel_cr3);
+    return spawn_locked(name, fn, arg, 0, 0, kernel_cr3, 0, 0);
 }
 
 /* Spawn a ring-3 task that owns user-window frames. Atomic with the spawn so
@@ -222,14 +245,26 @@ int task_spawn(const char *name, task_fn fn, void *arg) {
  * Stays on the kernel space + shared user window until M4 rewires exec. */
 int task_spawn_user(const char *name, task_fn fn, void *arg,
                     uint32_t upool_start, uint32_t upool_frames) {
-    return spawn_locked(name, fn, arg, upool_start, upool_frames, kernel_cr3);
+    return spawn_locked(name, fn, arg, upool_start, upool_frames, kernel_cr3, 0, 0);
 }
 
 /* Spawn a kernel task bound to a given address space (its vmspace PML4 phys).
  * See task.h: the cr3 is set under the lock before READY, so the scheduler
- * activates that space the first time it switches in. */
+ * activates that space the first time it switches in. The space is NOT owned
+ * here (space == 0): the caller (the vmswitch self-test) manages its lifetime,
+ * so reap must not double-free it. */
 int task_spawn_in_space(const char *name, task_fn fn, void *arg, uint64_t cr3) {
-    return spawn_locked(name, fn, arg, 0, 0, cr3);
+    return spawn_locked(name, fn, arg, 0, 0, cr3, 0, 0);
+}
+
+/* Spawn a ring-3 task that OWNS a per-process address space (M4 exec). Binds the
+ * task to space's PML4 as its CR3 AND records space for teardown, so reap frees
+ * it once the task leaves the runnable set. user_top bounds the task's own
+ * syscall pointer validation. See task.h. */
+int task_spawn_user_space(const char *name, task_fn fn, void *arg,
+                          struct vmspace *space, uint64_t user_top) {
+    if (!space) return -1;
+    return spawn_locked(name, fn, arg, 0, 0, space->pml4_phys, space, user_top);
 }
 
 /* The actual switch. MUST run with interrupts disabled (so the timer
@@ -349,5 +384,11 @@ int task_get_info(int idx, struct task_info *out) {
 int task_current_tid(void) { return current_tid; }
 
 const char *task_current_name(void) { return tasks[current_tid].name; }
+
+/* Exclusive top of the running task's mapped user region (0 for kernel tasks).
+ * Called from validate_user_range during a syscall, which always runs as the
+ * ring-3 task that made the call (current_tid == that task), so this returns
+ * that process's own extent. */
+uint64_t task_current_user_top(void) { return tasks[current_tid].user_top; }
 
 uint64_t task_kernel_cr3(void) { return kernel_cr3; }
