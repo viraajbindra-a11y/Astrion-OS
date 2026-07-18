@@ -139,6 +139,7 @@ static void cmd_monitor(int argc, char **argv);
 static void cmd_clip(int argc, char **argv);
 static void cmd_pmm(int argc, char **argv);
 static void cmd_vmtest(int argc, char **argv);
+static void cmd_vmswitch(int argc, char **argv);
 
 static const struct cmd CMDS[] = {
     { "files",   "open the Files browser window",    cmd_files },
@@ -173,6 +174,7 @@ static const struct cmd CMDS[] = {
     { "clip",    "print the clipboard contents",     cmd_clip },
     { "pmm",     "physical RAM: frame allocator stats + self-test", cmd_pmm },
     { "vmtest",  "per-process address space: build + walk self-test", cmd_vmtest },
+    { "vmswitch","scheduler-driven CR3 switch into a vmspace + back", cmd_vmswitch },
     { "disk",    "show ATA disk info",               cmd_disk },
     { "run",     "run a script (one cmd per line)",  cmd_run },
     { "exec",    "exec <file.elf> - load + run an ELF program", cmd_exec },
@@ -1013,6 +1015,143 @@ static void cmd_vmtest(int argc, char **argv) {
     else    { console_set_color(0xF87171u); console_puts("self-test: FAIL"); }
     console_set_color(COL_WHITE);
     console_puts(" (create, map uva=128G, translate hit + miss, destroy, no leak)\n");
+}
+
+/* ---- vmswitch: prove a scheduler-driven CR3 switch (Tier 3, M3) -------------
+ *
+ * The shell builds a real per-process address space, spawns a KERNEL task bound
+ * to it, and lets the SCHEDULER switch into it (loading the new CR3). The task
+ * runs entirely under that space and touches only kernel memory - which is
+ * mapped identically in every space, so it stays reachable across the switch. It
+ * records the CR3 it actually executed under, writes a sentinel, and bumps a
+ * counter; then it exits and the scheduler switches back to the kernel space.
+ * We prove: (1) the task ran (sentinel + counter changed), (2) it ran under the
+ * OTHER cr3 (seen == the vmspace PML4, and != kernel_cr3), (3) the box is alive,
+ * (4) destroying the space returns the pmm to its exact baseline (no leak). */
+
+#define VMSW_SENTINEL 0x5704DEADC0DE5704ULL
+
+static volatile uint64_t vmsw_seen_cr3;   /* CR3 the task observed itself under */
+static volatile uint64_t vmsw_sentinel;   /* task writes VMSW_SENTINEL here      */
+static volatile uint64_t vmsw_counter;    /* task increments this once           */
+
+static void vmswitch_task(void *arg) {
+    (void)arg;
+    /* Runs under the switched CR3. Read our own CR3 as hard evidence of which
+     * space we are executing in, then touch ONLY kernel globals (BSS, identity-
+     * mapped in every space - never the private user region). No framebuffer, no
+     * heap, no yield: the smallest possible surface under the foreign CR3. */
+    uint64_t cr3;
+    __asm__ volatile("mov %%cr3, %0" : "=r"(cr3));
+    vmsw_seen_cr3 = cr3;
+    vmsw_sentinel = VMSW_SENTINEL;
+    vmsw_counter++;
+    /* return -> task_entry_thunk -> task_exit(): the scheduler switches away
+     * (loading a different CR3) as part of the SAME schedule() that makes the
+     * shell runnable again. So by the time the shell observes us DONE, the CR3 is
+     * already off this vmspace - which is what makes destroy-after-DONE safe. */
+}
+
+static void cmd_vmswitch(int argc, char **argv) {
+    (void)argc; (void)argv;
+    if (pmm_frames_total() == 0) {
+        console_set_color(0xF87171u);
+        console_puts("vmswitch: pmm disabled - no address spaces without frames\n");
+        console_set_color(COL_WHITE);
+        return;
+    }
+
+    const uint64_t kcr3 = task_kernel_cr3();
+    uint64_t before = pmm_frames_free();
+    uint64_t space_cr3 = 0, seen = 0, cnt_before = vmsw_counter;
+    int ok = 1, mapped = 0, finished = 0, tid = -1;
+
+    /* Build a space that GENUINELY differs from the kernel space: mapping one
+     * page at USER_VA_BASE forks PML4[0] into a private PDPT, so its PML4 phys is
+     * a fresh frame != kernel_cr3. (If it matched kernel_cr3, "switching" would
+     * prove nothing.) The page frame is owned by the space and freed by destroy. */
+    vmspace_t *sp = vmspace_create();
+    if (!sp) ok = 0;
+    uint64_t page = 0;
+    if (ok) { page = pmm_alloc(); if (!page) ok = 0; }
+    if (ok) {
+        if (vmspace_map(sp, USER_VA_BASE, page, PTE_P | PTE_W | PTE_US) == 0) mapped = 1;
+        else ok = 0;
+    }
+    if (ok) {
+        space_cr3 = sp->pml4_phys;
+        if (space_cr3 == kcr3) ok = 0;          /* must be a different space */
+    }
+
+    if (ok) {
+        /* Arm the proof state, THEN spawn - so a stale value from a prior run
+         * can't fake a pass, and the task (spawned after) runs under sp from its
+         * first slice (cr3 bound under the spawn lock, before it is READY). */
+        vmsw_seen_cr3 = 0;
+        vmsw_sentinel = 0;
+        tid = task_spawn_in_space("vmswitch", vmswitch_task, 0, space_cr3);
+        if (tid < 0) ok = 0;
+    }
+
+    if (ok) {
+        /* Let the scheduler run it, and wait for its STATE to leave the runnable
+         * set (DONE, or reaped to UNUSED) - NOT a task-set flag. State only flips
+         * inside task_exit's final schedule(), which has ALREADY switched CR3 off
+         * sp before the shell resumes. Gating destroy on this (not on the task's
+         * own "done" write, which can be observed while it is still preemptible
+         * and READY under sp) is what makes freeing the space race-free. Bounded
+         * so a wedge can never hang the shell. */
+        struct task_info ti;
+        for (int spins = 0; spins < 5000000; spins++) {
+            if (!task_get_info(tid, &ti) || ti.state == TASK_DONE) { finished = 1; break; }
+            task_yield();
+        }
+        if (!finished) ok = 0;   /* never completed - see cleanup: do NOT free sp */
+    }
+
+    /* Evidence the task really executed under the switched CR3. */
+    seen = vmsw_seen_cr3;
+    if (ok) {
+        if (vmsw_sentinel != VMSW_SENTINEL)   ok = 0;   /* it ran                */
+        if (vmsw_counter  != cnt_before + 1)  ok = 0;   /* exactly once          */
+        if (seen != space_cr3)                ok = 0;   /* under the new cr3     */
+        if (seen == kcr3)                     ok = 0;   /* not the kernel space  */
+    }
+
+    /* Destroy the space ONLY when no live task is still bound to it: either the
+     * task finished (its CR3 is no longer active anywhere) or it never spawned.
+     * If it somehow didn't finish, leak the space deliberately rather than free
+     * page tables a live CR3 might still point at - a leak is a FAIL, a freed
+     * live CR3 is a triple-fault. */
+    int safe = (tid < 0) || finished;
+    if (sp && safe) vmspace_destroy(sp);          /* frees PML4 + tables (+ leaf if mapped) */
+    if (page && !mapped && safe) pmm_free(page);  /* orphaned leaf: destroy didn't own it   */
+
+    uint64_t after = pmm_frames_free();
+    if (after != before) ok = 0;   /* every frame must return - no leak */
+
+    console_puts("kernel cr3 ");
+    console_put_hex64(kcr3);
+    console_puts("\nspace  cr3 ");
+    console_put_hex64(space_cr3);
+    console_puts("\ntask ran   ");
+    console_put_hex64(seen);
+    console_puts("\nsentinel   ");
+    console_put_hex64(vmsw_sentinel);
+    console_puts("\ncounter    ");
+    console_put_u64(cnt_before);
+    console_puts(" -> ");
+    console_put_u64(vmsw_counter);
+    console_puts("\nframes     ");
+    console_put_u64(before);
+    console_puts(" before / ");
+    console_put_u64(after);
+    console_puts(" after\n");
+
+    if (ok) { console_set_color(COL_OK);    console_puts("self-test: PASS"); }
+    else    { console_set_color(0xF87171u); console_puts("self-test: FAIL"); }
+    console_set_color(COL_WHITE);
+    console_puts(" (scheduler switched CR3 into a vmspace task and back, no leak)\n");
 }
 
 static void cmd_sync(int argc, char **argv) {

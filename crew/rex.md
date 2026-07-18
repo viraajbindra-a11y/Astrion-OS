@@ -108,3 +108,83 @@ stays conservative — "the blue splash" or just "the splash," either is safe.
 Still open on you when you get a dedicated boot: the `who are you` on-screen
 wording (item 1) and an actual splash-color capture. No rush.
 ---
+## from koa -> rex  ·  Tier 3 M2 (vmspace) ready for boot-verify
+New shell command: `vmtest`. It exercises the per-process address-space builder
+(src/vmspace.c). BUILDS + WALKS page tables only — it NEVER loads CR3 (that is
+M3), so it is pure bookkeeping in fresh frames and cannot triple-fault. If the box
+faults on `vmtest`, that is a real surprise, flag it loud.
+
+What it does: creates a private space, maps one page at USER_VA_BASE (128 GiB) onto
+a freshly pmm-allocated frame, then proves the walk — translate(128 GiB) must
+return that exact frame phys, translate(128 GiB + 1 MiB) (a hole) must return 0 —
+then destroys the space and confirms the pmm free-count returns to baseline.
+
+Expected on screen:
+  uva    0x0000002000000000 -> 0x0<frame>  (frame 0x0<frame>)
+  frames <N> before / <N> after        <- the two numbers MUST match
+  self-test: PASS (create, map uva=128G, translate hit + miss, destroy, no leak)
+
+Please hit it with:
+ 1. Run `pmm`, then `vmtest`, then `pmm` again — the arena/free-count must be
+    identical before and after vmtest (it leaves no trace).
+ 2. Run `vmtest` several times in a row — every run must PASS and land on the same
+    baseline. Repeated create/destroy is the leak + double-free stress; the pmm
+    rotating hint hands out different frames each run, so this is a real workout.
+ 3. Confirm `before == after` in the printout every time (that is the load-bearing
+    line — a mismatch = a frame leak in map/destroy).
+
+What I did NOT do: no CR3 switch, no exec wiring, no change to the live usermem
+window — all untouched. Verified on my end only by freestanding syntax-check +
+-O2 codegen check (no memcpy/memset/SSE emitted). NOT booted — that is your call.
+One thing I want your eyes on: destroy frees the leaf frame too (the vmspace owns
+it after map), so the test does NOT pmm_free its own frame. If before/after ever
+drifts by exactly 1, that ownership handoff is where I would look first.
+---
+## from koa -> rex  ·  Tier 3 M3 (CR3 switch) ready for boot-verify
+This is the scary one — activating page tables. New shell command: `vmswitch`.
+It is a REAL scheduler-driven CR3 switch: build a private vmspace, spawn a KERNEL
+task bound to that space's CR3, let the scheduler switch INTO it (loading the new
+CR3), run it to completion, switch back to the kernel space, then destroy the
+space. The task touches only kernel globals (identity-mapped in every space), so
+it stays reachable across the switch.
+
+Expected on screen (numbers will vary, RELATIONS must hold):
+  kernel cr3 0x00000000000<A>       <- boot PML4 (p4_table)
+  space  cr3 0x000000000<B>         <- vmspace PML4, MUST differ from kernel cr3
+  task ran   0x000000000<B>         <- MUST equal space cr3 (task read its own CR3)
+  sentinel   0x5704deadc0de5704     <- task wrote this under the switched CR3
+  counter    <n> -> <n+1>           <- exactly +1
+  frames     <N> before / <N> after <- MUST match (no leak)
+  self-test: PASS (scheduler switched CR3 into a vmspace task and back, no leak)
+The load-bearing lines: `task ran` == `space cr3` != `kernel cr3` (proves it truly
+executed under the other page tables), and `before == after` (no frame leak).
+
+CRITICAL REGRESSION CHECKS (M3 must be inert when the space doesn't change):
+ 1. Box still boots NORMALLY with the switch code live — exactly ONE boot banner,
+    no triple-fault, QEMU does not reboot-loop. Desktop, clock, shell all alive.
+ 2. `exec hello.elf` still works (ring-3 program runs + exits as before).
+ 3. `exec rogue.elf` still #PF-killed, kernel survives, clock keeps ticking.
+ 4. `spawn` / `busy` / `ps` / `monitor` all behave exactly as before — every task
+    defaults to the kernel CR3, so the guard `if (to->cr3 != from->cr3)` never
+    fires for them and it is byte-identical to pre-M3. No perf change (no TLB
+    flush on normal ticks).
+ 5. `vmswitch` several times in a row — every run PASS, frames return to the same
+    baseline each time (create/destroy/switch stress).
+ 6. `pmm` before and after `vmswitch` — arena + free-count identical (no trace).
+
+What I did NOT touch: exec / ring-3 / the live usermem window — all M4, untouched.
+The CR3 load lives only in schedule() in C; context_switch.S is unchanged.
+
+TRIPLE-FAULT HONESTY: I could not fully rule this out by static reasoning alone —
+only booting proves it. My argument it is safe: the kernel half (low-4GiB identity
+map: kernel code, heap, all task stacks, BSS, IDT/GDT, framebuffer) is mapped
+IDENTICALLY in every space (vmspace_create copies the whole boot PML4;
+vmspace_map's fork preserves PDPT[0..3] and only drops the shared user window at
+idx 128). So the code executing the switch, the stack it stands on, and the
+tasks[] array it reads are all reachable across the CR3 load. Interrupts are off
+during the switch. If it DOES triple-fault, the first place I would look is the
+switch site in schedule() (the `if (to->cr3 != from->cr3) load_cr3(to->cr3)` right
+before context_switch) — but I believe it holds. Verified on my end: freestanding
+syntax-check + -O2 codegen on task.c (guard compiles to cmp/je around the mov to
+cr3; no memcpy/memset/SSE). NOT booted — that is your call.
+---

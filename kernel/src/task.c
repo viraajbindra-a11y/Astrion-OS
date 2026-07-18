@@ -48,6 +48,7 @@ struct task {
     void           *arg;
     uint8_t        *stack_base;   /* kmalloc'd; NULL for task 0 */
     uint64_t        kstack_top;   /* 16-aligned top of this task's kernel stack (-> tss.rsp0) */
+    uint64_t        cr3;          /* address space to activate on switch-in (kernel_cr3 = default) */
     uint32_t        upool_start;  /* ring-3 user-window frames (0/0 if not a user task) */
     uint32_t        upool_frames;
     uint64_t        switches;
@@ -57,6 +58,13 @@ struct task {
 static struct task tasks[TASK_MAX];
 static int current_tid;
 
+/* The kernel's CR3 (phys of the boot PML4 p4_table), captured once at
+ * tasks_init from the boot context. Every task defaults its cr3 to this, so a
+ * task with no private address space runs on the shared kernel mapping exactly
+ * as it did before M3. Only a task explicitly bound to a vmspace carries a
+ * different cr3 - and only then does schedule() actually load CR3. */
+static uint64_t kernel_cr3;
+
 static void copy_name(char *dst, const char *src) {
     int i = 0;
     while (src && src[i] && i < TASK_NAME_MAX) { dst[i] = src[i]; i++; }
@@ -64,12 +72,18 @@ static void copy_name(char *dst, const char *src) {
 }
 
 void tasks_init(void) {
+    /* Capture the kernel's CR3 (the boot PML4) once, from the boot context we
+     * are running in right now. This is the default address space every task
+     * inherits, and the baseline schedule() compares against. */
+    __asm__ volatile("mov %%cr3, %0" : "=r"(kernel_cr3));
+
     for (int i = 0; i < TASK_MAX; i++) tasks[i].state = TASK_UNUSED;
     /* Adopt the caller (boot stack) as task 0. Its rsp gets filled in
      * by the first context_switch away from it. */
     tasks[0].state = TASK_RUNNING;
     tasks[0].stack_base = 0;
     tasks[0].kstack_top = (uint64_t)(uintptr_t)stack_top;   /* boot stack (ring-0 only) */
+    tasks[0].cr3 = kernel_cr3;                              /* the kernel space */
     tasks[0].upool_start = 0;
     tasks[0].upool_frames = 0;
     tasks[0].switches = 1;
@@ -121,6 +135,14 @@ static inline void irq_restore(uint64_t f) {
     __asm__ volatile("push %0; popfq" :: "r"(f) : "memory", "cc");
 }
 
+/* Load CR3 - switch the active page-table root. The "memory" clobber tells the
+ * compiler this changes the address space, so it must not move memory accesses
+ * across it. Only ever called from schedule() (interrupts off) and only when the
+ * incoming task's space differs from the outgoing one. */
+static inline void load_cr3(uint64_t cr3) {
+    __asm__ volatile("mov %0, %%cr3" :: "r"(cr3) : "memory");
+}
+
 /* Spawn a task, optionally owning a ring-3 user-window allocation
  * [upool_start, upool_start+upool_frames). The ENTIRE body runs with
  * interrupts OFF: it reaps DONE slots (freeing kernel stacks + user frames)
@@ -131,7 +153,8 @@ static inline void irq_restore(uint64_t f) {
  * atomically with TASK_READY, so a ring-3 task that faults the instant it
  * runs can't be reaped before its frames are recorded (which would leak them). */
 static int spawn_locked(const char *name, task_fn fn, void *arg,
-                        uint32_t upool_start, uint32_t upool_frames) {
+                        uint32_t upool_start, uint32_t upool_frames,
+                        uint64_t cr3) {
     uint64_t flags = irq_save();
     reap_done();
 
@@ -149,6 +172,11 @@ static int spawn_locked(const char *name, task_fn fn, void *arg,
     t->arg = arg;
     t->stack_base = stack;
     t->kstack_top = ((uint64_t)(uintptr_t)stack + TASK_STACK_SIZE) & ~0xFULL;
+    /* Bind the address space now, under the lock, before the task is READY - so
+     * it runs under this space from its very first slice. cr3 == 0 (a phys frame
+     * addr is never 0) is a safe "default to the kernel space" sentinel, so no
+     * task can ever reach schedule() with a bogus cr3 of 0. */
+    t->cr3 = cr3 ? cr3 : kernel_cr3;
     t->upool_start = upool_start;
     t->upool_frames = upool_frames;
     t->switches = 0;
@@ -185,15 +213,23 @@ static int spawn_locked(const char *name, task_fn fn, void *arg,
 }
 
 int task_spawn(const char *name, task_fn fn, void *arg) {
-    return spawn_locked(name, fn, arg, 0, 0);
+    return spawn_locked(name, fn, arg, 0, 0, kernel_cr3);
 }
 
 /* Spawn a ring-3 task that owns user-window frames. Atomic with the spawn so
  * the task can't run (and fault, and be reaped) before its frames are on
- * record — otherwise an immediately-faulting program leaks its pool window. */
+ * record — otherwise an immediately-faulting program leaks its pool window.
+ * Stays on the kernel space + shared user window until M4 rewires exec. */
 int task_spawn_user(const char *name, task_fn fn, void *arg,
                     uint32_t upool_start, uint32_t upool_frames) {
-    return spawn_locked(name, fn, arg, upool_start, upool_frames);
+    return spawn_locked(name, fn, arg, upool_start, upool_frames, kernel_cr3);
+}
+
+/* Spawn a kernel task bound to a given address space (its vmspace PML4 phys).
+ * See task.h: the cr3 is set under the lock before READY, so the scheduler
+ * activates that space the first time it switches in. */
+int task_spawn_in_space(const char *name, task_fn fn, void *arg, uint64_t cr3) {
+    return spawn_locked(name, fn, arg, 0, 0, cr3);
 }
 
 /* The actual switch. MUST run with interrupts disabled (so the timer
@@ -245,6 +281,20 @@ static void schedule(void) {
      * stack, or two ring-3 tasks would trap onto one stack and corrupt each
      * other. context_switch.S is TSS-agnostic, so this hook lives here. */
     tss_set_rsp0(to->kstack_top);
+    /* Activate the incoming task's address space - but ONLY when it differs from
+     * the outgoing one. Guarding this matters: an unconditional CR3 load flushes
+     * the entire (non-global) TLB on every tick and tanks performance; the guard
+     * keeps the common same-space switch a no-op, byte-identical to pre-M3.
+     *
+     * Loading here is safe because the kernel half is mapped IDENTICALLY in every
+     * space: we are still executing shared kernel code (schedule() lives in the
+     * low identity map), standing on a kernel stack (boot stack / kmalloc heap,
+     * also identity-mapped), and context_switch is about to push onto that same
+     * stack and read both tasks' rsp from the identity-mapped tasks[] array.
+     * Every byte touched from now until `to` actually runs is in the shared half,
+     * so it stays reachable across the CR3 change. Interrupts are off, so no tick
+     * can re-enter us mid-switch. */
+    if (to->cr3 != from->cr3) load_cr3(to->cr3);
     context_switch(&from->rsp, to->rsp);
     /* When something switches back to us, execution resumes here. */
 }
@@ -299,3 +349,5 @@ int task_get_info(int idx, struct task_info *out) {
 int task_current_tid(void) { return current_tid; }
 
 const char *task_current_name(void) { return tasks[current_tid].name; }
+
+uint64_t task_kernel_cr3(void) { return kernel_cr3; }

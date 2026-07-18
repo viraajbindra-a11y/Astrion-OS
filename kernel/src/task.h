@@ -38,6 +38,13 @@ int  task_spawn(const char *name, task_fn fn, void *arg);  /* returns tid or -1 
  * frame bookkeeping is recorded atomically with the spawn (no leak window). */
 int  task_spawn_user(const char *name, task_fn fn, void *arg,
                      uint32_t upool_start, uint32_t upool_frames);
+/* Spawn a KERNEL task bound to a specific address space (cr3 = a vmspace's PML4
+ * phys). The cr3 is recorded under the spawn lock, BEFORE the task is READY, so
+ * the task runs under that space from its very first slice - no window where it
+ * could be scheduled on the kernel space first. A kernel task is safe in a
+ * per-process space because the kernel half is mapped identically in every
+ * space; it never touches the private user region. cr3 == 0 means "kernel". */
+int  task_spawn_in_space(const char *name, task_fn fn, void *arg, uint64_t cr3);
 void task_yield(void);                                  /* voluntary switch */
 void task_preempt(void);                                /* called by timer ISR after EOI */
 void task_exit(void);                                   /* never returns */
@@ -53,5 +60,9 @@ struct task_info {
 int task_get_info(int idx, struct task_info *out);      /* 1 if slot in use */
 int task_current_tid(void);
 const char *task_current_name(void);                    /* name of the running task */
+
+/* The kernel's own CR3 (boot PML4 phys), captured once at tasks_init from the
+ * boot context. Every task with no private address space runs on this. */
+uint64_t task_kernel_cr3(void);
 
 #endif
