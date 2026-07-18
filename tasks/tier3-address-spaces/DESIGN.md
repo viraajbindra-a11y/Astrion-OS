@@ -105,4 +105,16 @@ bounds (every index masked to 9 bits, every intermediate frame checked for OOM).
   no cross-visibility, balancing the pmm. Verified locally: clang -fsyntax-only
   clean (-Wall -Wextra), -O2 codegen has zero memcpy/memset/xmm across every
   touched file. Awaiting Rex boot-verify before checking this box.
-- [ ] M5 proof + red-team
+- [x] **M5 proof + red-team — DONE.** Proof: Rex's M4 boot (isotest x3 = two
+  spaces, same VA → distinct non-cross-visible frames; rogue #PF-killed; zero
+  leak). Red-team: independent adversarial read of vmspace.c + the exec path
+  (`M5-REVIEW.md`) — indices masked, bounds enforced, fork/destroy correct
+  (no double-free, identity tables skipped), every exec failure path leak-safe,
+  ELF span capped at 4 MiB so frame counts can't wrap, freed-live-CR3 avoided via
+  the state-gated M3 discipline. **No bugs found.**
+
+## ✅ TIER 3 COMPLETE — per-process memory isolation is real, booted, and hardened.
+Two ring-3 programs load at the same virtual address, land on distinct physical
+frames under distinct page tables, and cannot read each other's memory — proven on
+a real boot. M1 pmm → M2 vmspace → M3 CR3 switch → M4 exec-per-process → M5 red-team,
+each independently booted before the next.
