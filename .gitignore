@@ -33,3 +33,4 @@ kernel/src/hello_elf.h
 # CI ISOs downloaded into proof dirs for QEMU verification (~12MB each,
 # reproducible via `gh run download`). Keep the AUDIT + frames, not the ISO.
 tasks/**/iso/
+tasks/**/iso-*/

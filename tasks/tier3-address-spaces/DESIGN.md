@@ -66,7 +66,11 @@ bounds (every index masked to 9 bits, every intermediate frame checked for OOM).
   restored). Arena top `0x0ffe0000` (255.9 MiB) correctly excludes the reserved
   chunk at the top of RAM — the "free only available regions" logic works.
   Proof: `frames/M1_pmm_selftest.png`, `M1-serial.txt`.
-- [ ] M2 vmspace  ← next
-- [ ] M3 CR3 switch
+- [x] **M2 vmspace — DONE + booted (commit 6b3ba6c, verified by Rex).**
+  `vmtest` PASS on 3 consecutive runs, `frames 55776 before / 55776 after`
+  every time (zero drift = no leak / no double-free), fresh frames rotated per
+  run and all reclaimed to baseline, `pmm` byte-identical before/after, no fault,
+  single boot banner, no regression. Proof: `M2-AUDIT.md`, `frames-m2/`.
+- [ ] M3 CR3 switch  ← next (highest triple-fault risk — activation)
 - [ ] M4 exec per-process
 - [ ] M5 proof + red-team
