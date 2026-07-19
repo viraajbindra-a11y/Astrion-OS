@@ -8,12 +8,36 @@ decision I shouldn't make on your behalf. Claude handles everything else.
 
 ---
 
-## 🔴 THIS WEEK — the hard blocker
+> **Updated 2026-07-18:** you already own a test machine + spare drive, and you've
+> already booted an earlier (Linux-based) Astrion on it. So most of the original
+> "buy a machine / here's how to flash a USB" material is cut — you've done this.
+> What's left below is only what's genuinely different for the **from-scratch
+> kernel**, plus the calls that are yours.
 
-### 1. Order the test machine — **by Wed Jul 22** · ~$60–130
-August is hardware month. **You cannot test on a box that hasn't arrived**, and
-used office PCs ship slowly. Order this week → it's on your desk Aug 1. Order it
-Aug 1 → you lose a week of your only hardware month.
+## 🔴 THE ONE CHECK — 30 seconds, do it whenever
+
+### 0. Look at the back of your test machine
+**The Linux version booting there proves nothing about the kernel.** v1.0 ran on
+top of Linux, which has drivers for everything (USB keyboards, NVMe, all of it).
+The from-scratch kernel has **PS/2 and ATA only**. Same box, different rules.
+
+Look for either:
+- **two round purple + green connectors** (PS/2 keyboard + mouse), **or**
+- a **DB9** — 9-pin trapezoid (serial)
+
+- **Has either → buy nothing.** You're set; skip #1 entirely.
+- **Has neither** → it will boot to the desktop and then you won't be able to
+  type. That's the only reason to buy the machine below.
+
+Also worth knowing (doesn't block the demo): our disk driver is **ATA PIO**, so if
+that machine is NVMe or SATA-in-AHCI, files won't survive a reboot. Everything in
+the demo happens in one session, so this changes nothing on stage.
+
+## 🟠 ONLY IF THE PORT CHECK FAILS
+
+### 1. Order a test machine — ~$60–130
+Skip if #0 passed. If you do need one, order early enough to arrive before August
+— used office PCs ship slowly.
 
 **Buy:** Dell OptiPlex **7040** or **7050 SFF** (best). Also fine: HP EliteDesk
 800 **G1/G2** SFF/Tower, Lenovo ThinkCentre **M700/M710**, HP Compaq Elite **8300
