@@ -14,7 +14,33 @@ decision I shouldn't make on your behalf. Claude handles everything else.
 > What's left below is only what's genuinely different for the **from-scratch
 > kernel**, plus the calls that are yours.
 
-## 🔴 THE ONE CHECK — 30 seconds, do it whenever
+## ⚠️ RESOLVED 2026-07-18 — the test machine is a **Surface Pro 6**
+
+That answers the port check below: **no PS/2, no serial, NVMe storage, UEFI
+Class 3 (no CSM at all).** So:
+
+| On the Surface Pro 6 | |
+|---|---|
+| Boots + splash + desktop + live clock | ✅ very likely (hybrid ISO has BOOTX64.EFI; GRUB `timeout=0` needs no keypress; framebuffer comes from the multiboot2 GOP tag) |
+| **Typing** | ❌ no i8042. The Type Cover is USB HID and we have no USB stack. Firmware keyboard support dies when GRUB exits boot services. |
+| **Serial input** (the fallback we just built) | ❌ **no COM port to plug into.** A USB-serial adapter would itself need a USB stack. |
+| Mouse / touch | ❌ USB/I2C HID |
+| File persistence | ❌ NVMe, not ATA (irrelevant — all demo beats are in-session) |
+
+**Plan:** boot it anyway (~10 min, Secure Boot off) and capture a photo/short
+video **with the clock visibly ticking** — that proves the kernel is live on bare
+metal, not a frozen screenshot. That's the Tier 4 win and the asset we don't have.
+Keep the *interactive* demo in QEMU, which `DEMO-SCRIPT.md` already recommends as
+more reliable on a projector. Buy a PS/2 box only if you specifically want
+interactive-on-metal — the script itself calls real hardware "a bonus flex, not a
+requirement."
+
+*Note: our own `SESSION_HANDOFF.md` flags Surface as "Microsoft UEFI = a third
+EDK2 variant," so budget for firmware quirks on the boot itself.*
+
+---
+
+## 🔴 THE ONE CHECK — answered above; kept for any other machine
 
 ### 0. Look at the back of your test machine
 **The Linux version booting there proves nothing about the kernel.** v1.0 ran on
