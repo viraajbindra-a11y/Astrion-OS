@@ -17,6 +17,7 @@
 #include "snake.h"      /* snake_play */
 #include "mouse.h"      /* mouse_x/y/left_down/take_left_click/lift */
 #include "gpt.h"        /* on-device GPT for the Assistant */
+#include "assist_match.h" /* prompt matching, unit-tested on the host */
 #include "af.h"         /* antialiased Inter text */
 #include "task.h"       /* task_get_info — the assistant reports what's running */
 #include "ata.h"        /* ata_present — disk / persistence status */
@@ -662,17 +663,9 @@ static void assist_render_output(void) {
 /* ─── local command layer: the assistant DOES things, fully offline ─── */
 extern uint64_t pit_elapsed_ms(void);
 
-static char lc(char c) { return (c >= 'A' && c <= 'Z') ? (char)(c + 32) : c; }
+#define lc  am_lc   /* both now live in include/assist_match.h */
 
-/* case-insensitive substring test */
-static int has(const char *h, const char *n) {
-    for (int i = 0; h[i]; i++) {
-        int j = 0;
-        while (n[j] && lc(h[i + j]) == lc(n[j])) j++;
-        if (!n[j]) return 1;
-    }
-    return 0;
-}
+#define has am_has
 
 /* last whitespace-delimited token of s, trailing punctuation trimmed */
 static void last_word(const char *s, char *out, int cap) {
@@ -824,7 +817,8 @@ static int try_intent(const char *p) {
         assist_say("  write:  write hi to notes.txt / append bye to notes.txt\n");
         assist_say("  copy:   copy notes.txt to backup.txt / delete notes.txt\n");
         assist_say("  open:   open the editor / snake / files\n\n");
-        assist_say("or just type anything and I'll write it. No internet, ever.\n");
+        assist_say("ask me to write a story or a poem and you get the on-device\n");
+        assist_say("model - 212K parameters, so expect nonsense. No internet, ever.\n");
         return 1;
     }
 
@@ -1014,7 +1008,18 @@ static int try_intent(const char *p) {
             assist_emit('\n');
             return 1;
         }
-        /* no such file -> fall through (probably a chat request) */
+        /* No such file. This used to fall through on the theory that it was
+         * "probably a chat request" — only ever true while there WAS a chat
+         * model behind it to catch the fall. There isn't any more, and the
+         * fall-through is how `read poem.txt` reached a poetry generator.
+         * If they named something shaped like a file, say the file is missing;
+         * anything else still falls through to the intents below. */
+        if (has(name, ".")) {
+            assist_begin_output();
+            assist_say("no file called "); assist_say(name); assist_say(".\n");
+            assist_say("say 'list my files' to see what's there.\n");
+            return 1;
+        }
     }
     if (has(p, "open") || has(p, "launch") || has(p, "start") ||
         has(p, "play") || has(p, "go to")) {
@@ -1026,16 +1031,41 @@ static int try_intent(const char *p) {
     return 0;   /* -> GPT */
 }
 
+
 static void assist_run(void) {
     if (try_intent(as_prompt)) return;   /* did a real action, offline */
-    assist_begin_output();               /* open-ended text -> on-device GPT */
-    gpt_generate(as_prompt, 220, assist_emit);
+
+    /* The model is 212K parameters. It can produce English-shaped text; it
+     * cannot answer a question. Routing every unmatched prompt into it is what
+     * made the assistant look like it was hallucinating — it was being handed
+     * the one job a model this size cannot do. So: run it only when someone
+     * explicitly asks for invented text, and label what they're getting. */
+    if (am_wants_generation(as_prompt)) {
+        assist_begin_output();
+        assist_say("on-device model, 212K parameters, no internet involved.\n");
+        assist_say("it writes English-shaped text, not sense - that's the size:\n\n");
+        gpt_generate(as_prompt, 220, assist_emit);
+        return;
+    }
+
+    /* Everything else: say so. An honest "I didn't get that" reads as a small
+     * assistant that knows its limits; confident nonsense reads as a broken
+     * one. Same information, and only one of them survives a demo. */
+    assist_begin_output();
+    assist_say("I didn't understand that one.\n\n");
+    assist_say("I'm not a chatbot - I run this machine. What I do:\n\n");
+    assist_say("  ask:    how much memory / what's running / who are you\n");
+    assist_say("  files:  list my files / make notes.txt / read notes.txt\n");
+    assist_say("  write:  write hi to notes.txt / append bye to notes.txt\n");
+    assist_say("  copy:   copy notes.txt to backup.txt / delete notes.txt\n");
+    assist_say("  open:   open the editor / snake / files\n\n");
+    assist_say("say 'help' for the full list.\n");
 }
 
 static void assist_draw(void) {
     fb_rect_x(cx, cy, cw, ch, AC_TERM_BG);
     af_draw(cx, cy, "Astrion Assistant", settings_accent(), AF_SB16);
-    af_draw(cx, cy + 24, "on-device - try:  write hi to notes.txt  /  read notes.txt  /  open snake  /  help  /  or just chat",
+    af_draw(cx, cy + 24, "offline - try:  write hi to notes.txt  /  read notes.txt  /  what's running  /  open snake  /  help",
             AC_MUTED, AF_REG13);
     assist_prompt_line();
     assist_render_output();      /* redraw the last answer from its buffer */
