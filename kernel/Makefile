@@ -330,10 +330,22 @@ iso-grub: kernel-mb2
 	grub-mkrescue -o $(BUILD_DIR)/astrion-grub.iso $(BUILD_DIR)/iso-grub
 	@echo "GRUB ISO: $(BUILD_DIR)/astrion-grub.iso"
 
+# RAM and CPU model are variables so a run can override them:
+#   make run-grub MEM=256M          - the old small config
+#   make run-grub CPU=qemu64        - force the 2 MiB / 4 GiB fallback path
+MEM ?= 12G
+CPU ?= max
+
+# -cpu max is not optional at this size. The boot code picks its page mapping
+# from CPUID: with PDPE1GB it maps 512 GiB using 1 GiB pages, without it falls
+# back to 4 GiB. QEMU's DEFAULT cpu model does not expose PDPE1GB, so plain
+# `-m 12G` would boot fine and leave 8 of those 12 GiB unaddressable, silently.
+# Check the "PAGING:" line in the serial log to see which path a run took.
 run-grub: iso-grub
 	qemu-system-x86_64 \
 	    -cdrom $(BUILD_DIR)/astrion-grub.iso \
-	    -m 256M \
+	    -cpu $(CPU) \
+	    -m $(MEM) \
 	    -serial stdio \
 	    -display none \
 	    -no-reboot
@@ -348,8 +360,19 @@ run-grub: iso-grub
 HOSTCC ?= cc
 HOST_TEST_SRCS := $(wildcard tests/test_*.c)
 HOST_TESTS     := $(patsubst tests/%.c,$(BUILD_DIR)/%,$(HOST_TEST_SRCS))
+# The tests are ENTIRELY about the logic in these headers, so a header edit
+# has to rebuild them. Without this prerequisite `make test` re-ran a stale
+# binary and reported a pass for code that no longer existed — the same
+# "a gate that cannot fail is not a gate" failure the reloc gates had.
+HOST_TEST_HDRS := $(wildcard include/*.h)
 
-$(BUILD_DIR)/test_%: tests/test_%.c | $(BUILD_DIR)
+# `| $(BUILD_DIR)` is an order-only prerequisite and there was no rule to
+# satisfy it, so `make test` on a clean tree died with "No rule to make target
+# build/test_assist_match" before running a single case.
+$(BUILD_DIR):
+	@mkdir -p $(BUILD_DIR)
+
+$(BUILD_DIR)/test_%: tests/test_%.c $(HOST_TEST_HDRS) | $(BUILD_DIR)
 	$(HOSTCC) -std=c11 -Wall -Wextra -Werror -Iinclude -o $@ $<
 
 test: $(HOST_TESTS)

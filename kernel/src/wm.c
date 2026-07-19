@@ -20,10 +20,11 @@
 #include "assist_match.h" /* prompt matching, unit-tested on the host */
 #include "af.h"         /* antialiased Inter text */
 #include "task.h"       /* task_get_info — the assistant reports what's running */
-#include "ata.h"        /* ata_present — disk / persistence status */
+#include "ata.h"        /* ata_present/model/sectors — disk + persistence status */
 #include "rtc.h"        /* rtc_read — the assistant knows the real date */
 #include "calc.h"       /* the Calculator's arithmetic + state machine */
 #include "settings.h"   /* the session's accent / wallpaper / clock format */
+#include "pmm.h"        /* pmm_frames_* — the assistant reports physical RAM */
 
 /* Framebuffer wrappers live in kernel_mb2.c with no header — declare them
  * here the same way console.c / mouse.c do. */
@@ -34,6 +35,14 @@ extern uint32_t fb_width_x(void);
 extern uint32_t fb_height_x(void);
 extern void     fb_rect_x(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color);
 extern uint32_t fb_puts_x(uint32_t x, uint32_t y, const char *s, uint32_t color, int scale);
+
+/* Boot facts GRUB handed us, same accessors the shell's `version` / `mem`
+ * commands read. Declared here rather than in a header for the same reason
+ * the fb_* wrappers are — kernel_mb2.c doesn't publish one. */
+extern uint32_t    mb_total_available_mib_x(void);
+extern uint32_t    mb_mmap_entry_count_x(void);
+extern uint8_t     mb_fb_bpp_x(void);
+extern const char *mb_bootloader_name_x(void);
 
 /* ─── Geometry ─── */
 /* One generous size for the apps that hold content of unbounded length — a
@@ -99,6 +108,7 @@ static void repaint_all(void);
 static void draw_frame(struct window *w);
 static void draw_content(struct window *w);
 static void set_content_rect(struct window *w);
+static void settings_apply(int g, int idx);   /* the Assistant can change settings too */
 
 static int slot_of(enum app_kind a) {
     switch (a) { case APP_FILES: return 0; case APP_EDITOR: return 1;
@@ -624,7 +634,37 @@ static uint32_t as_ox, as_oy;      /* streaming output cursor */
 static char     as_out[3072];
 static int      as_olen;
 
-static void assist_reset(void) { as_plen = 0; as_prompt[0] = 0; as_olen = 0; }
+/* ─── the confirmation gate ───
+ *
+ * A destructive action that has been described to the user and is waiting on
+ * a yes. Nothing here is a pointer into the filesystem: the file is stored by
+ * NAME and re-resolved at the moment it is acted on, because the shell can
+ * unlink or replace it between the question and the answer, and an fs_node*
+ * cached across those two keystrokes is a stale pointer aimed at a delete.
+ *
+ * Cleared by assist_reset(), which runs every time the window is opened — so
+ * an armed delete can never outlive the window that asked about it. */
+enum as_pend {
+    AS_PEND_NONE = 0,
+    AS_PEND_DELETE,      /* unlink as_pend_a                            */
+    AS_PEND_OVERWRITE,   /* copy as_pend_b over the existing as_pend_a  */
+    AS_PEND_WRITE,       /* put as_pend_text into the existing as_pend_a */
+};
+static enum as_pend as_pending;
+static char         as_pend_a[FS_NAME_MAX + 1];
+static char         as_pend_b[FS_NAME_MAX + 1];
+/* The payload of a held-back write. Held here rather than re-parsed from the
+ * prompt at confirm time, because by then the prompt is the word "y". */
+static char         as_pend_text[128];
+
+static void assist_disarm(void) {
+    as_pending = AS_PEND_NONE;
+    as_pend_a[0] = 0; as_pend_b[0] = 0; as_pend_text[0] = 0;
+}
+
+static void assist_reset(void) {
+    as_plen = 0; as_prompt[0] = 0; as_olen = 0; assist_disarm();
+}
 
 static void assist_prompt_line(void) {
     uint32_t py = cy + 60;
@@ -667,7 +707,20 @@ extern uint64_t pit_elapsed_ms(void);
 
 #define has am_has
 
-/* last whitespace-delimited token of s, trailing punctuation trimmed */
+/* Bounded string copy — always terminates, never runs past cap. */
+static void scopy(char *dst, const char *src, int cap) {
+    int k = 0;
+    while (src[k] && k < cap - 1) { dst[k] = src[k]; k++; }
+    dst[k] = 0;
+}
+
+/* last whitespace-delimited token of s, trailing punctuation trimmed.
+ *
+ * LENIENT ON PURPOSE, and only safe for the intents that read rather than
+ * destroy. It takes whatever ends the sentence, so `delete edge3.txt later`
+ * hands back "later" — which is how a file the user never named got deleted.
+ * Anything that removes or overwrites data uses am_named_file() instead and
+ * refuses when it can't find exactly one explicitly named file. */
 static void last_word(const char *s, char *out, int cap) {
     int end = 0; while (s[end]) end++;
     while (end > 0) { char c = s[end - 1];
@@ -749,82 +802,318 @@ static const char *task_state_name(enum task_state s) {
     }
 }
 
-/* Try to handle the prompt as a real, safe, LOCAL action — the whole thesis:
- * you talk to the OS and it DOES things, offline. Returns 1 if handled; 0
- * falls through to the GPT for open-ended text. */
-static int try_intent(const char *p) {
-    /* ─── talk about the machine: real numbers, straight from the kernel ─── */
+/* Append ".txt" to a bare name, in place. Every file intent wants this so
+ * "copy notes to backup" means what a person means by it. */
+static void ensure_txt(char *name, int cap) {
+    if (name_has_ext(name)) return;
+    int k = 0; while (name[k]) k++;
+    const char *e = ".txt"; int j = 0;
+    while (e[j] && k < cap - 1) name[k++] = e[j++];
+    name[k] = 0;
+}
 
-    /* who/what are you — the honest pitch */
-    if ((has(p, "who are you") || has(p, "what are you") || has(p, "who made") ||
-         has(p, "who built") || has(p, "what is this") || has(p, "introduce")) &&
-        !has(p, "running") && !has(p, "doing")) {
+/* Copy a file's bytes to another name. Straight out of the source node's
+ * buffer: the previous copy path ran through a fixed 1 KiB static and
+ * silently truncated anything larger, which is the worst possible way for a
+ * "copy" to fail — you don't find out until you read the copy back. Returns
+ * bytes written, or -1. */
+static int dup_file_bytes(fs_node *sn, const char *dst) {
+    if (!sn->data || sn->size == 0)
+        return fs_write(dst, (const uint8_t *)"", 0) < 0 ? -1 : 0;
+    return fs_write(dst, sn->data, sn->size);
+}
+
+static void cpuid_x(uint32_t leaf, uint32_t *a, uint32_t *b,
+                    uint32_t *c, uint32_t *d) {
+    __asm__ volatile("cpuid"
+        : "=a"(*a), "=b"(*b), "=c"(*c), "=d"(*d)
+        : "a"(leaf), "c"(0));
+}
+
+/* CPUID returns its ASCII four bytes to a register. Unpacked by shifting
+ * rather than by casting the buffer to uint32_t*: the buffer is a char array
+ * with alignment 1, and the cast is the kind of aliasing the compiler is
+ * allowed to be creative about. */
+static void cpuid_word(char *dst, uint32_t v) {
+    dst[0] = (char)(v & 0xFF);         dst[1] = (char)((v >> 8) & 0xFF);
+    dst[2] = (char)((v >> 16) & 0xFF); dst[3] = (char)((v >> 24) & 0xFF);
+}
+
+/* ─── the question half of the intent table ───
+ * Everything here is terminal: the kernel always has something true to say,
+ * so none of these can fall through. WHICH one runs is decided by
+ * am_classify() in include/assist_match.h, where the order is unit-tested —
+ * see the note there about first-match-wins silently eating prompts. */
+static void assist_report(enum am_intent w, const char *p) {
+    switch (w) {
+
+    case AM_VERSION: {
+        const char *bl = mb_bootloader_name_x();
+        assist_begin_output();
+        assist_say("Astrion v2.0 - kernel v2.0-stub\n");
+        assist_say("  boot:       multiboot2, handed over by ");
+        assist_say(bl ? bl : "(unknown)"); assist_emit('\n');
+        assist_say("  arch:       x86_64 long mode, ring 0 + ring 3\n");
+        assist_say("  built:      " __DATE__ " " __TIME__ "\n");
+        assist_say("written from scratch in C. no Linux under me.\n");
+        return;
+    }
+
+    case AM_IDENTITY:
         assist_begin_output();
         assist_say("I'm Astrion's assistant. I live inside a kernel written from\n");
         assist_say("scratch in C - no Linux under me, no internet anywhere.\n");
         assist_say("I don't just chat: I run this machine for you. Ask me your\n");
-        assist_say("memory, what's running, or your files - or tell me to make,\n");
-        assist_say("write, append, copy, read or delete them.\n");
-        return 1;
+        assist_say("memory, disk, cpu, uptime, what's running or your files -\n");
+        assist_say("or tell me to make, write, append, copy, rename, read or\n");
+        assist_say("delete them, open an app, or change a setting.\n");
+        return;
+
+    case AM_HELP:
+        assist_begin_output();
+        assist_say("I run this machine, all offline:\n\n");
+        assist_say("  machine: how much memory / disk space / what cpu\n");
+        assist_say("           what's running / uptime / what version\n");
+        assist_say("           screen resolution / what happened at boot\n");
+        assist_say("  files:   list my files / how many files\n");
+        assist_say("           make notes.txt / read notes.txt\n");
+        assist_say("           write hi to notes.txt / append bye to notes.txt\n");
+        assist_say("           copy notes.txt to backup.txt\n");
+        assist_say("           rename notes.txt to todo.txt / delete notes.txt\n");
+        assist_say("  desktop: what apps do i have / open the editor\n");
+        assist_say("           set the accent to teal / clear the screen\n\n");
+        assist_say("ask me to write a story or a poem and you get the on-device\n");
+        assist_say("model - 212K parameters, so expect nonsense. No internet, ever.\n");
+        return;
+
+    /* ─── change a setting, for real: this repaints the whole desktop ─── */
+    case AM_SET_CHANGE: {
+        int g = am_setting_group(p);
+        if (g < 0) {
+            assist_begin_output();
+            assist_say("I can change the accent, the wallpaper or the clock.\n");
+            assist_say("try: set the accent to teal\n");
+            return;
+        }
+        int n = settings_count(g), hit = -1;
+        for (int i = 0; i < n; i++)
+            if (am_word(p, settings_label(g, i))) { hit = i; break; }
+        /* The clock's labels are "24-hour" / "12-hour"; people say "12 hour". */
+        if (hit < 0 && g == SET_CLOCK) {
+            if      (am_word(p, "12")) hit = 1;
+            else if (am_word(p, "24")) hit = 0;
+        }
+        if (hit < 0) {
+            assist_begin_output();
+            assist_say(settings_group_name(g)); assist_say(" can be:\n  ");
+            for (int i = 0; i < n; i++) {
+                assist_say(settings_label(g, i));
+                if (i + 1 < n) assist_say("  ");
+            }
+            assist_emit('\n');
+            return;
+        }
+        /* Say it BEFORE applying. settings_apply() calls repaint_all(), which
+         * redraws this window from as_out and leaves the content rect pointing
+         * at some other window - so nothing may be emitted after it. */
+        assist_begin_output();
+        assist_say("set "); assist_say(settings_group_name(g));
+        assist_say(" to ");  assist_say(settings_label(g, hit));
+        assist_say(".\nlive now - the whole desktop just repainted.\n");
+        settings_apply(g, hit);
+        return;
     }
 
-    /* memory — real heap numbers */
-    if (has(p, "memory") || has(p, "memor") || has(p, "how much ram") ||
-        has(p, "free ram") || has(p, "heap")) {
+    case AM_SET_SHOW:
+        assist_begin_output();
+        assist_say("your settings right now:\n");
+        for (int g = 0; g < SET_GROUPS; g++) {
+            assist_say("  "); assist_say(settings_group_name(g));
+            assist_say(": ");  assist_say(settings_label(g, settings_get(g)));
+            assist_emit('\n');
+        }
+        assist_say("say 'set the accent to teal' and I'll change it.\n");
+        assist_say("session only - none of it is written to disk yet.\n");
+        return;
+
+    /* ─── memory: the kernel heap AND the physical RAM behind it ─── */
+    case AM_MEMORY: {
         uint32_t usedkb = (uint32_t)(heap_used() >> 10);
         uint32_t freekb = (uint32_t)(heap_free() >> 10);
+        uint32_t ffree  = (uint32_t)pmm_frames_free();
+        uint32_t ftotal = (uint32_t)pmm_frames_total();
         assist_begin_output();
-        assist_say("memory: ");
+        assist_say("RAM this machine has: ");
+        assist_num(mb_total_available_mib_x()); assist_say(" MiB usable.\n");
+        assist_say("kernel heap: ");
         assist_num(usedkb); assist_say(" KB used, ");
         assist_num(freekb); assist_say(" KB free (");
-        assist_num(usedkb + freekb); assist_say(" KB kernel heap).\n");
+        assist_num(usedkb + freekb); assist_say(" KB total).\n");
+        assist_say("page frames: "); assist_num(ffree);
+        assist_say(" free of ");     assist_num(ftotal);
+        assist_say(" (");            assist_num(ffree / 256);
+        assist_say(" MiB spare for new programs).\n");
         assist_say("all on this machine - nothing in a cloud.\n");
-        return 1;
+        return;
     }
 
-    /* what's running — the real scheduler table */
-    if (has(p, "running") || has(p, "processes") || has(p, "process") ||
-        has(p, "tasks") || has(p, "what are you doing") || has(p, "jobs")) {
+    /* ─── disk: is one attached, how big, and what's on it ─── */
+    case AM_DISK: {
+        assist_begin_output();
+        if (ata_present()) {
+            uint32_t sect = ata_total_sectors();
+            assist_say("disk: attached");
+            const char *m = ata_model();
+            if (m && m[0]) { assist_say(" - "); assist_say(m); }
+            assist_emit('\n');
+            assist_say("  capacity: "); assist_num(sect / 2048);
+            assist_say(" MiB ("); assist_num(sect); assist_say(" sectors)\n");
+            assist_say("  in use:   "); assist_num(fs_total_bytes());
+            assist_say(" bytes across "); assist_num(fs_count());
+            assist_say(" files\n");
+            assist_say("your files persist across reboots - I save on every change.\n");
+        } else {
+            assist_say("no disk this boot - your ");
+            assist_num(fs_count()); assist_say(" files (");
+            assist_num(fs_total_bytes()); assist_say(" bytes) live in RAM\n");
+            assist_say("and go away at power-off. attach a disk and they stay.\n");
+        }
+        return;
+    }
+
+    /* ─── cpu: straight out of CPUID, not a guess ─── */
+    case AM_CPU: {
+        uint32_t a, b, c, d;
+        char vendor[13];
+        cpuid_x(0, &a, &b, &c, &d);
+        uint32_t maxleaf = a;
+        cpuid_word(&vendor[0], b); cpuid_word(&vendor[4], d);
+        cpuid_word(&vendor[8], c); vendor[12] = 0;
+
+        assist_begin_output();
+        assist_say("cpu: "); assist_say(vendor); assist_emit('\n');
+
+        cpuid_x(0x80000000, &a, &b, &c, &d);
+        if (a >= 0x80000004) {
+            char brand[49];
+            int at = 0;
+            for (uint32_t leaf = 0x80000002; leaf <= 0x80000004; leaf++) {
+                cpuid_x(leaf, &a, &b, &c, &d);
+                cpuid_word(&brand[at],      a); cpuid_word(&brand[at + 4],  b);
+                cpuid_word(&brand[at + 8],  c); cpuid_word(&brand[at + 12], d);
+                at += 16;
+            }
+            brand[48] = 0;
+            const char *bp = brand; while (*bp == ' ') bp++;
+            assist_say("  "); assist_say(bp); assist_emit('\n');
+        }
+
+        cpuid_x(1, &a, &b, &c, &d);
+        uint32_t family = (a >> 8) & 0xF, model = (a >> 4) & 0xF;
+        if (family == 0xF) family += (a >> 20) & 0xFF;
+        if (family >= 6)   model  += ((a >> 16) & 0xF) << 4;
+        assist_say("  family "); assist_num(family);
+        assist_say(", model ");  assist_num(model);
+        assist_say(", stepping "); assist_num(a & 0xF);
+        assist_say(" (cpuid leaves to "); assist_num(maxleaf); assist_say(")\n");
+        assist_say("one core is all I use - the scheduler is single-CPU.\n");
+        return;
+    }
+
+    /* ─── what's running — the real scheduler table ─── */
+    case AM_TASKS: {
+        struct task_info ti;
+        int live = 0;
         assist_begin_output();
         assist_say("running right now:\n");
-        struct task_info ti;
         for (int i = 0; i < TASK_MAX; i++) {
             if (!task_get_info(i, &ti)) continue;
+            live++;
             assist_say("  "); assist_num((uint32_t)ti.tid);
             assist_say("  "); assist_say(ti.name);
             assist_say("  ("); assist_say(task_state_name(ti.state)); assist_say(")\n");
         }
+        assist_say("  = "); assist_num((uint32_t)live);
+        assist_say(" of "); assist_num((uint32_t)TASK_MAX); assist_say(" task slots.\n");
         assist_say("preemptive - no runaway task can freeze me.\n");
-        return 1;
+        return;
     }
 
-    /* disk / persistence */
-    if (has(p, "disk") || has(p, "storage") || has(p, "persist")) {
+    case AM_CLEAR:
+        /* Clears THIS window's answer, not the Terminal's scrollback. Painting
+         * the console while a window floats over it would poison that window's
+         * saved backdrop, which is a bug we have already fixed twice. */
         assist_begin_output();
-        if (ata_present())
-            assist_say("disk: attached. your files persist across reboots -\nsaved to the ATA disk on every change.\n");
-        else
-            assist_say("no disk this boot - files live in RAM. attach one and\nthey survive reboots.\n");
-        return 1;
-    }
+        assist_say("cleared.\n");
+        assist_say("(this window - type 'clear' in the Terminal for that one.)\n");
+        return;
 
-    /* help / capabilities */
-    if (has(p, "what can you") || has(p, "help") || has(p, "command")) {
+    case AM_SCREEN:
         assist_begin_output();
-        assist_say("I run this machine, all offline:\n\n");
-        assist_say("  ask:    how much memory / what's running / who are you\n");
-        assist_say("  files:  list my files / make notes.txt / read notes.txt\n");
-        assist_say("  write:  write hi to notes.txt / append bye to notes.txt\n");
-        assist_say("  copy:   copy notes.txt to backup.txt / delete notes.txt\n");
-        assist_say("  open:   open the editor / snake / files\n\n");
-        assist_say("ask me to write a story or a poem and you get the on-device\n");
-        assist_say("model - 212K parameters, so expect nonsense. No internet, ever.\n");
-        return 1;
+        assist_say("screen: "); assist_num(fb_width_x());
+        assist_emit('x');       assist_num(fb_height_x());
+        assist_say(" at ");     assist_num((uint32_t)mb_fb_bpp_x());
+        assist_say(" bits per pixel.\n");
+        assist_say("a linear framebuffer GRUB set up before I started - I draw\n");
+        assist_say("every pixel of this myself, no graphics driver underneath.\n");
+        return;
+
+    case AM_APPS:
+        assist_begin_output();
+        assist_say("apps on this machine:\n");
+        assist_say("  Terminal        the shell - say 'go to the terminal'\n");
+        assist_say("  Files           browse the tree - 'open files'\n");
+        assist_say("  Editor          write a file - 'open the editor'\n");
+        assist_say("  Snake           'open snake'\n");
+        assist_say("  Assistant       me - you're in it\n");
+        assist_say("  System Monitor  live tasks + heap - 'open the monitor'\n");
+        assist_say("  Calculator      'open the calculator'\n");
+        assist_say("  Settings        'open the settings'\n");
+        assist_say("all built in. there is no app store and no download.\n");
+        return;
+
+    case AM_UPTIME: {
+        uint32_t secs = (uint32_t)(pit_elapsed_ms() / 1000);
+        assist_begin_output();
+        assist_say("up ");
+        if (secs >= 3600) { assist_num(secs / 3600);        assist_say(" hr ");
+                            assist_num((secs / 60) % 60);   assist_say(" min ");
+                            assist_num(secs % 60);          assist_say(" sec"); }
+        else if (secs >= 60) { assist_num(secs / 60);       assist_say(" min ");
+                               assist_num(secs % 60);       assist_say(" sec"); }
+        else                 { assist_num(secs);            assist_say(" seconds"); }
+        assist_say(" - counted off the PIT at 100 Hz, no network.\n");
+        return;
     }
 
-    /* date / time — the real wall clock, not uptime */
-    if (has(p, "date") || has(p, "what day") ||
-        (has(p, "time") && !has(p, "uptime"))) {
+    /* ─── what happened at boot: everything GRUB and init actually found ─── */
+    case AM_BOOT: {
+        const char *bl = mb_bootloader_name_x();
+        uint32_t secs = (uint32_t)(pit_elapsed_ms() / 1000);
+        assist_begin_output();
+        assist_say("this boot, in order:\n");
+        assist_say("  "); assist_say(bl ? bl : "the bootloader");
+        assist_say(" loaded me at 1 MiB and jumped in 32-bit,\n");
+        assist_say("  my asm stub built page tables and entered long mode,\n");
+        assist_say("  memory map: "); assist_num(mb_mmap_entry_count_x());
+        assist_say(" regions, "); assist_num(mb_total_available_mib_x());
+        assist_say(" MiB usable,\n");
+        assist_say("  framebuffer: "); assist_num(fb_width_x());
+        assist_emit('x'); assist_num(fb_height_x());
+        assist_say(" at "); assist_num((uint32_t)mb_fb_bpp_x());
+        assist_say(" bpp,\n");
+        assist_say("  heap "); assist_num((uint32_t)(heap_total() >> 10));
+        assist_say(" KB up, "); assist_num((uint32_t)pmm_frames_total());
+        assist_say(" page frames claimed,\n");
+        assist_say("  disk: ");
+        assist_say(ata_present() ? "found, files loaded from it.\n"
+                                 : "none, so files are in RAM only.\n");
+        assist_say("that was "); assist_num(secs); assist_say(" seconds ago.\n");
+        return;
+    }
+
+    /* ─── date / time — the real wall clock, not uptime ─── */
+    case AM_DATE: {
         struct rtc_time t;
         assist_begin_output();
         if (rtc_read(&t) == 0) {
@@ -838,31 +1127,18 @@ static int try_intent(const char *p) {
         } else {
             assist_say("my clock chip isn't answering - I only know uptime.\n");
         }
-        return 1;
+        return;
     }
 
-    /* uptime */
-    if (has(p, "uptime") || (has(p, "how long") && has(p, "been"))) {
-        uint32_t secs = (uint32_t)(pit_elapsed_ms() / 1000);
+    case AM_FILES_COUNT:
         assist_begin_output();
-        assist_say("up ");
-        if (secs >= 60) { assist_num(secs / 60); assist_say(" min ");
-                          assist_num(secs % 60); assist_say(" sec"); }
-        else            { assist_num(secs); assist_say(" seconds"); }
-        assist_say(" - on this kernel, no network.\n");
-        return 1;
-    }
+        assist_say("you have "); assist_num(fs_count());
+        assist_say(" files, "); assist_num(fs_total_bytes());
+        assist_say(" bytes total.\n");
+        return;
 
-    /* list files — now with sizes + totals, and "how many files" */
-    if ((has(p, "list") || has(p, "what") || has(p, "show") || has(p, "how many")) &&
-        has(p, "file")) {
+    case AM_FILES_LIST:
         assist_begin_output();
-        if (has(p, "how many")) {
-            assist_say("you have "); assist_num(fs_count());
-            assist_say(" files, "); assist_num(fs_total_bytes());
-            assist_say(" bytes total.\n");
-            return 1;
-        }
         assist_say("your files:\n");
         /* Whole tree, by full path - a leaf name on its own would be a lie
          * now that /a/notes.txt and /b/notes.txt can both exist. */
@@ -875,131 +1151,373 @@ static int try_intent(const char *p) {
         }
         assist_say("  = "); assist_num(fs_count()); assist_say(" files, ");
         assist_num(fs_total_bytes()); assist_say(" bytes.\n");
-        return 1;
+        return;
+
+    /* AM_CLOSE never reaches here (try_intent handles it before any drawing —
+     * there is no window left to draw into) and AM_NONE never gets sent. */
+    case AM_CLOSE:
+    case AM_NONE:
+        return;
     }
-    /* write TEXT to FILE — gated so creative "write a poem in X" still hits GPT */
-    if (has(p, "write") || has(p, "put ") || has(p, "save ")) {
-        int sl; const char *sep = find_to(p, &sl);
-        if (sep) {
-            char file[64]; const char *fp = sep + sl;
-            while (*fp == ' ') fp++;
-            int fk = 0; while (*fp && *fp != ' ' && fk < 63) file[fk++] = *fp++;
-            while (fk > 0 && (file[fk-1]=='.'||file[fk-1]=='!'||file[fk-1]=='?'||file[fk-1]==',')) fk--;
-            file[fk] = 0;
-            int looks_like_file = has(p, "file") || name_has_ext(file) || (fs_find(file) != 0);
-            const char *tp = p; while (*tp && *tp != ' ') tp++;   /* skip the verb */
-            while (*tp == ' ') tp++;
-            char text[128]; int tk = 0;
-            for (const char *q = tp; q < sep && tk < 127; q++) text[tk++] = *q;
-            text[tk] = 0;
-            if (file[0] && text[0] && looks_like_file) {
-                if (!name_has_ext(file)) {
-                    const char *e = ".txt"; int j = 0;
-                    while (e[j] && fk < 63) file[fk++] = e[j++];
-                    file[fk] = 0;
-                }
-                fs_write(file, (const uint8_t *)text, (uint32_t)tk);
-                fs_sync();
-                assist_begin_output();
-                assist_say("wrote to "); assist_say(file); assist_say(":\n  ");
-                assist_say(text); assist_emit('\n');
-                return 1;
-            }
+}
+
+/* The other half of the confirmation gate: the armed action is described, the
+ * user answered, and this is where it happens or doesn't.
+ *
+ * Two properties worth stating out loud, because both were bugs elsewhere:
+ *
+ *   Disarmed FIRST, before anything can fail. One question gets exactly one
+ *   answer — there is no path through here that leaves the action still armed
+ *   for the NEXT thing the user types.
+ *
+ *   The target is looked up again, by name, right now. The file the question
+ *   was about may have been unlinked or replaced from the shell in between,
+ *   and acting on a remembered pointer would be acting on whatever moved into
+ *   its place. */
+static void assist_answer_pending(const char *p) {
+    enum as_pend op = as_pending;
+    char a[FS_NAME_MAX + 1], b[FS_NAME_MAX + 1], txt[sizeof(as_pend_text)];
+    scopy(a, as_pend_a, sizeof(a));
+    scopy(b, as_pend_b, sizeof(b));
+    scopy(txt, as_pend_text, sizeof(txt));
+    assist_disarm();
+
+    assist_begin_output();
+    if (!am_confirm_yes(p)) {
+        assist_say("cancelled - "); assist_say(a); assist_say(" is untouched.\n");
+        assist_say("nothing was deleted and nothing was written.\n");
+        return;
+    }
+
+    if (op == AS_PEND_WRITE) {
+        /* No "is it still there" check, and that is deliberate: the user asked
+         * for these bytes to BE the file's contents. If it was unlinked from
+         * the shell in between, fs_write creates it and the outcome is exactly
+         * what they asked for, minus the destruction they agreed to. */
+        int tl = 0; while (txt[tl]) tl++;
+        if (fs_write(a, (const uint8_t *)txt, (uint32_t)tl) < 0) {
+            assist_say("couldn't write "); assist_say(a); assist_emit('\n');
+            return;
         }
+        fs_sync();
+        assist_say("wrote to "); assist_say(a); assist_say(", replacing what was there:\n  ");
+        assist_say(txt); assist_emit('\n');
+        return;
     }
-    /* copy FILE to NEWNAME — a real duplicate on disk */
-    if (has(p, "copy") || has(p, "duplicate")) {
+
+    if (op == AS_PEND_DELETE) {
+        fs_node *n = fs_find(a);
+        if (!n || n->kind != FS_FILE) {
+            assist_say("no file called "); assist_say(a);
+            assist_say(" any more - nothing deleted.\n");
+            return;
+        }
+        fs_unlink(a); fs_sync();
+        assist_say("deleted "); assist_say(a); assist_emit('\n');
+        return;
+    }
+
+    /* AS_PEND_OVERWRITE: b -> a, where a already exists and loses its bytes. */
+    fs_node *sn = fs_find(b);
+    if (!sn || sn->kind != FS_FILE) {
+        assist_say("no file called "); assist_say(b); assist_say(" any more - ");
+        assist_say(a); assist_say(" is untouched.\n");
+        return;
+    }
+    int wn = dup_file_bytes(sn, a);
+    fs_sync();
+    if (wn < 0) {
+        assist_say("couldn't write "); assist_say(a); assist_emit('\n');
+    } else {
+        assist_say("copied "); assist_say(b); assist_say(" -> "); assist_say(a);
+        assist_say(" ("); assist_num((uint32_t)wn); assist_say(" B, replaced)\n");
+    }
+}
+
+/* Try to handle the prompt as a real, safe, LOCAL action — the whole thesis:
+ * you talk to the OS and it DOES things, offline. Returns 1 if handled; 0
+ * falls through to the GPT for open-ended text.
+ *
+ * Two passes, matching the two halves of include/assist_match.h. The question
+ * pass is terminal. The action pass may DELIBERATELY fall through when it
+ * can't find its argument: "write me a poem in the style of X" contains " in "
+ * and must not become a file called "the". */
+static int try_intent(const char *p) {
+    enum am_intent w = am_classify(p);
+
+    /* Handled before assist_report because there will be no window to draw
+     * into afterwards, and cx/cy would be pointing at a dead rect. */
+    if (w == AM_CLOSE) { wm_close(); return 1; }
+    if (w != AM_NONE)  { assist_report(w, p); return 1; }
+
+    switch (am_action_of(p)) {
+
+    /* rename / move FILE to NEWNAME — a real move on disk, not a copy left
+     * behind. Refuses to clobber: an existing destination stops it. */
+    case AM_ACT_RENAME: {
         int sl; const char *sep = find_to(p, &sl);
-        char src[64];
-        if (sep && (word_after(p, "copy", src, sizeof(src)) ||
-                    word_after(p, "duplicate", src, sizeof(src)))) {
-            char dst[64]; const char *fp = sep + sl; while (*fp == ' ') fp++;
-            int k = 0; while (*fp && *fp != ' ' && k < 63) dst[k++] = *fp++;
-            while (k > 0 && (dst[k-1]=='.'||dst[k-1]=='!'||dst[k-1]=='?'||dst[k-1]==',')) k--;
-            dst[k] = 0;
-            fs_node *sn = resolve_file(src, sizeof(src));
+        char src[FS_NAME_MAX + 1];
+        if (!sep) break;
+        /* Same exposure as DELETE, milder shape: the source is unlinked, so
+         * picking the wrong one loses the name the user's data was under.
+         * word_after() is anchored to the verb rather than the end of the
+         * sentence, so it never invented a target the way last_word did — but
+         * it still hands back "the" for `rename the file notes.txt to x.txt`.
+         * If the source side names exactly one file, that IS the source; two
+         * is ambiguous and refused; none keeps the old verb-anchored guess,
+         * which is what lets `rename notes to todo` still work. */
+        char left[sizeof(as_prompt)]; int lk = 0;
+        for (const char *q = p; q < sep && lk < (int)sizeof(left) - 1; q++)
+            left[lk++] = *q;
+        left[lk] = 0;
+        enum am_named snf = am_named_file(left, src, sizeof(src));
+        if (snf == AM_NAMED_MANY) {
+            char other[FS_NAME_MAX + 1];
+            am_file_tokens(left, 1, other, sizeof(other));
             assist_begin_output();
-            if (sn && sn->kind == FS_FILE && dst[0]) {
-                static uint8_t cbuf[1024];
-                uint32_t len = sn->size < 1024 ? sn->size : 1024;
-                for (uint32_t i = 0; i < len; i++) cbuf[i] = sn->data[i];
-                if (!name_has_ext(dst)) { const char *e = ".txt"; int j = 0;
-                    while (e[j] && k < 63) dst[k++] = e[j++]; dst[k] = 0; }
-                fs_create(dst, FS_FILE);
-                fs_write(dst, cbuf, len);
-                fs_sync();
-                assist_say("copied "); assist_say(src); assist_say(" -> ");
-                assist_say(dst); assist_say(" ("); assist_num(len); assist_say(" B)\n");
-            } else {
-                assist_say("copy needs: copy <file> to <newname>\n");
-            }
+            assist_say("I won't rename anything - you named more than one file (");
+            assist_say(src); assist_say(", "); assist_say(other);
+            assist_say(")\nbefore the 'to', so I can't tell which one moves.\n");
             return 1;
         }
+        if (snf == AM_NAMED_NONE &&
+            !word_after(p, "rename", src, sizeof(src)) &&
+            !word_after(p, "move",   src, sizeof(src))) break;
+        char dst[64]; const char *fp = sep + sl; while (*fp == ' ') fp++;
+        int k = 0; while (*fp && *fp != ' ' && k < 63) dst[k++] = *fp++;
+        while (k > 0 && (dst[k-1]=='.'||dst[k-1]=='!'||dst[k-1]=='?'||dst[k-1]==',')) k--;
+        dst[k] = 0;
+        if (!dst[0]) break;
+        fs_node *sn = resolve_file(src, sizeof(src));
+        ensure_txt(dst, sizeof(dst));
+        assist_begin_output();
+        if (!sn || sn->kind != FS_FILE) {
+            assist_say("no file called "); assist_say(src); assist_emit('\n');
+        } else if (fs_find(dst) == sn) {
+            assist_say(src); assist_say(" is already called that.\n");
+        } else if (fs_find(dst)) {
+            assist_say(dst); assist_say(" already exists - I won't overwrite it.\n");
+        } else if (dup_file_bytes(sn, dst) < 0) {
+            assist_say("couldn't write "); assist_say(dst); assist_say(" - nothing moved.\n");
+        } else {
+            uint32_t moved = sn->size;
+            fs_unlink(src);          /* only after the copy landed */
+            fs_sync();
+            assist_say("renamed "); assist_say(src); assist_say(" -> ");
+            assist_say(dst); assist_say(" ("); assist_num(moved); assist_say(" B)\n");
+        }
+        return 1;
+    }
+
+    /* copy FILE to NEWNAME — a real duplicate on disk */
+    case AM_ACT_COPY: {
+        int sl; const char *sep = find_to(p, &sl);
+        char src[64];
+        if (!sep || (!word_after(p, "copy", src, sizeof(src)) &&
+                     !word_after(p, "duplicate", src, sizeof(src)))) break;
+        char dst[64]; const char *fp = sep + sl; while (*fp == ' ') fp++;
+        int k = 0; while (*fp && *fp != ' ' && k < 63) dst[k++] = *fp++;
+        while (k > 0 && (dst[k-1]=='.'||dst[k-1]=='!'||dst[k-1]=='?'||dst[k-1]==',')) k--;
+        dst[k] = 0;
+        fs_node *sn = resolve_file(src, sizeof(src));
+        assist_begin_output();
+        if (sn && sn->kind == FS_FILE && dst[0]) {
+            ensure_txt(dst, sizeof(dst));
+            /* A copy onto a name that already exists is a destroy: fs_write
+             * replaces the destination's bytes outright and they are not
+             * recoverable. RENAME has always refused to clobber; COPY did it
+             * silently. It asks now, which is the same answer in a friendlier
+             * shape — say yes and the copy lands. */
+            fs_node *dn = fs_find(dst);
+            if (dn && dn->kind != FS_FILE) {
+                assist_say(dst); assist_say(" is a folder - I won't write over it.\n");
+                return 1;
+            }
+            if (am_needs_confirm(AM_ACT_COPY, dn && dn->size > 0)) {
+                as_pending = AS_PEND_OVERWRITE;
+                scopy(as_pend_a, dst, sizeof(as_pend_a));
+                scopy(as_pend_b, src, sizeof(as_pend_b));
+                assist_say(dst); assist_say(" already exists (");
+                assist_num(dn->size); assist_say(" B) and copying over it\n");
+                assist_say("replaces what's in it. that can't be undone.\n\n");
+                assist_say("type y to replace it. anything else cancels.\n");
+                return 1;
+            }
+            fs_create(dst, FS_FILE);
+            int n = dup_file_bytes(sn, dst);
+            fs_sync();
+            if (n < 0) { assist_say("couldn't write "); assist_say(dst); assist_emit('\n'); }
+            else {
+                assist_say("copied "); assist_say(src); assist_say(" -> ");
+                assist_say(dst); assist_say(" ("); assist_num((uint32_t)n);
+                assist_say(" B)\n");
+            }
+        } else {
+            assist_say("copy needs: copy <file> to <newname>\n");
+        }
+        return 1;
     }
 
     /* append TEXT to FILE — grow an existing note */
-    if (has(p, "append")) {
+    case AM_ACT_APPEND: {
         int sl; const char *sep = find_to(p, &sl);
-        if (sep) {
-            char file[64]; const char *fp = sep + sl; while (*fp == ' ') fp++;
-            int fk = 0; while (*fp && *fp != ' ' && fk < 63) file[fk++] = *fp++;
-            while (fk > 0 && (file[fk-1]=='.'||file[fk-1]=='!'||file[fk-1]=='?'||file[fk-1]==',')) fk--;
-            file[fk] = 0;
-            const char *tp = p; while (*tp && *tp != ' ') tp++;   /* skip the verb */
-            while (*tp == ' ') tp++;
-            char text[128]; int tk = 0;
-            for (const char *q = tp; q < sep && tk < 127; q++) text[tk++] = *q;
-            text[tk] = 0;
-            if (file[0] && text[0]) {
-                if (!name_has_ext(file)) { const char *e = ".txt"; int j = 0;
-                    while (e[j] && fk < 63) file[fk++] = e[j++]; file[fk] = 0; }
-                int existed = (fs_find(file) != 0);
-                if (!existed) fs_create(file, FS_FILE);
-                if (existed) fs_append(file, (const uint8_t *)" ", 1);
-                fs_append(file, (const uint8_t *)text, (uint32_t)tk);
-                fs_sync();
-                assist_begin_output();
-                assist_say("appended to "); assist_say(file); assist_say(":\n  ");
-                assist_say(text); assist_emit('\n');
-                return 1;
-            }
-        }
+        if (!sep) break;
+        char file[64]; const char *fp = sep + sl; while (*fp == ' ') fp++;
+        int fk = 0; while (*fp && *fp != ' ' && fk < 63) file[fk++] = *fp++;
+        while (fk > 0 && (file[fk-1]=='.'||file[fk-1]=='!'||file[fk-1]=='?'||file[fk-1]==',')) fk--;
+        file[fk] = 0;
+        const char *tp = p; while (*tp && *tp != ' ') tp++;   /* skip the verb */
+        while (*tp == ' ') tp++;
+        char text[128]; int tk = 0;
+        for (const char *q = tp; q < sep && tk < 127; q++) text[tk++] = *q;
+        text[tk] = 0;
+        if (!file[0] || !text[0]) break;
+        ensure_txt(file, sizeof(file));
+        int existed = (fs_find(file) != 0);
+        if (!existed) fs_create(file, FS_FILE);
+        if (existed) fs_append(file, (const uint8_t *)" ", 1);
+        fs_append(file, (const uint8_t *)text, (uint32_t)tk);
+        fs_sync();
+        assist_begin_output();
+        assist_say("appended to "); assist_say(file); assist_say(":\n  ");
+        assist_say(text); assist_emit('\n');
+        return 1;
     }
 
-    if ((has(p, "make") || has(p, "create") || has(p, "new")) && has(p, "file")) {
+    /* write TEXT to FILE — gated so creative "write a poem in X" still hits GPT */
+    case AM_ACT_WRITE: {
+        int sl; const char *sep = find_to(p, &sl);
+        if (!sep) break;
+        char file[64]; const char *fp = sep + sl;
+        while (*fp == ' ') fp++;
+        int fk = 0; while (*fp && *fp != ' ' && fk < 63) file[fk++] = *fp++;
+        while (fk > 0 && (file[fk-1]=='.'||file[fk-1]=='!'||file[fk-1]=='?'||file[fk-1]==',')) fk--;
+        file[fk] = 0;
+        /* The gate that keeps "write a poem in the style of X" out of the
+         * filesystem: the destination has to LOOK like a file. */
+        int looks_like_file = has(p, "file") || name_has_ext(file) || (fs_find(file) != 0);
+        const char *tp = p; while (*tp && *tp != ' ') tp++;   /* skip the verb */
+        while (*tp == ' ') tp++;
+        char text[128]; int tk = 0;
+        for (const char *q = tp; q < sep && tk < 127; q++) text[tk++] = *q;
+        text[tk] = 0;
+        if (!file[0] || !text[0] || !looks_like_file) break;
+        ensure_txt(file, sizeof(file));
+        fs_node *wn = fs_find(file);
+        assist_begin_output();
+        if (wn && wn->kind != FS_FILE) {
+            assist_say(file); assist_say(" is a folder - I won't write over it.\n");
+            return 1;
+        }
+        /* fs_write REPLACES: every byte already in the file goes. Writing a
+         * file that doesn't exist yet destroys nothing and stays one step —
+         * that is the demo's headline command and it must not slow down. */
+        if (am_needs_confirm(AM_ACT_WRITE, wn && wn->size > 0)) {
+            as_pending = AS_PEND_WRITE;
+            scopy(as_pend_a, file, sizeof(as_pend_a));
+            scopy(as_pend_text, text, sizeof(as_pend_text));
+            assist_say(file); assist_say(" already exists and has ");
+            assist_num(wn->size); assist_say(" B in it.\n");
+            assist_say("writing replaces all of it - those bytes don't come back.\n\n");
+            assist_say("type y to replace them. anything else cancels, and\n");
+            assist_say(file); assist_say(" stays exactly as it is.\n");
+            return 1;
+        }
+        fs_write(file, (const uint8_t *)text, (uint32_t)tk);
+        fs_sync();
+        assist_say("wrote to "); assist_say(file); assist_say(":\n  ");
+        assist_say(text); assist_emit('\n');
+        return 1;
+    }
+    /* make FILE (or a folder) */
+    case AM_ACT_CREATE: {
         char name[64];
         if (!word_after(p, "called", name, sizeof(name)) &&
             !word_after(p, "named", name, sizeof(name)))
             last_word(p, name, sizeof(name));
-        int dot = 0; for (int i = 0; name[i]; i++) if (name[i] == '.') dot = 1;
-        if (!dot && name[0]) {
-            int k = 0; while (name[k]) k++;
-            const char *ext = ".txt"; int e = 0;
-            while (ext[e] && k < (int)sizeof(name) - 1) name[k++] = ext[e++];
-            name[k] = 0;
-        }
-        if (name[0]) { fs_create(name, FS_FILE); fs_sync(); }
+        if (!name[0]) break;
+        /* A folder is a real kind in this fs, so "make a folder called notes"
+         * makes a DIRECTORY - and must not get ".txt" stapled to it. */
+        int want_dir = am_word_any(p, "folder|folders|directory|mkdir");
+        if (!want_dir) ensure_txt(name, sizeof(name));
         assist_begin_output();
-        assist_say("made "); assist_say(name[0] ? name : "(no name)");
-        assist_say("\nsay 'open the editor' to write in it.\n");
+        if (fs_find(name)) {
+            assist_say(name); assist_say(" already exists.\n");
+            return 1;
+        }
+        if (!fs_create(name, want_dir ? (uint32_t)FS_DIR : (uint32_t)FS_FILE)) {
+            assist_say("couldn't make "); assist_say(name);
+            assist_say(" - is the folder above it there?\n");
+            return 1;
+        }
+        fs_sync();
+        assist_say("made "); assist_say(name);
+        if (want_dir) assist_say("/\nsay 'list my files' to see it.\n");
+        else          assist_say("\nsay 'open the editor' to write in it.\n");
         return 1;
     }
-    if (has(p, "delete") || has(p, "remove") || has(p, "rm ")) {
-        char name[64]; last_word(p, name, sizeof(name));
-        fs_node *n = resolve_file(name, sizeof(name));
+
+    /* DELETE — the only branch here that destroys data, and now the only one
+     * that asks first.
+     *
+     * The target comes from am_named_file(), NOT last_word(). last_word takes
+     * whatever ends the sentence, so `delete edge3.txt later` deleted a file
+     * called later.txt while edge3.txt sat there untouched — the user named a
+     * file and a different one died. Nothing on this path may guess: no bare
+     * word, no ".txt" stapled onto a noun (which is why this calls fs_find
+     * directly rather than resolve_file), and no acting on one of two named
+     * files while quietly leaving the other.
+     *
+     * And then, having found the exact file: ask. The word list in am_negated
+     * has a ceiling — "the last thing I want is to delete edge4.txt" contains
+     * no negation token to match on — so the guard that actually holds is the
+     * one that makes the user press a key. */
+    case AM_ACT_DELETE: {
+        char name[FS_NAME_MAX + 1], other[FS_NAME_MAX + 1];
+        enum am_named nf = am_named_file(p, name, sizeof(name));
         assist_begin_output();
-        if (n && n->kind == FS_FILE) {
-            fs_unlink(name); fs_sync();
-            assist_say("deleted "); assist_say(name); assist_emit('\n');
-        } else {
+
+        if (nf == AM_NAMED_NONE) {
+            assist_say("I won't delete anything - you didn't name a file.\n\n");
+            assist_say("I need the whole filename, extension and all:\n");
+            assist_say("  delete notes.txt\n\n");
+            assist_say("I won't guess which file you meant from a bare word.\n");
+            assist_say("guessing is how the wrong file gets deleted.\n");
+            return 1;
+        }
+        if (nf == AM_NAMED_MANY) {
+            am_file_tokens(p, 1, other, sizeof(other));
+            assist_say("I won't delete anything - you named more than one file (");
+            assist_say(name); assist_say(", "); assist_say(other);
+            assist_say(").\n\nI delete one at a time, so nothing here is half-done.\n");
+            assist_say("say 'delete "); assist_say(name);
+            assist_say("', then 'delete "); assist_say(other); assist_say("'.\n");
+            return 1;
+        }
+
+        fs_node *n = fs_find(name);
+        if (!n || n->kind != FS_FILE) {
             assist_say("no file called "); assist_say(name); assist_emit('\n');
+            return 1;
         }
+        as_pending = AS_PEND_DELETE;
+        scopy(as_pend_a, name, sizeof(as_pend_a));
+        assist_say("delete "); assist_say(name); assist_say(" (");
+        assist_num(n->size); assist_say(" B)?\n");
+        assist_say("this cannot be undone - there is no trash to fish it out of.\n\n");
+        assist_say("type y to confirm. anything else, including a bare Enter,\n");
+        assist_say("cancels and leaves the file exactly where it is.\n");
         return 1;
     }
-    if (has(p, "read") || has(p, "cat ") || has(p, "contents") ||
-        (has(p, "show") && !has(p, "file")) ||
-        ((has(p, "what") || has(p, "whats")) && has(p, "in "))) {
+
+    case AM_ACT_READ: {
         char name[64]; last_word(p, name, sizeof(name));
+        /* Read this BEFORE resolving. resolve_file() appends ".txt" to a bare
+         * name in place, so asking "does it have a dot?" afterwards is always
+         * yes — which made the fall-through below dead code and turned
+         * "show me something nice" into "no file called nice.txt" instead of
+         * the honest menu. The question is whether the USER named a file. */
+        int named_a_file = has(name, ".");
         fs_node *n = resolve_file(name, sizeof(name));
         if (n && n->kind == FS_FILE) {
             assist_begin_output();
@@ -1013,26 +1531,98 @@ static int try_intent(const char *p) {
          * model behind it to catch the fall. There isn't any more, and the
          * fall-through is how `read poem.txt` reached a poetry generator.
          * If they named something shaped like a file, say the file is missing;
-         * anything else still falls through to the intents below. */
-        if (has(name, ".")) {
+         * anything else falls through to the honest menu. */
+        if (named_a_file) {
             assist_begin_output();
             assist_say("no file called "); assist_say(name); assist_say(".\n");
             assist_say("say 'list my files' to see what's there.\n");
             return 1;
         }
+        break;
     }
-    if (has(p, "open") || has(p, "launch") || has(p, "start") ||
-        has(p, "play") || has(p, "go to")) {
-        if (has(p, "editor"))  { wm_open_editor(0); return 1; }
-        if (has(p, "snake"))   { wm_open_app(3);    return 1; }
-        if (has(p, "files"))   { wm_open_app(1);    return 1; }
-        if (has(p, "terminal") || has(p, "shell")) { wm_close(); return 1; }
+
+    /* open an APP, or - when no app is named - a FILE in the editor. Every
+     * one of these hands the window over immediately; nothing may draw into
+     * the Assistant's rect afterwards. */
+    case AM_ACT_OPEN: {
+        switch (am_open_target(p)) {
+            case AM_OPEN_FILES:    wm_open_app(1);    return 1;
+            case AM_OPEN_EDITOR:   wm_open_editor(0); return 1;
+            case AM_OPEN_SNAKE:    wm_open_app(3);    return 1;
+            case AM_OPEN_ASSIST:   wm_open_app(4);    return 1;
+            case AM_OPEN_MONITOR:  wm_open_app(5);    return 1;
+            case AM_OPEN_CALC:     wm_open_app(6);    return 1;
+            case AM_OPEN_SETTINGS: wm_open_app(7);    return 1;
+            case AM_OPEN_TERMINAL: wm_close();        return 1;
+            case AM_OPEN_NONE:     break;
+        }
+        /* "open notes.txt" - no app by that name, so try it as a file. Same
+         * before-resolve rule as READ: "start over" must reach the menu, not
+         * be told there is no file called over.txt. */
+        char name[64]; last_word(p, name, sizeof(name));
+        int named_a_file = has(name, ".");
+        fs_node *n = resolve_file(name, sizeof(name));
+        if (n && n->kind == FS_FILE) { wm_open_editor(name); return 1; }
+        if (named_a_file) {
+            assist_begin_output();
+            assist_say("no file or app called "); assist_say(name); assist_say(".\n");
+            assist_say("say 'what apps do i have' for the list.\n");
+            return 1;
+        }
+        break;
     }
+
+    /* The action chain declined. If it declined something DESTRUCTIVE, say so
+     * and say which guard did it — a blocked delete used to come back as the
+     * same "I didn't understand that one" a typo gets, so the user could not
+     * tell they had been refused on purpose, and the natural thing to do with
+     * a parser miss is to type it again. */
+    case AM_ACT_NONE: {
+        char name[FS_NAME_MAX + 1];
+        int one;
+        switch (am_delete_refusal(p)) {
+        case AM_REFUSE_NEGATED:
+            one = (am_named_file(p, name, sizeof(name)) == AM_NAMED_ONE);
+            assist_begin_output();
+            assist_say("I won't delete ");
+            assist_say(one ? name : "anything");
+            assist_say(" - that reads like you're telling me NOT to.\n\n");
+            if (one) {
+                assist_say("if you do want it gone, say it on its own:\n  delete ");
+                assist_say(name);
+            } else {
+                assist_say("if you did mean it, say just the verb and the\n");
+                assist_say("filename:\n  delete notes.txt");
+            }
+            assist_say("\nand I'll ask you to confirm before it goes.\n");
+            return 1;
+        case AM_REFUSE_UNNAMED:
+            assist_begin_output();
+            assist_say("I won't delete anything - you didn't name a file.\n\n");
+            assist_say("say the whole filename, extension and all:\n");
+            assist_say("  delete notes.txt\n\n");
+            assist_say("I won't work out which file you meant from a bare word.\n");
+            assist_say("say 'list my files' if you want to see what's there.\n");
+            return 1;
+        case AM_REFUSE_NONE:
+            break;
+        }
+        break;
+    }
+    }
+
     return 0;   /* -> GPT */
 }
 
 
 static void assist_run(void) {
+    /* A destructive action is waiting on a yes or a no, and that question is
+     * modal: whatever gets typed next is read as the answer. Anything other
+     * than an explicit yes cancels, so the cost of answering it with an
+     * unrelated command is retyping that command — and the cost of NOT being
+     * modal here would be a file deleted by a keystroke aimed elsewhere. */
+    if (as_pending != AS_PEND_NONE) { assist_answer_pending(as_prompt); return; }
+
     if (try_intent(as_prompt)) return;   /* did a real action, offline */
 
     /* The model is 212K parameters. It can produce English-shaped text; it
@@ -1054,11 +1644,15 @@ static void assist_run(void) {
     assist_begin_output();
     assist_say("I didn't understand that one.\n\n");
     assist_say("I'm not a chatbot - I run this machine. What I do:\n\n");
-    assist_say("  ask:    how much memory / what's running / who are you\n");
-    assist_say("  files:  list my files / make notes.txt / read notes.txt\n");
-    assist_say("  write:  write hi to notes.txt / append bye to notes.txt\n");
-    assist_say("  copy:   copy notes.txt to backup.txt / delete notes.txt\n");
-    assist_say("  open:   open the editor / snake / files\n\n");
+    assist_say("  machine: how much memory / how much disk space\n");
+    assist_say("           what cpu / what's running / uptime\n");
+    assist_say("           what version / screen resolution\n");
+    assist_say("  files:   list my files / make notes.txt / read notes.txt\n");
+    assist_say("           write hi to notes.txt / append bye to notes.txt\n");
+    assist_say("           copy notes.txt to backup.txt\n");
+    assist_say("           rename notes.txt to todo.txt / delete notes.txt\n");
+    assist_say("  desktop: what apps do i have / open the editor\n");
+    assist_say("           set the accent to teal\n\n");
     assist_say("say 'help' for the full list.\n");
 }
 
