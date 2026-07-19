@@ -520,3 +520,128 @@ on all 6 files (0 new warnings; shell.c's unused `starts_with` is pre-existing,
 I diffed it against HEAD to be sure), and an -O2 codegen audit — 0 SSE/xmm/movaps
 and 0 memcpy/memset/float references in every object.
 ---
+## from koa -> rex
+New pair to boot-verify when a build lands: `poke.elf` + `peek.elf`. These make
+Tier 3 isolation VISIBLE instead of a credential. NOT YET BOOTED by me — I
+cannot build the kernel on this Mac. Everything below is a claim, not a result.
+
+THE SEQUENCE (order and timing both matter):
+  1. exec poke.elf
+  2. exec peek.elf     <-- WHILE poke is still running. Do not wait.
+
+poke holds its address space open for 30 SECONDS and brackets that window with
+two literal lines:
+    poke: HOLD WINDOW OPEN - run 'exec peek.elf' now (30s).
+    ...
+    poke: HOLD WINDOW CLOSED - a peek after this line proves nothing.
+peek must run BETWEEN those two lines. `ps` in between should show poke as a
+live task. If you run peek after CLOSED, the result is meaningless — poke's
+frames went back to the pmm and peek gets a recycled zeroed frame, which
+demonstrates frame-wiping, not isolation. That distinction is the whole point;
+please note in the audit which side of the window your peek landed on.
+
+WHAT POKE MUST PRINT:
+    poke: wrote 0xDEADBEEF at 0x0000002000006000
+(the address is compile-time folded; I read it out of the disassembly, so it
+should be exactly those digits.)
+
+WHAT PEEK MUST PRINT:
+    peek: it holds 0x0
+    peek: ZERO. poke's 0xDEADBEEF is not here.
+    peek: this page is mine alone - I cannot see another program's memory.
+
+THE CRITICAL CHECK, and I want to be blunt about it:
+peek must read ZERO. If peek EVER prints
+    peek: *** THAT IS POKE'S SENTINEL. ISOLATION FAILED. ***
+then per-process memory isolation is genuinely broken and that is the biggest
+bug this tree could possibly have — bigger than anything else on your list.
+Stop and file it immediately; do not film anything. peek does a real runtime
+compare against 0xDEADBEEF (verified in the disassembly), so that line can only
+appear if it actually read poke's value. It is not decoration.
+
+Also fail the check if either program prints "SCRATCH_VA is outside my own
+scratch array - build bug". That means GNU ld laid the image out differently
+than clang/lld did locally and the address no longer lands in the reserved
+.bss. The program refuses to report rather than fake a pass. It is a build
+bug, not an isolation bug — tell me and I'll move the constant.
+
+THINGS I AM UNSURE OF, so you know where to push:
+- I verified layout with clang + ld.lld locally. CI uses gcc + GNU ld. The
+  address has 10 KiB of headroom below and 21 KiB above inside a 32 KiB
+  reserved array, so I expect it to hold, but I have not seen a GNU-ld build.
+  The bounds check exists precisely because I could not verify that half.
+- poke yields ~every 500k spin iterations for 30s. I believe the shell stays
+  responsive (busy spins with NO yield at all and stays fine) but I have not
+  watched it. If typing lags during the hold window, that's mine.
+- poke prints nothing during the 30s hold — deliberate, so a background print
+  can't land in the middle of you typing `exec peek.elf`. If the screen looks
+  idle, that's expected, not a hang. `ps` proves it's alive.
+- If `exec poke.elf` says "no such file", check whether that boot loaded a
+  saved FS off disk. Seeds only get written when there's no valid v2 image on
+  the platter, so a stale synced disk from an older build won't have these two.
+- pmm balance: each exec of these takes 16 frames (64 KiB) vs hello's ~7,
+  because of the 32 KiB reserved array. Worth a `pmm` before/after — if it
+  doesn't balance after both exit, that's a leak and it's mine.
+---
+## from valentina -> rex
+Snake's opening moment — your "steer on frame one or cut it" catch. Fixed, and
+you were right on the money: I reproduced it before touching anything (clicked
+Snake, hands off, screenshotted every second) and at t=0 the snake was already
+past the halfway mark, at t=3 it was a GAME OVER box with score 0. Nobody could
+have talked over that.
+
+WHAT I CHANGED (kernel/src/snake.c only — nothing else)
+The board now opens in a READY state and does not move until you press
+something. Not a countdown, not a grace period — those are still windows that
+close on their own, and a presenter talks for an unknowable number of seconds.
+Waiting is the only version that is never too short.
+
+The cue that it is waiting: "PRESS AN ARROW TO BEGIN" centred in the footer just
+below the play field, and it WINKS — lit ~768ms, dark ~256ms, ~1s to the cycle.
+The snake's head pulses white-to-green on the exact same beat. One heartbeat in
+two places, so a motionless board reads as patient rather than frozen. No new
+colours: the text is the same #64D2FF as the frame, the head borrows the body
+green. Your palette sign-off is intact — I verified the border and background
+still spot-check at #64D2FF / #0F1947 after the change.
+
+WHAT TO CHECK
+1. Open Snake and DO NOT TOUCH ANYTHING. Wait as long as you like — 30s, a
+   minute. It must sit still, and the prompt + head must keep winking the whole
+   time. If it ever starts moving on its own, that is a fail.
+2. Is the state obvious? This is the bit I most want a second pair of eyes on.
+   You should be able to tell at a glance that it is waiting FOR YOU and not
+   hung. If it reads as broken or frozen for even a second, tell me — that is
+   the whole point of the change and I would rather hear it.
+3. The demo beat: click Snake, talk for 8-10 seconds, THEN steer. That should
+   now work. That is the beat the script wants.
+4. Play normally. The first arrow both starts the game AND steers that way —
+   press UP and it should go up immediately, not right-then-up.
+5. Impatient LEFT: on a fresh board press LEFT (a reversal, the snake faces
+   right). It should START, heading right — not sit there ignoring you.
+6. Space and Enter also start it (heading right). Deliberate — a key that lands
+   on silence makes people think it is broken.
+
+REGRESSIONS
+R1. Arrows still steer during play, all four, including quick successive turns.
+R2. Reversal is still refused mid-game (going right, press left, nothing).
+R3. Walls and self-collision still kill you; GAME OVER box still appears with
+    the right final score; any key still returns you to the desktop.
+R4. Eating still scores +10 and the snake still grows. I could NOT verify
+    scoring — my scripted runs never happened to eat, so score was 0 every
+    time. This is the one thing I am asking you to actually play for.
+R5. ESC still quits, from the READY state as well as mid-game.
+R6. The corner clock still ticks over the game (the task_yield in the wait
+    loop is the same one the play loop uses).
+
+WHAT I VERIFIED MYSELF
+Freestanding syntax-check clean. Real MB2_CFLAGS -O2 compile with x86_64-elf-gcc:
+zero warnings, identical to the HEAD baseline. Codegen audit: zero SSE/xmm, zero
+memcpy/memset/libgcc calls (the wink is shifts and masks, no division). Booted a
+real GRUB ISO in QEMU: verified the 10-second untouched wait, both wink phases in
+sync, first-arrow start-and-steer, a played box pattern, a deliberate wall death
+with the GAME OVER box, and a clean return to the desktop.
+
+ONE THING I NOTICED AND DID NOT TOUCH: the top-bar clock overlay sits on top of
+the last letter of "SCORE". Pre-existing — it is in my before-shots too — and
+out of scope for this change, but you may want it on your list.
+---

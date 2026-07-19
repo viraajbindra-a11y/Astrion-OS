@@ -26,9 +26,10 @@ kernel/tools/font/*.ttf
 kernel/tools/font/af_font.h
 kernel/tools/font/af_preview.png
 
-# Generated at build time by `make` (xxd of the sample ELF). Regenerated
-# every build from progs/hello.c, so it's not committed.
-kernel/src/hello_elf.h
+# Generated at build time by `make` (xxd of each user program's ELF).
+# Regenerated every build from progs/*.c, so they're not committed —
+# hello, rogue, iodemo, poke, peek.
+kernel/src/*_elf.h
 
 # CI ISOs downloaded into proof dirs for QEMU verification (~12MB each,
 # reproducible via `gh run download`). Keep the AUDIT + frames, not the ISO.

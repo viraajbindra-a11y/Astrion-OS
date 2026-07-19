@@ -177,8 +177,9 @@ PROG_LDFLAGS = -nostdlib -pie -e _start -z max-page-size=0x1000 \
                -z noexecstack --no-dynamic-linker
 
 # Build a user program ($1=name), gate it (PIE, RELATIVE-only relocs, no
-# SSE), and emit it. The same recipe builds hello.elf and rogue.elf — both
-# are ring-3 ELF64 PIEs the kernel loads + relocates into the user window.
+# SSE), and emit it. The same recipe builds every one of them — hello, rogue,
+# iodemo and the poke/peek isolation pair are all ring-3 ELF64 PIEs the kernel
+# loads + relocates into the user window.
 define PROG_RULE
 $(BUILD_DIR)/$(1).elf: progs/$(1).c include/astrion_abi.h
 	@mkdir -p $(BUILD_DIR)
@@ -204,8 +205,14 @@ endef
 $(eval $(call PROG_RULE,hello))
 $(eval $(call PROG_RULE,rogue))
 $(eval $(call PROG_RULE,iodemo))
+# poke + peek are a PAIR: they hardcode the same user virtual address and the
+# demo is that one writes it and the other cannot see it. Never build one
+# without the other, and if you change SCRATCH_VA change it in both.
+$(eval $(call PROG_RULE,poke))
+$(eval $(call PROG_RULE,peek))
 
-kernel-mb2: src/hello_elf.h src/rogue_elf.h src/iodemo_elf.h
+kernel-mb2: src/hello_elf.h src/rogue_elf.h src/iodemo_elf.h \
+            src/poke_elf.h src/peek_elf.h
 	@mkdir -p $(BUILD_DIR)
 	$(CC) $(MB2_CFLAGS) -c boot/multiboot2.S -o $(BUILD_DIR)/multiboot2.o
 	$(CC) $(MB2_CFLAGS) -c src/isr.S -o $(BUILD_DIR)/isr.o

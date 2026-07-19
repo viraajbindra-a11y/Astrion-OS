@@ -31,6 +31,8 @@
 #include "hello_elf.h"   /* generated: the embedded sample ELF, seeded as /hello.elf */
 #include "rogue_elf.h"   /* generated: the hostile ring-3 program, seeded as /rogue.elf */
 #include "iodemo_elf.h"  /* generated: the ring-3 file-I/O demo, seeded as /iodemo.elf */
+#include "poke_elf.h"    /* generated: writer half of the isolation demo, /poke.elf */
+#include "peek_elf.h"    /* generated: reader half of the isolation demo, /peek.elf */
 
 /* kernel_mb2.c owns the serial primitives; borrow the same narrow hooks
  * elf.c and gdt.c use. The FS only ever speaks up when something is about
@@ -295,6 +297,16 @@ void fs_init(void) {
      * through the read/write syscalls, then `cat ring3.txt` shows the result. */
     fs_create("iodemo.elf", FS_FILE);
     fs_write("iodemo.elf", iodemo_elf, (uint32_t)iodemo_elf_len);
+
+    /* Per-process isolation, made visible. `exec poke.elf` writes a sentinel to
+     * a fixed user VA and holds its address space open for 30s; `exec peek.elf`
+     * run inside that window reads the SAME VA and finds zero, because it is a
+     * different process under a different CR3. Seed them together — one without
+     * the other proves nothing. */
+    fs_create("poke.elf", FS_FILE);
+    fs_write("poke.elf", poke_elf, (uint32_t)poke_elf_len);
+    fs_create("peek.elf", FS_FILE);
+    fs_write("peek.elf", peek_elf, (uint32_t)peek_elf_len);
 }
 
 fs_node *fs_find(const char *path) {
