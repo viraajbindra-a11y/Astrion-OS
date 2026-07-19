@@ -338,6 +338,28 @@ run-grub: iso-grub
 	    -display none \
 	    -no-reboot
 
+# ── Host-side unit tests ───────────────────────────────────────────────
+# Compiled with the HOST compiler, not the cross one: these run logic that has
+# no hardware dependency, so they don't need a kernel or an emulator. Some
+# kernel behaviour genuinely cannot be gated in QEMU — the PS/2 delta decode is
+# the standing example, since QEMU clamps every mouse packet to +/-127 and so
+# never emits the 256 packet shapes where a wrong decode differs from a right
+# one. Booting proves nothing there; this does.
+HOSTCC ?= cc
+HOST_TEST_SRCS := $(wildcard tests/test_*.c)
+HOST_TESTS     := $(patsubst tests/%.c,$(BUILD_DIR)/%,$(HOST_TEST_SRCS))
+
+$(BUILD_DIR)/test_%: tests/test_%.c | $(BUILD_DIR)
+	$(HOSTCC) -std=c11 -Wall -Wextra -Werror -Iinclude -o $@ $<
+
+test: $(HOST_TESTS)
+	@[ -n "$(HOST_TEST_SRCS)" ] || { echo "FAIL: no tests found in tests/ - refusing to report a pass"; exit 1; }
+	@echo "running $(words $(HOST_TESTS)) host test(s)"
+	@for t in $(HOST_TESTS); do echo "--- $$t"; ./$$t || exit 1; done
+	@echo "host tests: all passed"
+
+.PHONY: test
+
 clean:
 	rm -rf $(BUILD_DIR)
 	rm -f $(KERNEL_OBJS)

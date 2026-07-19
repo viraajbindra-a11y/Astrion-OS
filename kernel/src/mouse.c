@@ -24,6 +24,7 @@
 
 #include <stdint.h>
 #include "mouse.h"
+#include "ps2_delta.h"
 #include "idt.h"
 
 #define PS2_DATA   0x60
@@ -394,8 +395,10 @@ static void mouse_isr(struct registers *r) {
     btn_left  = new_left;
     btn_right = new_right;
 
-    int dx = (int8_t)packet[1];
-    int dy = (int8_t)packet[2];
+    /* 9-bit two's complement, sign bit in byte 0 — see ps2_delta.h. Shared with
+     * kernel/tests/test_ps2_delta.c, which covers all 512 combinations. */
+    int dx = ps2_delta9(packet[1], packet[0], PS2_SIGN_X);
+    int dy = ps2_delta9(packet[2], packet[0], PS2_SIGN_Y);
 
     int nx = mx + dx;
     int ny = my - dy;   /* PS/2 Y is +up, screen Y is +down - invert */
