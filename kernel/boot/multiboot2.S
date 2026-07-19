@@ -65,24 +65,58 @@ multiboot_header_end:
 .align 4096
 
     /* Page tables.
-     * PML4 -> PDPT -> 4x PD (2 MiB huge pages each). 4 PDs cover 4 GiB
-     * which is enough to reach the QEMU framebuffer at 0xfd000000.
-     * (2026-05-31: prev 1-GiB mapping caused a #PF when paint_test_pattern
-     * touched fb addr; extended here.) */
+     *
+     * Two shapes, chosen at boot by CPUID:
+     *
+     *   PDPE1GB present  -> PML4 -> PDPT, where the PDPT entries are THEMSELVES
+     *                       1 GiB pages. 512 entries = 512 GiB, no PDs used.
+     *   otherwise        -> PML4 -> PDPT -> 4x PD of 512 x 2 MiB pages = 4 GiB.
+     *
+     * The 4 GiB fallback is the old mapping and is why this file previously
+     * capped there. 4 GiB reaches the QEMU framebuffer at 0xfd000000, so it is
+     * fine for booting — but it makes memory above 4 GiB invisible, which caps
+     * how large an on-device model can be. Hence the 1 GiB path.
+     * (2026-05-31: an earlier 1-GiB-TOTAL mapping caused a #PF when
+     * paint_test_pattern touched the fb; that was too SMALL a map, a different
+     * problem from the page SIZE used here.) */
 .global p4_table
 .global p3_table
+.global pdpe1gb_used
+    /* EVERY table below is 4 KiB aligned, and each carries its own .align
+     * rather than inheriting one from the top of the section. A page-table
+     * physical address has to be 4 KiB aligned — its low 12 bits are flag
+     * bits, so a misaligned table doesn't fault where you'd notice, it
+     * silently sets flags and points the CPU at the wrong page.
+     *
+     * This is not hypothetical: an 8-byte variable declared between p3_table
+     * and p2_table_0 pushed all four PDs 8 bytes out of alignment and the
+     * kernel triple-faulted on the first instruction fetch after paging came
+     * on. Keep the .aligns even if the layout looks obviously fine. */
+.align 4096
 p4_table:
     .skip 4096
+.align 4096
 p3_table:
     .skip 4096
+.align 4096
 p2_table_0:                                 /* maps 0x0_0000_0000 .. 0x0_4000_0000 */
     .skip 4096
+.align 4096
 p2_table_1:                                 /* maps 0x0_4000_0000 .. 0x0_8000_0000 */
     .skip 4096
+.align 4096
 p2_table_2:                                 /* maps 0x0_8000_0000 .. 0x0_C000_0000 */
     .skip 4096
+.align 4096
 p2_table_3:                                 /* maps 0x0_C000_0000 .. 0x1_0000_0000 */
     .skip 4096
+
+    /* Which mapping shape ran. Read by the kernel so the choice is observable
+     * from outside instead of inferred — a boot that silently took the
+     * fallback looks identical to one that didn't. Deliberately placed AFTER
+     * every page table, not between them. */
+pdpe1gb_used:
+    .skip 8
 
     /* 16 KiB stack — plenty for early boot. This is task 0's (the shell's)
      * kernel stack; .global so task.c can set tss.rsp0 for it. */
@@ -134,8 +168,44 @@ _start:
     or $0b11, %eax
     mov %eax, p4_table
 
-    /* PDPT[0..3] -> the 4 PDs. */
-    mov $p2_table_0, %eax
+    /* Does this CPU support 1 GiB pages? CPUID leaf 0x80000001, EDX bit 26
+     * (PDPE1GB). Check the max extended leaf first — asking for a leaf the CPU
+     * doesn't implement returns another leaf's data, which would be read as a
+     * confident wrong answer.
+     *
+     * CPUID clobbers EBX, which held GRUB's multiboot info pointer. That is
+     * safe HERE and only here: it was stored to mb_info_ptr above, before this
+     * runs. Anything using EBX must stay above that store. */
+    mov $0x80000000, %eax
+    cpuid
+    cmp $0x80000001, %eax
+    jb 3f                                   /* no extended leaves -> 2 MiB */
+    mov $0x80000001, %eax
+    cpuid
+    test $(1 << 26), %edx
+    jz 3f                                   /* no PDPE1GB -> 2 MiB */
+
+    /* ── 1 GiB path: the PDPT entries are pages, not table pointers ──
+     * Entry i maps physical i GiB, so the address is i << 30 — which overflows
+     * 32 bits at i = 4. That's why the halves are computed separately rather
+     * than with a 64-bit multiply: low = i << 30 (wrapping is correct), and
+     * high = i >> 2. 512 entries reach 512 GiB. */
+    xor %ecx, %ecx
+2:  mov %ecx, %eax
+    shl $30, %eax                           /* low 32 bits of i * 1 GiB */
+    or $0b10000011, %eax                    /* present + writable + huge */
+    mov %eax, p3_table(, %ecx, 8)
+    mov %ecx, %eax
+    shr $2, %eax                            /* high 32 bits of i * 1 GiB */
+    mov %eax, p3_table + 4(, %ecx, 8)
+    inc %ecx
+    cmp $512, %ecx
+    jne 2b
+    movl $1, pdpe1gb_used
+    jmp 4f
+
+    /* ── 2 MiB fallback: PDPT[0..3] -> the 4 PDs ── */
+3:  mov $p2_table_0, %eax
     or $0b11, %eax
     mov %eax, p3_table + 0
     mov $p2_table_1, %eax
@@ -149,20 +219,19 @@ _start:
     mov %eax, p3_table + 24
 
     /* PD[i][0..511] -> 2 MiB pages, identity-mapped, present + writable
-     * + huge-page flag (bit 7). 4 PDs × 512 entries = 2048 entries
-     * covering 4 GiB. ECX = global entry index 0..2047. */
+     * + huge-page flag (bit 7). The 4 PDs are contiguous in .bss, so one
+     * index 0..2047 walks all of them. 2048 entries cover 4 GiB. */
     xor %ecx, %ecx
 1:  mov $0x200000, %eax
     mul %ecx                                /* edx:eax = ecx * 2 MiB (phys addr) */
     or $0b10000011, %eax                    /* present + writable + huge */
-    /* Lower half of address goes in eax, top byte in dl (= bit 32..39 of phys).
-     * For 4 GiB max, edx is 0 or 1 — we write it into the high half of the
-     * 8-byte PTE so addresses above 4 GiB would still work later. */
     mov %eax, p2_table_0(, %ecx, 8)         /* low 32 bits */
     mov %edx, p2_table_0 + 4(, %ecx, 8)     /* high 32 bits */
     inc %ecx
     cmp $2048, %ecx
     jne 1b
+    movl $0, pdpe1gb_used
+4:
 
     /* Load PML4 into CR3. */
     mov $p4_table, %eax

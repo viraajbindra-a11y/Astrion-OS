@@ -76,6 +76,10 @@ static void serial_puts(const char *s) {
     }
 }
 
+/* Set by boot/multiboot2.S: 1 if it mapped with 1 GiB pages, 0 if it fell
+ * back to the 4 GiB 2 MiB mapping. */
+extern uint64_t pdpe1gb_used;
+
 static void serial_put_hex64(uint64_t v) {
     static const char hex[] = "0123456789abcdef";
     serial_puts("0x");
@@ -787,6 +791,48 @@ void kernel_mb2_main(uint32_t magic, uint64_t info_ptr) {
         kfree(b);
         kfree(c);
         serial_puts("HEAP: smoke test passed\n");
+    }
+
+    /* How far can we actually address? boot/multiboot2.S picks between 1 GiB
+     * pages (512 GiB mapped) and a 2 MiB fallback (4 GiB) based on CPUID, and
+     * records which. Report it, then PROVE it: a boot that silently took the
+     * fallback is indistinguishable from one that didn't unless something
+     * writes past 4 GiB and reads it back.
+     *
+     * The probe only runs when the memory map says that address is real
+     * RAM - touching an unbacked physical address is how you earn a #PF at a
+     * point in boot where there is no handler to survive it. */
+    serial_puts("\nPAGING: ");
+    if (pdpe1gb_used) serial_puts("1 GiB pages, 512 GiB identity-mapped\n");
+    else              serial_puts("2 MiB pages, 4 GiB identity-mapped (no PDPE1GB)\n");
+
+    {
+        uint64_t probe = 6ull << 30;          /* 6 GiB - above the old ceiling */
+
+        /* Ask the MEMORY MAP whether that address is real RAM, not
+         * basic-meminfo's mem_upper. mem_upper is the legacy BIOS field and
+         * saturates around 3 GiB - on an 8 GiB box it reads 3071 MiB while the
+         * mmap correctly reports a 5 GiB region at 0x1_0000_0000. Gating on
+         * mem_upper skipped this probe on a machine that had the RAM. */
+        int backed = 0;
+        for (uint32_t i = 0; i < boot_mmap_avail_count(); i++) {
+            uint64_t base, len;
+            if (!boot_mmap_avail_region(i, &base, &len)) continue;
+            if (probe >= base && probe + 4096 <= base + len) { backed = 1; break; }
+        }
+        if (pdpe1gb_used && backed) {
+            /* XOR the sentinel with the address so a stale or aliased read -
+             * e.g. 6 GiB secretly folding back onto a low page - shows up as a
+             * mismatch instead of passing on a value that happens to be there. */
+            uint64_t want = 0xA5A5A5A5DEADBEEFull ^ probe;
+            volatile uint64_t *p = (volatile uint64_t *)probe;
+            *p = want;
+            uint64_t back = *p;
+            serial_puts("PAGING: probe at 6 GiB ");
+            serial_puts(back == want ? "OK\n" : "MISMATCH\n");
+        } else {
+            serial_puts("PAGING: probe skipped (not enough RAM, or 2 MiB path)\n");
+        }
     }
 
     /* Physical frame allocator over the RAM above the heap - the foundation
