@@ -286,3 +286,65 @@ F3 — WHAT I COULD NOT RULE OUT STATICALLY (one thing, cosmetic):
  gets stronger; no freed-live-CR3 window — destroy caller/gating untouched), but
  Id like the boot to confirm no triple-fault on create-forked spaces.
 ---
+## from koa -> rex  ·  console writer lock — NOT YET BOOTED, needs your hands
+
+Fixed the async-render race you flagged twice (M4 audit + hardening audit). Not
+pushed, no CI run yet — this is local only, so it is unverified on real hardware.
+I syntax-checked and compiled all three files with the real MB2_CFLAGS, zero
+warnings, no SSE/memcpy in codegen. That is ALL I have proven.
+
+WHAT I CHANGED
+- kernel/src/console.c: every mutating entry point (putchar/puts/put_u32/u64/
+  hex64/newline/backspace/clear/set_capture/clear_capture) now runs inside
+  irq_save/irq_restore. Internals were split into unlocked cores
+  (putchar_nolock, newline_nolock, backspace_nolock) so the lock is taken
+  exactly ONCE per entry — verified in the disassembly, one cli + one popfq per
+  public function, zero inside the cores.
+- console_redraw is deliberately NOT locked. It is a pure reader and locking it
+  would mean interrupts off across thousands of blended glyphs. See KNOWN GAP.
+- New public console_lock()/console_unlock(f) for lines built from several
+  calls. Used in exactly 3 places: sys_puts_user (ring-3 SYS_PUTS, line at a
+  time), the SYS_EXIT "exec: X exited (code N)" line, and the idt.c ring-3
+  kill line.
+
+THE REPRO I NEED YOU TO RUN
+exec hello.elf several times BACK-TO-BACK, fast, no pause between them — the
+prompt returning while the task is still printing is the trigger. Confirm EVERY
+run prints its full output: no dropped row, no duplicated row. Same for
+exec iodemo.elf (it duplicated its "launched" line for you before). Please run
+it enough times to beat the old odds — it was transient, maybe 1 in 3, so a
+single clean run proves nothing.
+
+REGRESSIONS TO CHECK
+1. Shell typing feels normal — no dropped or doubled keystrokes. This is the one
+   I am least sure about: interrupts are now off during a console_clear and
+   during a scroll, both of which repaint a large region. If typing feels laggy
+   or eats characters, that is me, tell me.
+2. Scroll past a full screenful (cat something long, or help) — rows must
+   scroll cleanly, nothing torn or doubled.
+3. Window overlap redraw — drag a window over the terminal and off again, the
+   terminal must repaint correctly.
+4. Panic screen still renders. I believe it CANNOT deadlock because the panic
+   path in idt.c writes via fb_puts_x/serial only and never touches the console
+   at all — I read it, it bypasses the lock by construction. But please prove it
+   with a real panic.
+5. exec rogue.elf — the #PF kill message must still print in red and the
+   kernel must survive. I unlock BEFORE task_exit() in both idt.c and syscall.c;
+   if I got that wrong the next task inherits IF=0 and the SCHEDULER STOPS DEAD.
+   Symptom would be: clock freezes, prompt never returns, box looks hung but not
+   panicked. That is the worst thing that can go wrong here — worth a hard look.
+6. Clock keeps ticking through all of it.
+7. Redirection with > still works (console_set_capture is now locked).
+
+KNOWN GAP I DID NOT FIX
+console_redraw is unlocked, so a window drag happening at the same instant as a
+print can still paint one stale-looking frame. It corrupts no state and the next
+write repaints over it. If you can actually make that visible, tell me and I
+will do the snapshot-under-lock version — I just did not think it was worth
+milliseconds of interrupts-off to fix a self-healing cosmetic edge.
+
+Also still unfixed by design: two writers can interleave BETWEEN separate calls
+in the shell (shell.c builds some lines from several console_puts calls and I
+did not wrap 404 call sites). The destructive mechanism — the torn scroll — is
+gone; that residue is character-level, not row-level.
+---

@@ -20,6 +20,8 @@ extern void console_puts(const char *s);
 extern void console_putchar(char c);
 extern void console_put_u32(uint32_t v);
 extern void console_set_color(uint32_t rgb);
+extern uint64_t console_lock(void);          /* see console.h — masks IRQs */
+extern void     console_unlock(uint64_t f);
 extern char kbd_getchar(void);
 extern uint64_t pit_elapsed_ms(void);
 extern void task_yield(void);
@@ -66,11 +68,32 @@ static void sys_puts_user(uint64_t uptr) {
     const char *p = (const char *)(uintptr_t)uptr;
     uint64_t max = usermem_active_top() - uptr;   /* validated: uptr <= this process's top */
     if (max > 65536ull) max = 65536ull;
+
+    /* Hold the console lock for a LINE at a time, not the whole string.
+     *
+     * A line at a time, because this is the async writer: the shell's prompt
+     * comes back while the exec'd task is still printing, and without this the
+     * two of them land in the same row. Locking makes the ring-3 program's line
+     * arrive whole.
+     *
+     * Not the whole string, because the lock is the interrupt flag and the
+     * string is up to 64 KiB of RING 3's choosing. Releasing at every newline
+     * (and at a hard run cap, for a program that never sends one) keeps a user
+     * program from parking interrupts for as long as it feels like — that would
+     * be a denial of service on the scheduler, handed out by a syscall. */
+    uint64_t f = console_lock();
+    uint32_t run = 0;
     for (uint64_t i = 0; i < max; i++) {
         char c = p[i];
         if (!c) break;
         console_putchar(c);
+        if (c == '\n' || ++run >= 256) {
+            console_unlock(f);        /* breathe: let a tick or a keystroke in */
+            run = 0;
+            f = console_lock();
+        }
     }
+    console_unlock(f);
 }
 
 /* Copy a user-supplied filename into a kernel buffer. Validates the pointer is
@@ -133,7 +156,14 @@ uint64_t syscall_dispatch(uint64_t no, uint64_t a1, uint64_t a2, uint64_t a3) {
     case SYS_YIELD:     task_yield();                         return 0;
     case SYS_READ_FILE:  return sys_read_file(a1, a2, a3);
     case SYS_WRITE_FILE: return sys_write_file(a1, a2, a3);
-    case SYS_EXIT:
+    case SYS_EXIT: {
+        /* Six calls, one line on screen — lock the run so the shell's prompt
+         * can't land in the middle of "exec: hello.elf exited (code 0)". The
+         * color changes are inside the lock too, or another writer could pick
+         * up the green. Unlock BEFORE task_exit(): it never comes back, and
+         * leaving with interrupts off would hand IF=0 to the next task and
+         * stop the scheduler dead. */
+        uint64_t cf = console_lock();
         console_set_color(0x34D399u);
         console_puts("\nexec: ");
         console_set_color(0xFFFFFFu);
@@ -141,8 +171,11 @@ uint64_t syscall_dispatch(uint64_t no, uint64_t a1, uint64_t a2, uint64_t a3) {
         console_puts(" exited (code ");
         console_put_u32((uint32_t)a1);
         console_puts(")\n");
+        console_unlock(cf);
+
         task_exit();          /* marks task DONE, schedules away — never returns */
         return 0;             /* not reached */
+    }
     default:
         return (uint64_t)-1;  /* unknown syscall */
     }

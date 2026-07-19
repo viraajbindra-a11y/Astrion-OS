@@ -44,6 +44,39 @@ static uint32_t x0, y0, w_px, h_px;
 static uint32_t cx, cy;
 static uint32_t color = COL_FG_DEFLT;
 
+/* ─── Writer lock ───
+ * The console has more than one writer: the shell (task context), a ring-3
+ * program printing through SYS_PUTS, and the ring-3 fault handler in idt.c.
+ * On a single CPU the ONLY way two of them interleave is an interrupt — the
+ * timer preempting a task part-way through a print — so masking interrupts IS
+ * the lock. Same idiom heap.c uses for the free list and rtc.c uses for CMOS.
+ *
+ * What it protects, as ONE unit: the cursor (cx, cy), the backing store, and
+ * the scroll's pixel move. That last one is the bug this exists for.
+ * scroll_one_line() copies the whole console region up by one row; get
+ * preempted inside that copy, let another writer draw a glyph into the region,
+ * and the rest of the copy reads source rows that have already changed. That
+ * is how `exec hello.elf` occasionally duplicated one row and dropped another
+ * while the shell prompt came back underneath it.
+ *
+ * Save/restore, never bare cli/sti, so it NESTS: the ring-3 fault handler can
+ * print while interrupts are already off and it puts back exactly what it
+ * found. And because nothing here ever WAITS on the lock — there is no lock
+ * word, only the interrupt flag — there is nothing to deadlock on. That is the
+ * whole reason to mask interrupts instead of spinning on a flag: a fault
+ * arriving mid-print can't wedge on state the faulting task was holding. */
+static inline uint64_t irq_save(void) {
+    uint64_t f;
+    __asm__ volatile("pushfq; pop %0; cli" : "=r"(f) :: "memory");
+    return f;
+}
+static inline void irq_restore(uint64_t f) {
+    __asm__ volatile("push %0; popfq" :: "r"(f) : "memory", "cc");
+}
+
+uint64_t console_lock(void)          { return irq_save(); }
+void     console_unlock(uint64_t f)  { irq_restore(f); }
+
 /* ─── Backing store ───
  * Every drawn cell is also recorded here so the console can be repainted from
  * state (console_redraw). Needed as soon as windows can overlap the terminal:
@@ -76,7 +109,14 @@ static void grid_clear_cell(void) {
     if (row < CON_MAX_ROWS && col < CON_MAX_COLS) g_ch[row][col] = 0;
 }
 
-/* Repaint the whole console region from the backing store. */
+/* Repaint the whole console region from the backing store.
+ *
+ * Deliberately NOT under the writer lock. This is a pure reader — it never
+ * touches cx/cy or the grid — and a full repaint is thousands of blended
+ * glyphs. Holding interrupts off across that would cost milliseconds and start
+ * eating timer ticks and keystrokes, which is a worse bug than the one it would
+ * fix. Worst case if a writer scrolls mid-repaint is one stale-looking frame,
+ * and the very next write or window event paints over it. No state corruption. */
 void console_redraw(void) {
     if (!fb_present_x() || !w_px) return;
     fb_rect_x(x0, y0, w_px, h_px, COL_BG);
@@ -130,42 +170,68 @@ void console_init(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
 }
 
 void console_clear(void) {
+    uint64_t f = irq_save();
     fb_rect_x(x0, y0, w_px, h_px, COL_BG);
     grid_clear();
     cx = x0;
     cy = y0;
+    irq_restore(f);
 }
 
 void console_set_color(uint32_t c) { color = c; }
 uint32_t console_color(void)       { return color; }
 
-void console_newline(void) {
+/* ─── Unlocked cores ───
+ * These assume the writer lock is already held. Everything below calls THESE,
+ * never the public wrappers, so the lock is taken exactly once at whichever
+ * entry point the caller came in through. That is what keeps the scroll path
+ * from re-entering a locked function on its way through newline. */
+static void newline_nolock(void) {
     cx = x0;
     cy += LINE_STRIDE;
     while (cy + GH > y0 + h_px) scroll_one_line();
 }
 
-void console_backspace(void) {
+static void backspace_nolock(void) {
     if (cx <= x0) return;
     cx -= GW;
     fb_rect_x(cx, cy, GW, GH, COL_BG);
     grid_clear_cell();
 }
 
+void console_newline(void) {
+    uint64_t f = irq_save();
+    newline_nolock();
+    irq_restore(f);
+}
+
+void console_backspace(void) {
+    uint64_t f = irq_save();
+    backspace_nolock();
+    irq_restore(f);
+}
+
 void console_set_capture(uint8_t *buf, uint32_t cap, uint32_t *len_out) {
+    /* Locked: putchar reads all three of these together. Swapping them in
+     * one at a time could hand a preempting writer a live buf with a stale
+     * len pointer. */
+    uint64_t f = irq_save();
     cap_buf = buf;
     cap_cap = cap;
     cap_len_out = len_out;
     if (cap_len_out) *cap_len_out = 0;
+    irq_restore(f);
 }
 
 void console_clear_capture(void) {
+    uint64_t f = irq_save();
     cap_buf = 0; cap_cap = 0; cap_len_out = 0;
+    irq_restore(f);
 }
 
 int console_capture_active(void) { return cap_buf != 0; }
 
-void console_putchar(char c) {
+static void putchar_nolock(char c) {
     /* Output redirect: append to capture buffer + skip pixel writes. */
     if (cap_buf) {
         if (cap_len_out && *cap_len_out + 1 < cap_cap) {
@@ -175,8 +241,8 @@ void console_putchar(char c) {
         return;
     }
 
-    if (c == '\n') { console_newline(); return; }
-    if (c == '\b') { console_backspace(); return; }
+    if (c == '\n') { newline_nolock(); return; }
+    if (c == '\b') { backspace_nolock(); return; }
     if (c == '\r') { cx = x0; return; }
     if (c == '\t') {
         /* Tab to next multiple of 4 chars. */
@@ -185,14 +251,14 @@ void console_putchar(char c) {
             af_draw(cx, cy, buf, color, AF_MONO);
             grid_put(' ');
             cx += GW;
-            if (cx + GW > x0 + w_px) console_newline();
+            if (cx + GW > x0 + w_px) newline_nolock();
         } while (((cx - x0) / GW) % 4);
         return;
     }
     if (c < 32 || c > 126) c = '?';
 
     /* Wrap before drawing if needed. */
-    if (cx + GW > x0 + w_px) console_newline();
+    if (cx + GW > x0 + w_px) newline_nolock();
 
     char buf[2] = {c, 0};
     af_draw(cx, cy, buf, color, AF_MONO);
@@ -200,28 +266,47 @@ void console_putchar(char c) {
     cx += GW;
 }
 
+void console_putchar(char c) {
+    uint64_t f = irq_save();
+    putchar_nolock(c);
+    irq_restore(f);
+}
+
+/* One lock for the WHOLE string, not one per character — a line printed in a
+ * single puts() lands intact instead of being cut in half by whoever else is
+ * writing. Callers are kernel code with bounded strings; the ring-3 path comes
+ * in through console_putchar a byte at a time, so a user program can't hold
+ * interrupts off for as long as it likes by printing something enormous. */
 void console_puts(const char *s) {
-    while (*s) console_putchar(*s++);
+    uint64_t f = irq_save();
+    while (*s) putchar_nolock(*s++);
+    irq_restore(f);
 }
 
 void console_put_u32(uint32_t v) {
     char buf[11]; int i = 0;
     if (v == 0) buf[i++] = '0';
     else { while (v) { buf[i++] = '0' + (v % 10); v /= 10; } }
-    while (i > 0) console_putchar(buf[--i]);
+    uint64_t f = irq_save();
+    while (i > 0) putchar_nolock(buf[--i]);
+    irq_restore(f);
 }
 
 void console_put_u64(uint64_t v) {
     char buf[21]; int i = 0;
     if (v == 0) buf[i++] = '0';
     else { while (v) { buf[i++] = '0' + (v % 10); v /= 10; } }
-    while (i > 0) console_putchar(buf[--i]);
+    uint64_t f = irq_save();
+    while (i > 0) putchar_nolock(buf[--i]);
+    irq_restore(f);
 }
 
 void console_put_hex64(uint64_t v) {
     static const char hex[] = "0123456789abcdef";
-    console_putchar('0'); console_putchar('x');
+    uint64_t f = irq_save();
+    putchar_nolock('0'); putchar_nolock('x');
     for (int i = 15; i >= 0; i--) {
-        console_putchar(hex[(v >> (i * 4)) & 0xF]);
+        putchar_nolock(hex[(v >> (i * 4)) & 0xF]);
     }
+    irq_restore(f);
 }

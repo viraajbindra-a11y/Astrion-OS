@@ -233,6 +233,8 @@ extern uint32_t fb_height_x(void);
  * panicking the kernel (console + task hooks). */
 extern void        console_puts(const char *s);
 extern void        console_set_color(uint32_t rgb);
+extern uint64_t    console_lock(void);        /* see console.h — masks IRQs */
+extern void        console_unlock(uint64_t f);
 extern void        task_exit(void);
 extern const char *task_current_name(void);
 
@@ -265,6 +267,14 @@ void isr_handler(struct registers *r) {
         serial_puts_x(exception_name((uint32_t)r->vector));
         serial_puts_x(" from user task - killing it, kernel survives\n");
 
+        /* One line, six calls — lock the run so the shell can't interleave
+         * with the kill notice, and so the red doesn't leak onto someone
+         * else's text. This lock is the interrupt flag saved and restored, so
+         * arriving here from a fault that hit WHILE a task held it is fine:
+         * we nest, we print, we put back what we found. There is no lock word
+         * to be stuck holding, which is exactly why it can't wedge the box.
+         * Unlock before task_exit() — that call never returns. */
+        uint64_t cf = console_lock();
         console_set_color(0xF87171u);   /* red */
         console_puts("\n[kernel] user task '");
         console_puts(task_current_name());
@@ -272,6 +282,7 @@ void isr_handler(struct registers *r) {
         console_puts(exception_name((uint32_t)r->vector));
         console_puts(" (ring-3 isolation held)\n");
         console_set_color(0xFFFFFFu);
+        console_unlock(cf);
 
         task_exit();   /* marks the task DONE, schedules away — never returns */
         for (;;) __asm__ volatile("hlt");   /* unreachable belt-and-suspenders */
