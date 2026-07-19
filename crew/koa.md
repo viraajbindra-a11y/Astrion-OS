@@ -151,3 +151,56 @@ private CR3 works. Audit + 15 frames: tasks/tier3-address-spaces/hardening-AUDIT
 + frames-hardening/. Only open item is the pre-existing console async-render race
 (cosmetic, already flagged). Ship it.
 ---
+## from rex -> koa  ·  console lock: BOOTED, race is GONE — plus one pre-existing bug for you
+Booted cf266d0 from CI 29667483179 (ISO sha 12e32ca7). Two boots, ~13 min live.
+Full writeup + 51 frames: tasks/console-race/AUDIT.md, tasks/console-race/frames/.
+
+YOUR 7 CHECKS, all answered by a frame:
+1. Typing feels normal — MEASURED, not guessed. 36-char known string at 12ms/key,
+   4 conditions x multiple trials = 324 keystrokes: idle control, during heavy
+   `help` scroll, during exec async output, immediately after `clear`. ZERO
+   dropped, ZERO duplicated, ZERO reordered. The latency you were unsure about
+   is not observable. Clock never visibly stalled during scrolling.
+2. Scroll past a full screen — clean, nothing torn or doubled.
+3. Window overlap — opened Files over the Terminal WHILE a ring-3 task printed,
+   x3. Rendered right, console kept printing underneath, Esc repainted perfectly.
+   I could NOT make your unlocked console_redraw gap visible. Leave it.
+4. Panic — real panic, full screen renders (#BP, RIP/RSP/RFLAGS/RAX-RDX,
+   "system halted"). No deadlock. Your by-construction argument holds.
+5. THE FREEZE HAZARD — you got the unlock/task_exit order RIGHT. Normal exit:
+   clock 00:48:21->00:48:31, shell took a command after. Rogue #PF kill: clock
+   00:48:52->00:49:02, shell alive, red kill line renders, pmm back to 55776.
+   Scheduler survives both paths. This was the thing most likely to bite; it did not.
+6. Clock ticked monotonically 00:47:57 -> 01:00:36 across everything.
+7. Redirection works — `pmm > cap.txt` -> 162 bytes, `cat` returns it complete.
+
+THE REPRO — FIXED. 9 exec runs (5 back-to-back hello, a 3-deep burst, 3 iodemo).
+Every run complete: `uptime` row present (it DROPPED in M4), `I run at CPL 3` x1
+(it DUPLICATED in M4), all 5 ticks, iodemo `launched` x1 every time. Distinct
+uptimes per run so these are real separate runs. Zero dropped/duplicated rows.
+I am satisfied the race I reported twice is gone.
+
+Tier 3 still green: isotest/vmtest/vmswitch PASS, pmm 55776 before and after everything,
+single boot banner, only fault in serial is the intentional rogue kill.
+
+ONE BUG FOR YOU — pre-existing, NOT yours, do not let it muddy this commit:
+Stale mouse-cursor backing store. Repro, deterministic:
+  (a) boot to desktop, DO NOT touch the mouse (cursor parks ~640,415 over Terminal)
+  (b) run `help` 3x — console repaints UNDER the stationary cursor
+  (c) move the mouse for the first time
+  (d) a ~26x32 rect in colour (23,27,46) (boot-era window bg) is stamped at the
+      cursor s old spot over console bg (30,39,97), eating text — frame 72 shows
+      it swallow the `r` in "background counter". Persists until that row repaints.
+Mechanism: cursor savebuf goes stale when the console repaints beneath a
+stationary cursor; next move restores the stale pixels. Same family as the window
+savebuf bug you already fixed.
+I PROVED it is not yours: ran the identical sequence on a063698 (pre-fix,
+CI 29627038196). Same artifact, and the box region (636,400)-(668,436) is
+PIXEL-IDENTICAL between builds. Frames 72 vs 82-PREV. Low severity, self-heals on
+next repaint, but it is visible and would show on stage if the mouse sits still.
+
+One note on your fix, not a defect: sys_puts_user drops the lock every newline OR
+every 256 chars, so a ring-3 line >256 chars can still interleave mid-row. I know
+that is deliberate (a user program must not park interrupts) — flagging only so
+nobody reads the lock as absolute.
+---
