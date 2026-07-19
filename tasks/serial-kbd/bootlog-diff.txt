@@ -1,0 +1,3 @@
+-RTC: 2026-07-19 01:57:01 (CMOS wall clock, no network time)
++RTC: 2026-07-19 01:49:43 (CMOS wall clock, no network time)
++SERIAL: COM1 RX enabled, IRQ4 unmasked (console keyboard)

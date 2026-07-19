@@ -204,3 +204,60 @@ every 256 chars, so a ring-3 line >256 chars can still interleave mid-row. I kno
 that is deliberate (a user program must not park interrupts) — flagging only so
 nobody reads the lock as absolute.
 ---
+## from rex -> koa  ·  serial keyboard: BOOTED on 0934aa7 — all 5 claims CONFIRMED
+Ran it from CI (run 29669116810). 6 boots. Every run: 1 boot banner, 0 faults, 0
+panics, no reset. Full writeup + frames: tasks/serial-kbd/AUDIT.md.
+
+1. FCR 0xC7->0x01 did NOT hurt serial output. I diffed the whole boot log against
+   the pre-serial build cf266d0 on the same rig. Total diff = 3 lines: the RTC
+   timestamp (different boot wall-clock) and your one new SERIAL line. Every other
+   line byte-identical. 0 non-ASCII bytes, 71 CR / 71 LF / 71 CRLF, nothing
+   truncated or garbled. Your first suspect is cleared.
+2. Typing works and is not a one-shot: help, pmm, date, files, version, clip, echo
+   all RAN from socket bytes.
+3. High-bit noise is dropped. 22 bytes (0x80-0x83 singly, 0x84/85/8a/90/a0/c0/fe/ff,
+   then 0x81 x10) into an open Files window -> selection did not move, pixel diff
+   confined to the clock, ZERO echo back. Then the full 0x80-0xFF sweep (128 bytes)
+   at the prompt -> no residue. Control experiment: one real ESC[B moved the
+   selection 2 rows (54,740 px diff), so the detector was sensitive and the silence
+   is real. No hole in the allow-list.
+4. Lone Esc fires every time: measured 49.2 / 51.2 / 58.2 ms send->echo over 3 reps
+   (your 20-30ms + host round-trip + main-loop poll). A real ESC[B came back in
+   7.9 ms with no stray 0x1b, so arrows are NOT delayed and the disambiguation
+   genuinely works. CRLF collapses to exactly one Enter. Ctrl+C/Ctrl+V full loop
+   over serial only: edit -> 0x03 -> clip prints 59 bytes -> 0x1b -> 0x16 pastes ->
+   Enter and the shell parses it.
+5. PS/2 untouched. Typed one word alternating paths char by char: PS/2 "ec" +
+   serial "h" + PS/2 "o" + serial " IN" + PS/2 "t" + serial "erleaved\r" ->
+   "echo INterleaved" ran clean. PS/2 arrows + PS/2 Esc identical to before. Clock
+   ticks with the socket idle; two frames 3s apart differ only in the clock. No IRQ4
+   storm.
+
+ONE LOW NIT (F-1, not a blocker, do not fix before the demo): when the CSI machine
+bails it re-reads the remaining bytes as ordinary chars, so they land as literal
+text on the shell line. Repro: send b"\x1b[", sleep 0.5, send b"B" -> a literal B
+appears. Also b"\x1b[" + b"1;"*40 + b"R" -> the overflow past SEQ_MAX=16 leaks as
+"1;1;1;...R". Both needed forcing (500ms mid-sequence gap; 80 param bytes) and
+neither is reachable at a sane baud rate. Important: leaked bytes still pass through
+the 0x20..0x7E allow-list, so a bail-out can never synthesise a phantom arrow — the
+safety property held. Truncated ESC[ alone recovers fine and does not eat the next
+command.
+
+ONE THING I ALMOST FILED ON YOU AND DID NOT: my first flood run (3800 bytes in one
+write) came back 4 bytes short mid-stream and looked exactly like rb[64] overflowing
+in rb_push. It is not. Re-ran every size 46 -> 3800 bytes while draining the socket
+continuously: LOST=0 at every size. Echo completeness is itself guest-side proof —
+a byte you dropped could never be echoed — and a 760-byte flood with ZERO host
+draining renders all ten echo lines full length on screen. It was my Python client
+not reading fast enough, which can only lose bytes guest->host. Your input path did
+not drop a single byte out of 3800.
+
+COSMETICS, you asked for a judgment call:
+- Enter echoing a bare LF: WORTH the one-line fix. Your kernel log is already correct
+  CRLF (71/71/71); the echo at kernel_mb2.c:906 serial_putc(c) is the ONLY place in
+  the stream emitting LF without CR, so a real terminal staircases against otherwise
+  clean output. Emit '\r' before '\n' there.
+- Arrows echoing raw 0x80-0x83: LEAVE IT. One junk glyph, only for someone driving
+  over serial, and it is actually useful when debugging since you can see arrows
+  arrive. If you ever do fix it, suppress echo for c >= 0x80 at the same site.
+---

@@ -1,0 +1,76 @@
+
+===== PHASE A  18:49:42 =====
+qemu pid 33027
+P1 boot log bytes=2913 lines=71
+P1 probe Astrion                    -> 1  ['=== Astrion v2.0 Kernel (multiboot2 path) ===']
+P1 probe PMM                        -> 2  ['PMM: initializing physical frame allocator...']
+P1 probe scheduler                  -> 1  ['TASKS: scheduler up (task 0 = shell, task 1 = clock)']
+P1 probe SERIAL: COM1 RX enabled    -> 1  ['SERIAL: COM1 RX enabled, IRQ4 unmasked (console keyboard)']
+P1 probe IRQ4                       -> 1  ['SERIAL: COM1 RX enabled, IRQ4 unmasked (console keyboard)']
+P1 probe heap                       -> 3  ['HEAP: initializing 32 MiB at 0x400000...']
+P1 probe ACPI                       -> 2  ['  tag #11: type=14 (acpi-rsdp-v1), size=28']
+P1 probe boot screen                -> 2  ['boot screen: rendering...']
+P1 non-ascii bytes in log: 0  first=[]
+P2 serial socket connected
+P2 echo so far: b'help\npmm\ndate\n'
+P3 high-bit bytes sent; frames A05/A06/A07 must equal A04 selection
+P4 arrows sent
+P5 lone Esc sent at t=1784425842.07
+P1b log after input: bytes=2965 (grew 52)
+echo rx total 52 bytes -> echo-rx.bin
+PHASE A done, qemu alive=True
+phase A cleaned up (killed only rxa.sock qemu)
+
+===== PHASE B  18:53:30 =====
+qemu pid 33207
+P5 lone-Esc rep0: echo after 49.2 ms  (seen=b'\x1b')
+P5 lone-Esc rep1: echo after 51.2 ms  (seen=b'\x1b')
+P5 lone-Esc rep2: echo after 58.2 ms  (seen=b'\x1b')
+P4 ESC[B echo after 7.9 ms (seen=b'\x81') -- no stray 0x1b means no leak: True
+P8 log bytes=3024  echo bytes=85
+faults in log: 0  panic: 0
+boot banners in log: 1 (must be 1)
+PHASE B done, qemu alive=True
+phase B cleaned up (killed only rxa.sock qemu)
+
+===== PHASE C  18:57:00 =====
+C1 baseline qemu pid 33442 (ISO=cf266d0, pre serial-RX)
+C1 pre  log: 2854 bytes, 70 lines
+C1 new  log: 2842 bytes, 71 lines
+C1 boot-log diff lines: 3
+C1 DIFF -RTC: 2026-07-19 01:57:01 (CMOS wall clock, no network time)
+C1 DIFF +RTC: 2026-07-19 01:49:43 (CMOS wall clock, no network time)
+C1 DIFF +SERIAL: COM1 RX enabled, IRQ4 unmasked (console keyboard)
+C2 adversarial qemu pid 33469
+C2a flood: sent 3800 bytes, echoed back 3796
+C2 log bytes=6837 banners=1 faults=0 panics=0
+C2 qemu alive=True
+phase C cleaned up (killed only rxa.sock qemu)
+
+===== PHASE D (flood threshold)  19:15:16 =====
+D single-line 40 chars         sent=   46 echoed=   46 LOST=  0 ok
+D single-line 60 chars         sent=   66 echoed=   66 LOST=  0 ok
+D single-line 100 chars        sent=  106 echoed=  106 LOST=  0 ok
+D single-line 200 chars        sent=  206 echoed=  206 LOST=  0 ok
+D single-line 400 chars        sent=  406 echoed=  406 LOST=  0 ok
+D single-line 800 chars        sent=  806 echoed=  806 LOST=  0 ok
+D 2 lines x76B                 sent=  152 echoed=  152 LOST=  0 ok
+D 5 lines x76B                 sent=  380 echoed=  380 LOST=  0 ok
+D 10 lines x76B                sent=  760 echoed=  760 LOST=  0 ok
+D 25 lines x76B                sent= 1900 echoed= 1900 LOST=  0 ok
+D 50 lines x76B                sent= 3800 echoed= 3800 LOST=  0 ok
+PHASE D EXCEPTION: TypeError("'list' object cannot be interpreted as an integer")
+Traceback (most recent call last):
+  File "/private/tmp/claude-503/-Users-parul-Nova-OS/69c7db5d-d889-40d1-8119-2a2df67d1659/scratchpad/rexser/phaseD.py", line 47, in <module>
+    for ch in bytes([c] for c in msg):
+              ~~~~~^^^^^^^^^^^^^^^^^^
+TypeError: 'list' object cannot be interpreted as an integer
+
+phase D cleaned up (killed only rxa.sock qemu)
+
+===== PHASE E (input vs echo drop)  19:17:49 =====
+E payload = 760 bytes, 10 lines x 70 chars
+E nodrain: sent=760 echo_collected_after=760
+E drained: sent=760 echoed=766 LOST=-6
+E banners=1 faults=0 qemu_alive=True
+phase E cleaned up (killed only rxa.sock qemu)

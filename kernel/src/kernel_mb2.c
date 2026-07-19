@@ -903,6 +903,13 @@ void kernel_mb2_main(uint32_t magic, uint64_t info_ptr) {
                 /* If an app window is open it gets the keys; otherwise the
                  * shell does. */
                 if (!wm_handle_key(c)) shell_on_key(c);
+                /* Echo to serial. Emit CR before LF: serial_puts() already does
+                 * this, so this raw echo was the ONLY bare LF in the stream and
+                 * a real terminal staircased against otherwise-clean output.
+                 * Matters now that serial is a real input path, not just a log.
+                 * (The raw 0x80-0x83 arrow-key echo is left as-is on purpose —
+                 * one junk glyph, and it's useful when debugging over serial.) */
+                if (c == '\n') serial_putc('\r');
                 serial_putc(c);
             }
         }
