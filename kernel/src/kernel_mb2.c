@@ -839,6 +839,14 @@ void kernel_mb2_main(uint32_t magic, uint64_t info_ptr) {
     kbd_install();
     serial_puts("KBD: PS/2 IRQ1 unmasked\n");
 
+    /* Serial console keyboard on COM1 / IRQ4 - a second producer feeding the
+     * SAME ring buffer as the PS/2 path, so anything that reads the keyboard
+     * is driven identically from a terminal on the other end of the cable.
+     * Enables the UART's received-data interrupt only; the kernel log keeps
+     * transmitting exactly as it does now. */
+    serial_kbd_install();
+    serial_puts("SERIAL: COM1 RX enabled, IRQ4 unmasked (console keyboard)\n");
+
     /* PS/2 mouse on IRQ12. */
     mouse_install(boot_info.fb_width, boot_info.fb_height);
     serial_puts("MOUSE: PS/2 aux device enabled, IRQ12 unmasked\n");

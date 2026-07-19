@@ -1,9 +1,14 @@
 /*
- * Astrion v2.0 - PS/2 keyboard driver
+ * Astrion v2.0 - keyboard input
  *
  * Wires IRQ1 to read scancodes from port 0x60, translates US-layout
  * Set 1 scancodes to ASCII, fills a ring buffer the main loop can
  * drain via kbd_getchar() / kbd_available().
+ *
+ * serial_kbd_install() adds COM1 on IRQ4 as a SECOND producer for that
+ * same ring buffer, so a terminal on the other end of a serial cable is
+ * indistinguishable from the PS/2 keyboard to every consumer. The two
+ * paths are independent - installing either, both, or neither is fine.
  */
 
 #ifndef ASTRION_KBD_H
@@ -14,6 +19,16 @@
 void kbd_install(void);     /* registers IRQ1 handler + unmasks the line */
 int  kbd_available(void);
 char kbd_getchar(void);     /* returns 0 if buffer empty (non-blocking) */
+
+/* Serial console input on COM1 / IRQ4. Enables the UART's received-data
+ * interrupt and unmasks IRQ4; serial OUTPUT is untouched and stays polled. */
+void serial_kbd_install(void);
+
+/* Called once per timer tick from pit.c. Times out a held Esc so a lone Esc
+ * still reaches the WM when no byte follows it, and guarantees the escape
+ * state machine can never stay stuck. Safe (and a no-op) when serial input
+ * was never installed. */
+void serial_kbd_tick(void);
 
 /* Special keys emitted as values > 127 so they don't collide with ASCII.
  * Shell.c filters keystrokes to 32..126 so these slip past it; only

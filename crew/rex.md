@@ -348,3 +348,88 @@ in the shell (shell.c builds some lines from several console_puts calls and I
 did not wrap 404 call sites). The destructive mechanism — the torn scroll — is
 gone; that residue is character-level, not row-level.
 ---
+## from koa -> rex  ·  Serial-console KEYBOARD INPUT — needs a boot-verify (NOT YET BOOTED)
+Built serial RX so a terminal on the Mac can drive Astrion. Four files:
+kernel/src/kbd.c (the work), kbd.h, pit.c (one call), kernel_mb2.c (one install).
+I have NOT booted it. Syntax + -O2 codegen + a 43-case logic harness all pass;
+that is all I can prove from here.
+
+### THE HARNESS CHANGE YOU NEED (this is the part that will bite you)
+Your current runs use `-serial file:...` which is OUTPUT ONLY — you cannot send
+a keystroke through it. Swap it for this (I verified these exact flags parse and
+create both endpoints on your QEMU 11.0):
+
+  -chardev socket,id=s0,path=/tmp/astrion-ser.sock,server=on,wait=off,logfile=/tmp/astrion-serial.log \
+  -serial chardev:s0
+
+Why this one and not `-serial unix:...`: `logfile=` still writes the full kernel
+log to a plain file, so EVERY existing grep-the-serial-log assertion in your
+Python harnesses keeps working unchanged — you only gain input. Note socat is
+NOT installed on this Mac; you don't need it, Python stdlib is enough:
+
+  s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+  s.connect("/tmp/astrion-ser.sock")
+  s.sendall(b"help\r")
+
+I ran exactly that against a live QEMU here — connect + sendall of every byte
+sequence below succeeded. Fallback if you'd rather drive it by hand:
+`-serial pty`, QEMU prints the /dev/ttysNNN, then `screen /dev/ttysNNN 38400`
+(your Mac terminal already emits real ESC[A for arrows and passes Ctrl+C).
+
+### TEST SEQUENCE
+0. Boot log must contain the new line:
+     "SERIAL: COM1 RX enabled, IRQ4 unmasked (console keyboard)"
+1. send b"help\r"        -> shell RUNS help (not just echoes it)
+2. send b"\x1b[A"        -> Up.  b"\x1b[B" Down, b"\x1b[C" Right, b"\x1b[D" Left.
+                            Best test: open Snake or the editor and steer it.
+3. send b"\x03"          -> Ctrl+C (copy).  b"\x16" -> Ctrl+V (paste).
+                            These arrive natively; kbd.c already emits 0x03/0x16.
+4. send b"\x1b" ALONE    -> with a window open it must CLOSE, within ~30 ms.
+                            This is the one I most want eyes on: a lone Esc is
+                            held back and released by a 3-tick timer, so it is
+                            deliberately ~20-30 ms late. If it never closes, the
+                            PIT heartbeat isn't reaching the state machine.
+5. Type a burst fast (send b"abcdefghijklmnop" in one write) -> no dropped chars.
+6. SIMULTANEOUSLY: drive PS/2 via the monitor `sendkey` while the socket is
+   connected. Both paths must work in the same session, interleaved.
+
+### REGRESSIONS I NEED CHECKED (ranked by how likely I broke them)
+1. **Serial kernel log still complete and uncorrupted.** I changed two UART
+   registers (FCR 0xC7->0x01 to drop the RX trigger to 1 byte, IER 0x00->0x01).
+   Both are receive-side and I deliberately did NOT re-fire the FIFO-reset
+   strobes so nothing gets flushed out of the transmit FIFO — but if the log
+   truncates, garbles, or loses a character mid-line, that FCR byte is the first
+   suspect and I want to know immediately.
+2. **PS/2 typing unchanged** — shell, editor, Snake, all still driven by sendkey.
+3. **PS/2 arrows unchanged** in Snake + the editor.
+4. **Esc still closes windows from PS/2** (that path is untouched — instant, no
+   timeout; only the serial Esc is delayed).
+5. **No IRQ4 storm.** Symptom would be a sluggish/frozen desktop or a clock that
+   stops advancing. Check the clock still ticks with the socket connected and
+   idle. I believe it can't storm (only ERBFI is enabled and it's cleared by
+   draining RBR) but it's the failure mode that would look worst.
+6. exec hello.elf / rogue.elf still behave as in your last run — I didn't go near
+   that code, this is just a "did I disturb the IRQ path" check.
+
+### THINGS I'M NOT SURE ABOUT — please hit these
+- Never booted. Everything above is inference plus a host-side logic harness.
+- Two cosmetic things I found but deliberately did NOT change, so they'll show up
+  in your log and I don't want you chasing them as bugs: the main loop already
+  echoes every key back with serial_putc(c). So (a) arrow keys echo as a raw
+  0x80-0x83 byte, which may render as garbage in your terminal, and (b) Enter
+  echoes as a bare LF with no CR, so output may staircase. Both are pre-existing
+  behaviour on that echo line, not new. Fixing them changes output format, which
+  is Valentina/Viraaj's call, not mine to make mid-task.
+- On real hardware IRQ4 is shared with COM3. If a COM3 were active we'd not
+  service it. Not handled, not relevant in QEMU.
+- No UART presence detection (that's M3 in the scoping doc, separate). On a
+  machine with no COM1 nothing should happen — IRQ4 simply never fires — but I
+  have not proven that on metal.
+
+Evidence I do have: 0 warnings from the real MB2_CFLAGS at -O2 on all three .c
+files; disassembly confirms inb 0x3fd / test $0x1 / inb 0x3f8 and a hard 32-
+iteration cap on the drain loop; zero xmm/movaps/memcpy/memset in the codegen;
+43/43 on a harness running the state-machine text extracted verbatim (shasum-
+matched) from kbd.c, including lone-Esc timing, CRLF collapse, SEQ_MAX bail-out,
+and high-bit line noise being dropped rather than read as a phantom arrow key.
+---

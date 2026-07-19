@@ -10,6 +10,7 @@
 #include <stdint.h>
 #include "pit.h"
 #include "idt.h"
+#include "kbd.h"
 
 #define PIT_BASE_HZ   1193182u
 #define PIT_CMD       0x43
@@ -29,6 +30,14 @@ static void pit_isr(struct registers *r) {
     /* Cheap integer ms - 1000 * ticks / hz. Cached so callers don't
      * pay the divide on hot paths. */
     cached_ms = (ticks_total * 1000) / tick_hz;
+
+    /* Heartbeat for the serial console's Esc state machine. It needs a clock
+     * to tell a lone Esc from the start of an arrow-key sequence, and this
+     * is the only periodic thing running. Bounded, no I/O, and it runs in
+     * the same IF=0 interrupt context as the two keyboard ISRs, so the
+     * keyboard ring buffer keeps exactly one writer at a time. No-op unless
+     * a sequence is actually in flight. */
+    serial_kbd_tick();
 }
 
 void pit_install(uint32_t hz) {

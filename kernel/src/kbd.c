@@ -1,17 +1,24 @@
 /*
- * Astrion v2.0 - PS/2 keyboard driver
+ * Astrion v2.0 - keyboard input: PS/2 (IRQ1) + serial console (IRQ4)
  *
- * Scancode set 1 (the default for the legacy PS/2 controller QEMU
- * emulates). On every IRQ1, read one byte from port 0x60:
+ * TWO producers, ONE event stream. Everything that reads the keyboard -
+ * shell, WM, editor, Snake - drains the same ring buffer and cannot tell
+ * which wire a key came in on.
+ *
+ * PS/2 (IRQ1): scancode set 1 (the default for the legacy PS/2 controller
+ * QEMU emulates). On every IRQ1, read one byte from port 0x60:
  *   - byte & 0x80  → key release; we ignore for now (no auto-repeat,
  *                    no held-key tracking).
  *   - otherwise    → press; look up the ASCII code, push to ring
  *                    buffer. Shift status latches across press/release.
+ * Extended scancodes (0xE0 prefix) are decoded for the four arrow keys
+ * and right-Ctrl; the rest are dropped.
  *
- * Multi-byte scancodes (0xE0 prefix for arrows / numpad etc.) are
- * dropped for now - only printable + Enter + Backspace + Tab are wired.
+ * Serial (IRQ4): bytes off COM1, translated in the second half of this
+ * file. This is the input path that still works on a machine whose
+ * firmware gives us no i8042 emulation.
  *
- * Ring buffer is 64 bytes. Drops the oldest if full (the main loop is
+ * Ring buffer is 64 bytes. Drops the newest if full (the main loop is
  * expected to drain it every frame).
  */
 
@@ -27,6 +34,10 @@ static inline uint8_t inb_(uint16_t port) {
     uint8_t v;
     __asm__ volatile("inb %1, %0" : "=a"(v) : "Nd"(port));
     return v;
+}
+
+static inline void outb_(uint16_t port, uint8_t v) {
+    __asm__ volatile("outb %0, %1" : : "a"(v), "Nd"(port));
 }
 
 /* US-layout scancode set 1 → ASCII (no shift). Index = scancode. */
@@ -62,11 +73,19 @@ static int ctrl_held   = 0;  /* left or right Ctrl, latched across press/release
 static int is_extended = 0;  /* set after a 0xE0 byte, cleared after the next byte */
 
 static void rb_push(char c) {
-    /* Single-producer (this runs only in the IRQ1 ISR) / single-consumer
-     * (kbd_getchar runs only in task context). The ISR must NEVER write
-     * rb_tail - that's the consumer's field. On a single core the ISR
-     * preempts the consumer between its read and write of rb_tail, so
-     * if both touched it we'd lose updates / corrupt the index. When the
+    /* One producer at a time / single consumer (kbd_getchar runs only in
+     * task context). There are now THREE callers of this - the IRQ1 PS/2
+     * ISR, the IRQ4 serial ISR, and the IRQ0 timer tick that flushes a held
+     * Esc - and they are all interrupt handlers. Every IRQ vector is a
+     * 64-bit INTERRUPT gate (idt.c sets type 0x8E), which clears IF on
+     * entry, and nothing in isr.S's irq_common or in irq_handler turns it
+     * back on. On one core that makes the three mutually exclusive: none
+     * can start while another is inside rb_push, so rb_head still has
+     * exactly one writer at any instant.
+     *
+     * The producers must NEVER write rb_tail - that's the consumer's field.
+     * An ISR preempts the consumer between its read and write of rb_tail,
+     * so if both touched it we'd lose updates / corrupt the index. When the
      * buffer is full we drop the NEWEST char (this one) instead. Only
      * rb_head is written here; only rb_tail in kbd_getchar. Race-free. */
     uint8_t next = (rb_head + 1) & (sizeof(rb) - 1);
@@ -152,4 +171,228 @@ void kbd_install(void) {
     rb_head = rb_tail = 0;
     irq_register(1, kbd_isr);
     pic_unmask_irq(1);
+}
+
+/* ─── Serial-console keyboard (COM1, IRQ4) ────────────────────────────
+ *
+ * A second producer for the ring buffer above, so a terminal on the far end
+ * of a null-modem cable drives the shell, the WM, the editor and Snake
+ * exactly the way the PS/2 keyboard does. This is the input path that keeps
+ * working on hardware whose firmware hands us no i8042 emulation, and it
+ * doubles as a debugger console for every hardware bug after this one.
+ *
+ * The UART is already brought up for OUTPUT by serial_init() in
+ * kernel_mb2.c, and the kernel log shares the port - so we touch exactly
+ * two registers here, and neither one affects transmit:
+ *
+ *   FCR (base+2) ← 0x01   The same FIFO-enable serial_init() set, with the
+ *                         receive trigger level dropped from 14 bytes to 1,
+ *                         so a single keystroke raises IRQ4 immediately
+ *                         instead of waiting on the character timeout. The
+ *                         FIFO-reset strobes (bits 1,2) are deliberately
+ *                         left at 0: re-firing them here would flush a byte
+ *                         of the boot log out of the transmit FIFO.
+ *   IER (base+1) ← 0x01   ERBFI (received-data-available) ONLY. Bit 1,
+ *                         transmit-holding-register-empty, stays off, so
+ *                         serial_putc keeps polling LSR exactly as it does
+ *                         today. Output behaviour is byte-for-byte unchanged.
+ *
+ * MCR already has OUT2 set (serial_init writes 0x0B) - on a PC that bit is
+ * what gates the UART's interrupt line onto the PIC, so there is nothing to
+ * change there either.
+ */
+
+#define COM1_BASE       0x3F8
+#define COM1_RBR        (COM1_BASE + 0)   /* receive buffer (read) */
+#define COM1_IER        (COM1_BASE + 1)   /* interrupt enable */
+#define COM1_FCR        (COM1_BASE + 2)   /* FIFO control (write) */
+#define COM1_LSR        (COM1_BASE + 5)   /* line status */
+#define LSR_DATA_READY  0x01              /* LSR bit 0: a byte is waiting */
+#define IER_RX_AVAIL    0x01              /* IER bit 0: ERBFI */
+#define FCR_TRIGGER_1   0x01              /* FIFO on, trigger 1 byte, no reset */
+
+/* ─── Esc disambiguation ───
+ *
+ * Arrow keys arrive as three bytes: ESC '[' 'A'. A lone Esc - which the WM
+ * uses to close a window - is one byte that looks exactly like the start of
+ * one of those. Nothing in the first byte tells them apart, so we hold the
+ * Esc back and decide once we see what follows.
+ *
+ * The whole risk in that trick is getting stuck holding a byte forever, so
+ * the machine has one hard rule: it is back in ESC_NONE within
+ * ESC_TIMEOUT_TICKS of the LAST byte received, whatever that byte was.
+ * esc_ticks_left is reloaded ONLY by an arriving byte and counted down ONLY
+ * by the 100 Hz timer, so with no input it always reaches zero.
+ *
+ *   ESC_NONE  --0x1B------→ ESC_GOT   hold the Esc, arm the countdown
+ *   ESC_GOT   --'[' or 'O'→ ESC_SEQ   CSI / SS3 - an arrow may be coming
+ *   ESC_GOT   --0x1B------→ ESC_GOT   emit the held Esc, hold the new one
+ *   ESC_GOT   --anything--→ ESC_NONE  emit the held Esc, then re-handle
+ *                                     this byte as an ordinary key. The
+ *                                     byte is never swallowed.
+ *   ESC_SEQ   --A/B/C/D---→ ESC_NONE  emit KEY_UP/DOWN/RIGHT/LEFT
+ *   ESC_SEQ   --0x20..0x3F→ ESC_SEQ   parameter byte ('1', ';', ...) - eat
+ *   ESC_SEQ   --0x40..0x7E→ ESC_NONE  any other final byte ends the
+ *                                     sequence and we drop it (Home, End,
+ *                                     PgUp, F-keys have no code here yet)
+ *   ESC_SEQ   --anything--→ ESC_NONE  a control character can't appear
+ *                                     inside a CSI, so the sequence was
+ *                                     garbage: abandon it and re-handle
+ *                                     this byte
+ *   timeout in ESC_GOT      emit the held Esc - it really was a lone Esc
+ *   timeout in ESC_SEQ      drop the partial sequence. The user was clearly
+ *                           mid-sequence; a stray Esc here would close a
+ *                           window they never asked to close.
+ *
+ * So the worst case for a real Esc keypress is ESC_TIMEOUT_TICKS = 30 ms
+ * before the WM sees it - under one frame, and the same order terminal
+ * emulators use. The worst case for a stuck state is that same 30 ms.
+ */
+
+#define ESC_NONE  0
+#define ESC_GOT   1
+#define ESC_SEQ   2
+#define ESC_TIMEOUT_TICKS 3    /* PIT runs at 100 Hz → 20..30 ms */
+#define SEQ_MAX   16           /* parameter bytes tolerated inside one CSI */
+#define ESC_BYTE  0x1B         /* what wm.c matches as `c == 27` to close */
+
+static volatile uint8_t esc_state;        /* ESC_NONE / ESC_GOT / ESC_SEQ */
+static volatile uint8_t esc_ticks_left;   /* countdown to forced ESC_NONE */
+static volatile uint8_t seq_len;          /* parameter bytes eaten in ESC_SEQ */
+static volatile uint8_t last_was_cr;      /* for the CRLF collapse below */
+
+static void serial_feed(uint8_t b) {
+    /* At most two passes. Pass 0 can flush a held Esc and drop us back to
+     * ESC_NONE so the SAME byte is re-read as an ordinary key in pass 1;
+     * both paths that loop set ESC_NONE first, so pass 1 always falls
+     * straight through. The bound of 2 is belt-and-suspenders: this runs in
+     * an ISR and must terminate no matter what state we are in. */
+    for (int pass = 0; pass < 2; pass++) {
+        if (esc_state == ESC_GOT) {
+            esc_ticks_left = ESC_TIMEOUT_TICKS;
+            if (b == '[' || b == 'O') { esc_state = ESC_SEQ; seq_len = 0; return; }
+            if (b == ESC_BYTE)        { rb_push((char)ESC_BYTE);          return; }
+            rb_push((char)ESC_BYTE);  /* the held Esc was a real Esc */
+            esc_state = ESC_NONE;
+            continue;                 /* now handle b on its own merits */
+        }
+
+        if (esc_state == ESC_SEQ) {
+            esc_ticks_left = ESC_TIMEOUT_TICKS;
+            if (b >= 0x40 && b <= 0x7E) {          /* final byte: sequence ends */
+                esc_state = ESC_NONE;
+                switch (b) {
+                    case 'A': rb_push(KEY_UP);    break;
+                    case 'B': rb_push(KEY_DOWN);  break;
+                    case 'C': rb_push(KEY_RIGHT); break;
+                    case 'D': rb_push(KEY_LEFT);  break;
+                    default:  break;               /* no code for this key */
+                }
+                return;
+            }
+            if (b >= 0x20 && b <= 0x3F && seq_len < SEQ_MAX) {
+                seq_len++;             /* parameter / intermediate byte */
+                return;
+            }
+            esc_state = ESC_NONE;      /* garbage, or absurdly long */
+            continue;
+        }
+
+        break;                         /* ESC_NONE - ordinary byte */
+    }
+
+    if (b == ESC_BYTE) {               /* start holding an Esc */
+        esc_state      = ESC_GOT;
+        esc_ticks_left = ESC_TIMEOUT_TICKS;
+        seq_len        = 0;
+        last_was_cr    = 0;
+        return;
+    }
+
+    /* CR and LF both mean Enter, because which one a terminal sends depends
+     * on its line settings. The CRLF collapse below stops a terminal that
+     * sends "\r\n" for one Return from producing two. Cost: a Ctrl+J typed
+     * immediately after Return is eaten - nothing in Astrion binds Ctrl+J. */
+    if (b == '\r') { last_was_cr = 1; rb_push('\n'); return; }
+    if (b == '\n') {
+        uint8_t swallow = last_was_cr;
+        last_was_cr = 0;
+        if (!swallow) rb_push('\n');
+        return;
+    }
+    last_was_cr = 0;
+
+    /* Both erase codes mean Backspace. Which one you get depends on the
+     * terminal's erase setting, so accept either. */
+    if (b == 0x7F || b == 0x08) { rb_push('\b'); return; }
+    if (b == '\t')              { rb_push('\t'); return; }
+
+    /* Ctrl+C / Ctrl+V arrive over serial as the bare control codes 0x03 and
+     * 0x16 - which are EXACTLY what kbd_isr folds the PS/2 chords into - so
+     * they reach the clipboard without any special handling. */
+    if (b == (uint8_t)KEY_CTRL_C || b == (uint8_t)KEY_CTRL_V) {
+        rb_push((char)b);
+        return;
+    }
+
+    /* Everything else is a whitelist, and this is the load-bearing line for
+     * a noisy cable: KEY_UP..KEY_RIGHT are 128..131, so one high-bit byte of
+     * line noise pushed through raw would land in the stream as a phantom
+     * arrow key. Only printable ASCII gets through; the rest is dropped. */
+    if (b >= 0x20 && b <= 0x7E) rb_push((char)b);
+}
+
+static void serial_isr(struct registers *r) {
+    (void)r;
+    /* Drain what the FIFO holds, with a hard cap. The 16550 FIFO is 16 deep,
+     * so 32 is generous - the cap is the point. A UART wedged with Data
+     * Ready stuck high would otherwise spin here forever with IF=0, which is
+     * a dead machine. Anything still pending keeps IRQ4 asserted and we come
+     * straight back in.
+     *
+     * Reading LSR each time also clears the overrun / parity / framing
+     * latches, so a line error can't leave an interrupt permanently
+     * asserted. This handler touches nothing but I/O ports and the ring
+     * buffer - no console, no heap, no lock - so there is no path from here
+     * into anything a task could be holding. */
+    for (int i = 0; i < 32; i++) {
+        if ((inb_(COM1_LSR) & LSR_DATA_READY) == 0) break;
+        serial_feed(inb_(COM1_RBR));
+    }
+}
+
+/* Heartbeat for the Esc state machine, called once per PIT tick from IRQ0.
+ * Without it a lone Esc would sit held until the NEXT byte arrived, and
+ * "press Esc to close the window" would appear to do nothing. Runs in IRQ
+ * context like the other two producers, so rb_push keeps its one-writer
+ * guarantee. No-op unless a sequence is actually in flight - which is why
+ * pit.c can call it unconditionally even if serial input was never
+ * installed (esc_state starts at ESC_NONE in BSS). */
+void serial_kbd_tick(void) {
+    if (esc_state == ESC_NONE) return;
+    if (esc_ticks_left && --esc_ticks_left) return;
+    if (esc_state == ESC_GOT) rb_push((char)ESC_BYTE);
+    esc_state = ESC_NONE;
+    seq_len   = 0;
+}
+
+void serial_kbd_install(void) {
+    esc_state      = ESC_NONE;
+    esc_ticks_left = 0;
+    seq_len        = 0;
+    last_was_cr    = 0;
+
+    outb_(COM1_FCR, FCR_TRIGGER_1);
+
+    /* Throw away whatever is already sitting in the receive FIFO - line
+     * noise from plugging the cable in, or a terminal's own handshake - so
+     * the first thing the shell sees is something a person actually typed.
+     * Same bounded-drain shape as the ISR, same reason. */
+    for (int i = 0; i < 32 && (inb_(COM1_LSR) & LSR_DATA_READY); i++) {
+        (void)inb_(COM1_RBR);
+    }
+
+    irq_register(4, serial_isr);
+    outb_(COM1_IER, IER_RX_AVAIL);
+    pic_unmask_irq(4);
 }
