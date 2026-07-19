@@ -22,9 +22,26 @@ extern void serial_puts_x(const char *s);
 extern void serial_put_hex64_x(uint64_t v);
 extern void serial_put_u64_x(uint64_t v);
 
-/* The identity map covers the low 4 GiB; frames above it aren't addressable
- * as kernel pointers, so the pmm never manages them. */
-#define IDMAP_LIMIT 0x100000000ull
+/* How far the boot identity map reaches. A frame above it is not addressable
+ * as a kernel pointer, so the pmm must never hand it out — zero_frame() would
+ * dereference an unmapped address and fault.
+ *
+ * This is a RUNTIME value, not a constant, because boot/multiboot2.S chooses
+ * its mapping from CPUID: 512 GiB via 1 GiB pages when the CPU has PDPE1GB,
+ * else the old 4 GiB via 2 MiB pages. It was hardcoded to 4 GiB, which was
+ * correct while that was the only shape — but once the map grew, the allocator
+ * kept ignoring everything above 4 GiB. On a 12 GiB machine that left 8 GiB
+ * claimed by nobody: visible in the memory map, addressable by the CPU, and
+ * unusable. Deriving it from the same flag the boot code sets means the two
+ * cannot drift apart. */
+extern uint64_t pdpe1gb_used;
+
+#define IDMAP_1GIB_LIMIT (512ull << 30)   /* 512 PDPT entries x 1 GiB */
+#define IDMAP_2MIB_LIMIT 0x100000000ull   /* 4 PDs x 512 x 2 MiB      */
+
+static uint64_t idmap_limit(void) {
+    return pdpe1gb_used ? IDMAP_1GIB_LIMIT : IDMAP_2MIB_LIMIT;
+}
 
 static uint64_t  arena_base;   /* first managed frame (4 KiB aligned)     */
 static uint64_t  arena_top;    /* one past the last managed byte          */
@@ -47,8 +64,9 @@ static void zero_frame(uint64_t phys) {
 
 /* End of a memory-map region, clamped into the identity map and wrap-safe. */
 static uint64_t region_end(uint64_t base, uint64_t len) {
-    if (base >= IDMAP_LIMIT) return base;         /* wholly out of range */
-    if (len > IDMAP_LIMIT - base) return IDMAP_LIMIT;
+    uint64_t limit = idmap_limit();
+    if (base >= limit) return base;               /* wholly out of range */
+    if (len > limit - base) return limit;
     return base + len;
 }
 
