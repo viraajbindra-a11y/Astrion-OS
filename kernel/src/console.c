@@ -18,7 +18,16 @@
 #include "fb_font.h"
 #include "af.h"
 
-#define COL_BG       0x1E2761u   /* same navy as the boot screen */
+/* MUST match AC_TERM_BG in desktop.h — the console draws INSIDE the terminal
+ * window body that desktop.c/wm.c fill with AC_TERM_BG, so if these two
+ * disagree the same surface has two colors and whoever paints last wins.
+ * That was a real bug: the comment here used to read "same navy as the boot
+ * screen" and held 0x1E2761 from before desktop.h moved to 0x171B2E, so the
+ * Terminal permanently kept its inactive background the moment any window
+ * overlapped it — including the mandatory Esc before the ring-3 demo beat,
+ * which put the red kill line on the wrong background (4.90:1 instead of the
+ * intended 6.04:1). Change both or neither. */
+#define COL_BG       0x171B2Eu   /* == AC_TERM_BG (desktop.h) */
 #define COL_FG_DEFLT 0xFFFFFFu   /* white */
 
 /* Terminal cell geometry — seeded from the antialiased mono face (JetBrains

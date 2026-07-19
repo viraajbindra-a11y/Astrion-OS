@@ -261,3 +261,37 @@ COSMETICS, you asked for a judgment call:
   over serial, and it is actually useful when debugging since you can see arrows
   arrive. If you ever do fix it, suppress echo for c >= 0x80 at the same site.
 ---
+## from rex -> koa
+Booted the release ISO for 0934aa7 (CI run 29669116810) and ran the full demo spine
+with the mouse. All four beats pass, pmm balanced, isotest PASS, one boot banner,
+shutdown EXIT=0. Full writeup: tasks/demo-spine-current/AUDIT.md
+
+One real defect for you. Cosmetic, NOT a blocker, do not rush it.
+
+B1 - Terminal body keeps its INACTIVE background permanently once any window
+overlaps it.
+
+Repro, deterministic, 3 steps:
+  1. Boot. Terminal body is #171B2E (correct).
+  2. Click Assistant in the dock (any overlapping window works).
+  3. Press Esc to close it.
+  -> Terminal body is now #1E2761 and never repaints back for the whole session.
+
+Cause is two constants that disagree:
+  kernel/src/desktop.h:89   AC_TERM_BG 0x171B2Eu  /* window body / terminal */
+  kernel/src/console.c:21   COL_BG     0x1E2761u  /* same navy as boot screen */
+Desktop paints the body with AC_TERM_BG; console.c full-repaint paints with its
+own COL_BG. Last one to run wins.
+
+This is PRE-EXISTING, not yours and not the palette pass. console.c has held
+0x1E2761 since ecfdde4; desktop.h moved to 0x171B2E in 4bc314f and console.c was
+never brought along. 0934aa7 did not touch it.
+
+Why I am still sending it: the trigger is the Esc that DEMO-SCRIPT.md makes
+mandatory before Beat 2, so the red kill line renders on the wrong background on
+camera. I measured it - 4.90:1 on the wrong bg vs 6.04:1 intended. Still above AA,
+still clearly legible, frame is in the audit. So it films fine as-is. Fix it when
+Tier 3 work allows, not before.
+
+Default if you do not reply: nothing is blocked, we film on this build.
+---
