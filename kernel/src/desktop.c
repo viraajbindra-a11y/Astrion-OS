@@ -28,8 +28,12 @@ extern int      fb_present_x(void);
 static void power_off(void)    { }
 static void power_reboot(void) { }
 #define CPU_HALT() do { } while (0)
+/* The harness has no PS/2 mouse, so nothing is ever cached over the pixels. */
+static void mouse_invalidate_rect(int x, int y, int w, int h)
+                                 { (void)x; (void)y; (void)w; (void)h; }
 #else
 #include "power.h"
+#include "mouse.h"
 #define CPU_HALT() __asm__ volatile("cli; hlt")
 #endif
 
@@ -244,6 +248,12 @@ void desktop_draw_clock(const char *hhmmss) {
     if (desktop_power_is_open()) return;
     uint32_t w = af_text_width(hhmmss, AF_SB16);
     uint32_t x = SW - w - CLOCK_PAD;   /* left of the power button + divider */
+    /* This runs on the clock TASK, not task 0, so it must not lift the cursor:
+     * it can preempt task 0 mid-redraw and mutate the sprite's state underneath
+     * it. Flag the damage instead and let the main loop repair it — otherwise a
+     * pointer parked on the clock caches these pixels and paints them back over
+     * the next four times the time changes. */
+    mouse_invalidate_rect((int)x - 12, 6, (int)w + 24, (int)TOPBAR_H - 8);
     fb_rect_x(x - 12, 6, w + 24, TOPBAR_H - 8, AC_BAR);   /* clear old */
     af_draw(x, 12, hhmmss, AC_WHITE, AF_SB16);
 }

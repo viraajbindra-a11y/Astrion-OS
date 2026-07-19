@@ -1472,11 +1472,19 @@ static void set_content_rect(struct window *w) {
  * restore→move→save without repainting anything else. */
 static void repaint_all(void) {
     SW = fb_width_x(); SH = fb_height_x();
+    /* FIRST, before a single pixel moves. mouse_lift() paints the cursor's
+     * cached background back, and that cache is only true until somebody
+     * repaints underneath it — so lifting AFTER the chrome meant stamping
+     * pre-repaint pixels on top of freshly drawn chrome. That is precisely how
+     * clicking a dock tile bit a 22x2 notch out of the Files active ring: the
+     * ring was drawn by desktop_set_active_app(), then the resting cursor
+     * restored what had been there before it. Lift while the cache is still
+     * true and let the repaint below cover the hole. */
+    mouse_lift();
     desktop_repaint_chrome();
     console_redraw();
     struct window *f = focused();
     desktop_set_active_app(f ? icon_of(f->app) : 0);
-    mouse_lift();
     for (int i = 0; i < zn; i++) {
         struct window *w = &wins[zord[i]];
         save_rect(w->x, w->y, w->sw, w->sh, w->savebuf);
@@ -1580,6 +1588,11 @@ void wm_open_app(int icon) {
     switch (icon) {
         case 0:   /* Terminal: hand the keyboard back to the shell */
             focus_shell = 1;
+            /* desktop_set_active_app() repaints the whole dock strip, and with
+             * no windows open nothing else follows to cover a stale restore —
+             * so lift before it, not after. (When zn > 0 the repaint_all()
+             * below lifts too; mouse_lift() is idempotent between redraws.) */
+            mouse_lift();
             desktop_set_active_app(0);
             if (zn) repaint_all();          /* redraw titles/borders as unfocused */
             break;
@@ -1638,6 +1651,13 @@ int wm_handle_key(char c) {
     }
     struct window *f = focused();
     if (!f) return 0;               /* nothing focused → the shell gets it */
+    /* Every one of these handlers repaints part of its window — an editor line,
+     * the Files selection, an assistant reply. If the pointer is resting on that
+     * window its cached background goes stale the moment they do, so take the
+     * sprite off first, exactly as mon_tick does. The main loop puts it back on
+     * the same pass. Free when nothing is on screen (mouse_lift is idempotent
+     * between redraws), so holding a key down doesn't repeat the work. */
+    mouse_lift();
     set_content_rect(f);            /* app draw fns work off cx/cy/cw/ch */
     switch (f->app) {
         case APP_EDITOR: editor_key(c); return 1;
@@ -1714,6 +1734,7 @@ void wm_tick(void) {
         /* clicked the desktop / terminal → give the keyboard to the shell */
         if (!focus_shell) {
             focus_shell = 1;
+            mouse_lift();               /* the dock repaints under us — see above */
             desktop_set_active_app(0);
             if (zn) repaint_all();
         }

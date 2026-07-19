@@ -113,6 +113,9 @@ static uint8_t  packet[3];
 static int      btn_left, btn_right;
 static volatile int dirty;
 static volatile int left_click_latch;
+/* Set when somebody repainted the framebuffer under the resting cursor, so
+ * saved_bg no longer matches what is actually there. See mouse.h. */
+static volatile int bg_stale;
 static uint32_t sw, sh;
 
 /* Sized for 2x cursor (CUR_W * CUR_H * scale^2 = 11*18*4 = 792 dwords). */
@@ -124,6 +127,9 @@ static uint32_t saved_bg[CUR_W * 2 * CUR_H * 2];
  * it's clearly visible against the dense bitmap-font text on screen.
  * saved_bg is sized for 2x already. */
 #define CUR_SCALE 2
+/* The sprite's footprint in real pixels — the rect saved_bg mirrors. */
+#define CUR_PW (CUR_W * CUR_SCALE)
+#define CUR_PH (CUR_H * CUR_SCALE)
 
 static void save_bg_at(int x, int y) {
     if (!fb_present_x()) return;
@@ -152,6 +158,36 @@ static void restore_bg_at(int x, int y) {
             int px = x + col, py = y + row;
             if (px >= 0 && py >= 0 && (uint32_t)px < sw && (uint32_t)py < sh) {
                 fb[py * pitch_px + px] = saved_bg[row * w + col];
+            }
+        }
+    }
+}
+
+/* Erase the sprite WITHOUT trusting the whole cached rect.
+ *
+ * restore_bg_at() paints all 22x36 pixels back, which is right only while
+ * saved_bg is still true. Once something has repainted underneath us it is not:
+ * most of that rect now holds NEW content (the console blends glyph ink into
+ * the gaps around the arrow without filling the cell background first), and
+ * stamping the cache over it is exactly the bug. So walk the sprite bitmap and
+ * write back only the pixels the arrow itself covered — those are the only ones
+ * the sprite is still sitting on, and every pixel we never covered keeps
+ * whatever the repaint left there. */
+static void erase_cursor_at(int x, int y) {
+    if (!fb_present_x()) return;
+    volatile uint32_t *fb = (volatile uint32_t *)fb_addr_x();
+    uint32_t pitch_px = fb_pitch_x() / 4;
+    for (int row = 0; row < CUR_H; row++) {
+        for (int col = 0; col < CUR_W; col++) {
+            if (!CURSOR_BMP[row][col]) continue;      /* transparent: leave it */
+            for (int sy = 0; sy < CUR_SCALE; sy++) {
+                for (int sx = 0; sx < CUR_SCALE; sx++) {
+                    int sr = row * CUR_SCALE + sy;
+                    int sc = col * CUR_SCALE + sx;
+                    int px = x + sc, py = y + sr;
+                    if (px < 0 || py < 0 || (uint32_t)px >= sw || (uint32_t)py >= sh) continue;
+                    fb[py * pitch_px + px] = saved_bg[sr * CUR_PW + sc];
+                }
             }
         }
     }
@@ -242,6 +278,70 @@ void mouse_lift(void) {
     dirty = 1;
 }
 
+/* ─── Stale-background invalidation (see mouse.h) ─────────── */
+
+/* Save/restore rather than bare cli/sti: mouse_invalidate_rect() is called from
+ * console.c with interrupts ALREADY masked, and a bare sti there would hand the
+ * console's critical section back to the timer half-finished. Same idiom
+ * console.c uses for its writer lock, and it nests for the same reason.
+ * mouse_redraw_if_dirty() and mouse_take_left_click() keep bare cli/sti on
+ * purpose — they only ever run on task 0, with interrupts already on. */
+static inline uint64_t m_irq_save(void) {
+    uint64_t f;
+    __asm__ volatile("pushfq; pop %0; cli" : "=r"(f) :: "memory");
+    return f;
+}
+static inline void m_irq_restore(uint64_t f) {
+    __asm__ volatile("push %0; popfq" :: "r"(f) : "memory", "cc");
+}
+
+/* Does (x,y,w,h) touch the sprite's drawn footprint? Written subtractively —
+ * `lx - x >= w` rather than `x + w <= lx` — so a caller passing a nonsense
+ * width can't wrap the comparison into a false "no overlap". Both coordinates
+ * are framebuffer-bounded, so the differences themselves can't overflow. */
+static int rect_hits_cursor(int x, int y, int w, int h) {
+    if (w <= 0 || h <= 0) return 0;
+    if (lx - x >= w || x - lx >= CUR_PW) return 0;
+    if (ly - y >= h || y - ly >= CUR_PH) return 0;
+    return 1;
+}
+
+void mouse_invalidate_rect(int x, int y, int w, int h) {
+    uint64_t f = m_irq_save();
+    /* first_paint means nothing of ours is on the screen and there is no cache
+     * to go stale — the next redraw captures fresh either way. Skipping that
+     * case keeps a burst of console output from arming a repair per frame. */
+    if (!first_paint && rect_hits_cursor(x, y, w, h)) {
+        bg_stale = 1;
+        dirty    = 1;     /* wake the main loop so the repair actually happens */
+    }
+    m_irq_restore(f);
+}
+
+int mouse_bg_stale(void) { return bg_stale; }
+
+void mouse_erase_cursor(int *x, int *y, int *w, int *h) {
+    /* Same snapshot discipline as mouse_redraw_if_dirty: read and clear the
+     * flags together so an invalidation that lands mid-erase is kept for the
+     * next pass instead of being dropped. */
+    __asm__ volatile("cli");
+    int stale = bg_stale, painted = !first_paint;
+    int ex = lx, ey = ly;
+    bg_stale = 0;
+    if (stale && painted) { first_paint = 1; dirty = 1; }
+    __asm__ volatile("sti");
+
+    if (!stale || !painted) {
+        /* Nothing on screen to lift (a window repaint already called
+         * mouse_lift, say). Report an empty rect so the caller skips its
+         * repaint too. */
+        *x = 0; *y = 0; *w = 0; *h = 0;
+        return;
+    }
+    erase_cursor_at(ex, ey);
+    *x = ex; *y = ey; *w = CUR_PW; *h = CUR_PH;
+}
+
 int mouse_x(void)          { return mx; }
 int mouse_y(void)          { return my; }
 int mouse_left_down(void)  { return btn_left; }
@@ -314,6 +414,7 @@ void mouse_install(uint32_t screen_w, uint32_t screen_h) {
     my = sh / 2;
     first_paint = 1;
     dirty = 1;
+    bg_stale = 0;
     packet_phase = 0;
 
     /* 1. Enable aux. */

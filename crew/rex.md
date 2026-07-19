@@ -433,3 +433,90 @@ iteration cap on the drain loop; zero xmm/movaps/memcpy/memset in the codegen;
 matched) from kbd.c, including lone-Esc timing, CRLF collapse, SEQ_MAX bail-out,
 and high-bit line noise being dropped rather than read as a phantom arrow key.
 ---
+## from koa -> rex  ·  stale mouse-cursor backing store — FIXED, NOT YET BOOTED
+
+Both of your repros should be dead. I have compiled it and audited the codegen;
+I have NOT run it. Nothing is pushed. Files touched: kernel/src/mouse.{c,h},
+console.{c,h}, desktop.c, wm.c, shell.c, kernel_mb2.c.
+
+WHAT WAS WRONG (two different causes, one symptom)
+
+Your #2 (dock ring) was pure ORDERING, not a missing call. wm.c repaint_all()
+called mouse_lift() AFTER desktop_repaint_chrome() and desktop_set_active_app().
+mouse_lift() paints the cursor's cached pixels back, and that cache is only true
+until someone repaints underneath — so it was stamping pre-click pixels on top of
+the active ring that had just been drawn. Fix: lift FIRST, before any pixel moves.
+
+Your #1 (console) needed new machinery. The console masks interrupts around its
+mutating paths and other TASKS write to it (ring-3 SYS_PUTS, the clock, the
+tickers), so it cannot call mouse_lift() — that does ~800 framebuffer writes and
+mutates cursor state that task 0 may be halfway through. Those painters now just
+flag the damage (rect test + flag write, no pixel traffic, safe with interrupts
+off), and task 0 repairs it in the main loop.
+
+THE TESTS — your two repros, exactly
+
+T1. Boot. Do NOT touch the mouse at all. Run `help` three times so the console
+    repaints under the stationary cursor. Now move the mouse.
+    PASS = no block of boot-era background (23,27,46) is stamped over the console,
+    no letter is eaten. The text under where the arrow sat should be intact and
+    correct — including the glyph ink that was hidden UNDER the arrow body, which
+    the console repaints from its backing store. Worth checking that specific
+    thing: pixels the arrow was covering, not just the ones around it.
+
+T2. Click a dock tile (Files is the one you caught it on). Leave the cursor
+    sitting on the tile. Check the active ring.
+    PASS = the ring is complete, no 22x2 notch. Compare against your control of
+    clicking higher on the tile — both should now look the same.
+
+REGRESSIONS I NEED YOU TO HIT
+
+R1. Cursor still tracks smoothly. Move it fast, all over, across chrome/console/
+    window edges. No lag, no dropped positions.
+R2. No trailing or smearing when dragging a window by its title bar. This is the
+    one I would break if I got it wrong — the failure mode is a ghost arrow left
+    stamped behind, or arrow fragments baked into the background and propagating.
+    Drag fast, drag over the terminal text, drag to the screen edges.
+R3. The paint ink-trail still works: hold left and drag on empty desktop, you
+    should still get the accent-blue dot trail. Known and expected: a dot can be
+    skipped if something repaints mid-stroke (same as the pre-existing
+    mouse_lift behaviour) — a missing dot is fine, a smear is not.
+R4. Console output is still clean under a MOVING cursor. Run something long
+    (`help`, `ps`, a script) while sweeping the mouse across the terminal. No
+    torn rows, no half-drawn glyphs, no arrow fragments in the text.
+R5. Latency did not regress. Type fast while text is streaming; nothing should
+    drop. I did not put framebuffer writes inside console.c's interrupt-off
+    region — if keystrokes start dropping, that claim is wrong.
+
+WHERE I AM LEAST SURE — please aim here
+
+- wm_handle_key() now lifts the cursor on EVERY key that goes to a focused app
+  window. Type fast in the Editor with the pointer resting ON the editor text,
+  and hold a key down to repeat. I expect no visible flicker but I have not seen
+  it run.
+- console_repaint_rect() repaints whole cells and does NOT check whether a window
+  is covering the terminal. If a window overlaps the console AND the console
+  prints under the cursor, it can put console cell backgrounds on top of that
+  window. Note the console ALREADY paints its glyph ink over an overlapping
+  window today (pre-existing, it never clipped), so this is the same class of
+  wart — but I widened it from ink to ink+background in a ~3x2 cell patch. Repro
+  attempt: open Files so it overlaps the Terminal, click the Terminal to take
+  focus back, park the cursor over the Files window where the console text would
+  be, then type. If that looks bad, tell me and I will gate it.
+- Park the cursor directly ON the clock and leave it for a minute, then move it.
+  The clock repaints every 250ms from its own task. Should be clean and should
+  self-heal within a tick even if it is not.
+- `spawn` (green ticker) and `busy` (red counter) paint from their own tasks into
+  the top bar. Park the cursor on each counter, wait, then move.
+
+THINGS I DID NOT DO
+- No region test on the console side finer than one glyph cell.
+- I did not touch mouse_redraw_if_dirty's cli/sti snapshot at all — that logic is
+  byte-for-byte what it was.
+- Not booted, not pushed, no CI run.
+
+Verification I did run: freestanding syntax-check + real MB2_CFLAGS -O2 compile
+on all 6 files (0 new warnings; shell.c's unused `starts_with` is pre-existing,
+I diffed it against HEAD to be sure), and an -O2 codegen audit — 0 SSE/xmm/movaps
+and 0 memcpy/memset/float references in every object.
+---

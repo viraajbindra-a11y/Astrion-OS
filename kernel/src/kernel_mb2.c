@@ -916,6 +916,29 @@ void kernel_mb2_main(uint32_t magic, uint64_t info_ptr) {
 
         /* Mouse: dock clicks + window dragging, then repaint the cursor. */
         wm_tick();
+
+        /* Something repainted the framebuffer underneath a resting cursor —
+         * console output, the clock task, a background ticker — so the pixels
+         * the cursor cached are stale and must not be painted back. Those
+         * painters can't fix it themselves: they run with interrupts masked, or
+         * on another task that could preempt this one mid-redraw, so all they
+         * do is set a flag (mouse_invalidate_rect). Task 0 does the work here,
+         * where writing pixels is safe.
+         *
+         * Lift the sprite arrow-shaped, so the content painted around it
+         * survives, then let the console put back the glyph ink that was hidden
+         * under the arrow itself. mouse_erase_cursor() leaves the cursor
+         * un-painted, so mouse_redraw_if_dirty() below re-captures a clean
+         * background and re-anchors.
+         *
+         * This can't loop: mouse_erase_cursor() clears the flag before it draws,
+         * and neither call reaches console_putchar/puts, which is the only thing
+         * that re-arms it. */
+        if (mouse_bg_stale()) {
+            int rx, ry, rw, rh;
+            mouse_erase_cursor(&rx, &ry, &rw, &rh);
+            console_repaint_rect((uint32_t)rx, (uint32_t)ry, (uint32_t)rw, (uint32_t)rh);
+        }
         mouse_redraw_if_dirty();
 
         /* Give background tasks (clock, spawned tickers, …) a slice. */

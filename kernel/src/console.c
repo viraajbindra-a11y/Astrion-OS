@@ -17,6 +17,7 @@
 #include "console.h"
 #include "fb_font.h"
 #include "af.h"
+#include "mouse.h"      /* damage(): tell the cursor its cached pixels changed */
 
 /* MUST match AC_TERM_BG in desktop.h — the console draws INSIDE the terminal
  * window body that desktop.c/wm.c fill with AC_TERM_BG, so if these two
@@ -52,6 +53,22 @@ extern uint32_t fb_pitch_x(void);
 static uint32_t x0, y0, w_px, h_px;
 static uint32_t cx, cy;
 static uint32_t color = COL_FG_DEFLT;
+
+/* ─── Cursor damage ───
+ * The mouse cursor caches the pixels under itself and paints them back when it
+ * moves. Everything below that writes pixels has to say so, or the cursor keeps
+ * a snapshot from before the write and stamps it back over the text later —
+ * that is how three `help`s under an untouched pointer ended with a block of
+ * boot-era background sitting on the console, eating a letter.
+ *
+ * Deliberately NOT mouse_lift(): a lift does ~800 framebuffer writes, and every
+ * caller below is inside the writer lock with interrupts masked. This is a
+ * rectangle test and a flag write — nothing to wait on, no pixel traffic, safe
+ * with interrupts off, and it costs a still cursor parked elsewhere one
+ * compare. The actual repair happens on task 0 (see mouse.h). */
+static void damage(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
+    mouse_invalidate_rect((int)x, (int)y, (int)w, (int)h);
+}
 
 /* ─── Writer lock ───
  * The console has more than one writer: the shell (task context), a ring-3
@@ -128,6 +145,7 @@ static void grid_clear_cell(void) {
  * and the very next write or window event paints over it. No state corruption. */
 void console_redraw(void) {
     if (!fb_present_x() || !w_px) return;
+    damage(x0, y0, w_px, h_px);
     fb_rect_x(x0, y0, w_px, h_px, COL_BG);
     for (uint32_t r = 0; r < CON_MAX_ROWS; r++)
         for (uint32_t c = 0; c < CON_MAX_COLS; c++) {
@@ -135,6 +153,65 @@ void console_redraw(void) {
             if (!ch) continue;
             uint32_t px = x0 + c * GW, py = y0 + r * LINE_STRIDE;
             if (px + GW > x0 + w_px || py + GH > y0 + h_px) continue;
+            char s[2] = { ch, 0 };
+            af_draw(px, py, s, g_fg[r][c], AF_MONO);
+        }
+}
+
+/* Repaint just the cells that intersect (x,y,w,h) — the counterpart to
+ * console_redraw() for one small patch.
+ *
+ * This exists for exactly one caller: the main loop, after it has lifted the
+ * mouse cursor off a region the console painted underneath. The cursor can give
+ * back the pixels it covered, but not the ink the console blended into them
+ * while it sat there (af_draw blends onto whatever it finds, and putchar never
+ * fills a cell background), so only the console can restore that patch exactly.
+ * A cursor is ~3 columns by ~2 rows, so this is a handful of glyphs.
+ *
+ * Fill-then-draw per cell, the same order console_redraw() uses region-wide, so
+ * a repaired cell is bit-identical to a fully repainted one and the blend never
+ * accumulates. Clips to the console region and no-ops outside it, so passing a
+ * rect that is really over the dock or a window costs nothing.
+ *
+ * MUST NOT call damage(): it is reached FROM the staleness repair, so arming the
+ * flag here would re-arm the repair that called it, every single frame. Nothing
+ * in here goes through putchar/puts, which is what keeps that true.
+ *
+ * Unlocked, for the same reason console_redraw() is: a pure reader of the grid,
+ * and the worst a writer racing it can do is leave one cell looking a frame old. */
+void console_repaint_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
+    if (!fb_present_x() || !w_px || !h_px) return;
+    if (!w || !h || !GW || !GH || !LINE_STRIDE) return;
+    if (w_px < GW || h_px < GH) return;   /* region too small to hold a cell */
+
+    uint32_t rgt = x0 + w_px, bot = y0 + h_px;   /* console's right/bottom edge */
+    if (x >= rgt || y >= bot) return;            /* wholly right of / below us  */
+    /* Clip to the region. Subtractive throughout (`w > rgt - x`, never
+     * `x + w > rgt`) — w and h come from a caller measuring a sprite, so they
+     * are not this file's to trust. */
+    if (w > rgt - x) w = rgt - x;
+    if (h > bot - y) h = bot - y;
+    if (x < x0) { uint32_t d = x0 - x; if (d >= w) return; x += d; w -= d; }
+    if (y < y0) { uint32_t d = y0 - y; if (d >= h) return; y += d; h -= d; }
+
+    uint32_t c0 = (x - x0) / GW,          c1 = (x - x0 + w - 1) / GW;
+    uint32_t r0 = (y - y0) / LINE_STRIDE, r1 = (y - y0 + h - 1) / LINE_STRIDE;
+    if (r0 >= CON_MAX_ROWS || c0 >= CON_MAX_COLS) return;
+    if (c1 >= CON_MAX_COLS) c1 = CON_MAX_COLS - 1;
+    if (r1 >= CON_MAX_ROWS) r1 = CON_MAX_ROWS - 1;
+
+    for (uint32_t r = r0; r <= r1; r++)
+        for (uint32_t c = c0; c <= c1; c++) {
+            uint32_t px = x0 + c * GW, py = y0 + r * LINE_STRIDE;
+            if (px > rgt - GW || py > bot - GH) continue;   /* same guard as console_redraw */
+            /* One cell slot is LINE_STRIDE tall (glyph box + its leading), so
+             * filling that height repairs the row without touching its
+             * neighbours. Clamp anyway: the last row's slot can overhang h_px. */
+            uint32_t fh = LINE_STRIDE;
+            if (fh > bot - py) fh = bot - py;
+            fb_rect_x(px, py, GW, fh, COL_BG);
+            char ch = g_ch[r][c];
+            if (!ch) continue;
             char s[2] = { ch, 0 };
             af_draw(px, py, s, g_fg[r][c], AF_MONO);
         }
@@ -150,6 +227,8 @@ static void scroll_one_line(void) {
     if (!fb_present_x()) return;
     volatile uint32_t *fb = (volatile uint32_t *)fb_addr_x();
     uint32_t pitch_px = fb_pitch_x() / 4;
+    /* The whole region moves, including whatever the cursor is sitting on. */
+    damage(x0, y0, w_px, h_px);
 
     /* Move pixels in the console region up by LINE_STRIDE rows.
      * Source: y0 + LINE_STRIDE .. y0 + h_px. Dest: y0 .. y0 + h_px - LINE_STRIDE. */
@@ -180,6 +259,7 @@ void console_init(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
 
 void console_clear(void) {
     uint64_t f = irq_save();
+    damage(x0, y0, w_px, h_px);
     fb_rect_x(x0, y0, w_px, h_px, COL_BG);
     grid_clear();
     cx = x0;
@@ -204,6 +284,7 @@ static void newline_nolock(void) {
 static void backspace_nolock(void) {
     if (cx <= x0) return;
     cx -= GW;
+    damage(cx, cy, GW, GH);
     fb_rect_x(cx, cy, GW, GH, COL_BG);
     grid_clear_cell();
 }
@@ -257,6 +338,7 @@ static void putchar_nolock(char c) {
         /* Tab to next multiple of 4 chars. */
         do {
             char buf[2] = {' ', 0};
+            damage(cx, cy, GW, GH);
             af_draw(cx, cy, buf, color, AF_MONO);
             grid_put(' ');
             cx += GW;
@@ -270,6 +352,7 @@ static void putchar_nolock(char c) {
     if (cx + GW > x0 + w_px) newline_nolock();
 
     char buf[2] = {c, 0};
+    damage(cx, cy, GW, GH);
     af_draw(cx, cy, buf, color, AF_MONO);
     grid_put(c);
     cx += GW;

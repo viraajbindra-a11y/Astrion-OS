@@ -1343,6 +1343,12 @@ static void cmd_disk(int argc, char **argv) {
 extern void     fb_rect_x(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color);
 extern uint32_t fb_put_u32_x(uint32_t x, uint32_t y, uint32_t v, uint32_t color, int scale);
 extern uint32_t fb_width_x(void);
+/* Both counters below paint from their OWN task, so they can land on top of a
+ * resting mouse cursor. They can't lift it (they preempt task 0, which may be
+ * inside the cursor's pixel loops) — they flag the damage and the main loop
+ * repairs it. Without this, parking the pointer on a counter caches its pixels
+ * and stamps them back a tenth of a second later. */
+extern void     mouse_invalidate_rect(int x, int y, int w, int h);
 
 static void ticker_task(void *arg) {
     (void)arg;
@@ -1353,6 +1359,7 @@ static void ticker_task(void *arg) {
         uint64_t now = pit_elapsed_ms();
         if (now - last >= 100) {
             last = now;
+            mouse_invalidate_rect((int)x - 6, 26, 150, 32);
             fb_rect_x(x - 6, 26, 150, 32, 0x1E2761u);
             fb_put_u32_x(x, 30, n, 0x4ADE80u, 2);
             n++;
@@ -1375,6 +1382,7 @@ static void busy_task(void *arg) {
     for (;;) {
         /* Burn CPU with no yield. ~8M iterations ≈ a visible beat. */
         for (uint32_t i = 0; i < 8000000; i++) spin++;
+        mouse_invalidate_rect((int)x - 6, 26, 150, 32);
         fb_rect_x(x - 6, 26, 150, 32, 0x1E2761u);
         fb_put_u32_x(x, 30, n, 0xF87171u, 2);   /* red: "I never yield" */
         n++;

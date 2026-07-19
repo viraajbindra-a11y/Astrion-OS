@@ -29,6 +29,12 @@ void     console_backspace(void);    /* erase prior glyph, retreats cursor */
  * something (an overlapping window) has drawn over the terminal. */
 void     console_redraw(void);
 
+/* Repaint only the cells intersecting this rect, clipped to the console region
+ * (a no-op if it falls outside). For the main loop's mouse-cursor repair: the
+ * cursor can put back the pixels it covered, but not the glyph ink the console
+ * blended around it while it sat there — only the backing store has that. */
+void     console_repaint_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h);
+
 /* ─── Writer lock ───
  * Every function above already locks itself, so ONE putchar/puts/put_u32 call
  * can't be split by another writer. These two are for the case where one
