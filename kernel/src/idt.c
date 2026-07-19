@@ -209,7 +209,17 @@ void irq_handler(struct registers *r) {
 /* ─── Panic screen + handler ────────────────────────────────── */
 
 #define COL_PANIC_BG   0x8A1B17u    /* deep red */
-#define COL_PANIC_ACC  0xFF7A00u    /* Astrion orange */
+#define COL_PANIC_ACC  0xFF9F0Au    /* systemOrange - hazard, not brand.
+                                     * Warm is CORRECT here: blue would paint the
+                                     * most alarming screen in the OS the same
+                                     * color as "this window is focused", and red
+                                     * on COL_PANIC_BG (deep red) is mud. Red
+                                     * field + warm bar = hazard stripe. This is
+                                     * yellow-leaning where 0xFF7A00 was
+                                     * red-leaning, so it separates better from
+                                     * the background - which matters because the
+                                     * accent also paints the vector:/error:
+                                     * field labels. */
 #define COL_WHITE      0xFFFFFFu
 #define COL_ICE        0xCADCFCu
 

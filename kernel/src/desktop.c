@@ -152,7 +152,15 @@ static void draw_dock(void) {
     for (uint32_t i = 0; i < NICON; i++) {
         uint32_t ix = sx + i * (ICON_SZ + ICON_GAP);
         int active = ((int)i == g_active_icon);
-        if (active) fb_rect_x(ix - 3, iy - 3, ICON_SZ + 6, ICON_SZ + 6, AC_ACCENT);
+        if (active) {
+            /* Ring, then a 1px gap in the dock colour, then the tile. Without
+             * the gap the ring merges into any tile close to the accent, and
+             * Files is 0x0A84FF — exactly AC_ACCENT — so its active ring was
+             * invisible: the one running app was the one that looked idle.
+             * The gap makes a single indicator read against all six tiles. */
+            fb_rect_x(ix - 3, iy - 3, ICON_SZ + 6, ICON_SZ + 6, AC_ACCENT);
+            fb_rect_x(ix - 1, iy - 1, ICON_SZ + 2, ICON_SZ + 2, AC_BAR);
+        }
         fb_rect_x(ix, iy, ICON_SZ, ICON_SZ, g_icons[i].color);
         char g[2] = { g_icons[i].glyph, 0 };
         uint32_t gw = af_text_width(g, AF_SB16);

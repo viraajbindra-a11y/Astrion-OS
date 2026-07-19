@@ -248,7 +248,7 @@ static void editor_draw(void) {
         gx += GW;
     }
     if (caret_y + GH <= cy + ch)
-        fb_rect_x(caret_x, caret_y, 2, GH, AC_ORANGE);   /* text caret */
+        fb_rect_x(caret_x, caret_y, 2, GH, AC_ACCENT);   /* text caret */
     if (ed_copied) editor_draw_copied();
 }
 
@@ -626,7 +626,7 @@ static void assist_prompt_line(void) {
     af_draw(cx, py, ">", AC_TEAL, AF_MONO);
     af_draw(cx + GW + 6, py, as_prompt, AC_WHITE, AF_MONO);
     uint32_t caret = cx + GW + 6 + (uint32_t)as_plen * GW;
-    fb_rect_x(caret, py, 2, GH, AC_ORANGE);
+    fb_rect_x(caret, py, 2, GH, AC_ACCENT);
 }
 
 /* Draw one char at the streaming cursor, wrapping + clipping. Draw only. */

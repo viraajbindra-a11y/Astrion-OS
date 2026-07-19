@@ -88,8 +88,12 @@ void desktop_power_shutdown(int reboot);
 #define AC_PANEL     0x252A42u   /* window title bar                     */
 #define AC_TERM_BG   0x171B2Eu   /* window body / terminal               */
 #define AC_BORDER    0x3A4166u   /* 1px window border                    */
+/* AC_ACCENT means one thing: "this has focus / this is the system speaking."
+ * It is spent on the focused window border, the text caret, the active dock
+ * icon, the power glyph and the boot splash — and nowhere else. Keeping it
+ * scarce is what makes it read. For accent-coloured *ink* on a dark window
+ * body use AC_TEAL instead; AC_ACCENT is too dark for thin glyph strokes. */
 #define AC_ACCENT    0x0A84FFu   /* macOS-style blue accent              */
-#define AC_ORANGE    AC_ACCENT   /* legacy name -> now the blue accent   */
 #define AC_WHITE     0xFFFFFFu
 #define AC_MUTED     0x99A2BEu
 #define AC_RED       0xFF5F57u   /* macOS traffic lights                 */

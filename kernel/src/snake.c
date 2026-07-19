@@ -30,10 +30,24 @@ extern uint32_t fb_put_u32_x(uint32_t x, uint32_t y, uint32_t v, uint32_t color,
 #define CELL        32
 #define COL_BG      0x0F1947u   /* deeper navy */
 #define COL_GRID    0x1E2761u
-#define COL_BORDER  0xFF7A00u   /* Astrion orange */
+/* One rule on this board: warm means points, cold means furniture.
+ * COL_FOOD paints the food and the score total — the two things that are
+ * about scoring — and nothing else is warm, so your eye lands on the food
+ * with no competition. It keeps a hot colour on purpose: a blue dot on a
+ * navy field would genuinely disappear, which is legibility, not nostalgia.
+ * It moves off the retired 0xFF7A00 to systemOrange, the warm the product
+ * still owns (it is the Editor's dock tile).
+ *
+ * COL_BORDER is everything structural — field frame, title, SCORE label, the
+ * game-over box. It is AC_TEAL rather than AC_ACCENT because most of what it
+ * paints is *text* on a dark body, and that is exactly the case desktop.h
+ * reserves teal for: 0x0A84FF is too dark on navy and the title went murky.
+ * Before this, the frame and the food were the same orange — the furniture
+ * was shouting as loudly as the target. */
+#define COL_BORDER  0x64D2FFu   /* = AC_TEAL — structure, cold */
 #define COL_BODY    0x4ADE80u   /* green snake body */
 #define COL_HEAD    0xFFFFFFu
-#define COL_FOOD    0xFF7A00u
+#define COL_FOOD    0xFF9F0Au   /* systemOrange — warm means points */
 #define COL_TEXT    0xFFFFFFu
 #define COL_MUTED   0xCADCFCu
 

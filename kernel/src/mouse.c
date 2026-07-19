@@ -33,7 +33,6 @@
 #define COL_NAVY    0x1E2761u
 #define COL_WHITE   0xFFFFFFu
 #define COL_BLACK   0x000000u
-#define COL_ORANGE  0xFF7A00u
 #define COL_ACCENT  0x0A84FFu   /* systemBlue - matches the polished chrome */
 
 /* Forward decls from kernel_mb2.c. */

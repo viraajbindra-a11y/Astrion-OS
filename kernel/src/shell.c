@@ -41,7 +41,16 @@
 #include "pmm.h"
 #include "vmspace.h"
 
-#define COL_PROMPT 0xFF7A00u     /* Astrion orange */
+/* The shell's structural ink: the prompt, directory names in `ls`, help
+ * section headers, the current task in `ps`. Not "accent" — accent (AC_ACCENT
+ * 0x0A84FF) means focus, and it is spent on the focused window border, the
+ * caret and the active dock icon. This colour is a label that repeats on
+ * every line, so it has to be quiet, and 0x0A84FF is too dark to read as
+ * thin monospace strokes on the navy console body anyway.
+ * 0x64D2FF is AC_TEAL — the palette's "accent, as ink" — and it is already
+ * what the Files window paints directory names in and what the Assistant
+ * paints its own ">" prompt in (wm.c). Same concept, same colour. */
+#define COL_PROMPT 0x64D2FFu     /* = AC_TEAL (desktop.h) */
 #define COL_OK     0x4ADE80u     /* green for success-ish */
 #define COL_MUTED  0x94A3B8u
 #define COL_WHITE  0xFFFFFFu
@@ -581,7 +590,7 @@ static void cmd_paint(int argc, char **argv) {
     console_puts("paint mode:\n");
     console_set_color(COL_WHITE);
     console_puts("  - drag mouse with LEFT button to leave ink\n");
-    console_puts("  - cursor turns orange while drawing\n");
+    console_puts("  - cursor turns blue while drawing\n");
     console_puts("  - type 'wipe' to clear and start over\n");
 }
 
