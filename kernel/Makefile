@@ -16,6 +16,22 @@ CC = gcc
 LD = ld
 OBJCOPY = objcopy
 
+# Gate tooling. Prefer the cross binutils when present — they're the correct
+# tools for cross-ELF, and they're what a macOS dev box has (homebrew
+# x86_64-elf-binutils) — else fall back to the plain names, which is what CI
+# uses on Linux. Resolved to a path so the gates can tell "tool missing" from
+# "check failed".
+#
+# Why that distinction matters: the reloc and SSE gates below are written as
+# `! { tool ... | grep ... }`. With the tool ABSENT the pipeline emits nothing,
+# grep matches nothing, and the `!` flips that into SUCCESS — so both gates
+# passed VACUOUSLY on any machine without binutils, silently, while claiming to
+# guard the triple-fault class. (The PIE gate had the inverse bug: it reported
+# "is not a PIE" when the truth was "I couldn't tell.") A check that cannot run
+# must say so, never return a verdict.
+READELF := $(shell command -v x86_64-elf-readelf 2>/dev/null || command -v readelf 2>/dev/null)
+OBJDUMP := $(shell command -v x86_64-elf-objdump 2>/dev/null || command -v objdump 2>/dev/null)
+
 # Kernel flags — freestanding (no OS, no libc)
 CFLAGS = -ffreestanding -fno-stack-protector -fno-pic -mno-red-zone \
          -Wall -Wextra -O2 -I include -I gui -I drivers
@@ -185,13 +201,15 @@ $(BUILD_DIR)/$(1).elf: progs/$(1).c include/astrion_abi.h
 	@mkdir -p $(BUILD_DIR)
 	$$(CC) $$(PROG_CFLAGS) -c progs/$(1).c -o $(BUILD_DIR)/$(1).o
 	$$(LD) $$(PROG_LDFLAGS) -o $$@ $(BUILD_DIR)/$(1).o
+	@[ -n "$$(READELF)" ] || { echo "FAIL: gate cannot run - no readelf found (tried x86_64-elf-readelf, readelf)"; exit 1; }
+	@[ -n "$$(OBJDUMP)" ] || { echo "FAIL: gate cannot run - no objdump found (tried x86_64-elf-objdump, objdump)"; exit 1; }
 	@echo "=== user prog gate ($(1)): must be PIE (ET_DYN) ==="
-	readelf -h $$@ | grep -q 'DYN' || { echo "FAIL: $(1).elf is not a PIE"; exit 1; }
+	@$$(READELF) -h $$@ | grep -q 'DYN' || { echo "FAIL: $(1).elf is not a PIE"; exit 1; }
 	@echo "=== user prog gate ($(1)): only RELATIVE/NONE relocations ==="
-	@! { readelf -r $$@ 2>/dev/null | grep -E 'R_X86_64_' | grep -Ev 'R_X86_64_(RELATIVE|NONE)'; } \
+	@! { $$(READELF) -r $$@ 2>/dev/null | grep -E 'R_X86_64_' | grep -Ev 'R_X86_64_(RELATIVE|NONE)'; } \
 	    || { echo "FAIL: $(1).elf has a non-RELATIVE reloc (symbol/GOT/PLT)"; exit 1; }
 	@echo "=== user prog gate ($(1)): no SSE instructions ==="
-	@! objdump -d $$@ | grep -Eiq 'xmm|movaps|movups' \
+	@! $$(OBJDUMP) -d $$@ | grep -Eiq 'xmm|movaps|movups' \
 	    || { echo "FAIL: $(1).elf contains SSE"; exit 1; }
 	@echo "user prog OK: $$@"
 
@@ -224,7 +242,9 @@ kernel-mb2: src/hello_elf.h src/rogue_elf.h src/iodemo_elf.h \
 	$(CC) $(MB2_CFLAGS) -c src/power.c -o $(BUILD_DIR)/power.o
 	$(CC) $(MB2_CFLAGS) -c src/console.c -o $(BUILD_DIR)/console.o
 	$(CC) $(MB2_CFLAGS) -c src/clipboard.c -o $(BUILD_DIR)/clipboard.o
+	$(CC) $(MB2_CFLAGS) -c src/settings.c -o $(BUILD_DIR)/settings.o
 	$(CC) $(MB2_CFLAGS) -c src/desktop.c -o $(BUILD_DIR)/desktop.o
+	$(CC) $(MB2_CFLAGS) -c src/calc.c -o $(BUILD_DIR)/calc.o
 	$(CC) $(MB2_CFLAGS) -c src/wm.c -o $(BUILD_DIR)/wm.o
 	$(CC) $(MB2_CFLAGS) -c src/af.c -o $(BUILD_DIR)/af.o
 	$(CC) $(GPT_CFLAGS) -c src/gpt.c -o $(BUILD_DIR)/gpt.o
@@ -255,7 +275,9 @@ kernel-mb2: src/hello_elf.h src/rogue_elf.h src/iodemo_elf.h \
 	    $(BUILD_DIR)/power.o \
 	    $(BUILD_DIR)/console.o \
 	    $(BUILD_DIR)/clipboard.o \
+	    $(BUILD_DIR)/settings.o \
 	    $(BUILD_DIR)/desktop.o \
+	    $(BUILD_DIR)/calc.o \
 	    $(BUILD_DIR)/wm.o \
 	    $(BUILD_DIR)/af.o \
 	    $(BUILD_DIR)/gpt.o \
@@ -282,8 +304,18 @@ kernel-mb2: src/hello_elf.h src/rogue_elf.h src/iodemo_elf.h \
 	readelf -l $(BUILD_DIR)/kernel_mb2.elf | head -30
 	@echo "=== multiboot2 magic search (file offset of bytes d6 50 52 e8) ==="
 	@grep -obUaP "\xd6\x50\x52\xe8" $(BUILD_DIR)/kernel_mb2.elf | head -3 || echo "magic NOT FOUND"
-	# Verify the multiboot2 header is present + first in the binary.
-	grub-file --is-x86-multiboot2 $(BUILD_DIR)/kernel_mb2.elf
+	# Verify the multiboot2 header is present + first in the binary. grub-file
+	# ships with GRUB, which a macOS dev box does not have — so gate on the tool
+	# and SAY when it didn't run rather than failing the whole build over a
+	# missing packaging tool (or, worse, quietly skipping and implying a pass).
+	# The magic-byte offset printed above is the local substitute evidence: the
+	# header must sit in the first 8192 bytes, and 4096 is correct.
+	@if command -v grub-file >/dev/null 2>&1; then \
+	    grub-file --is-x86-multiboot2 $(BUILD_DIR)/kernel_mb2.elf \
+	        && echo "grub-file: valid multiboot2 kernel"; \
+	else \
+	    echo "SKIPPED: grub-file not installed - multiboot2 header NOT verified here (CI does verify it)"; \
+	fi
 	@echo "Multiboot2 kernel built: $(BUILD_DIR)/kernel_mb2.elf"
 
 iso-grub: kernel-mb2

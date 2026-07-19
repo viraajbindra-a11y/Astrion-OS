@@ -21,6 +21,8 @@
 #include "task.h"       /* task_get_info — the assistant reports what's running */
 #include "ata.h"        /* ata_present — disk / persistence status */
 #include "rtc.h"        /* rtc_read — the assistant knows the real date */
+#include "calc.h"       /* the Calculator's arithmetic + state machine */
+#include "settings.h"   /* the session's accent / wallpaper / clock format */
 
 /* Framebuffer wrappers live in kernel_mb2.c with no header — declare them
  * here the same way console.c / mouse.c do. */
@@ -53,7 +55,8 @@ extern uint32_t fb_puts_x(uint32_t x, uint32_t y, const char *s, uint32_t color,
  * (advance, wrap, line step) is unchanged; only the glyph draw + cell differ. */
 static uint32_t GW = 12, GH = 27, LINE = 29;   /* real values set in wm_init */
 
-enum app_kind { APP_NONE = 0, APP_FILES, APP_EDITOR, APP_ASSIST, APP_MON };
+enum app_kind { APP_NONE = 0, APP_FILES, APP_EDITOR, APP_ASSIST, APP_MON,
+                APP_CALC, APP_SET };
 
 static uint32_t SW, SH;
 
@@ -71,7 +74,7 @@ static uint32_t SW, SH;
  * That savebuf rule is also what bounds the System Monitor's live repaint:
  * a window may only paint over itself, because anything above it holds a
  * savebuf snapshotted from BEFORE the paint. See mon_can_live_paint(). */
-#define WM_MAX 4
+#define WM_MAX 6
 
 struct window {
     int           open;
@@ -99,11 +102,13 @@ static void set_content_rect(struct window *w);
 static int slot_of(enum app_kind a) {
     switch (a) { case APP_FILES: return 0; case APP_EDITOR: return 1;
                  case APP_ASSIST: return 2; case APP_MON: return 3;
+                 case APP_CALC: return 4; case APP_SET: return 5;
                  default: return -1; }
 }
 static int icon_of(enum app_kind a) {   /* dock icon index */
     switch (a) { case APP_FILES: return 1; case APP_EDITOR: return 2;
                  case APP_ASSIST: return 4; case APP_MON: return 5;
+                 case APP_CALC: return 6; case APP_SET: return 7;
                  default: return 0; }
 }
 static struct window *topwin(void)  { return zn > 0 ? &wins[zord[zn - 1]] : 0; }
@@ -248,7 +253,7 @@ static void editor_draw(void) {
         gx += GW;
     }
     if (caret_y + GH <= cy + ch)
-        fb_rect_x(caret_x, caret_y, 2, GH, AC_ACCENT);   /* text caret */
+        fb_rect_x(caret_x, caret_y, 2, GH, settings_accent());   /* text caret */
     if (ed_copied) editor_draw_copied();
 }
 
@@ -556,7 +561,7 @@ static void files_draw(void) {
         int sel = (i == fl_sel);
         if (sel) {
             fb_rect_x(cx, ry, rw, rh, AC_PANEL);
-            fb_rect_x(cx, ry, 2, rh, AC_ACCENT);   /* the selection's edge */
+            fb_rect_x(cx, ry, 2, rh, settings_accent());   /* the selection's edge */
         }
         files_row_glyph(fl_kind[i], cx + FL_INSET, ry + rh / 2, sel);
 
@@ -626,7 +631,7 @@ static void assist_prompt_line(void) {
     af_draw(cx, py, ">", AC_TEAL, AF_MONO);
     af_draw(cx + GW + 6, py, as_prompt, AC_WHITE, AF_MONO);
     uint32_t caret = cx + GW + 6 + (uint32_t)as_plen * GW;
-    fb_rect_x(caret, py, 2, GH, AC_ACCENT);
+    fb_rect_x(caret, py, 2, GH, settings_accent());
 }
 
 /* Draw one char at the streaming cursor, wrapping + clipping. Draw only. */
@@ -1029,7 +1034,7 @@ static void assist_run(void) {
 
 static void assist_draw(void) {
     fb_rect_x(cx, cy, cw, ch, AC_TERM_BG);
-    af_draw(cx, cy, "Astrion Assistant", AC_ACCENT, AF_SB16);
+    af_draw(cx, cy, "Astrion Assistant", settings_accent(), AF_SB16);
     af_draw(cx, cy + 24, "on-device - try:  write hi to notes.txt  /  read notes.txt  /  open snake  /  help  /  or just chat",
             AC_MUTED, AF_REG13);
     assist_prompt_line();
@@ -1274,7 +1279,7 @@ static void mon_draw_mem(void) {
          * cannot overflow; the divide keeps it inside the bar. */
         uint64_t fw = (uint64_t)cw * used / tot;
         if (fw > (uint64_t)cw) fw = cw;
-        fb_rect_x(cx, by, (uint32_t)fw, MON_BAR_H, AC_ACCENT);
+        fb_rect_x(cx, by, (uint32_t)fw, MON_BAR_H, settings_accent());
         uint64_t px = (uint64_t)cw * pk / tot;
         if (px >= (uint64_t)cw) px = cw - 1;      /* cw >= MON_COLS*GW, so no wrap */
         fb_rect_x(cx + (uint32_t)px, by, 1, MON_BAR_H, AC_TEAL);
@@ -1425,6 +1430,380 @@ static void mon_tick(void) {
     mon_draw_live();
 }
 
+/* ─── Calculator ───
+ *
+ * The window and the pixels only; the arithmetic and the state machine live in
+ * calc.c, which has no idea a screen exists. Two reasons that split is worth a
+ * second file: the maths is the part that has to be exactly right and it is
+ * easier to reason about on its own, and this file is already long enough.
+ *
+ * BOTH keyboard and mouse, through ONE path. A click resolves to a button id
+ * and so does a keystroke (calc_key_to_btn), and both then call calc_press().
+ * There is no second implementation for the pointer to drift away from — the 7
+ * key and the 7 button are the same line of code.
+ *
+ * There is no hover state. Every button changes the display the instant it is
+ * pressed, so the feedback a hover would promise is already there in the thing
+ * the button is for; adding hover would mean lifting the cursor and repainting
+ * on every mouse move across the window, which is real work for a hint the
+ * result already gives.
+ */
+#define CALC_W       340u
+#define CALC_H       440u
+#define CALC_GAP     8u
+#define CALC_DISP_H  84u    /* the display panel: expression line + big number */
+#define CALC_COLS    4u
+#define CALC_ROWS    5u
+
+/* Button tiers, borrowed wholesale from the power dialog so the two speak the
+ * same language: one accent primary, an outlined alternative, a quiet ghost.
+ * Exactly one button here is the accent — desktop.h asks for it to stay
+ * scarce, and on a calculator "=" is unarguably the one. */
+enum { KB_NUM = 0, KB_FN, KB_OP, KB_EQ };
+
+/* Labels are the characters you would TYPE. No ÷ or ×: the font atlas is ASCII
+ * 32..126 (af_font.h) so they aren't available, but more to the point a button
+ * that reads "/" and a key that is "/" need no translation between them. */
+static const struct calc_key {
+    const char *label; short btn;
+    unsigned char col, row, span, kind;
+} calc_keys[] = {
+    { "AC",  CB_CLEAR, 0, 0, 1, KB_FN  },
+    { "DEL", CB_BACK,  1, 0, 1, KB_FN  },
+    { "+/-", CB_SIGN,  2, 0, 1, KB_FN  },
+    { "/",   CB_DIV,   3, 0, 1, KB_OP  },
+    { "7",   CB_7,     0, 1, 1, KB_NUM },
+    { "8",   CB_8,     1, 1, 1, KB_NUM },
+    { "9",   CB_9,     2, 1, 1, KB_NUM },
+    { "*",   CB_MUL,   3, 1, 1, KB_OP  },
+    { "4",   CB_4,     0, 2, 1, KB_NUM },
+    { "5",   CB_5,     1, 2, 1, KB_NUM },
+    { "6",   CB_6,     2, 2, 1, KB_NUM },
+    { "-",   CB_SUB,   3, 2, 1, KB_OP  },
+    { "1",   CB_1,     0, 3, 1, KB_NUM },
+    { "2",   CB_2,     1, 3, 1, KB_NUM },
+    { "3",   CB_3,     2, 3, 1, KB_NUM },
+    { "+",   CB_ADD,   3, 3, 1, KB_OP  },
+    { "0",   CB_0,     0, 4, 2, KB_NUM },   /* double width, as a 0 key is */
+    { ".",   CB_DOT,   2, 4, 1, KB_NUM },
+    { "=",   CB_EQ,    3, 4, 1, KB_EQ  },
+};
+#define CALC_NKEYS ((int)(sizeof(calc_keys) / sizeof(calc_keys[0])))
+
+/* The pad's origin and cell size, derived from the content rect so the buttons
+ * follow the window instead of a table of literals. Returns 0 when the rect is
+ * too small for a usable pad — and because everything below subtracts from
+ * cw/ch, that check is the wrap guard as well as the layout guard. */
+static int calc_grid(uint32_t *gx, uint32_t *gy, uint32_t *bw, uint32_t *bh) {
+    uint32_t lh   = (uint32_t)af_line_height(AF_REG13);
+    uint32_t top  = CALC_DISP_H + 12;      /* display + air under it      */
+    uint32_t bot  = lh + 16;               /* footer rule + the hint line */
+    uint32_t need = top + bot + CALC_ROWS * 18;
+    if (ch < need) return 0;
+    if (cw < CALC_COLS * 28 + (CALC_COLS - 1) * CALC_GAP) return 0;
+    uint32_t gh = ch - top - bot;
+    *gx = cx;
+    *gy = cy + top;
+    *bw = (cw - (CALC_COLS - 1) * CALC_GAP) / CALC_COLS;
+    *bh = (gh - (CALC_ROWS - 1) * CALC_GAP) / CALC_ROWS;
+    return 1;
+}
+
+/* One button's rect. Shared by the drawing and the hit-test, the same discipline
+ * desktop_dock_hit() keeps with draw_dock() — two copies of a layout is two
+ * layouts, and they always eventually disagree. */
+static void calc_key_rect(int i, uint32_t gx, uint32_t gy, uint32_t bw, uint32_t bh,
+                          uint32_t *rx, uint32_t *ry, uint32_t *rw, uint32_t *rh) {
+    const struct calc_key *k = &calc_keys[i];
+    *rx = gx + (uint32_t)k->col * (bw + CALC_GAP);
+    *ry = gy + (uint32_t)k->row * (bh + CALC_GAP);
+    *rw = bw * (uint32_t)k->span + CALC_GAP * (uint32_t)(k->span - 1);
+    *rh = bh;
+}
+
+static void calc_draw_key(int i, uint32_t gx, uint32_t gy, uint32_t bw, uint32_t bh) {
+    uint32_t rx, ry, rw, rh;
+    calc_key_rect(i, gx, gy, bw, bh, &rx, &ry, &rw, &rh);
+    uint32_t fill, ink;
+    int outline = 0;
+    switch (calc_keys[i].kind) {
+        case KB_OP: fill = AC_TERM_BG;        ink = AC_TEAL;  outline = 1; break;
+        case KB_FN: fill = AC_PANEL;          ink = AC_MUTED; break;
+        case KB_EQ: fill = settings_accent(); ink = AC_WHITE; break;
+        default:    fill = AC_PANEL;          ink = AC_WHITE; break;
+    }
+    fb_rect_x(rx, ry, rw, rh, fill);
+    if (outline) draw_border(rx, ry, rw, rh, AC_BORDER);
+    af_draw_center(rx + rw / 2, ry + rh / 2 - (uint32_t)af_line_height(AF_SB16) / 2,
+                   calc_keys[i].label, ink, AF_SB16);
+}
+
+/* The display: what you are building on top, what it currently equals below.
+ * Both right-aligned, the way a calculator has always read.
+ *
+ * The number takes the biggest face that fits and steps down rather than
+ * overflowing the panel — a long answer stays inside its box instead of running
+ * out over the buttons. */
+static void calc_draw_display(void) {
+    fb_rect_x(cx, cy, cw, CALC_DISP_H, AC_PANEL);
+
+    uint32_t pad   = 12;
+    uint32_t avail = (cw > 2 * pad) ? cw - 2 * pad : 0;
+    char buf[96];
+
+    calc_expr(buf, (int)sizeof(buf));
+    if (buf[0]) {
+        uint32_t tw = af_text_width(buf, AF_REG13);
+        /* Too long to right-align without falling off the left edge? Then pin it
+         * left and let the tail sit under the number — the head of a long
+         * expression is the part that has scrolled out of reach anyway. */
+        af_draw((tw <= avail) ? (cx + cw - pad - tw) : (cx + pad), cy + 10,
+                buf, AC_MUTED, AF_REG13);
+    }
+
+    calc_value(buf, (int)sizeof(buf));
+    int      err  = calc_is_error();
+    uint32_t ink  = err ? AC_RED : AC_WHITE;
+    int      face = err ? AF_SB16 : AF_SB30;
+    uint32_t tw   = af_text_width(buf, face);
+    if (tw > avail) { face = AF_SB16; tw = af_text_width(buf, face); }
+    if (tw > avail) { face = AF_MONO; tw = af_text_width(buf, face); }
+    uint32_t lh = (uint32_t)af_line_height(face);
+    uint32_t ty = (CALC_DISP_H > lh + 10) ? (cy + CALC_DISP_H - 10 - lh) : cy;
+    af_draw((tw <= avail) ? (cx + cw - pad - tw) : (cx + pad), ty, buf, ink, face);
+}
+
+static void calc_draw(void) {
+    fb_rect_x(cx, cy, cw, ch, AC_TERM_BG);
+    uint32_t gx, gy, bw, bh;
+    if (!calc_grid(&gx, &gy, &bw, &bh)) {
+        af_draw(cx, cy, "window too small", AC_MUTED, AF_MONO);
+        return;
+    }
+    calc_draw_display();
+    for (int i = 0; i < CALC_NKEYS; i++) calc_draw_key(i, gx, gy, bw, bh);
+
+    /* Same footer convention as Files: a 1px rule with the keys under it. */
+    const char *hint = "Enter equals   c clears   Esc closes";
+    uint32_t fy = cy + ch - (uint32_t)af_line_height(AF_REG13);
+    uint32_t hw = af_text_width(hint, AF_REG13);
+    if (hw > cw) { hint = "Esc closes"; hw = af_text_width(hint, AF_REG13); }
+    fb_rect_x(cx, fy - 8, cw, 1, AC_BORDER);
+    if (cw > hw) af_draw(cx + cw - hw, fy, hint, AC_MUTED, AF_REG13);
+}
+
+static void calc_click(int mx, int my) {
+    uint32_t gx, gy, bw, bh;
+    if (!calc_grid(&gx, &gy, &bw, &bh)) return;
+    for (int i = 0; i < CALC_NKEYS; i++) {
+        uint32_t rx, ry, rw, rh;
+        calc_key_rect(i, gx, gy, bw, bh, &rx, &ry, &rw, &rh);
+        if (mx < (int)rx || mx >= (int)(rx + rw)) continue;
+        if (my < (int)ry || my >= (int)(ry + rh)) continue;
+        calc_press(calc_keys[i].btn);
+        calc_draw();
+        return;
+    }
+}
+
+static void calc_key(char c) {
+    if (c == 27) { wm_close(); return; }      /* Esc closes, as everywhere else */
+    int b = calc_key_to_btn(c);
+    if (b == CB_NONE) return;                 /* a key that means nothing here */
+    calc_press(b);
+    calc_draw();
+}
+
+/* ─── Settings ───
+ *
+ * Three things about the machine you can change, and every one of them is
+ * WIRED — the panel walks settings.c's groups and knows nothing about what any
+ * of them mean, so there is no place for a control to exist without something
+ * behind it. Adding a fourth is a table edit in settings.c and no change here.
+ *
+ * A change applies the instant you make it: arrow onto another accent and the
+ * whole desktop is that colour before you let go of the key. That is what
+ * repaint_all() is for and it is why the panel doesn't have an Apply button —
+ * an Apply button is what you build when you can't afford to do the thing.
+ *
+ * It also says out loud that the change lasts until shutdown. Nothing here is
+ * written to disk yet, and a setting that quietly forgets overnight is the same
+ * broken promise as a switch that does nothing.
+ */
+#define SET_W         560u
+#define SET_H         360u
+#define SET_ROW_H     73u    /* label line + chips + the air under them */
+#define SET_CHIP_H    30u
+#define SET_CHIP_GAP  10u
+#define SET_SW_W      52u    /* a colour swatch's width                 */
+/* How far the selection ring reaches OUTSIDE the chip it encircles. The row is
+ * inset by this much and the last chip must end this far short of the right
+ * edge, so the ring always lands inside the content rect. That is not cosmetic:
+ * settings_draw() clears exactly cx..cx+cw, so a ring drawn one pixel outside
+ * it is a ring nothing ever erases — move the selection and the old one stays
+ * on the window body for the rest of the session. */
+#define SET_RING      3u
+
+static int st_row;           /* which group has the keyboard */
+
+/* Linear RGB interpolation, so a wallpaper swatch is a small picture of the
+ * gradient it selects rather than a label for it. Same maths as desktop.c's
+ * lerp_color; it's static there and this is the only other caller. */
+static uint32_t set_blend(uint32_t a, uint32_t b, int num, int den) {
+    if (den <= 0) return a;
+    int ar = (int)((a >> 16) & 0xFF), ag = (int)((a >> 8) & 0xFF), ab = (int)(a & 0xFF);
+    int br = (int)((b >> 16) & 0xFF), bg = (int)((b >> 8) & 0xFF), bb = (int)(b & 0xFF);
+    int r = ar + (br - ar) * num / den;
+    int g = ag + (bg - ag) * num / den;
+    int l = ab + (bb - ab) * num / den;
+    return ((uint32_t)r << 16) | ((uint32_t)g << 8) | (uint32_t)l;
+}
+
+static uint32_t set_label_h(void) { return (uint32_t)af_line_height(AF_REG13); }
+static uint32_t set_group_y(int g) { return cy + (uint32_t)g * SET_ROW_H; }
+
+/* Room for the rows, the note and the hint. Subtractive, so this is the wrap
+ * guard too — everything below takes pieces out of cw/ch. */
+static int set_fits(void) {
+    uint32_t need = (uint32_t)SET_GROUPS * SET_ROW_H + set_label_h() + 8
+                    + set_label_h() + 8;
+    return cw >= 260 && ch >= need;
+}
+
+static uint32_t set_chip_w(int g, int i) {
+    uint32_t top, bot;
+    if (settings_swatch(g, i, &top, &bot)) return SET_SW_W;
+    return af_text_width(settings_label(g, i), AF_REG13) + 24;
+}
+
+/* One chip's rect, shared by the drawing and the hit-test. Returns 0 when the
+ * chip would run off the right edge, so a chip that isn't drawn also can't be
+ * clicked. Written subtractively — cw is not this function's to trust. */
+static int set_chip_rect(int g, int i, uint32_t *rx, uint32_t *ry,
+                         uint32_t *rw, uint32_t *rh) {
+    if (!set_fits()) return 0;
+    if (i < 0 || i >= settings_count(g)) return 0;
+    uint32_t off = 0;
+    for (int k = 0; k < i; k++) off += set_chip_w(g, k) + SET_CHIP_GAP;
+    uint32_t w = set_chip_w(g, i);
+    /* The usable lane is the content width less the ring's reach on BOTH sides.
+     * Subtractive throughout — cw is not this function's to trust. */
+    uint32_t avail = (cw > 2 * SET_RING) ? cw - 2 * SET_RING : 0;
+    if (w > avail || off > avail - w) return 0;
+    *rx = cx + SET_RING + off;
+    *ry = set_group_y(g) + set_label_h() + 6;
+    *rw = w;
+    *rh = SET_CHIP_H;
+    return 1;
+}
+
+static void set_draw_chip(int g, int i, int selected, int focused_row) {
+    uint32_t rx, ry, rw, rh, top, bot;
+    if (!set_chip_rect(g, i, &rx, &ry, &rw, &rh)) return;
+
+    if (settings_swatch(g, i, &top, &bot)) {
+        if (top == bot) fb_rect_x(rx, ry, rw, rh, top);
+        else for (uint32_t r = 0; r < rh; r++)
+                 fb_rect_x(rx, ry + r, rw, 1, set_blend(top, bot, (int)r, (int)rh));
+    } else {
+        fb_rect_x(rx, ry, rw, rh, selected ? AC_PANEL : AC_TERM_BG);
+        draw_border(rx, ry, rw, rh, AC_BORDER);
+        af_draw_center(rx + rw / 2, ry + rh / 2 - set_label_h() / 2,
+                       settings_label(g, i), selected ? AC_WHITE : AC_MUTED, AF_REG13);
+    }
+
+    if (!selected) return;
+    /* The selection ring is WHITE, not the accent — one of these rows chooses
+     * the accent itself, and a ring the same colour as the swatch it encircles
+     * disappears exactly when it matters most. White reads on all five
+     * wallpapers and all six accents, so one rule covers every row. The
+     * unfocused row keeps its ring in muted, so you can still see what is set
+     * everywhere while only one row is taking arrows. */
+    uint32_t c = focused_row ? AC_WHITE : AC_MUTED;
+    fb_rect_x(rx - 3, ry - 3,      rw + 6, 2,      c);
+    fb_rect_x(rx - 3, ry + rh + 1, rw + 6, 2,      c);
+    fb_rect_x(rx - 3, ry - 3,      2,      rh + 6, c);
+    fb_rect_x(rx + rw + 1, ry - 3, 2,      rh + 6, c);
+}
+
+static void settings_draw(void) {
+    fb_rect_x(cx, cy, cw, ch, AC_TERM_BG);
+    if (!set_fits()) {
+        af_draw(cx, cy, "window too small", AC_MUTED, AF_MONO);
+        return;
+    }
+
+    for (int g = 0; g < SET_GROUPS; g++) {
+        uint32_t ly = set_group_y(g);
+        int sel = settings_get(g);
+        const char *name = settings_group_name(g);
+        af_draw(cx, ly, name, (g == st_row) ? AC_WHITE : AC_MUTED, AF_REG13);
+        /* The swatch rows have no text on their chips, so the current choice is
+         * named beside the group. Teal, not the accent: this is the row telling
+         * you what it is set to, and on the accent row an accent-coloured word
+         * would change colour with the very thing it is naming. */
+        uint32_t nx = cx + af_text_width(name, AF_REG13) + 12;
+        if (nx < cx + cw)
+            af_draw(nx, ly, settings_label(g, sel),
+                    (g == st_row) ? AC_TEAL : AC_MUTED, AF_REG13);
+        for (int i = 0; i < settings_count(g); i++)
+            set_draw_chip(g, i, i == sel, g == st_row);
+    }
+
+    af_draw(cx, cy + (uint32_t)SET_GROUPS * SET_ROW_H,
+            "Changes apply at once and last until you shut down.",
+            AC_MUTED, AF_REG13);
+
+    const char *hint = "Arrows choose   Esc closes";
+    uint32_t fy = cy + ch - set_label_h();
+    uint32_t hw = af_text_width(hint, AF_REG13);
+    if (hw > cw) { hint = "Esc closes"; hw = af_text_width(hint, AF_REG13); }
+    fb_rect_x(cx, fy - 8, cw, 1, AC_BORDER);
+    if (cw > hw) af_draw(cx + cw - hw, fy, hint, AC_MUTED, AF_REG13);
+}
+
+/* Commit a choice. repaint_all() is the right hammer: an accent or a wallpaper
+ * is system-wide, so the desktop, the terminal and every open window all have
+ * to be redrawn — including this panel, which repaint_all() reaches through
+ * draw_content(). It also lifts the mouse cursor first, so nothing bakes the
+ * pointer into the new chrome. Nothing may touch cx/cy after this: repaint_all
+ * walks every window and leaves the content rect pointing at the last one. */
+static void settings_apply(int g, int idx) {
+    settings_set(g, idx);
+    repaint_all();
+}
+
+static void settings_key(char c) {
+    if (c == 27) { wm_close(); return; }
+    if (c == (char)KEY_UP)   { if (st_row > 0)               st_row--; settings_draw(); return; }
+    if (c == (char)KEY_DOWN) { if (st_row < SET_GROUPS - 1)  st_row++; settings_draw(); return; }
+    if (c == (char)KEY_LEFT || c == (char)KEY_RIGHT) {
+        int n = settings_count(st_row);
+        if (n <= 0) return;
+        int cur = settings_get(st_row);
+        int nxt = cur + ((c == (char)KEY_RIGHT) ? 1 : -1);
+        if (nxt < 0 || nxt >= n) return;        /* already at the end: sit still */
+        settings_apply(st_row, nxt);
+    }
+}
+
+static void settings_click(int mx, int my) {
+    for (int g = 0; g < SET_GROUPS; g++)
+        for (int i = 0; i < settings_count(g); i++) {
+            uint32_t rx, ry, rw, rh;
+            if (!set_chip_rect(g, i, &rx, &ry, &rw, &rh)) continue;
+            if (mx < (int)rx || mx >= (int)(rx + rw)) continue;
+            if (my < (int)ry || my >= (int)(ry + rh)) continue;
+            int moved = (settings_get(g) != i);
+            st_row = g;
+            /* Clicking the chip that is already set still moves the focus ring
+             * to that row, but there is nothing system-wide to redraw for it. */
+            if (moved) settings_apply(g, i);
+            else       settings_draw();
+            return;
+        }
+}
+
 /* ─── Window chrome + lifecycle ─── */
 
 static const char *title_for(enum app_kind a) {
@@ -1433,6 +1812,8 @@ static const char *title_for(enum app_kind a) {
         case APP_EDITOR: return ed_title;
         case APP_ASSIST: return "Assistant";
         case APP_MON:    return "System Monitor";
+        case APP_CALC:   return "Calculator";
+        case APP_SET:    return "Settings";
         default:         return "App";
     }
 }
@@ -1447,7 +1828,7 @@ static void draw_frame(struct window *w) {
     /* the focused window gets a white title + accent border; others dim */
     af_draw_center(w->x + w->w / 2, w->y + 8, title_for(w->app),
                    fg ? AC_WHITE : AC_MUTED, AF_SB16);
-    draw_border(w->x, w->y, w->w, w->h, fg ? AC_ACCENT : AC_BORDER);
+    draw_border(w->x, w->y, w->w, w->h, fg ? settings_accent() : AC_BORDER);
 }
 
 static void draw_content(struct window *w) {
@@ -1457,6 +1838,8 @@ static void draw_content(struct window *w) {
         case APP_FILES:  files_draw();  break;
         case APP_ASSIST: assist_draw(); break;
         case APP_MON:    mon_draw();    break;
+        case APP_CALC:   calc_draw();     break;
+        case APP_SET:    settings_draw(); break;
         default: break;
     }
 }
@@ -1535,6 +1918,12 @@ static void size_for(enum app_kind a, uint32_t *w, uint32_t *h) {
         *h = mon_ch_for(mon_open_rows()) + TITLE_H + 10 + PAD;
         return;
     }
+    /* The Calculator and Settings are the other two apps whose content is
+     * bounded and known — a 4-column keypad, three rows of chips — so like the
+     * Monitor they take a size cut to fit rather than the generous default. A
+     * calculator that opened at 860px wide would be 500px of empty panel. */
+    if (a == APP_CALC) { *w = CALC_W; *h = CALC_H; return; }
+    if (a == APP_SET)  { *w = SET_W;  *h = SET_H;  return; }
     *w = APP_W; *h = APP_H;
 }
 
@@ -1566,6 +1955,10 @@ static void open_common(enum app_kind app) {
         if (app == APP_ASSIST) assist_reset();
         if (app == APP_FILES)  files_load();
         if (app == APP_MON)    mon_last_ms = pit_elapsed_ms();
+        /* A calculator you come back to still holding your last sum is a
+         * calculator you have to remember to clear. Open means zero. */
+        if (app == APP_CALC)   calc_reset();
+        if (app == APP_SET)    st_row = 0;
     }
     z_raise(s);
     focus_shell = 0;
@@ -1601,6 +1994,8 @@ void wm_open_app(int icon) {
         case 3: run_snake();             break;
         case 4: open_common(APP_ASSIST); break;
         case 5: open_common(APP_MON);    break;
+        case 6: open_common(APP_CALC);   break;
+        case 7: open_common(APP_SET);    break;
         default: break;
     }
 }
@@ -1638,6 +2033,7 @@ void wm_init(void) {
     zn = 0; focus_shell = 1;
     dragging = 0; ed_buf = 0;
     mon_last_ms = 0;
+    calc_reset(); st_row = 0;
 }
 
 int wm_active(void) { return focused() != 0; }
@@ -1664,6 +2060,8 @@ int wm_handle_key(char c) {
         case APP_FILES:  files_key(c);  return 1;
         case APP_ASSIST: assist_key(c); return 1;
         case APP_MON:    mon_key(c);    return 1;
+        case APP_CALC:   calc_key(c);     return 1;
+        case APP_SET:    settings_key(c); return 1;
         default: return 0;
     }
 }
@@ -1728,6 +2126,24 @@ void wm_tick(void) {
             if (my >= (int)w->y && my <= (int)(w->y + TITLE_H)) {
                 dragging = 1; drag_ox = mx - (int)w->x; drag_oy = my - (int)w->y;
                 last_mx = mx; last_my = my;
+            } else {
+                /* Everything below the title bar belongs to the app. Only the
+                 * two apps with things to press take it; the rest are read-only
+                 * or keyboard-driven and ignore a click on their page.
+                 *
+                 * mouse_lift() first, for the same reason wm_handle_key does it:
+                 * these handlers repaint part of the window, and a pointer
+                 * resting on it holds a cached background that goes stale the
+                 * moment they do. The main loop paints the cursor back on the
+                 * same pass. (A raise above may already have lifted — it is
+                 * idempotent between redraws, so this costs nothing.) */
+                mouse_lift();
+                set_content_rect(w);
+                switch (w->app) {
+                    case APP_CALC: calc_click(mx, my);     break;
+                    case APP_SET:  settings_click(mx, my); break;
+                    default: break;
+                }
             }
             return;
         }

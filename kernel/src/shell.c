@@ -145,6 +145,8 @@ static void cmd_files(int argc, char **argv);
 static void cmd_edit(int argc, char **argv);
 static void cmd_assistant(int argc, char **argv);
 static void cmd_monitor(int argc, char **argv);
+static void cmd_calc(int argc, char **argv);
+static void cmd_settings(int argc, char **argv);
 static void cmd_clip(int argc, char **argv);
 static void cmd_pmm(int argc, char **argv);
 static void cmd_vmtest(int argc, char **argv);
@@ -156,6 +158,8 @@ static const struct cmd CMDS[] = {
     { "edit",    "edit <file> - open the text editor", cmd_edit },
     { "assistant","open the Assistant window",       cmd_assistant },
     { "monitor", "open the System Monitor window",   cmd_monitor },
+    { "calc",    "open the Calculator window",       cmd_calc },
+    { "settings","open the Settings window",         cmd_settings },
     { "help",    "list available commands",          cmd_help },
     { "version", "kernel + build banner",            cmd_version },
     { "clear",   "clear the console",                cmd_clear },
@@ -1497,6 +1501,14 @@ static void cmd_assistant(int argc, char **argv) {
 static void cmd_monitor(int argc, char **argv) {
     (void)argc; (void)argv;
     wm_open_app(5);   /* System Monitor — the GUI form of `ps` + `heap` */
+}
+static void cmd_calc(int argc, char **argv) {
+    (void)argc; (void)argv;
+    wm_open_app(6);   /* Calculator */
+}
+static void cmd_settings(int argc, char **argv) {
+    (void)argc; (void)argv;
+    wm_open_app(7);   /* Settings */
 }
 
 /* ─── exec: load + run an ELF program in its OWN address space (Tier 3, M4) ──

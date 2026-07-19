@@ -24,8 +24,9 @@ int  wm_handle_key(char c);         /* 1 if a focused app consumed the key */
 int  wm_active(void);               /* 1 if an app window is open */
 
 /* Programmatic launch (dock icon index: 0=Terminal 1=Files 2=Editor
- * 3=Snake 4=Assistant 5=Monitor) and a direct editor open. Used by the dock
- * and by the shell's `files` / `edit` / `assistant` / `monitor` commands. */
+ * 3=Snake 4=Assistant 5=Monitor 6=Calculator 7=Settings) and a direct editor
+ * open. Used by the dock and by the shell's `files` / `edit` / `assistant` /
+ * `monitor` / `calc` / `settings` commands. */
 void wm_open_app(int dock_icon);
 void wm_open_editor(const char *name);   /* name may be 0 for a new buffer */
 

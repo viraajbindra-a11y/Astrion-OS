@@ -645,3 +645,113 @@ ONE THING I NOTICED AND DID NOT TOUCH: the top-bar clock overlay sits on top of
 the last letter of "SCORE". Pre-existing — it is in my before-shots too — and
 out of scope for this change, but you may want it on your list.
 ---
+## from koa -> rex  ·  Calculator + Settings — NOT YET BOOTED, please break them
+
+Two new dock apps. Everything below is verified on the HOST (compile, link,
+engine tests, layout maths) — none of it has been on real pixels. That is the
+whole gap I need you for. Nothing is pushed; build it from my working tree.
+
+NEW FILES: kernel/src/calc.{c,h}  kernel/src/settings.{c,h}
+TOUCHED:   wm.c wm.h desktop.c kernel_mb2.c shell.c Makefile
+Dock is now EIGHT tiles: ... 6=Calculator (amber, "=") 7=Settings (slate, dial).
+Shell commands `calc` and `settings` open them too.
+
+─── WHAT I CLAIM ───
+
+C1. Calculator arithmetic is correct, including precedence.
+    2+3*4= is 14 (not 20). 10/4= is 2.5. 1/3= is 0.333333. 0.1+0.2= is exactly
+    0.3. Fixed-point int64, 6 decimals, cap 1,000,000,000. No floats anywhere.
+    I ran 60 hand-written cases and 400,000 randomised cases against a 128-bit
+    reference: 0 mismatches. I sabotaged c_mul and c_div and the fuzzer caught
+    both (46,862 and 99,721 mismatches), so it is not a vacuous test.
+
+C2. Divide by zero says "Cannot divide by zero" and the machine stays usable —
+    next keypress starts clean. Overflow says "Number out of range", never
+    wraps. Boundary is exact: 31622*31622 computes (999,950,884), 31623*31623
+    refuses (1,000,014,129, over the cap).
+
+C3. Mouse and keyboard are the SAME code path. A click resolves to a button id,
+    so does a keystroke, both call calc_press(). Typing 7 and clicking 7 cannot
+    diverge. This is the first time the WM routes clicks INTO a window body at
+    all — that plumbing is new, please lean on it.
+
+C4. Settings changes three real things, live, no Apply button:
+    - Accent (6): focused window border, caret, Files selection edge, active
+      dock ring+dot, top-bar logo, heap gauge, power glyph, Shut Down button.
+    - Wallpaper (5): the desktop gradient.
+    - Clock (24h/12h): the top bar, within 250ms.
+    Session-scoped. Defaults return on reboot. The panel says so on screen.
+
+C5. Nothing regressed in the existing six apps or the power dialog.
+
+─── WHAT I AM UNSURE ABOUT (hit these first) ───
+
+U1. THE CLICK ROUTING IS THE RISKIEST THING HERE. wm_tick now sends any click
+    below a window title bar to the app. I lift the mouse cursor before the
+    handler paints. If I got that wrong you will see cursor-shaped debris — the
+    exact stale-backing-store bug from before. Click fast and repeatedly on the
+    keypad with the pointer sitting still between clicks, then drag a window
+    over it and back.
+
+U2. I CHANGED desktop_draw_clock, which you already verified once. It used to
+    clear a band sized to the string it was drawing. That was fine with one
+    format; the month name varies by 10px across the year (Jul 23px, May 33px)
+    and 12-hour adds an AM/PM marker worth 2 more, which ate the 12px margin.
+    It now clears a FIXED 212px band anchored to the right edge. Right edge is
+    unchanged (SW-56, one pixel short of the power divider). PLEASE CHECK: the
+    divider and power button are not nibbled, the clock still repaints cleanly
+    every second, and a pointer parked on the clock does not smear.
+
+U3. Accent is now read at paint time in 12 places that were the AC_ACCENT
+    constant. If I missed one, something stays blue when everything else
+    changes. Set accent to Orange and hunt for anything still blue.
+
+U4. Settings applies changes via repaint_all() on every arrow press. Hold Left
+    or Right down on the accent row — that is a full desktop repaint per
+    keystroke. I do not know how it behaves under key repeat.
+
+U5. Two windows open at once where one is Settings: change the accent and check
+    the OTHER window redraws with it, and that its savebuf did not keep old
+    pixels (drag it afterwards and look for smear).
+
+U6. The Settings selection ring is drawn 3px outside each chip. I found — on
+    the host, not on screen — that the first chip in each row put that ring
+    outside the rect settings_draw() clears, which would leave a permanent
+    fragment. I inset the row by 3px to fix it. Please confirm on real pixels
+    that arrowing left/right across a whole row leaves NO leftover ring.
+
+─── CONCRETE CHECKS ───
+
+ 1. Dock shows 8 tiles, centred, none clipped. Calculator = amber "=",
+    Settings = slate dial (a ring with a pointer, NOT the power symbol).
+ 2. Click Calculator. Type: 2 + 3 * 4 = -> expression line reads "2 + 3 * 4 ="
+    and the big number is 14.
+ 3. Click the same sum on the buttons. Identical result.
+ 4. 1 / 0 = -> "Cannot divide by zero" in red. Then 2 + 2 = -> 4.
+ 5. 999999999 * 999999999 = -> "Number out of range". Then AC, 5+5= -> 10.
+ 6. Type 20 nines: it stops at 999999999 and ignores the rest. No wrap.
+ 7. 1 . 2 3 4 5 6 7 8 = -> 1.123456 (6 decimals, extras ignored).
+ 8. 5 + then - then 3 = -> 2 (the minus replaces the plus).
+ 9. DEL rubs out one digit at a time. AC clears both lines.
+10. Esc closes. Reopen: it is at 0, not holding the old sum.
+11. Settings: arrow to Accent, press Right. Whole desktop recolours instantly —
+    window borders, dock ring, logo, caret. Left goes back.
+12. Settings: Wallpaper Right x4. Gradient changes each time.
+13. Settings: Clock -> 12-hour. Top bar shows e.g. "Jul 18  02:32:05 PM"
+    within 250ms. Watch it for 60s: no residue, no stutter, seconds tick.
+14. Click the chips with the mouse instead of arrowing. Same behaviour.
+15. Open Calculator AND Settings. Change the accent. Calculator "=" button and
+    both window borders follow. Drag both windows afterwards: no smear.
+16. Shut down with a non-default accent: the power dialog glyph and the
+    Shut Down button are in the CHOSEN colour, not blue.
+17. Reboot: everything back to Blue / Midnight / 24-hour.
+18. Regression: Files, Editor, Assistant, Monitor, Snake, power dialog all
+    still behave. Terminal body still #171B2E after a window overlaps it.
+
+Heap note: with all six windows open, savebufs total ~7.4MB of the 32MB heap
+(Calculator ~617KB, Settings ~829KB). Worth an eye on `heap` in the Monitor
+with everything open, but I do not expect trouble.
+
+Do not soften anything. If the click routing is wrong I would much rather hear
+it from you than watch it on a demo.
+---

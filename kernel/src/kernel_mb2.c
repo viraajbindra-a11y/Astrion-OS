@@ -30,6 +30,7 @@
 #include "console.h"
 #include "desktop.h"
 #include "wm.h"
+#include "settings.h"   /* session accent / wallpaper / 12h-vs-24h clock */
 #include "gpt.h"
 #include "af.h"
 #include "shell.h"
@@ -692,7 +693,33 @@ static void clock_task(void *arg) {
                 clkbuf[k++] = (char)('0' + (t.day / 10) % 10);
                 clkbuf[k++] = (char)('0' + t.day % 10);
                 clkbuf[k++] = ' '; clkbuf[k++] = ' ';
-                rtc_format_time(&t, clkbuf + k);
+                if (settings_clock_24h()) {
+                    rtc_format_time(&t, clkbuf + k);
+                } else {
+                    /* 12-hour, with the hour ZERO-PADDED. That is not how a
+                     * clock is usually written, and it is deliberate: the width
+                     * rule at the top of this block applies inside a format as
+                     * well as between the day digits, and an unpadded hour would
+                     * change width at 9 -> 10 and again at 12 -> 1, leaving a
+                     * sliver of the old string behind. The AM/PM suffix is a
+                     * constant two characters, so the whole string is fixed
+                     * width; switching FORMAT does change it, but that only
+                     * happens from the Settings panel, which repaints the
+                     * entire top bar on its way through. */
+                    int h12 = t.hour % 12; if (h12 == 0) h12 = 12;
+                    clkbuf[k++] = (char)('0' + h12 / 10);
+                    clkbuf[k++] = (char)('0' + h12 % 10);
+                    clkbuf[k++] = ':';
+                    clkbuf[k++] = (char)('0' + (t.min / 10) % 10);
+                    clkbuf[k++] = (char)('0' + t.min % 10);
+                    clkbuf[k++] = ':';
+                    clkbuf[k++] = (char)('0' + (t.sec / 10) % 10);
+                    clkbuf[k++] = (char)('0' + t.sec % 10);
+                    clkbuf[k++] = ' ';
+                    clkbuf[k++] = (t.hour < 12) ? 'A' : 'P';
+                    clkbuf[k++] = 'M';
+                    clkbuf[k]   = 0;
+                }
             } else {
                 pit_format_clock(clkbuf);      /* no usable RTC -> uptime */
             }
@@ -870,6 +897,11 @@ void kernel_mb2_main(uint32_t magic, uint64_t info_ptr) {
         uint64_t t0 = pit_elapsed_ms();
         while (pit_elapsed_ms() - t0 < 1500) __asm__ volatile("hlt");
     }
+
+    /* Session settings (accent / wallpaper / clock format) come up FIRST: the
+     * very first thing desktop_init() does is ask them what colour the
+     * wallpaper is. Defaults only — nothing is read from disk. */
+    settings_init();
 
     /* Paint the desktop (wallpaper + top bar + dock + Terminal window),
      * then anchor the scrolling console inside the Terminal window's

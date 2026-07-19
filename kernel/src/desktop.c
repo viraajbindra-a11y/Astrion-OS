@@ -8,6 +8,7 @@
 #include <stdint.h>
 #include "desktop.h"
 #include "af.h"
+#include "settings.h"   /* accent + wallpaper are the user's, not this file's */
 
 extern uint32_t fb_width_x(void);
 extern uint32_t fb_height_x(void);
@@ -51,6 +52,7 @@ static void mouse_invalidate_rect(int x, int y, int w, int h)
 #define PWR_BTN_W   30u    /* button hit width                        */
 #define PWR_MARGIN  14u    /* button's gap to the screen's right edge */
 #define CLOCK_PAD   68u    /* clock's right margin: clears the button */
+#define CLOCK_MAXW  200u   /* fixed clear band — see desktop_draw_clock */
 
 /* Geometry computed at init. */
 static uint32_t SW, SH;
@@ -93,17 +95,41 @@ static void draw_power_glyph(int cx, int cy, int r, int t, uint32_t color) {
     fb_rect_x((uint32_t)(cx - 1), (uint32_t)(cy - r - 2), 2, (uint32_t)(r + 3), color);
 }
 
+/* A dial for the Settings tile: a closed ring with a pointer inside it aimed at
+ * 12 o'clock. Same integer distance test as the power symbol above, and
+ * deliberately NOT the same silhouette — the power ring is BROKEN at the top by
+ * a stub that crosses it, this one is whole with a mark that sits inside. It
+ * exists because every other dock tile carries a letter and 'S' was already
+ * spoken for by Snake; two S tiles is a dock you have to read twice. */
+static void draw_dial_glyph(int cx, int cy, int r, int t, uint32_t color) {
+    int ro2 = r * r, ri = r - t, ri2 = ri * ri;
+    for (int dy = -r; dy <= r; dy++)
+        for (int dx = -r; dx <= r; dx++) {
+            int d2 = dx * dx + dy * dy;
+            if (d2 > ro2 || d2 < ri2) continue;
+            fb_rect_x((uint32_t)(cx + dx), (uint32_t)(cy + dy), 1, 1, color);
+        }
+    if (r - t > 2)   /* the pointer, from just inside the ring to the centre */
+        fb_rect_x((uint32_t)(cx - 1), (uint32_t)(cy - r + t + 1),
+                  2, (uint32_t)(r - t - 1), color);
+}
+
 /* ─── Components ─── */
 
+/* The gradient ends come from settings.c now rather than the AC_WALL_* macros
+ * (which are still the defaults it hands back on a fresh boot). One read per
+ * repaint, not per row — the wallpaper must be one gradient even if a setting
+ * changed halfway down the screen. */
 static void draw_wallpaper(void) {
+    uint32_t top = settings_wall_top(), bot = settings_wall_bot();
     for (uint32_t y = 0; y < SH; y++)
-        fb_rect_x(0, y, SW, 1, lerp_color(AC_WALL_TOP, AC_WALL_BOT, (int)y, (int)SH));
+        fb_rect_x(0, y, SW, 1, lerp_color(top, bot, (int)y, (int)SH));
 }
 
 static void draw_topbar(void) {
     fb_rect_x(0, 0, SW, TOPBAR_H, AC_BAR);
     /* Logo emblem: accent square with a dark notch. */
-    fb_rect_x(16, 12, 22, 22, AC_ACCENT);
+    fb_rect_x(16, 12, 22, 22, settings_accent());
     fb_rect_x(23, 19, 8, 8, AC_BAR);
     af_draw(48, 12, "Astrion", AC_WHITE, AF_SB16);
     af_draw(48 + af_text_width("Astrion", AF_SB16) + 8, 15, "v2.0", AC_MUTED, AF_REG13);
@@ -141,20 +167,47 @@ static const struct dock_icon g_icons[] = {
      * colour in this table is mid-luminance for exactly that reason — it is
      * the rule that makes one glyph colour work for all six. */
     { "Monitor",   'M', 0x30B0C7u },   /* teal   */
+    /* Amber, and a gold rather than the Editor's bright orange (0xFF9F0A):
+     * it is the one hue this dock was missing, and at ~0.49 relative luminance
+     * it lands inside the 0.16..0.47 band the note above sets, so the shared
+     * white glyph holds. '=' instead of a letter — no other tile could mean it,
+     * and it is the one mark a calculator is really for. */
+    { "Calculator", '=', 0xA8791Au },  /* amber  */
+    /* Neutral slate: Settings is a system control rather than a place you keep
+     * things, so it takes the chrome's own register instead of a product hue.
+     * glyph 0 = "draw me instead of lettering me" — see draw_dial_glyph. */
+    { "Settings",   0,   0x6E7288u },  /* slate  */
 };
 #define NICON ((uint32_t)(sizeof(g_icons) / sizeof(g_icons[0])))
 #define DOCK_IY (SH - DOCK_H + 12)
+
+/* Where the row of tiles starts and how far apart they sit. ONE function, called
+ * by both the drawing and the hit-test, because two copies of a layout are two
+ * layouts and they drift.
+ *
+ * It shrinks the gap before it lets the row run off the screen, and computes the
+ * left edge subtractively (SW > total, never SW/2 - total/2). With six tiles the
+ * old form was safe on any sane mode; with eight it needs 654px, and on a
+ * narrower framebuffer SW/2 - total/2 would have wrapped a uint32 and started
+ * the dock at ~4 billion. */
+static void dock_layout(uint32_t *sx, uint32_t *gap) {
+    uint32_t g = ICON_GAP;
+    while (g > 8 && NICON * ICON_SZ + (NICON - 1) * g > SW) g -= 2;
+    uint32_t total = NICON * ICON_SZ + (NICON - 1) * g;
+    *sx  = (SW > total) ? (SW - total) / 2 : 0;
+    *gap = g;
+}
 
 static void draw_dock(void) {
     uint32_t dy = SH - DOCK_H;
     fb_rect_x(0, dy, SW, DOCK_H, AC_BAR);
     fb_rect_x(0, dy, SW, 1, AC_BORDER);
 
-    uint32_t total = NICON * ICON_SZ + (NICON - 1) * ICON_GAP;
-    uint32_t sx = SW / 2 - total / 2;
+    uint32_t sx, gap;
+    dock_layout(&sx, &gap);
     uint32_t iy = DOCK_IY;
     for (uint32_t i = 0; i < NICON; i++) {
-        uint32_t ix = sx + i * (ICON_SZ + ICON_GAP);
+        uint32_t ix = sx + i * (ICON_SZ + gap);
         int active = ((int)i == g_active_icon);
         if (active) {
             /* Ring, then a 1px gap in the dock colour, then the tile. Without
@@ -162,18 +215,24 @@ static void draw_dock(void) {
              * Files is 0x0A84FF — exactly AC_ACCENT — so its active ring was
              * invisible: the one running app was the one that looked idle.
              * The gap makes a single indicator read against all six tiles. */
-            fb_rect_x(ix - 3, iy - 3, ICON_SZ + 6, ICON_SZ + 6, AC_ACCENT);
+            fb_rect_x(ix - 3, iy - 3, ICON_SZ + 6, ICON_SZ + 6, settings_accent());
             fb_rect_x(ix - 1, iy - 1, ICON_SZ + 2, ICON_SZ + 2, AC_BAR);
         }
         fb_rect_x(ix, iy, ICON_SZ, ICON_SZ, g_icons[i].color);
-        char g[2] = { g_icons[i].glyph, 0 };
-        uint32_t gw = af_text_width(g, AF_SB16);
-        af_draw(ix + ICON_SZ / 2 - gw / 2,
-                iy + ICON_SZ / 2 - (uint32_t)af_line_height(AF_SB16) / 2,
-                g, AC_WHITE, AF_SB16);
+        if (g_icons[i].glyph) {
+            char g[2] = { g_icons[i].glyph, 0 };
+            uint32_t gw = af_text_width(g, AF_SB16);
+            af_draw(ix + ICON_SZ / 2 - gw / 2,
+                    iy + ICON_SZ / 2 - (uint32_t)af_line_height(AF_SB16) / 2,
+                    g, AC_WHITE, AF_SB16);
+        } else {
+            draw_dial_glyph((int)(ix + ICON_SZ / 2), (int)(iy + ICON_SZ / 2),
+                            9, 2, AC_WHITE);
+        }
         af_draw_center(ix + ICON_SZ / 2, iy + ICON_SZ + 4, g_icons[i].label,
                        active ? AC_WHITE : AC_MUTED, AF_REG13);
-        if (active) fb_rect_x(ix + ICON_SZ / 2 - 2, iy + ICON_SZ + 22, 4, 4, AC_ACCENT);
+        if (active) fb_rect_x(ix + ICON_SZ / 2 - 2, iy + ICON_SZ + 22, 4, 4,
+                              settings_accent());
     }
 }
 
@@ -223,11 +282,11 @@ int desktop_dock_hit(int x, int y) {
     if (!SW) return -1;
     uint32_t dy = SH - DOCK_H;
     if (x < 0 || y < (int)dy) return -1;
-    uint32_t total = NICON * ICON_SZ + (NICON - 1) * ICON_GAP;
-    uint32_t sx = SW / 2 - total / 2;
+    uint32_t sx, gap;
+    dock_layout(&sx, &gap);
     uint32_t iy = DOCK_IY;
     for (uint32_t i = 0; i < NICON; i++) {
-        uint32_t ix = sx + i * (ICON_SZ + ICON_GAP);
+        uint32_t ix = sx + i * (ICON_SZ + gap);
         if ((uint32_t)x >= ix && (uint32_t)x < ix + ICON_SZ &&
             (uint32_t)y >= iy && (uint32_t)y < iy + ICON_SZ)
             return (int)i;
@@ -247,14 +306,37 @@ void desktop_draw_clock(const char *hhmmss) {
      * (repaint_all() then brings it back within a tick). */
     if (desktop_power_is_open()) return;
     uint32_t w = af_text_width(hhmmss, AF_SB16);
+    if (SW <= w + CLOCK_PAD) return;   /* absurdly narrow mode: nowhere to put it */
     uint32_t x = SW - w - CLOCK_PAD;   /* left of the power button + divider */
+
+    /* ─── Clear a FIXED band, not one measured from THIS string ───
+     *
+     * The clock is not a constant width. The month name varies by 10px across
+     * the year in this face (Jul is 23px, May is 33px), and the 12-hour format
+     * the Settings panel can select adds an AM/PM marker worth another 2. The
+     * old clear was sized to the string being drawn, so a NARROWER string
+     * started its clear too far right to cover the wider one already on the bar
+     * and left the head of last month's name behind. With one format and
+     * tabular digits that never bit; with two formats the margin is gone.
+     *
+     * So the band is anchored to the right edge and never moves. Its right edge
+     * is exactly where it was — one pixel short of the power divider at
+     * SW - 56 — so the divider and the button are untouched, as before.
+     * CLOCK_MAXW's whole job is to be wider than any string this can draw; the
+     * widest today is "Jul 18  02:32:05 PM" at 151px plus 10px of month
+     * variation, so 200 leaves real room. */
+    uint32_t bx = (SW > CLOCK_PAD + CLOCK_MAXW) ? SW - CLOCK_PAD - CLOCK_MAXW : 0;
+    uint32_t bw = (SW - CLOCK_PAD + 12) - bx;
+
     /* This runs on the clock TASK, not task 0, so it must not lift the cursor:
      * it can preempt task 0 mid-redraw and mutate the sprite's state underneath
      * it. Flag the damage instead and let the main loop repair it — otherwise a
      * pointer parked on the clock caches these pixels and paints them back over
-     * the next four times the time changes. */
-    mouse_invalidate_rect((int)x - 12, 6, (int)w + 24, (int)TOPBAR_H - 8);
-    fb_rect_x(x - 12, 6, w + 24, TOPBAR_H - 8, AC_BAR);   /* clear old */
+     * the next four times the time changes. The invalidate and the fill are the
+     * SAME rect on purpose: the cursor must be told about exactly the pixels
+     * that changed, no more and no less. */
+    mouse_invalidate_rect((int)bx, 6, (int)bw, (int)TOPBAR_H - 8);
+    fb_rect_x(bx, 6, bw, TOPBAR_H - 8, AC_BAR);   /* clear old */
     af_draw(x, 12, hhmmss, AC_WHITE, AF_SB16);
 }
 
@@ -324,7 +406,12 @@ static void power_dim(void) {
 #define PWR_LIFT 0x323A5Cu    /* hover grey — one step above the card */
 static void power_draw_button(int i, int hover) {
     uint32_t by = pw_by[i], fill, ink; int outline = 0;
-    if (i == 0)      { fill = hover ? 0x3D9BFFu : AC_ACCENT;  ink = AC_WHITE; }
+    /* The hover lift used to be a hardcoded lighter blue, which only worked
+     * while the accent was guaranteed to be blue. It is a quarter-step of the
+     * live accent toward white now, so Shut Down lifts in its own colour
+     * whichever one that is. */
+    if (i == 0)      { fill = hover ? lerp_color(settings_accent(), AC_WHITE, 1, 4)
+                                    : settings_accent();      ink = AC_WHITE; }
     else if (i == 1) { fill = hover ? PWR_LIFT  : AC_TERM_BG; ink = AC_WHITE; outline = 1; }
     else             { fill = hover ? PWR_LIFT  : AC_PANEL;   ink = hover ? AC_WHITE : AC_MUTED;
                        outline = hover; }
@@ -341,7 +428,7 @@ void desktop_power_open(void) {
     fb_rect_x(pw_cx + 6, pw_cy + 6, pw_cw, pw_ch, 0x05060Fu);   /* soft shadow */
     fb_rect_x(pw_cx, pw_cy, pw_cw, pw_ch, AC_PANEL);            /* card body   */
     draw_border(pw_cx, pw_cy, pw_cw, pw_ch, AC_BORDER);
-    draw_power_glyph((int)(pw_cx + pw_cw / 2), (int)(pw_cy + 42), 14, 3, AC_ACCENT);
+    draw_power_glyph((int)(pw_cx + pw_cw / 2), (int)(pw_cy + 42), 14, 3, settings_accent());
     af_draw_center(pw_cx + pw_cw / 2, pw_cy + 66, "Your session will end.",
                    AC_MUTED, AF_REG13);
     for (int i = 0; i < PWR_NBTN; i++) power_draw_button(i, 0);
@@ -391,7 +478,7 @@ int desktop_power_hover(int x, int y) {
 static void power_progress_screen(const char *msg) {
     draw_wallpaper();
     int cxp = (int)(SW / 2), cyp = (int)(SH / 2);
-    draw_power_glyph(cxp, cyp - 42, 16, 3, AC_ACCENT);
+    draw_power_glyph(cxp, cyp - 42, 16, 3, settings_accent());
     af_draw_center((uint32_t)cxp, (uint32_t)(cyp + 6), msg, AC_WHITE, AF_SB16);
 }
 
