@@ -5,6 +5,10 @@
  * end the game. Renders directly to the framebuffer in 32-px cells.
  * Game logic ticks every ~150ms, driven by the PIT.
  *
+ * The board opens in a READY state and does not move until the player
+ * presses something. See the note above snake_play() for why that beat
+ * exists and why it is open-ended rather than a countdown.
+ *
  * Mouse cursor is hidden while the game runs (we just stop calling
  * mouse_redraw_if_dirty; the cursor's last-drawn pixels get overpainted
  * by the game's full-screen fill and stay gone until the shell repaint
@@ -58,6 +62,20 @@ extern uint32_t fb_put_u32_x(uint32_t x, uint32_t y, uint32_t v, uint32_t color,
 
 #define MAX_LEN 1024
 
+/* ─── The opening moment ─────────────────────────────────────────
+ * A window that opens already running punishes you for not having
+ * your hands on the keys. So the board waits. The invitation below
+ * winks — lit for three beats, dark for one, ~1s to the cycle — so a
+ * still board reads as *patient* rather than frozen or broken. The
+ * shifts keep the cadence division-free (see ready_lit).
+ *
+ * The text is deliberately the only thing outside the frame: it sits
+ * in the footer under the play area, so it can never be confused with
+ * a game object and food can never land on top of it. */
+#define READY_MSG   "PRESS AN ARROW TO BEGIN"
+#define READY_SCALE 2
+#define READY_GAP   24   /* px between the field's bottom edge and the text */
+
 typedef struct { int16_t x, y; } cell_t;
 
 static cell_t snake[MAX_LEN];
@@ -70,6 +88,7 @@ static int    grid_x0, grid_y0;
 static cell_t food;
 static int    score;
 static int    dead;
+static int    started;      /* 0 = READY, waiting for the player's first key */
 
 /* Simple LCG, seeded fresh each game from PIT ticks. */
 static uint64_t rng;
@@ -141,6 +160,32 @@ static void draw_full(void) {
     draw_cell(food.x, food.y, COL_FOOD);
 }
 
+/* Is the READY wink currently lit? 256ms per beat, three lit then one
+ * dark. Shift + mask only — no 64-bit division, so no libgcc call. */
+static int ready_lit(void) {
+    return (int)(((pit_elapsed_ms() >> 8) & 3u) != 3u);
+}
+
+/* The invitation, centred on the play field and one gap below it.
+ * Always erases its own strip first, so lit=0 is a clean wipe and the
+ * same call serves as "take it away" when the game starts. */
+static void draw_ready_prompt(int lit) {
+    int tw = (int)(sizeof(READY_MSG) - 1) * FONT_WIDTH * READY_SCALE;
+    int th = FONT_HEIGHT * READY_SCALE;
+    int x  = grid_x0 + (grid_cols * CELL - tw) / 2;
+    int y  = grid_y0 + grid_rows * CELL + READY_GAP;
+    fb_rect_x((uint32_t)x, (uint32_t)y, (uint32_t)tw, (uint32_t)th, COL_BG);
+    if (lit) fb_puts_x((uint32_t)x, (uint32_t)y, READY_MSG, COL_BORDER, READY_SCALE);
+}
+
+/* The head breathes on the same beat as the text. Two cues, one pulse:
+ * the words say "press an arrow", the head says "and this is the thing
+ * that will move". Both colours are already on the board — the wink
+ * borrows the body green, it does not introduce anything new. */
+static void draw_ready_head(int lit) {
+    draw_cell(snake[head_idx].x, snake[head_idx].y, lit ? COL_HEAD : COL_BODY);
+}
+
 static void draw_score(void) {
     /* Just the number - blank then redraw. */
     fb_rect_x(grid_x0 + grid_cols * CELL - 280, 100, 280, 60, COL_BG);
@@ -169,6 +214,7 @@ static void start_game(void) {
     next_dir = DIR_RIGHT;
     score = 0;
     dead = 0;
+    started = 0;    /* nothing moves until the player asks it to */
 
     rng ^= pit_ticks() * 0x9E3779B97F4A7C15ULL;
     rng += 0x9E3779B97F4A7C15ULL;
@@ -186,6 +232,15 @@ static int handle_key(char c) {
     if (c == KEY_LEFT  && dir != DIR_RIGHT) next_dir = DIR_LEFT;
     if (c == KEY_RIGHT && dir != DIR_LEFT)  next_dir = DIR_RIGHT;
     return 0;
+}
+
+/* Which keys wake a READY board. Arrows are what we advertise and what
+ * a player will reach for, but space and enter are accepted too: someone
+ * who taps those and gets nothing back would reasonably conclude the game
+ * is broken, and no keypress should ever land on silence. */
+static int is_start_key(char c) {
+    return c == KEY_UP || c == KEY_DOWN || c == KEY_LEFT || c == KEY_RIGHT ||
+           c == ' '    || c == '\n'     || c == '\r';
 }
 
 static void tick_game(void) {
@@ -259,11 +314,29 @@ static void draw_game_over(void) {
     fb_puts_x(bx + 40, by + 170, "press any key to exit", COL_MUTED, 2);
 }
 
+/* Why the board waits instead of counting down.
+ *
+ * It used to start moving the instant the window opened, which meant you
+ * had about two seconds to find the arrow keys before the snake put itself
+ * into the right-hand wall. Anyone who clicked the icon to see what it was
+ * got a GAME OVER box and a score of zero as their first impression.
+ *
+ * A countdown or a fixed grace period was the obvious fix and it is the
+ * wrong one: both are still a window that closes on its own. Somebody
+ * opening this to show it off talks for an unknowable number of seconds,
+ * and any fixed number we picked would eventually be too short. Waiting
+ * for the player is the only version that is never too short.
+ *
+ * The press that starts the game is also the first steer — handle_key()
+ * has already turned it into next_dir — so no input is spent on ceremony
+ * and the control scheme teaches itself on the very first keystroke.
+ */
 int snake_play(void) {
     start_game();
 
     uint64_t last_tick_ms = pit_elapsed_ms();
     uint64_t tick_period_ms = 150;
+    int shown_lit = -1;             /* -1 forces the first prompt paint */
 
     for (;;) {
         /* Drain keyboard. */
@@ -271,6 +344,30 @@ int snake_play(void) {
             char c = kbd_getchar();
             if (handle_key(c)) return score;
             if (dead) return score;  /* any key after death */
+            if (!started && is_start_key(c)) {
+                /* handle_key() above already set next_dir, and already
+                 * refused a reversal — so an impatient LEFT here starts
+                 * the run heading right rather than doing nothing. */
+                started = 1;
+                draw_ready_prompt(0);   /* take the invitation away */
+                draw_ready_head(1);     /* head back to solid white */
+                last_tick_ms = pit_elapsed_ms();
+                tick_game();            /* move on the same keypress */
+            }
+        }
+
+        if (!started) {
+            /* Waiting for the player. Wink the invitation and the head on
+             * one shared beat so a motionless board still reads as alive. */
+            int lit = ready_lit();
+            if (lit != shown_lit) {
+                shown_lit = lit;
+                draw_ready_prompt(lit);
+                draw_ready_head(lit);
+            }
+            task_yield();
+            __asm__ volatile("sti; hlt");
+            continue;
         }
 
         if (dead) {
