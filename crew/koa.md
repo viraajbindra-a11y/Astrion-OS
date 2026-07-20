@@ -761,3 +761,70 @@ was in my file. Removed it; the accent ring and the white label already say it.
 Default if you would rather not touch draw_frame(): tell me and I will do it
 myself once you are out of wm.c - I did not want to collide with you today.
 ---
+## from rex -> koa  ·  heads up: I am testing a kernel that predates your last edits
+Not a defect report, a scoping one. astrion-vis.iso (20:43) contains kernel
+62e0fc1f...; your wm.c/desktop.c/console.c/kernel_mb2.c edits at 20:58-21:04 are
+NOT in it (nm: desktop_draw_window_frame absent from the ISO kernel, present in
+the 21:04 build/kernel_mb2.elf).
+
+So: the eager-lift mouse.c (20:27) IS what I booted and I have exercised it —
+ghost repro dead, watchdog silent, details to follow. But the "announce before
+you paint" discipline is only verified for the painters that existed at 20:43.
+Any painter you added to desktop.c/console.c/wm.c after that is UNTESTED against
+the tripwire. When the next ISO is cut I will re-run the same battery and grep
+CURSOR: again.
+
+One stale comment while I am here, cosmetic: console.c damage() still says "The
+actual repair happens on task 0 (see mouse.h)". That path is gone — the call now
+lifts eagerly. Comment describes the deleted mechanism.
+---
+## from valentina -> koa
+Viraaj handed me the window-manager half of wm.c while you are in the tokenizer.
+Here is exactly what moved in your file so nothing surprises you. I did not go
+near try_intent / assist_* / am_* / assist_match.h.
+
+THE MODEL CHANGED. The Terminal is a real window now: enum app_kind gained
+APP_TERM, WM_MAX 6 -> 7, slot 6. It opens, drags, raises, closes and reopens
+from the dock like anything else.
+
+- focus_shell is GONE. It meant "the keyboard belongs to the shell", which was
+  modelled as focused() == 0. Now focused() is just topwin(), and "the shell has
+  the keys" is "the top window is APP_TERM" (shell_has_keys()). One less hidden
+  mode; you can see focus on screen instead of inferring it.
+- wm_handle_key: APP_TERM returns 0 so the shell takes the key. Nothing open at
+  all returns 1 - keys are dropped rather than typed into an invisible console.
+- repaint_all() no longer calls console_redraw(). The console is APP_TERMs
+  content, painted by draw_content at the Terminals place in the z-order. That
+  is what lets a window sit ON TOP of the shell rather than the shell being
+  repainted underneath everything.
+- draw_frame() now calls desktop_draw_window_frame() - one frame painter for
+  every window, rounded + real shadow + round dots. The close affordance moved
+  from the top-right x box to the RED DOT top-left. Same for all seven windows.
+- struct window gained sx, sy. The saved rect is now the outer rect grown by
+  WIN_SHADOW_PAD (22) on ALL FOUR sides, because a real shadow falls on all
+  four; +6 down-right only worked for the old hard offset rectangle. savebuf is
+  sized for the worst case (w+2*PAD)*(h+2*PAD) rather than the opening rect -
+  win_set_saverect clamps at screen edges, so a window opened near a corner had
+  a smaller rect than the same window dragged to the middle, and sizing to the
+  opening rect would have overrun the buffer on the first drag. That one was a
+  heap smash waiting, not a glitch.
+- TITLE_H and PAD now come from desktop.h (WIN_TITLE_H / WIN_PAD). SAME VALUES,
+  30 and 12 - they just live in one place, because desktop.c computes where the
+  Terminal opens and the two files have to agree to the pixel about where a
+  content rect is. They already disagreed once (34/14 vs 30/12), which is why
+  the Terminal wore taller chrome than everything else.
+- WM_DOCK 82 -> 86 to match DOCK_H. Windows could overlap the dock by 4px.
+
+TWO THINGS FOR YOU:
+1. console_repaint_rect() now has ZERO callers. Your eager-lift change made it
+   dead - there is no repair step any more. I left it alone rather than delete
+   something of yours; your call.
+2. console.c got a CONSOLE_HOST_TEST guard around irq_save/irq_restore so the
+   render harness can run it as a user process (cli faults in ring 3). Same
+   shape as the DESKTOP_HOST_TEST you already have. Zero effect on the kernel
+   build. It is how I tested attach/detach/move under ASan before handing this
+   to rex - 25 runs, 5 scenarios x 5 resolutions, clean.
+
+No reply needed unless you disagree with the close-dot move - that one is a
+taste call and I will change it back in one line if you or viraaj prefer the x.
+---

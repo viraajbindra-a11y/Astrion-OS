@@ -1,21 +1,80 @@
 /*
- * Astrion v2.0 — desktop shell (window chrome around the console)
+ * Astrion v2.0 — the desktop: wallpaper, top bar, dock, and window chrome.
  *
- * Paints the thing that makes Astrion read as an operating system rather
- * than a terminal: a gradient wallpaper, a top bar (logo + live clock +
- * status), a bottom dock of app icons, and a framed "Terminal" window that
- * hosts the scrolling console (console.c). Everything is drawn through the
- * kernel_mb2.c fb_* wrappers, so it composes with the existing shell, mouse
- * cursor, and full-screen apps without touching pixel-poke code here.
+ * This file owns the SURFACE. Three things live on it — a gradient wallpaper,
+ * a top bar (logo, live clock, power), and a dock of app tiles — plus the two
+ * pieces of chrome that are not the window manager's business: the one window
+ * frame every window is drawn with, and the power dialog.
  *
- * T1.1 draws the chrome statically (direct-to-framebuffer). The dock icons
- * are not yet clickable and windows are not yet movable — that arrives with
- * the back-buffer compositor + window manager in T1.2.
+ * It does NOT own windows. It used to paint a permanent Terminal-shaped
+ * rectangle and call that the desktop, which is exactly why Astrion did not
+ * read as an operating system: the shell was a painted hole rather than a
+ * window, unmovable and unclosable, while everything else floated above it.
+ * The Terminal is a real wm.c window now. This file just says where it opens
+ * (desktop_terminal_frame) and how every window is drawn
+ * (desktop_draw_window_frame).
+ *
+ * Everything goes through the kernel_mb2.c fb_* wrappers. There is no
+ * compositor, no back buffer and no alpha channel: antialiasing and shadows
+ * are read-modify-write against whatever is already on the framebuffer, and
+ * the ordering rules that makes necessary are documented at each one.
  */
 #ifndef ASTRION_DESKTOP_H
 #define ASTRION_DESKTOP_H
 
 #include <stdint.h>
+
+/* ─── Window chrome metrics ───
+ *
+ * ONE definition, shared by desktop.c and wm.c, because the Terminal is a real
+ * window managed by wm.c but its opening geometry is computed in desktop.c
+ * (that is where the layout system lives). Those two files must agree about
+ * exactly where a window's content rect is, to the pixel, or the console
+ * anchors somewhere the window manager isn't going to draw.
+ *
+ * They already disagreed once: desktop.c had TITLE_H 34 and PAD 14, wm.c had
+ * 30 and 12, which is why the Terminal wore visibly taller chrome than every
+ * other window. These are wm.c's numbers — it has seven windows using them and
+ * desktop.c had one. */
+#define WIN_TITLE_H   30u   /* title bar height                       */
+#define WIN_PAD       12u   /* content inset: left, right, bottom     */
+#define WIN_TOP_GAP   10u   /* title bar bottom → content top         */
+
+/* Content rect of a window whose outer rect is (x,y,w,h). */
+#define WIN_CONTENT_X(x)    ((x) + WIN_PAD)
+#define WIN_CONTENT_Y(y)    ((y) + WIN_TITLE_H + WIN_TOP_GAP)
+#define WIN_CONTENT_W(w)    (((w) > 2 * WIN_PAD) ? (w) - 2 * WIN_PAD : 0u)
+#define WIN_CONTENT_H(h)    (((h) > WIN_TITLE_H + WIN_TOP_GAP + WIN_PAD) \
+                             ? (h) - WIN_TITLE_H - WIN_TOP_GAP - WIN_PAD : 0u)
+
+/* Window dots: centre of the first one, relative to the window's left edge,
+ * and their radius. Shared by the drawing and the hit-test. */
+#define WIN_DOT_X    19u
+#define WIN_DOT_R    5
+
+/* How far outside its own rect a window's shadow reaches, on every side.
+ *
+ * wm.c saves the pixels beneath a window so it can drag it without repainting
+ * the world, and that saved rect MUST cover the shadow too. The old shadow was
+ * a hard rectangle offset down-right, so +6 on two sides was enough; a real
+ * shadow falls on all four, and a save rect that misses it leaves a smear of
+ * darkened wallpaper behind every drag. 22 clears the widest spread (20) plus
+ * the 2px the shadow sits below the window. */
+#define WIN_SHADOW_PAD 22u
+
+/* Where the Terminal window opens: outer rect, derived from the type scale
+ * rather than from the screen. See the note at desktop.c's definition. */
+void desktop_terminal_frame(uint32_t *x, uint32_t *y, uint32_t *w, uint32_t *h);
+
+/* ─── The one window frame ───
+ * Every window in Astrion is drawn by this, including the Terminal. wm.c is the
+ * only caller; it lives here because it is chrome. `focused` picks the accent
+ * border, the white title and the live dots. */
+void desktop_draw_window_frame(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
+                               const char *title, int focused);
+
+/* 1 if (px,py) is on the close dot of a window whose top-left is (x,y). */
+int  desktop_window_close_hit(uint32_t x, uint32_t y, int px, int py);
 
 /* ─── Shape primitives ───
  *
@@ -70,12 +129,19 @@ void ac_shadow(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
  * console_init (the console goes inside the Terminal window). */
 void desktop_init(void);
 
-/* Repaint the static chrome (wallpaper + bar + dock + window frame). Use
- * after a full-screen app (e.g. Snake) returns. Does not touch the console
- * text itself — the caller reprints as needed. */
+/* Repaint the chrome: wallpaper + top bar + dock. NO WINDOWS.
+ *
+ * Almost nothing should call this directly. If you have scribbled over the
+ * screen (Snake, a full-screen app) you want wm_repaint(), which does this and
+ * then puts every open window back on top — including the Terminal, which is
+ * now a window and will otherwise stay erased. wm.c's repaint_all() is the one
+ * legitimate caller. */
 void desktop_repaint_chrome(void);
 
-/* Inner content rectangle of the Terminal window — where the console draws. */
+/* Content rectangle of the Terminal window at its DEFAULT position — where the
+ * console is first anchored at boot, before the window manager exists. Once wm
+ * is up the Terminal can be dragged, and the live rect is whatever wm.c last
+ * passed to console_attach(). */
 void desktop_terminal_rect(uint32_t *x, uint32_t *y, uint32_t *w, uint32_t *h);
 
 /* Draw the clock string (e.g. "12:34:56") on the right of the top bar. */

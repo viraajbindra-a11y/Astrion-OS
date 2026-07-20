@@ -54,6 +54,17 @@ static uint32_t x0, y0, w_px, h_px;
 static uint32_t cx, cy;
 static uint32_t color = COL_FG_DEFLT;
 
+/* ─── attached ───
+ * 0 while the Terminal window is closed: the grid below still records every
+ * character, the cursor still advances and lines still scroll, but not one
+ * pixel is written. Reopening the window calls console_attach(), which
+ * re-anchors and repaints the whole store — so closing the Terminal loses
+ * nothing and the shell never has to know it happened.
+ *
+ * Every function in this file that writes pixels checks this. That is the
+ * complete contract: writers call console_puts() the same way in both states. */
+static int attached = 1;
+
 /* ─── Cursor damage ───
  * The mouse cursor caches the pixels under itself and paints them back when it
  * moves. Everything below that writes pixels has to say so, or the cursor keeps
@@ -91,6 +102,16 @@ static void damage(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
  * word, only the interrupt flag — there is nothing to deadlock on. That is the
  * whole reason to mask interrupts instead of spinning on a flag: a fault
  * arriving mid-print can't wedge on state the faulting task was holding. */
+/* CONSOLE_HOST_TEST: the render harness runs this file as an ordinary user
+ * process to exercise attach/detach/scroll against real pixels, and `cli` is a
+ * privileged instruction that faults there. The harness is single-threaded
+ * with no interrupts to mask, so the lock is genuinely a no-op for it — same
+ * arrangement DESKTOP_HOST_TEST already makes for the power calls. It changes
+ * nothing in the kernel build. */
+#ifdef CONSOLE_HOST_TEST
+static inline uint64_t irq_save(void)          { return 0; }
+static inline void     irq_restore(uint64_t f) { (void)f; }
+#else
 static inline uint64_t irq_save(void) {
     uint64_t f;
     __asm__ volatile("pushfq; pop %0; cli" : "=r"(f) :: "memory");
@@ -99,6 +120,7 @@ static inline uint64_t irq_save(void) {
 static inline void irq_restore(uint64_t f) {
     __asm__ volatile("push %0; popfq" :: "r"(f) : "memory", "cc");
 }
+#endif
 
 uint64_t console_lock(void)          { return irq_save(); }
 void     console_unlock(uint64_t f)  { irq_restore(f); }
@@ -112,15 +134,25 @@ void     console_unlock(uint64_t f)  { irq_restore(f); }
 static char     g_ch[CON_MAX_ROWS][CON_MAX_COLS];
 static uint32_t g_fg[CON_MAX_ROWS][CON_MAX_COLS];
 
+/* Highest row index that has ever held ink. A repaint only has to walk this
+ * far, which matters now that the Terminal is a window you can drag: every
+ * drag step repaints the console, and scanning all 48x160 cells when the shell
+ * has printed six lines is 7,600 pointless compares per mouse move. */
+static uint32_t g_maxrow;
+
 static void grid_clear(void) {
     for (uint32_t r = 0; r < CON_MAX_ROWS; r++)
         for (uint32_t c = 0; c < CON_MAX_COLS; c++) g_ch[r][c] = 0;
+    g_maxrow = 0;
 }
 /* Record c at the current cursor cell (call before cx advances). */
 static void grid_put(char c) {
     if (!GW || !LINE_STRIDE) return;
     uint32_t col = (cx - x0) / GW, row = (cy - y0) / LINE_STRIDE;
-    if (row < CON_MAX_ROWS && col < CON_MAX_COLS) { g_ch[row][col] = c; g_fg[row][col] = color; }
+    if (row < CON_MAX_ROWS && col < CON_MAX_COLS) {
+        g_ch[row][col] = c; g_fg[row][col] = color;
+        if (row > g_maxrow) g_maxrow = row;
+    }
 }
 static void grid_scroll(void) {
     for (uint32_t r = 0; r + 1 < CON_MAX_ROWS; r++)
@@ -128,6 +160,7 @@ static void grid_scroll(void) {
             g_ch[r][c] = g_ch[r + 1][c]; g_fg[r][c] = g_fg[r + 1][c];
         }
     for (uint32_t c = 0; c < CON_MAX_COLS; c++) g_ch[CON_MAX_ROWS - 1][c] = 0;
+    if (g_maxrow) g_maxrow--;
 }
 static void grid_clear_cell(void) {
     if (!GW || !LINE_STRIDE) return;
@@ -144,10 +177,10 @@ static void grid_clear_cell(void) {
  * fix. Worst case if a writer scrolls mid-repaint is one stale-looking frame,
  * and the very next write or window event paints over it. No state corruption. */
 void console_redraw(void) {
-    if (!fb_present_x() || !w_px) return;
+    if (!fb_present_x() || !w_px || !attached) return;
     damage(x0, y0, w_px, h_px);
     fb_rect_x(x0, y0, w_px, h_px, COL_BG);
-    for (uint32_t r = 0; r < CON_MAX_ROWS; r++)
+    for (uint32_t r = 0; r <= g_maxrow && r < CON_MAX_ROWS; r++)
         for (uint32_t c = 0; c < CON_MAX_COLS; c++) {
             char ch = g_ch[r][c];
             if (!ch) continue;
@@ -180,7 +213,7 @@ void console_redraw(void) {
  * Unlocked, for the same reason console_redraw() is: a pure reader of the grid,
  * and the worst a writer racing it can do is leave one cell looking a frame old. */
 void console_repaint_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
-    if (!fb_present_x() || !w_px || !h_px) return;
+    if (!fb_present_x() || !w_px || !h_px || !attached) return;
     if (!w || !h || !GW || !GH || !LINE_STRIDE) return;
     if (w_px < GW || h_px < GH) return;   /* region too small to hold a cell */
 
@@ -223,22 +256,35 @@ static uint8_t  *cap_buf;
 static uint32_t  cap_cap;
 static uint32_t *cap_len_out;
 
+/* Scroll the region up one line.
+ *
+ * The GRID scroll and the cursor step happen in both states; only the pixel
+ * move is conditional. That ordering is the whole point of the detached mode:
+ * a shell printing into a closed Terminal must scroll its scrollback exactly
+ * as it would on screen, or reopening the window would show text that never
+ * lined up with what the shell thinks it wrote. */
 static void scroll_one_line(void) {
-    if (!fb_present_x()) return;
-    volatile uint32_t *fb = (volatile uint32_t *)fb_addr_x();
-    uint32_t pitch_px = fb_pitch_x() / 4;
-    /* The whole region moves, including whatever the cursor is sitting on. */
-    damage(x0, y0, w_px, h_px);
+    if (attached && fb_present_x()) {
+        volatile uint32_t *fb = (volatile uint32_t *)fb_addr_x();
+        uint32_t pitch_px = fb_pitch_x() / 4;
+        /* The whole region moves, including whatever the cursor is sitting on.
+         * MUST come before the move, not after — this is a painter that copies
+         * pixels rather than overwriting them, so a cursor still on the
+         * framebuffer gets duplicated into the destination and nothing has a
+         * record of the copy. See the "WHY NOT REPAIR AFTERWARDS" note in
+         * mouse.h; that is the bug this ordering exists for. */
+        damage(x0, y0, w_px, h_px);
 
-    /* Move pixels in the console region up by LINE_STRIDE rows.
-     * Source: y0 + LINE_STRIDE .. y0 + h_px. Dest: y0 .. y0 + h_px - LINE_STRIDE. */
-    for (uint32_t y = 0; y + LINE_STRIDE < h_px; y++) {
-        volatile uint32_t *dst = &fb[(y0 + y)              * pitch_px + x0];
-        volatile uint32_t *src = &fb[(y0 + y + LINE_STRIDE)* pitch_px + x0];
-        for (uint32_t x = 0; x < w_px; x++) dst[x] = src[x];
+        /* Move pixels in the console region up by LINE_STRIDE rows.
+         * Source: y0 + LINE_STRIDE .. y0 + h_px. Dest: y0 .. y0 + h_px - LINE_STRIDE. */
+        for (uint32_t y = 0; y + LINE_STRIDE < h_px; y++) {
+            volatile uint32_t *dst = &fb[(y0 + y)              * pitch_px + x0];
+            volatile uint32_t *src = &fb[(y0 + y + LINE_STRIDE)* pitch_px + x0];
+            for (uint32_t x = 0; x < w_px; x++) dst[x] = src[x];
+        }
+        /* Clear the freed bottom strip. */
+        fb_rect_x(x0, y0 + h_px - LINE_STRIDE, w_px, LINE_STRIDE, COL_BG);
     }
-    /* Clear the freed bottom strip. */
-    fb_rect_x(x0, y0 + h_px - LINE_STRIDE, w_px, LINE_STRIDE, COL_BG);
     grid_scroll();
     cy -= LINE_STRIDE;
 }
@@ -253,14 +299,56 @@ void console_init(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
     x0 = x; y0 = y; w_px = w; h_px = h;
     cx = x0; cy = y0;
     color = COL_FG_DEFLT;
+    attached = 1;
     /* Don't clear here - caller may want the boot screen painted above
      * the console region. */
 }
 
+/* ─── Attach / detach (see console.h) ─── */
+
+void console_detach(void) {
+    uint64_t f = irq_save();
+    attached = 0;
+    irq_restore(f);
+}
+
+int console_is_attached(void) { return attached; }
+
+void console_attach(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
+    uint64_t f = irq_save();
+    /* Carry the LOGICAL cursor across, not the pixel one. The window may have
+     * been dragged anywhere between detach and attach, so the only thing that
+     * survives a move is which row and column we were on. */
+    uint32_t col = (GW && w_px) ? (cx - x0) / GW : 0;
+    uint32_t row = (LINE_STRIDE && h_px) ? (cy - y0) / LINE_STRIDE : 0;
+
+    x0 = x; y0 = y; w_px = w; h_px = h;
+
+    /* A shorter region than we left can put the cursor past the bottom. Scroll
+     * the GRID (never the pixels — there is nothing on screen yet, and the
+     * region we are about to paint is not ours until the caller has drawn the
+     * window body) until the cursor's row fits. */
+    uint32_t rows = (LINE_STRIDE && h_px >= GH) ? (h_px - GH) / LINE_STRIDE + 1 : 1;
+    while (row + 1 > rows) { grid_scroll(); row--; }
+
+    cx = x0 + col * GW;
+    cy = y0 + row * LINE_STRIDE;
+    attached = 1;
+    irq_restore(f);
+
+    /* Outside the lock on purpose: a full repaint is thousands of blended
+     * glyphs and holding interrupts off across it would eat timer ticks and
+     * keystrokes. console_redraw() is a pure reader — the same reasoning it
+     * already documents for itself. */
+    console_redraw();
+}
+
 void console_clear(void) {
     uint64_t f = irq_save();
-    damage(x0, y0, w_px, h_px);
-    fb_rect_x(x0, y0, w_px, h_px, COL_BG);
+    if (attached) {
+        damage(x0, y0, w_px, h_px);
+        fb_rect_x(x0, y0, w_px, h_px, COL_BG);
+    }
     grid_clear();
     cx = x0;
     cy = y0;
@@ -284,8 +372,10 @@ static void newline_nolock(void) {
 static void backspace_nolock(void) {
     if (cx <= x0) return;
     cx -= GW;
-    damage(cx, cy, GW, GH);
-    fb_rect_x(cx, cy, GW, GH, COL_BG);
+    if (attached) {
+        damage(cx, cy, GW, GH);
+        fb_rect_x(cx, cy, GW, GH, COL_BG);
+    }
     grid_clear_cell();
 }
 
@@ -337,9 +427,11 @@ static void putchar_nolock(char c) {
     if (c == '\t') {
         /* Tab to next multiple of 4 chars. */
         do {
-            char buf[2] = {' ', 0};
-            damage(cx, cy, GW, GH);
-            af_draw(cx, cy, buf, color, AF_MONO);
+            if (attached) {
+                char buf[2] = {' ', 0};
+                damage(cx, cy, GW, GH);
+                af_draw(cx, cy, buf, color, AF_MONO);
+            }
             grid_put(' ');
             cx += GW;
             if (cx + GW > x0 + w_px) newline_nolock();
@@ -351,9 +443,11 @@ static void putchar_nolock(char c) {
     /* Wrap before drawing if needed. */
     if (cx + GW > x0 + w_px) newline_nolock();
 
-    char buf[2] = {c, 0};
-    damage(cx, cy, GW, GH);
-    af_draw(cx, cy, buf, color, AF_MONO);
+    if (attached) {
+        char buf[2] = {c, 0};
+        damage(cx, cy, GW, GH);
+        af_draw(cx, cy, buf, color, AF_MONO);
+    }
     grid_put(c);
     cx += GW;
 }

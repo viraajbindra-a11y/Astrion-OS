@@ -55,8 +55,10 @@ static void mouse_invalidate_rect(int x, int y, int w, int h)
 #define TOPBAR_H    44u
 #define DOCK_H      86u
 #define DESK_GAP    40u
-#define TITLE_H     30u   /* == wm.c TITLE_H — change both or neither */
-#define PAD         14u
+/* Window chrome comes from desktop.h now — shared with wm.c, which manages the
+ * Terminal. Local aliases so the layout math below stays readable. */
+#define TITLE_H     WIN_TITLE_H
+#define PAD         WIN_PAD
 #define ICON_SZ     52u
 #define ICON_GAP    34u
 
@@ -553,70 +555,149 @@ void desktop_set_active_app(int icon) {
     draw_dock();
 }
 
-/* The three window dots. They are CIRCLES now. They were 11x11 fb_rect_x
- * squares, and of everything on this screen that was the tell people read
- * fastest: the silhouette is one almost everybody knows by heart, so drawing it
- * with the wrong shape says "hand-made" louder than any amount of misalignment.
- * r=5 gives the same 11px diameter the squares had, so nothing else moves. */
-static void draw_window_dots(uint32_t x, uint32_t cy) {
-    ac_fill_disc((int)(x + 14), (int)cy, 5, AC_RED);
-    ac_fill_disc((int)(x + 32), (int)cy, 5, AC_YELLOW);
-    ac_fill_disc((int)(x + 50), (int)cy, 5, AC_GREEN);
-}
-
-static void draw_terminal_window(void) {
-    ac_shadow(win_x, win_y, win_w, win_h, WIN_R, 18);
-    ac_fill_round(win_x, win_y, win_w, win_h, WIN_R, AC_TERM_BG);   /* body  */
+/* ─── One window frame, for every window ───
+ *
+ * Lives here rather than in wm.c because it is chrome, and chrome is this
+ * file's job — but wm.c is the only caller: it draws every window, including
+ * the Terminal, through this. That is the point. Astrion had two window looks
+ * (a 34px title bar with three dots for the Terminal, a 30px one with a red x
+ * box for everything else) because it had two pieces of code drawing windows.
+ * One function, one look.
+ *
+ * The three dots are CIRCLES. They were 11x11 fb_rect_x squares, and of
+ * everything on the old screen that was the tell people read fastest: the
+ * silhouette is one almost everybody knows by heart, so drawing it with the
+ * wrong shape says "hand-made" louder than any misalignment.
+ *
+ * HONESTY DEBT, named so it doesn't get lost: only the red dot does anything
+ * (it closes). Minimise and zoom do not exist yet, so amber and green are
+ * decoration. Two inert controls is a real thing to fix — either by building
+ * the states or by dropping to a single dot — but not today, and it is a
+ * one-line change here when we decide. */
+void desktop_draw_window_frame(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
+                               const char *title, int focused) {
+    if (!w || !h) return;
+    ac_shadow(x, y, w, h, WIN_R, focused ? 20 : 12);
+    ac_fill_round(x, y, w, h, WIN_R, AC_TERM_BG);              /* body      */
     /* Title bar: rounded on top, square where it meets the body. Drawn as a
      * rounded box of double height and then clipped by the body fill below it,
      * which is cheaper than a two-radius primitive nobody else needs. */
-    ac_fill_round(win_x, win_y, win_w, TITLE_H * 2, WIN_R, AC_PANEL);
-    fb_rect_x(win_x + 1, win_y + TITLE_H, win_w - 2, TITLE_H, AC_TERM_BG);
-    /* Hairline where chrome meets content. Without it the title bar and the
-     * body just abut and the window has no seam — the eye reads one surface. */
-    fb_rect_x(win_x + 1, win_y + TITLE_H, win_w - 2, 1, AC_BORDER);
+    ac_fill_round(x, y, w, TITLE_H * 2, WIN_R, AC_PANEL);
+    if (h > TITLE_H) {
+        fb_rect_x(x + 1, y + TITLE_H, w - 2, TITLE_H, AC_TERM_BG);
+        /* Hairline where chrome meets content. Without it the title bar and the
+         * body just abut and the window has no seam — the eye reads one
+         * surface rather than a handle above a page. */
+        fb_rect_x(x + 1, y + TITLE_H, w - 2, 1, AC_BORDER);
+    }
 
-    draw_window_dots(win_x, win_y + TITLE_H / 2);
-    /* WHITE, not AC_MUTED. The focused window's own name was the dimmest text
-     * in the frame — the thing you are using was labelled more quietly than the
-     * files inside it. */
-    af_draw_center(win_x + win_w / 2,
-                   win_y + TITLE_H / 2 - (uint32_t)af_line_height(AF_SB16) / 2,
-                   "Terminal", AC_WHITE, AF_SB16);
-    ac_stroke_round(win_x, win_y, win_w, win_h, WIN_R, AC_BORDER);
+    uint32_t dcy = y + TITLE_H / 2;
+    ac_fill_disc((int)(x + WIN_DOT_X),      (int)dcy, WIN_DOT_R, AC_RED);
+    ac_fill_disc((int)(x + WIN_DOT_X + 18), (int)dcy, WIN_DOT_R,
+                 focused ? AC_YELLOW : lerp_color(AC_YELLOW, AC_PANEL, 1, 2));
+    ac_fill_disc((int)(x + WIN_DOT_X + 36), (int)dcy, WIN_DOT_R,
+                 focused ? AC_GREEN : lerp_color(AC_GREEN, AC_PANEL, 1, 2));
+
+    /* The focused window's title is WHITE. It used to be AC_MUTED even on the
+     * Terminal, which made the name of the thing you were using one of the
+     * dimmest pieces of text on the screen. */
+    if (title)
+        af_draw_center(x + w / 2, y + TITLE_H / 2 - (uint32_t)af_line_height(AF_SB16) / 2,
+                       title, focused ? AC_WHITE : AC_MUTED, AF_SB16);
+    ac_stroke_round(x, y, w, h, WIN_R, focused ? settings_accent() : AC_BORDER);
+}
+
+/* Is (px,py) on this window's close dot? Shares WIN_DOT_* with the drawing
+ * above so the target is exactly where the dot is — the hit box is grown a
+ * little because an 11px circle is a small thing to ask someone to hit. */
+int desktop_window_close_hit(uint32_t x, uint32_t y, int px, int py) {
+    int cxp = (int)(x + WIN_DOT_X), cyp = (int)(y + TITLE_H / 2);
+    int dx = px - cxp, dy = py - cyp;
+    int r = WIN_DOT_R + 4;
+    return dx * dx + dy * dy <= r * r;
 }
 
 /* ─── Public API ─── */
 
+/* ─── Where the Terminal opens ───
+ *
+ * It used to be "everything that isn't chrome": 1184x630, 73% of the screen,
+ * 97% empty at boot, welded to the edges. That was the deepest reason Astrion
+ * did not read as an operating system. A desktop is a place things sit on; a
+ * single window stretched to the bezels is one program with chrome glued
+ * round it, and no amount of polish on the frame fixes that.
+ *
+ * So the size is derived from the TYPE, not from the screen. A terminal's
+ * natural dimensions are a column count and a row count, and TERM_COLS x
+ * TERM_ROWS is a real one — 96 columns is comfortably past the 80 everything
+ * has assumed since punch cards, and 20 rows on a window this size leaves
+ * genuine desktop visible on all four sides. Someone looking at it can see
+ * there is room for another window, which is the entire point.
+ *
+ * Vertically it sits at two fifths of the free band rather than dead centre:
+ * a shape centred in a frame reads as sitting low, so optical centring puts it
+ * slightly high. It also leaves the larger gap at the bottom, nearest the dock,
+ * which is where a second window cascades in.
+ *
+ * Everything clamps. On a small mode the window shrinks to the band minus one
+ * DESK_GAP rather than overflowing it, and all the arithmetic is subtractive
+ * so a framebuffer smaller than the chrome can't wrap a uint32. */
+#define TERM_COLS 96u
+#define TERM_ROWS 20u
+
+void desktop_terminal_frame(uint32_t *x, uint32_t *y, uint32_t *w, uint32_t *h) {
+    uint32_t sw = fb_width_x(), sh = fb_height_x();
+    uint32_t cellw = af_text_width("M", AF_MONO);
+    uint32_t cellh = (uint32_t)af_line_height(AF_MONO) + 2;
+    if (!cellw) cellw = 10;
+    if (!cellh) cellh = 24;
+
+    /* Desired outer size = the text grid plus this window's own chrome. */
+    uint32_t ww = TERM_COLS * cellw + 2 * PAD;
+    uint32_t wh = TERM_ROWS * cellh + TITLE_H + WIN_TOP_GAP + PAD;
+
+    /* The band the desktop actually offers, minus a gutter on each side. */
+    uint32_t band_y = TOPBAR_H;
+    uint32_t band_h = (sh > TOPBAR_H + DOCK_H) ? sh - TOPBAR_H - DOCK_H : 0;
+    uint32_t max_w  = (sw > 2 * DESK_GAP)  ? sw - 2 * DESK_GAP : sw;
+    uint32_t max_h  = (band_h > 2 * DESK_GAP) ? band_h - 2 * DESK_GAP : band_h;
+    if (ww > max_w) ww = max_w;
+    if (wh > max_h) wh = max_h;
+
+    *w = ww;
+    *h = wh;
+    *x = (sw > ww) ? (sw - ww) / 2 : 0;
+    *y = band_y + ((band_h > wh) ? (band_h - wh) * 2 / 5 : 0);
+}
+
+/* The console's rect inside that frame. Derived from the frame rather than
+ * computed alongside it, because two functions that must agree about the same
+ * rectangle eventually won't. MUST match wm.c's set_content_rect() — the
+ * window manager owns the Terminal now, and this is what it opens it at. */
 static void compute_geometry(void) {
     SW = fb_width_x();
     SH = fb_height_x();
-    /* One gutter on all four sides — see DESK_GAP. Subtractive so a small mode
-     * can't wrap: the dock and bar get their space first, the window takes what
-     * is left, and if there is nothing left it collapses to zero rather than to
-     * four billion. */
-    uint32_t gap = DESK_GAP;
-    uint32_t vert = TOPBAR_H + DOCK_H + 2 * gap;
-    while (gap > 8 && (vert + 120 > SH || 2 * gap + 200 > SW)) {
-        gap -= 4;
-        vert = TOPBAR_H + DOCK_H + 2 * gap;
-    }
-    win_x = gap;
-    win_y = TOPBAR_H + gap;
-    win_w = (SW > 2 * gap) ? SW - 2 * gap : 0;
-    win_h = (SH > vert)    ? SH - vert    : 0;
-    term_x = win_x + PAD;
-    term_y = win_y + TITLE_H + PAD;
-    term_w = (win_w > 2 * PAD) ? win_w - 2 * PAD : 0;
-    term_h = (win_h > TITLE_H + 2 * PAD) ? win_h - TITLE_H - 2 * PAD : 0;
+    desktop_terminal_frame(&win_x, &win_y, &win_w, &win_h);
+    term_x = WIN_CONTENT_X(win_x);
+    term_y = WIN_CONTENT_Y(win_y);
+    term_w = WIN_CONTENT_W(win_w);
+    term_h = WIN_CONTENT_H(win_h);
 }
 
+/* The desktop is the wallpaper, the top bar and the dock. That is ALL it is
+ * now — it no longer paints a Terminal.
+ *
+ * It used to, and that was the structural bug behind "this is not an OS": the
+ * Terminal was a pseudo-window drawn by this file, permanently present,
+ * unmovable and unclosable, while every other window was a real one managed by
+ * wm.c. Astrion had two kinds of window and one of them was really just a
+ * painted rectangle. The shell is a window like anything else now; wm.c opens
+ * it, drags it and closes it, and this file's job is the surface it sits on. */
 void desktop_init(void) {
     compute_geometry();
     draw_wallpaper();
     draw_topbar();
     draw_dock();
-    draw_terminal_window();
 }
 
 void desktop_repaint_chrome(void) { desktop_init(); }

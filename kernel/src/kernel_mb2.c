@@ -1058,15 +1058,25 @@ void kernel_mb2_main(uint32_t magic, uint64_t info_ptr) {
      * wallpaper is. Defaults only — nothing is read from disk. */
     settings_init();
 
-    /* Paint the desktop (wallpaper + top bar + dock + Terminal window),
-     * then anchor the scrolling console inside the Terminal window's
-     * content rect. This replaces the old static boot-info panel. */
+    /* Paint the desktop — wallpaper, top bar, dock. NOT the Terminal: the
+     * shell is a real window now, and windows are the window manager's job.
+     *
+     * The order below is load-bearing and reads oddly, so: console_init()
+     * anchors the text grid and seeds the character cell from the mono face,
+     * but paints nothing. wm_init() then OPENS the Terminal window, which
+     * draws the frame and attaches the console to its content rect. Only then
+     * does shell_install() print the boot banner — so it lands inside a real
+     * window instead of onto bare wallpaper.
+     *
+     * It used to be desktop_init / console_init / shell_install / wm_init,
+     * which worked only because desktop_init() painted a Terminal-shaped
+     * rectangle itself and the window manager was told about it afterwards. */
     desktop_init();
     uint32_t cx0, cy0, cw, ch;
     desktop_terminal_rect(&cx0, &cy0, &cw, &ch);
     console_init(cx0, cy0, cw, ch);
+    wm_init();       /* window manager — opens the Terminal */
     shell_install();
-    wm_init();   /* window manager: dock apps float above the Terminal */
     gpt_init();  /* on-device GPT (Assistant): allocate the KV-cache */
 
     /* Cooperative scheduler: adopt this context as task 0 ("shell"),

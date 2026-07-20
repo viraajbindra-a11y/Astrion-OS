@@ -14,6 +14,27 @@
 #include <stdint.h>
 
 void     console_init(uint32_t x, uint32_t y, uint32_t w, uint32_t h);
+
+/* ─── Attach / detach ───
+ *
+ * The console's text lives in a backing store (see console.c), not in the
+ * pixels. That is what lets the Terminal be a real window you can close, move
+ * and reopen instead of a permanent hole in the desktop.
+ *
+ *   detached  the grid keeps accumulating — the shell runs, output is recorded,
+ *             the cursor advances, lines scroll — but NOTHING is painted. This
+ *             is the state while the Terminal window is closed.
+ *   attached  anchored to (x,y,w,h) and painting again.
+ *
+ * console_attach() re-anchors AND repaints from the store, so it is the one
+ * call the window manager needs on open, on move, and on reveal. It preserves
+ * the logical cursor (row/column), not its pixel position, so text picks up
+ * exactly where it left off wherever the window has been dragged to.
+ *
+ * Every writer below is safe in either state; nothing has to ask first. */
+void     console_attach(uint32_t x, uint32_t y, uint32_t w, uint32_t h);
+void     console_detach(void);
+int      console_is_attached(void);
 void     console_putchar(char c);
 void     console_puts(const char *s);
 void     console_put_u32(uint32_t v);

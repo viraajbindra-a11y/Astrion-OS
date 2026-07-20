@@ -57,17 +57,27 @@ extern const char *mb_bootloader_name_x(void);
  * the left 60% and the footer rule framing 245px of nothing. */
 #define APP_W     860u
 #define APP_H     520u
-#define TITLE_H   30u
-#define PAD       12u
+/* Window chrome is defined ONCE, in desktop.h, and shared with desktop.c —
+ * which computes where the Terminal opens. Same values these always had; they
+ * just live in one place now, because the Terminal is a real window and its
+ * opening rect is computed in the other file. Two copies of a content-rect
+ * formula is two formulas and they drift. */
+#define TITLE_H   WIN_TITLE_H
+#define PAD       WIN_PAD
 #define WM_TOP    66u    /* below top bar + accent */
-#define WM_DOCK   82u    /* reserved dock height at the bottom */
+#define WM_DOCK   86u    /* reserved dock height at the bottom — == DOCK_H */
 /* Content text cell — seeded from the antialiased mono face (JetBrains Mono)
  * in wm_init(), the same trick as console.c: the editor/assistant layout math
  * (advance, wrap, line step) is unchanged; only the glyph draw + cell differ. */
 static uint32_t GW = 12, GH = 27, LINE = 29;   /* real values set in wm_init */
 
+/* APP_TERM is the shell. It is a window like any other now — it opens, it
+ * drags, it closes, it raises when you click it, and the dock reopens it. It
+ * used to be "the background": drawn by desktop.c, permanently present, and
+ * modelled here as the ABSENCE of a window (focus_shell == 1, focused() == 0).
+ * That is why the desktop never felt like a desktop. */
 enum app_kind { APP_NONE = 0, APP_FILES, APP_EDITOR, APP_ASSIST, APP_MON,
-                APP_CALC, APP_SET };
+                APP_CALC, APP_SET, APP_TERM };
 
 static uint32_t SW, SH;
 
@@ -85,20 +95,19 @@ static uint32_t SW, SH;
  * That savebuf rule is also what bounds the System Monitor's live repaint:
  * a window may only paint over itself, because anything above it holds a
  * savebuf snapshotted from BEFORE the paint. See mon_can_live_paint(). */
-#define WM_MAX 6
+#define WM_MAX 7      /* six apps + the Terminal */
 
 struct window {
     int           open;
     enum app_kind app;
     uint32_t      x, y, w, h;     /* outer rect */
-    uint32_t      sw, sh;         /* saved-rect dims (incl. shadow) */
+    uint32_t      sx, sy, sw, sh; /* saved rect: outer rect grown by the shadow */
     uint32_t     *savebuf;        /* pixels beneath this window at paint time */
     uint32_t      savecap;        /* savebuf capacity in pixels (grows, never shrinks) */
 };
 static struct window wins[WM_MAX];
 static int zord[WM_MAX];      /* z-order: [0] = bottom … [zn-1] = top */
 static int zn;                /* number of open windows */
-static int focus_shell = 1;   /* 1 = the keyboard belongs to the terminal */
 
 /* Content rect of the window currently being drawn / keyed. */
 static uint32_t cx, cy, cw, ch;
@@ -115,16 +124,27 @@ static int slot_of(enum app_kind a) {
     switch (a) { case APP_FILES: return 0; case APP_EDITOR: return 1;
                  case APP_ASSIST: return 2; case APP_MON: return 3;
                  case APP_CALC: return 4; case APP_SET: return 5;
+                 case APP_TERM: return 6;
                  default: return -1; }
 }
 static int icon_of(enum app_kind a) {   /* dock icon index */
     switch (a) { case APP_FILES: return 1; case APP_EDITOR: return 2;
                  case APP_ASSIST: return 4; case APP_MON: return 5;
                  case APP_CALC: return 6; case APP_SET: return 7;
+                 case APP_TERM: return 0;
                  default: return 0; }
 }
 static struct window *topwin(void)  { return zn > 0 ? &wins[zord[zn - 1]] : 0; }
-static struct window *focused(void) { return focus_shell ? 0 : topwin(); }
+/* The focused window is simply the top one. There is no focus_shell flag any
+ * more: "the keyboard belongs to the shell" is now just "the Terminal window
+ * is on top", which is a thing you can see rather than a hidden mode. */
+static struct window *focused(void) { return topwin(); }
+/* 1 when keystrokes should fall through to the shell — i.e. the Terminal is
+ * the focused window. */
+static int shell_has_keys(void) {
+    struct window *f = topwin();
+    return f && f->app == APP_TERM;
+}
 static void z_remove(int slot) {
     int k = 0;
     for (int i = 0; i < zn; i++) if (zord[i] != slot) zord[k++] = zord[i];
@@ -167,6 +187,19 @@ static void restore_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_
             uint32_t px = x + c, py = y + r;
             if (px < SW && py < SH) fb[py * pitch + px] = buf[r * w + c];
         }
+}
+
+/* The saved rect: the window's outer rect grown by WIN_SHADOW_PAD on every
+ * side, clamped at the screen edges (save_rect takes unsigned origins, so a
+ * window near the top-left would otherwise hand it a wrapped coordinate).
+ * Computed in ONE place and stored, because the save and the restore have to
+ * agree about the same rectangle across a move. */
+static void win_set_saverect(struct window *w) {
+    uint32_t p = WIN_SHADOW_PAD;
+    w->sx = (w->x > p) ? w->x - p : 0;
+    w->sy = (w->y > p) ? w->y - p : 0;
+    w->sw = (w->x - w->sx) + w->w + p;
+    w->sh = (w->y - w->sy) + w->h + p;
 }
 
 /* ─── Editor state ─── */
@@ -2656,21 +2689,17 @@ static const char *title_for(enum app_kind a) {
         case APP_MON:    return "System Monitor";
         case APP_CALC:   return "Calculator";
         case APP_SET:    return "Settings";
+        case APP_TERM:   return "Terminal";
         default:         return "App";
     }
 }
 
+/* Every window, including the Terminal, goes through desktop.c's one frame
+ * painter — rounded corners, a real decaying shadow, round dots. There is no
+ * longer a second window look for the shell. */
 static void draw_frame(struct window *w) {
-    int fg = (w == focused());
-    fb_rect_x(w->x + 6, w->y + 6, w->w, w->h, 0x0A0E24u);   /* shadow */
-    fb_rect_x(w->x, w->y, w->w, w->h, AC_TERM_BG);          /* body   */
-    fb_rect_x(w->x, w->y, w->w, TITLE_H, AC_PANEL);         /* title  */
-    fb_rect_x(w->x + w->w - 27, w->y + 9, 16, 16, AC_RED);  /* close  */
-    af_draw(w->x + w->w - 23, w->y + 8, "x", AC_WHITE, AF_REG13);
-    /* the focused window gets a white title + accent border; others dim */
-    af_draw_center(w->x + w->w / 2, w->y + 8, title_for(w->app),
-                   fg ? AC_WHITE : AC_MUTED, AF_SB16);
-    draw_border(w->x, w->y, w->w, w->h, fg ? settings_accent() : AC_BORDER);
+    desktop_draw_window_frame(w->x, w->y, w->w, w->h,
+                              title_for(w->app), w == focused());
 }
 
 static void draw_content(struct window *w) {
@@ -2682,13 +2711,17 @@ static void draw_content(struct window *w) {
         case APP_MON:    mon_draw();    break;
         case APP_CALC:   calc_draw();     break;
         case APP_SET:    settings_draw(); break;
+        /* The Terminal's content is the console. Re-anchor it to wherever the
+         * window is now and repaint from its backing store — that one call is
+         * what makes the shell survive being dragged, covered and closed. */
+        case APP_TERM:   console_attach(cx, cy, cw, ch); break;
         default: break;
     }
 }
 
 static void set_content_rect(struct window *w) {
-    cx = w->x + PAD; cy = w->y + TITLE_H + 10;
-    cw = w->w - 2 * PAD; ch = w->h - TITLE_H - 10 - PAD;
+    cx = WIN_CONTENT_X(w->x); cy = WIN_CONTENT_Y(w->y);
+    cw = WIN_CONTENT_W(w->w); ch = WIN_CONTENT_H(w->h);
 }
 
 /* Repaint the world from state: desktop chrome, the terminal (from its
@@ -2707,12 +2740,17 @@ static void repaint_all(void) {
      * true and let the repaint below cover the hole. */
     mouse_lift();
     desktop_repaint_chrome();
-    console_redraw();
+    /* No console_redraw() here any more. The console is the Terminal window's
+     * content, so it is painted by the draw_content() below at the Terminal's
+     * place in the z-order — which is what lets a window sit ON TOP of the
+     * shell instead of the shell always being repainted underneath everything.
+     * When the Terminal is closed, nothing paints it at all, and the console
+     * keeps recording into its backing store until it reopens. */
     struct window *f = focused();
-    desktop_set_active_app(f ? icon_of(f->app) : 0);
+    desktop_set_active_app(f ? icon_of(f->app) : -1);
     for (int i = 0; i < zn; i++) {
         struct window *w = &wins[zord[i]];
-        save_rect(w->x, w->y, w->sw, w->sh, w->savebuf);
+        save_rect(w->sx, w->sy, w->sw, w->sh, w->savebuf);
         draw_frame(w);
         draw_content(w);
     }
@@ -2721,10 +2759,14 @@ static void repaint_all(void) {
 static void close_window(struct window *w) {
     if (!w || !w->open) return;
     if (w->app == APP_EDITOR) { editor_save(); if (ed_buf) { kfree(ed_buf); ed_buf = 0; } }
+    /* Closing the Terminal does not stop the shell — it stops DRAWING it. The
+     * console keeps its backing store and keeps recording, so reopening from
+     * the dock brings back the exact session, scrollback and cursor column
+     * included. A window is a view onto a program, not the program. */
+    if (w->app == APP_TERM) console_detach();
     z_remove(slot_of(w->app));
     w->open = 0;
     dragging = 0;
-    if (zn == 0) focus_shell = 1;
     repaint_all();
 }
 
@@ -2766,6 +2808,10 @@ static void size_for(enum app_kind a, uint32_t *w, uint32_t *h) {
      * calculator that opened at 860px wide would be 500px of empty panel. */
     if (a == APP_CALC) { *w = CALC_W; *h = CALC_H; return; }
     if (a == APP_SET)  { *w = SET_W;  *h = SET_H;  return; }
+    /* The Terminal's size comes from desktop.c, which derives it from the type
+     * scale (96 columns x 20 rows) rather than from the screen — see the note
+     * at desktop_terminal_frame(). */
+    if (a == APP_TERM) { uint32_t tx, ty; desktop_terminal_frame(&tx, &ty, w, h); return; }
     *w = APP_W; *h = APP_H;
 }
 
@@ -2777,17 +2823,32 @@ static void open_common(enum app_kind app) {
     if (!w->open) {
         w->app = app;
         size_for(app, &w->w, &w->h);
-        /* cascade so a second window doesn't land exactly on the first */
-        w->x = (SW - w->w) / 2 + (uint32_t)(s * 26);
-        w->y = WM_TOP + 4 + (uint32_t)(s * 22);
-        w->sw = w->w + 6; w->sh = w->h + 6;          /* include shadow */
+        if (app == APP_TERM) {
+            /* The Terminal opens where the desktop says it should, not in the
+             * cascade — it is the first thing on screen and the layout is
+             * composed around it. */
+            desktop_terminal_frame(&w->x, &w->y, &w->w, &w->h);
+        } else {
+            /* cascade so a second window doesn't land exactly on the first */
+            w->x = (SW - w->w) / 2 + (uint32_t)(s * 26);
+            w->y = WM_TOP + 4 + (uint32_t)(s * 22);
+        }
+        win_set_saverect(w);                          /* include shadow */
         /* The savebuf must hold the whole shadow-inclusive rect: save_rect
-         * writes exactly sw*sh pixels into it. The Monitor now opens at a
-         * task-count-dependent height (size_for -> mon_open_rows), so a slot
-         * reopened TALLER than last time needs a bigger buffer than the one
-         * cached here — grow it, or save_rect walks off the old end and
-         * smashes the heap. sw*sh is bounded by the screen, so *4 can't wrap. */
-        uint32_t need = w->sw * w->sh;
+         * writes exactly sw*sh pixels into it. Two ways that goes wrong, and
+         * both are heap smashes rather than glitches, so it is sized for the
+         * worst case of each:
+         *
+         *  - the Monitor opens at a task-count-dependent height (size_for ->
+         *    mon_open_rows), so a slot reopened TALLER than last time needs a
+         *    bigger buffer than the one cached here — hence grow-never-shrink.
+         *  - win_set_saverect() CLAMPS at the screen edges, so a window opened
+         *    near a corner has a smaller rect than the same window dragged into
+         *    the middle. Sizing to the opening rect would overrun on the first
+         *    drag away from the edge. Hence the full w+2*PAD, not w->sw.
+         *
+         * Both dimensions are bounded by the screen plus 44px, so *4 can't wrap. */
+        uint32_t need = (w->w + 2 * WIN_SHADOW_PAD) * (w->h + 2 * WIN_SHADOW_PAD);
         if (need > w->savecap) {
             if (w->savebuf) kfree(w->savebuf);
             w->savebuf = (uint32_t *)kmalloc(need * 4);
@@ -2803,7 +2864,6 @@ static void open_common(enum app_kind app) {
         if (app == APP_SET)    st_row = 0;
     }
     z_raise(s);
-    focus_shell = 0;
     repaint_all();
 }
 
@@ -2821,16 +2881,12 @@ static void run_snake(void) {
 
 void wm_open_app(int icon) {
     switch (icon) {
-        case 0:   /* Terminal: hand the keyboard back to the shell */
-            focus_shell = 1;
-            /* desktop_set_active_app() repaints the whole dock strip, and with
-             * no windows open nothing else follows to cover a stale restore —
-             * so lift before it, not after. (When zn > 0 the repaint_all()
-             * below lifts too; mouse_lift() is idempotent between redraws.) */
-            mouse_lift();
-            desktop_set_active_app(0);
-            if (zn) repaint_all();          /* redraw titles/borders as unfocused */
-            break;
+        /* The Terminal is opened exactly like every other app now: if it is
+         * closed this reopens it (console_attach repaints the whole session
+         * from the backing store), and if it is already open this raises and
+         * focuses it. It used to be a special case that only flipped a
+         * keyboard-ownership flag, because there was no window to raise. */
+        case 0: open_common(APP_TERM);   break;
         case 1: open_common(APP_FILES);  break;
         case 2: wm_open_editor(0);       break;
         case 3: run_snake();             break;
@@ -2848,15 +2904,21 @@ void wm_open_app(int icon) {
 static void wm_move(int nx, int ny) {
     struct window *w = topwin();
     if (!w) return;
+    /* Clamp the WINDOW, not its shadow-inflated save rect: the shadow is
+     * allowed to run off the screen (it just gets clipped), and clamping on it
+     * would stop every window 22px short of every edge. */
     if (nx < 0) nx = 0;
     if (ny < (int)WM_TOP) ny = (int)WM_TOP;
-    if (nx + (int)w->sw > (int)SW) nx = (int)SW - (int)w->sw;
-    if (ny + (int)w->sh > (int)(SH - WM_DOCK)) ny = (int)(SH - WM_DOCK) - (int)w->sh;
+    if (nx + (int)w->w > (int)SW) nx = (int)SW - (int)w->w;
+    if (ny + (int)w->h > (int)(SH - WM_DOCK)) ny = (int)(SH - WM_DOCK) - (int)w->h;
+    if (nx < 0) nx = 0;
+    if (ny < (int)WM_TOP) ny = (int)WM_TOP;
     if (nx == (int)w->x && ny == (int)w->y) return;
     mouse_lift();
-    restore_rect(w->x, w->y, w->sw, w->sh, w->savebuf);
+    restore_rect(w->sx, w->sy, w->sw, w->sh, w->savebuf);
     w->x = (uint32_t)nx; w->y = (uint32_t)ny;
-    save_rect(w->x, w->y, w->sw, w->sh, w->savebuf);
+    win_set_saverect(w);
+    save_rect(w->sx, w->sy, w->sw, w->sh, w->savebuf);
     draw_frame(w);
     draw_content(w);
 }
@@ -2872,13 +2934,22 @@ void wm_init(void) {
     for (int i = 0; i < WM_MAX; i++) {
         wins[i].open = 0; wins[i].app = APP_NONE; wins[i].savebuf = 0; wins[i].savecap = 0;
     }
-    zn = 0; focus_shell = 1;
+    zn = 0;
     dragging = 0; ed_buf = 0;
     mon_last_ms = 0;
     calc_reset(); st_row = 0;
+    /* Open the Terminal. The shell is an app, and at boot it is the app you
+     * are looking at — so it comes up the same way clicking its dock tile
+     * would. Everything the boot sequence prints afterwards lands inside a
+     * real window. */
+    open_common(APP_TERM);
 }
 
-int wm_active(void) { return focused() != 0; }
+/* 1 if a window other than the Terminal has the keyboard. Nothing outside
+ * wm.h calls this today; it means "an app is in front of the shell". */
+int wm_active(void) { return !shell_has_keys(); }
+
+void wm_repaint(void) { repaint_all(); }
 
 int wm_handle_key(char c) {
     /* The power dialog is modal: while it's up it swallows every key so nothing
@@ -2888,7 +2959,15 @@ int wm_handle_key(char c) {
         return 1;
     }
     struct window *f = focused();
-    if (!f) return 0;               /* nothing focused → the shell gets it */
+    /* The Terminal focused → fall through to the shell, which is what actually
+     * consumes the key. */
+    if (f && f->app == APP_TERM) return 0;
+    /* Nothing open at all — the Terminal has been closed and no app replaced
+     * it. Swallow the key rather than letting the shell take it: typing into a
+     * console nobody can see, and finding the text waiting when you reopen the
+     * window, is worse than the keystroke going nowhere. Reopen the Terminal
+     * from the dock and it types again. */
+    if (!f) return 1;
     /* Every one of these handlers repaints part of its window — an editor line,
      * the Files selection, an assistant reply. If the pointer is resting on that
      * window its cached background goes stale the moment they do, so take the
@@ -2956,14 +3035,12 @@ void wm_tick(void) {
             struct window *w = &wins[slot];
             if (mx < (int)w->x || mx > (int)(w->x + w->w) ||
                 my < (int)w->y || my > (int)(w->y + w->h)) continue;
-            if (i != zn - 1 || focus_shell) {   /* click-to-focus: raise it */
-                z_raise(slot); focus_shell = 0; repaint_all();
+            if (i != zn - 1) {                  /* click-to-focus: raise it */
+                z_raise(slot); repaint_all();
             }
-            /* close box */
-            if (mx >= (int)(w->x + w->w - 27) && mx <= (int)(w->x + w->w - 11) &&
-                my >= (int)(w->y + 9)         && my <= (int)(w->y + 25)) {
-                wm_close(); return;
-            }
+            /* Close: the red dot, top-left. Same geometry the frame draws it
+             * with (desktop.h WIN_DOT_*), so the target is exactly the dot. */
+            if (desktop_window_close_hit(w->x, w->y, mx, my)) { wm_close(); return; }
             /* title bar → begin drag */
             if (my >= (int)w->y && my <= (int)(w->y + TITLE_H)) {
                 dragging = 1; drag_ox = mx - (int)w->x; drag_oy = my - (int)w->y;
@@ -2989,13 +3066,9 @@ void wm_tick(void) {
             }
             return;
         }
-        /* clicked the desktop / terminal → give the keyboard to the shell */
-        if (!focus_shell) {
-            focus_shell = 1;
-            mouse_lift();               /* the dock repaints under us — see above */
-            desktop_set_active_app(0);
-            if (zn) repaint_all();
-        }
+        /* Clicked the bare desktop. Nothing to focus — the wallpaper is not a
+         * window. This used to be how you got the keyboard back to the shell;
+         * now you click the Terminal itself, like any other window. */
     }
 
     if (dragging) {

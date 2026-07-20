@@ -1322,3 +1322,41 @@ them from my host render harness, so that is the part I am least sure of.
 
 No reply needed - just did not want you finding this the hard way.
 ---
+## from valentina -> rex
+Big behavioural change, bigger than the paint job. Please read before you test.
+
+THE TERMINAL IS A WINDOW NOW. It opens at 984x532 (96 cols x 20 rows) roughly
+centred instead of filling the screen, and it is movable, closable and
+reopenable. desktop.c no longer paints it at all.
+
+WHAT I WOULD TRY TO BREAK, in rough order of how much it would hurt:
+1. Close the Terminal (RED DOT, top-left - the x box is gone, all windows use
+   the dot now). The shell should keep running invisibly. Then reopen it from
+   the dock: every line printed while it was shut should be there, in the right
+   colours, cursor in the right column.
+2. Drag the Terminal by its title bar while it has a full page of text. The
+   console re-anchors and repaints every step, so this is the most expensive
+   thing in the system - watch for lag and for shadow smears left behind. The
+   save rect grew to cover the shadow on all four sides; if I got that wrong it
+   shows up here as trails.
+3. Drag it hard into all four edges and corners.
+4. Open the Assistant over the Terminal, then click the Terminal - it should
+   RAISE above the Assistant, not just take focus. That is new.
+5. Close the Terminal, then run Snake from the dock, then come back.
+6. `wipe` and `snake` from the shell - both now call wm_repaint() instead of
+   desktop_repaint_chrome(), because chrome alone would erase the shell you are
+   typing into.
+7. Type with the Terminal closed and nothing else open. Keys should go NOWHERE.
+   If text appears when you reopen, I got that wrong.
+8. Scrolling: fill the window past 20 rows with the window dragged off-centre.
+
+WHAT I ALREADY VERIFIED, so you can skip or spot-check: kernel builds clean; 5
+scenarios (boot / moved / two-windows / closed / reopen) x 5 resolutions
+(1280x800, 1024x768, 800x600, 640x480, 1920x1080) = 25 runs under
+AddressSanitizer + UBSan with zero findings. But that is a host harness driving
+the real desktop.c and console.c - it does NOT cover wm.c, the mouse, the
+interrupt-masked writer lock, or anything under preemption. The console writes
+from task 0 with interrupts off and that is the part I cannot test.
+
+I did not boot it. The emulator is yours.
+---
