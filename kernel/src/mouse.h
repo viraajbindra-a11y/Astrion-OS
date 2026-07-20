@@ -27,55 +27,57 @@ int  mouse_right_down(void);
  * the last call. Used by demo "buttons" on the boot screen. */
 int  mouse_take_left_click(void);
 
-/* ─── Stale-background invalidation ───
+/* ─── The one rule ───
  *
- * The cursor caches the pixels underneath it (saved_bg) and paints them back
- * when it moves. If somebody ELSE repaints that patch of framebuffer while the
- * cursor is sitting still, the cache is silently wrong, and the next move
- * stamps the old pixels over the new content. That was a real, visible bug:
- * three `help`s under an untouched cursor, then one nudge, and a 22x36 block of
- * boot-era background landed on top of the console text and ate a letter.
+ *   ANNOUNCE BEFORE YOU PAINT.
  *
- * mouse_lift() is the fix for painters that run on task 0 with interrupts on —
- * it takes the sprite off the screen BEFORE they paint, while the cache is
- * still true. It is the WRONG tool for two kinds of caller:
- *   - console.c, which masks interrupts around its mutating paths. mouse_lift()
- *     does ~800 framebuffer writes; doing those inside that critical section is
- *     exactly the interrupt latency we avoided by leaving console_redraw()
- *     unlocked.
- *   - anything on another task (the clock, a background ticker, a ring-3
- *     program printing). Those preempt task 0, which may be halfway through the
- *     cursor's own pixel loops — mouse_lift() would mutate lx/ly/saved_bg
- *     underneath it.
+ * The cursor caches the pixels underneath it and paints them back when it
+ * moves. Any painter touching that patch must call mouse_invalidate_rect()
+ * BEFORE it writes — not after, not instead. That single ordering is what the
+ * whole thing rests on, and it has now cost three bugs to learn.
  *
- * So those callers INVALIDATE instead. mouse_invalidate_rect() takes no locks,
- * touches no framebuffer, and does nothing but test a rectangle and set a flag:
- * safe from any context, including with interrupts already masked.
+ * WHY BEFORE. mouse_invalidate_rect() lifts the sprite immediately, using the
+ * cache it is holding. Called before the write, that cache is still true and
+ * the lift is exact. Called after, it is a lie, and putting it back stamps
+ * stale pixels over fresh content — which was bug one: three `help`s under an
+ * untouched pointer, one nudge, and a 22x36 block of boot-era background
+ * landed on the console and ate a letter.
  *
- * The repair then happens on task 0, in the main loop, where it is safe:
+ * WHY NOT REPAIR AFTERWARDS. This used to set a flag and let task 0 clean up
+ * later. That is unfixable for a painter which MOVES pixels rather than
+ * overwriting them: console scroll blits the terminal up a row with the arrow
+ * in it, and afterwards there is a copy of the cursor somewhere nothing has a
+ * record of. Cleaning "where the cursor is" left every scrolled-away copy on
+ * screen — five stacked arrows after five scrolls, gone only on `clear`. That
+ * was bug three, and it is why the repair is now eager rather than deferred:
+ * lifted before the move, there is nothing of ours to copy.
  *
- *     if (mouse_bg_stale()) {
- *         int x, y, w, h;
- *         mouse_erase_cursor(&x, &y, &w, &h);
- *         console_repaint_rect(x, y, w, h);   // owner repaints what was hidden
- *     }
- *     mouse_redraw_if_dirty();                // re-anchors on a clean background
- */
+ * SO: after invalidate, nothing of ours is on the framebuffer. Paint freely.
+ * mouse_redraw_if_dirty() on task 0 puts the cursor back on whatever you left,
+ * capturing a fresh background. There is no repair step and no rect to hand
+ * back — the region's owner never has to repaint what the arrow was hiding,
+ * because the arrow was gone before it drew.
+ *
+ * mouse_lift() remains the equivalent for task-0 painters that want the cursor
+ * down across a whole sequence (the window manager, opening or dragging a
+ * window) rather than for one rectangle. */
 
-/* Tell the cursor that (x,y,w,h) is about to be repainted. No-ops unless that
- * rectangle actually overlaps the sprite, so a still cursor parked far from the
- * damage costs one compare. Flag-only: safe with interrupts off. */
+/* Tell the cursor that (x,y,w,h) is ABOUT TO BE painted, and lift it if that
+ * rectangle touches the sprite. Call it before every write to the region,
+ * including one that only moves pixels.
+ *
+ * Safe from any context — it takes no lock and cannot wait, and it saves and
+ * restores the interrupt flag so it nests inside console.c's masked sections.
+ * It DOES write pixels (this changed): a sprite-shaped erase, ~300 writes, and
+ * only on the first damage after the cursor is drawn. A still cursor parked
+ * away from the damage costs one compare. */
 void mouse_invalidate_rect(int x, int y, int w, int h);
 
-/* 1 if a repaint has landed under the cursor since the last erase. */
-int  mouse_bg_stale(void);
-
-/* Take the sprite off the framebuffer SPRITE-SHAPED: only the pixels the arrow
- * actually covered are written back, so content that was painted around it
- * survives. Reports the rect that was occupied (w=h=0 if there was nothing to
- * erase) so the region's owner can repaint what the arrow was hiding. Leaves
- * the cursor un-painted, so the next mouse_redraw_if_dirty() re-captures a
- * clean background. Task-0 only — it writes pixels. */
-void mouse_erase_cursor(int *x, int *y, int *w, int *h);
+/* How many times a caller announced a rectangle whose pixels had ALREADY
+ * changed — i.e. painted first and called us second, breaking the rule above.
+ * Should be 0 forever. It is a convention no compiler can enforce, so it is
+ * measured instead: if this is ever non-zero, some painter is reintroducing
+ * the stale-cache bug family and the count is the only thing that will say so. */
+unsigned long mouse_bg_faults(void);
 
 #endif

@@ -114,9 +114,6 @@ static uint8_t  packet[3];
 static int      btn_left, btn_right;
 static volatile int dirty;
 static volatile int left_click_latch;
-/* Set when somebody repainted the framebuffer under the resting cursor, so
- * saved_bg no longer matches what is actually there. See mouse.h. */
-static volatile int bg_stale;
 static uint32_t sw, sh;
 
 /* Sized for 2x cursor (CUR_W * CUR_H * scale^2 = 11*18*4 = 792 dwords). */
@@ -307,40 +304,88 @@ static int rect_hits_cursor(int x, int y, int w, int h) {
     return 1;
 }
 
-void mouse_invalidate_rect(int x, int y, int w, int h) {
-    uint64_t f = m_irq_save();
-    /* first_paint means nothing of ours is on the screen and there is no cache
-     * to go stale — the next redraw captures fresh either way. Skipping that
-     * case keeps a burst of console output from arming a repair per frame. */
-    if (!first_paint && rect_hits_cursor(x, y, w, h)) {
-        bg_stale = 1;
-        dirty    = 1;     /* wake the main loop so the repair actually happens */
-    }
-    m_irq_restore(f);
+/* Do the pixels we are NOT covering still match what we cached?
+ *
+ * The tripwire for this whole bug family. Every caller of
+ * mouse_invalidate_rect() is contracted to call it BEFORE it writes, so at this
+ * instant saved_bg must still describe the framebuffer exactly. Only the
+ * transparent pixels are checked — the opaque ones hold arrow ink, which is
+ * supposed to differ.
+ *
+ * A non-zero count means some painter wrote first and announced afterwards,
+ * which silently reintroduces the stale-cache class. It is a convention that
+ * cannot be enforced by the type system, so it is at least measured. */
+static unsigned long bg_faults;
+
+static void bg_check_at(int x, int y) {
+    if (!fb_present_x()) return;
+    volatile uint32_t *fb = (volatile uint32_t *)fb_addr_x();
+    uint32_t pitch_px = fb_pitch_x() / 4;
+    for (int row = 0; row < CUR_H; row++)
+        for (int col = 0; col < CUR_W; col++) {
+            if (CURSOR_BMP[row][col]) continue;         /* ink: expected to differ */
+            for (int sy = 0; sy < CUR_SCALE; sy++)
+                for (int sx = 0; sx < CUR_SCALE; sx++) {
+                    int sr = row * CUR_SCALE + sy, sc = col * CUR_SCALE + sx;
+                    int px = x + sc, py = y + sr;
+                    if (px < 0 || py < 0 || (uint32_t)px >= sw || (uint32_t)py >= sh)
+                        continue;
+                    if (fb[py * pitch_px + px] != saved_bg[sr * CUR_PW + sc]) {
+                        bg_faults++;
+                        return;                          /* one report per lift */
+                    }
+                }
+        }
 }
 
-int mouse_bg_stale(void) { return bg_stale; }
+unsigned long mouse_bg_faults(void) { return bg_faults; }
 
-void mouse_erase_cursor(int *x, int *y, int *w, int *h) {
-    /* Same snapshot discipline as mouse_redraw_if_dirty: read and clear the
-     * flags together so an invalidation that lands mid-erase is kept for the
-     * next pass instead of being dropped. */
-    __asm__ volatile("cli");
-    int stale = bg_stale, painted = !first_paint;
-    int ex = lx, ey = ly;
-    bg_stale = 0;
-    if (stale && painted) { first_paint = 1; dirty = 1; }
-    __asm__ volatile("sti");
-
-    if (!stale || !painted) {
-        /* Nothing on screen to lift (a window repaint already called
-         * mouse_lift, say). Report an empty rect so the caller skips its
-         * repaint too. */
-        *x = 0; *y = 0; *w = 0; *h = 0;
-        return;
+/* Take the sprite off the screen NOW, rather than noting that it will need
+ * repairing later.
+ *
+ * WHY EAGER, AND WHY THIS IS THE STRUCTURAL FIX:
+ *
+ * The old contract was "repair afterwards". That can work for a painter which
+ * OVERWRITES a rectangle — the stray pixels stay where we left them, so we can
+ * go back and clean them. It cannot work for a painter which MOVES pixels.
+ * console.c's scroll_one_line() blits the whole console region up one row,
+ * cursor included, and afterwards there is a copy of the arrow at a position
+ * the cursor code has never heard of. Repairing "where the cursor is" cleans
+ * the live copy and leaves every scrolled-away copy on screen forever. Five
+ * `pwd`s after a full screen left five stacked arrows; only `clear` removed
+ * them.
+ *
+ * Lifting at damage time fixes moves and overwrites with one rule: the sprite
+ * is never composited into the framebuffer while another painter is touching
+ * its footprint. A scroll then copies clean console pixels, because there is
+ * nothing of ours there to copy.
+ *
+ * WHAT MAKES IT EXACT: every damage() call site in console.c precedes the write
+ * it describes (verified at all seven), so saved_bg is still true right here.
+ * That is the difference between restoring accurate pixels and stamping the
+ * stale rectangle that started this whole family — the deferred path had to use
+ * the sprite-shaped erase precisely because by then the cache was a lie.
+ *
+ * WHAT IT COSTS: mouse.h used to promise this function touched no pixels,
+ * because ~800 framebuffer writes inside console.c's interrupt-masked section
+ * is real latency. That promise is now broken deliberately, and the arithmetic
+ * is why. It is the sprite-shaped erase, so ~300 writes, not 800. It happens at
+ * most ONCE per burst of output — first_paint short-circuits every subsequent
+ * damage() until task 0 puts the cursor back — so a 3200-glyph `help` pays for
+ * one erase and 3199 compares. And the case it exists for, a scroll, already
+ * moves several hundred thousand pixels of its own inside that same critical
+ * section; adding 0.1% to it to make it correct is a trade worth taking. */
+void mouse_invalidate_rect(int x, int y, int w, int h) {
+    uint64_t f = m_irq_save();
+    /* first_paint means nothing of ours is on the screen: no pixels to lift,
+     * no cache to go stale, and the next redraw captures fresh either way. */
+    if (!first_paint && rect_hits_cursor(x, y, w, h)) {
+        bg_check_at(lx, ly);          /* the caller wrote first? count it */
+        erase_cursor_at(lx, ly);
+        first_paint = 1;              /* re-anchors on a clean background */
+        dirty       = 1;              /* wake task 0 to put us back */
     }
-    erase_cursor_at(ex, ey);
-    *x = ex; *y = ey; *w = CUR_PW; *h = CUR_PH;
+    m_irq_restore(f);
 }
 
 int mouse_x(void)          { return mx; }
@@ -417,7 +462,6 @@ void mouse_install(uint32_t screen_w, uint32_t screen_h) {
     my = sh / 2;
     first_paint = 1;
     dirty = 1;
-    bg_stale = 0;
     packet_phase = 0;
 
     /* 1. Enable aux. */

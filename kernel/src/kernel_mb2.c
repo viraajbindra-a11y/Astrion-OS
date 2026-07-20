@@ -1104,29 +1104,38 @@ void kernel_mb2_main(uint32_t magic, uint64_t info_ptr) {
         /* Mouse: dock clicks + window dragging, then repaint the cursor. */
         wm_tick();
 
-        /* Something repainted the framebuffer underneath a resting cursor —
-         * console output, the clock task, a background ticker — so the pixels
-         * the cursor cached are stale and must not be painted back. Those
-         * painters can't fix it themselves: they run with interrupts masked, or
-         * on another task that could preempt this one mid-redraw, so all they
-         * do is set a flag (mouse_invalidate_rect). Task 0 does the work here,
-         * where writing pixels is safe.
+        /* There used to be a staleness repair here: painters that ran under the
+         * resting cursor set a flag, and task 0 lifted the sprite and asked the
+         * console to repaint what had been hidden.
          *
-         * Lift the sprite arrow-shaped, so the content painted around it
-         * survives, then let the console put back the glyph ink that was hidden
-         * under the arrow itself. mouse_erase_cursor() leaves the cursor
-         * un-painted, so mouse_redraw_if_dirty() below re-captures a clean
-         * background and re-anchors.
+         * It is gone because repairing afterwards is unfixable for a painter
+         * that MOVES pixels. Console scroll blits the whole terminal up a row,
+         * arrow included, and afterwards there is a copy of the cursor at a
+         * position nothing has a record of — so this cleaned the live copy and
+         * left every scrolled-away one on screen until `clear`.
          *
-         * This can't loop: mouse_erase_cursor() clears the flag before it draws,
-         * and neither call reaches console_putchar/puts, which is the only thing
-         * that re-arms it. */
-        if (mouse_bg_stale()) {
-            int rx, ry, rw, rh;
-            mouse_erase_cursor(&rx, &ry, &rw, &rh);
-            console_repaint_rect((uint32_t)rx, (uint32_t)ry, (uint32_t)rw, (uint32_t)rh);
-        }
+         * mouse_invalidate_rect() now lifts the sprite at damage time instead,
+         * while the cache it holds is still true. Nothing of ours is ever on
+         * the framebuffer while another painter is touching that footprint, so
+         * there is nothing left here to repair — a scroll copies clean console
+         * pixels. This redraw puts the cursor back on a fresh background. */
         mouse_redraw_if_dirty();
+
+        /* The one thing that CAN quietly undo all of that is a painter which
+         * writes first and announces afterwards. mouse.c detects it but cannot
+         * say so from where it notices — that is inside console.c's masked
+         * section, and serial output busy-waits per character. So it counts,
+         * and the report happens here with interrupts on. Once, not per frame:
+         * a loud line in a log Rex already reads, and silence when we are
+         * behaving. */
+        {
+            static int faults_reported;
+            if (!faults_reported && mouse_bg_faults()) {
+                faults_reported = 1;
+                serial_puts("CURSOR: a painter wrote before calling "
+                            "mouse_invalidate_rect - stale-cache bugs are back\n");
+            }
+        }
 
         /* Give background tasks (clock, spawned tickers, …) a slice. */
         task_yield();
