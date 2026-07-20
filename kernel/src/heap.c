@@ -91,14 +91,32 @@ extern char _kernel_end[];
 
 static uint64_t g_heap_base;
 
-void heap_init(void) {
+/* floor: the lowest address the heap may start at. The caller passes one past
+ * the end of anything already sitting in low memory that we must not scribble
+ * on — in practice, files the bootloader loaded for us.
+ *
+ * This exists because the heap silently ate one. GRUB placed a 4 MiB module at
+ * 0x443000, immediately after the kernel image; the heap started at 0x600000
+ * and ran for 32 MiB, so 0x600000..0x843000 — over half the module — was handed
+ * out as allocations. Nothing faulted. The tag still reported the right base
+ * and the right length, and a loader that trusted those numbers would have fed
+ * a quietly corrupted model to the inference code and produced garbage that
+ * looked like a bad model rather than a bad allocator.
+ *
+ * Caught only by fingerprinting the module's bytes in the kernel and comparing
+ * against the host's hash of the same file. Worth keeping that check. */
+void heap_init(uint64_t floor) {
     uint64_t end  = (uint64_t)(uintptr_t)_kernel_end;
+    if (floor > end) end = floor;
     g_heap_base   = (end + 0x1FFFFFULL) & ~0x1FFFFFULL;   /* align up to 2 MiB */
 
     extern void serial_puts_x(const char *s);
     extern void serial_put_hex64_x(uint64_t v);
-    serial_puts_x("HEAP: base after kernel end = 0x");
+    serial_puts_x("HEAP: base after kernel end = ");
     serial_put_hex64_x(g_heap_base);
+    if (floor > (uint64_t)(uintptr_t)_kernel_end) {
+        serial_puts_x(" (pushed up past a bootloader module)");
+    }
     serial_puts_x("\n");
 
     /* Place a single huge free block covering the whole heap. */

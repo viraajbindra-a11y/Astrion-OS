@@ -159,6 +159,25 @@ struct mb2_tag_basic_meminfo {
     uint32_t mem_upper;     /* KiB above 1 MiB */
 } __attribute__((packed));
 
+/* A file GRUB loaded into RAM for us before the kernel started, named by a
+ * `module2 <path> <string>` line in grub.cfg. mod_start/mod_end are PHYSICAL
+ * addresses of the first and one-past-last byte.
+ *
+ * This is how the language model gets in. The alternative is our own disk
+ * driver, and ata.c is PIO `insw` at roughly 3 MB/s - a 400 MB model would take
+ * about two minutes of staring at a blank screen, and a multi-GB one half an
+ * hour. GRUB reads at 20-50 MB/s and does it before we are running, so the
+ * weights are simply present at kernel entry. It also means no AHCI/DMA driver
+ * has to exist first, which was otherwise weeks of work standing between here
+ * and any model at all. */
+struct mb2_tag_module {
+    uint32_t type;
+    uint32_t size;
+    uint32_t mod_start;
+    uint32_t mod_end;
+    char     string[];      /* the label from grub.cfg, NUL-terminated */
+} __attribute__((packed));
+
 struct mb2_mmap_entry {
     uint64_t addr;
     uint64_t len;
@@ -211,9 +230,27 @@ static struct {
     uint64_t avail_len[BOOT_MAX_AVAIL];
     uint32_t avail_count;
 
+    /* Files GRUB loaded for us. Physical base + length; the pointer is into
+     * the multiboot info block, which stays live. */
+#define BOOT_MAX_MODULES 8
+    uint64_t    module_base[BOOT_MAX_MODULES];
+    uint64_t    module_len[BOOT_MAX_MODULES];
+    const char *module_name[BOOT_MAX_MODULES];
+    uint32_t    module_count;
+
     const char *bootloader_name;
     const char *cmdline;
 } boot_info;
+
+/* Exposed so the model loader can find its weights without re-walking tags. */
+uint32_t boot_module_count(void) { return boot_info.module_count; }
+int boot_module(uint32_t i, uint64_t *base, uint64_t *len, const char **name) {
+    if (i >= boot_info.module_count) return 0;
+    if (base) *base = boot_info.module_base[i];
+    if (len)  *len  = boot_info.module_len[i];
+    if (name) *name = boot_info.module_name[i];
+    return 1;
+}
 
 /* Exposed for pmm.c - the available RAM regions the frame allocator draws from. */
 uint32_t boot_mmap_avail_count(void) { return boot_info.avail_count; }
@@ -309,6 +346,38 @@ static void parse_info(uint64_t info_ptr) {
                 serial_puts("    cmdline = \"");
                 serial_puts(s->string);
                 serial_puts("\"\n");
+                break;
+            }
+            case MB2_TAG_MODULE: {
+                struct mb2_tag_module *m = (struct mb2_tag_module *)t;
+                serial_puts("    module \"");
+                serial_puts(m->string);
+                serial_puts("\" at ");
+                serial_put_hex64(m->mod_start);
+                serial_puts(" .. ");
+                serial_put_hex64(m->mod_end);
+                serial_puts(", ");
+                serial_put_u32(m->mod_end - m->mod_start);
+                serial_puts(" bytes\n");
+
+                /* Reject a backwards or empty span before recording it. GRUB
+                 * should never produce one, but this is attacker-adjacent data
+                 * in the sense that it arrives from outside the kernel, and
+                 * mod_end - mod_start is about to become a length someone
+                 * iterates over. A wrapped length here is a fault later, a long
+                 * way from the cause. */
+                if (m->mod_end <= m->mod_start) {
+                    serial_puts("    IGNORED: module span is empty or backwards\n");
+                    break;
+                }
+                if (boot_info.module_count < BOOT_MAX_MODULES) {
+                    uint32_t k = boot_info.module_count++;
+                    boot_info.module_base[k] = m->mod_start;
+                    boot_info.module_len[k]  = m->mod_end - m->mod_start;
+                    boot_info.module_name[k] = m->string;
+                } else {
+                    serial_puts("    IGNORED: too many modules\n");
+                }
                 break;
             }
             case MB2_TAG_BASIC_MEMINFO: {
@@ -781,7 +850,15 @@ void kernel_mb2_main(uint32_t magic, uint64_t info_ptr) {
      * nothing - but it's cheap and sets up the contract for the
      * next features). 32 MiB at 4 MiB physical. */
     serial_puts("\nHEAP: initializing 32 MiB at 0x400000...\n");
-    heap_init();
+    /* Push the heap above anything GRUB loaded for us. Modules land right
+     * after the kernel image, which is exactly where the heap wanted to go —
+     * it overlapped and silently ate half a 4 MiB module before this. */
+    uint64_t mod_floor = 0;
+    for (uint32_t i = 0; i < boot_info.module_count; i++) {
+        uint64_t e = boot_info.module_base[i] + boot_info.module_len[i];
+        if (e > mod_floor) mod_floor = e;
+    }
+    heap_init(mod_floor);
     /* Smoke test: tiny alloc + free, verify round-trip. */
     {
         void *a = kmalloc(64);
@@ -833,6 +910,38 @@ void kernel_mb2_main(uint32_t magic, uint64_t info_ptr) {
         } else {
             serial_puts("PAGING: probe skipped (not enough RAM, or 2 MiB path)\n");
         }
+    }
+
+    /* Modules GRUB handed us. Fingerprint each one HERE, inside the kernel,
+     * over the bytes actually in RAM — then compare against the host's hash of
+     * the file on disk. "The tag says 400 MB is at 0x1000000" proves only that
+     * GRUB filled in a struct; reading every byte proves the data survived the
+     * handoff, the address is really mapped, and nothing is aliased. That
+     * distinction is the whole point of the check.
+     *
+     * FNV-1a: no table, no allocation, and it runs before the heap exists. */
+    if (boot_info.module_count) {
+        serial_puts("\nMODULES: ");
+        serial_put_u32(boot_info.module_count);
+        serial_puts(" loaded by the bootloader\n");
+        for (uint32_t i = 0; i < boot_info.module_count; i++) {
+            const uint8_t *p = (const uint8_t *)(uintptr_t)boot_info.module_base[i];
+            uint64_t n = boot_info.module_len[i];
+            uint64_t h = 1469598103934665603ull;          /* FNV offset basis */
+            for (uint64_t k = 0; k < n; k++) {
+                h ^= p[k];
+                h *= 1099511628211ull;                    /* FNV prime */
+            }
+            serial_puts("  \"");
+            serial_puts(boot_info.module_name[i]);
+            serial_puts("\" ");
+            serial_put_u64(n);
+            serial_puts(" bytes, fnv1a=");
+            serial_put_hex64(h);
+            serial_puts("\n");
+        }
+    } else {
+        serial_puts("\nMODULES: none\n");
     }
 
     /* Physical frame allocator over the RAM above the heap - the foundation

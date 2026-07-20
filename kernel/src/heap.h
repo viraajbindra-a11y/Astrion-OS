@@ -19,7 +19,9 @@
 
 typedef uint64_t ksize_t;
 
-void  heap_init(void);
+/* floor: lowest address the heap may start at — pass one past the end of
+ * anything the bootloader left in low memory, or 0 if there is nothing. */
+void  heap_init(uint64_t floor);
 
 /* One past the last byte the heap owns (base + HEAP_SIZE). The physical frame
  * allocator (pmm) begins its arena here so the two regions never overlap. */

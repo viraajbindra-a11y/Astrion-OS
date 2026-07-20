@@ -318,13 +318,30 @@ kernel-mb2: src/hello_elf.h src/rogue_elf.h src/iodemo_elf.h \
 	fi
 	@echo "Multiboot2 kernel built: $(BUILD_DIR)/kernel_mb2.elf"
 
+# A file to hand the kernel at boot via multiboot2 `module2`. This is the path
+# the language model will arrive on: GRUB reads it at 20-50 MB/s before the
+# kernel starts, versus ata.c's ~3 MB/s PIO, and it needs no disk driver to
+# exist. Set MODEL=<path> to include one; unset, the ISO is built exactly as
+# before so nothing here changes the normal build.
+#   make iso-grub MODEL=weights/qwen-0.6b-q4.bin
+MODEL ?=
+MODEL_NAME := $(notdir $(MODEL))
+
 iso-grub: kernel-mb2
 	@mkdir -p $(BUILD_DIR)/iso-grub/boot/grub
 	cp $(BUILD_DIR)/kernel_mb2.elf $(BUILD_DIR)/iso-grub/boot/kernel_mb2.elf
+	@if [ -n "$(MODEL)" ]; then \
+	    [ -f "$(MODEL)" ] || { echo "FAIL: MODEL=$(MODEL) does not exist"; exit 1; }; \
+	    cp "$(MODEL)" $(BUILD_DIR)/iso-grub/boot/$(MODEL_NAME); \
+	    echo "module: $(MODEL_NAME) ($$(wc -c < "$(MODEL)") bytes)"; \
+	fi
 	@echo 'set timeout=0'                                > $(BUILD_DIR)/iso-grub/boot/grub/grub.cfg
 	@echo 'set default=0'                               >> $(BUILD_DIR)/iso-grub/boot/grub/grub.cfg
 	@echo 'menuentry "Astrion v2.0 (multiboot2)" {'     >> $(BUILD_DIR)/iso-grub/boot/grub/grub.cfg
 	@echo '  multiboot2 /boot/kernel_mb2.elf'           >> $(BUILD_DIR)/iso-grub/boot/grub/grub.cfg
+	@if [ -n "$(MODEL)" ]; then \
+	    echo "  module2 /boot/$(MODEL_NAME) $(MODEL_NAME)" >> $(BUILD_DIR)/iso-grub/boot/grub/grub.cfg; \
+	fi
 	@echo '  boot'                                      >> $(BUILD_DIR)/iso-grub/boot/grub/grub.cfg
 	@echo '}'                                           >> $(BUILD_DIR)/iso-grub/boot/grub/grub.cfg
 	grub-mkrescue -o $(BUILD_DIR)/astrion-grub.iso $(BUILD_DIR)/iso-grub
