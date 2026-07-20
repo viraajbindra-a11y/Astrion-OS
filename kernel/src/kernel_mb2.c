@@ -214,7 +214,8 @@ static struct {
     uint32_t fb_width;
     uint32_t fb_height;
     uint8_t  fb_bpp;
-    int      fb_present;
+    int      fb_present;    /* the bootloader gave us a framebuffer tag       */
+    int      fb_usable;     /* ...and it is one we can actually paint on      */
 
     uint32_t mem_lower_kib;
     uint32_t mem_upper_kib;
@@ -472,6 +473,75 @@ static void parse_info(uint64_t info_ptr) {
     serial_puts(" tags total\n");
 }
 
+/* ─── Can we drive this framebuffer at all? ───────────────────────
+ *
+ * ONE place decides, and everything else inherits the decision through
+ * fb_present_x(). This exists because of a real memory-corruption bug, and the
+ * shape of that bug is worth keeping written down.
+ *
+ * Every painter in the kernel — af.c's antialiased text, desktop.c's
+ * ac_fill_round / ac_shadow / blend_px / power_dim, console.c's scroll blit,
+ * mouse.c's cursor, wm.c's save/restore — reaches the framebuffer as
+ *
+ *     fb[y * (pitch / 4) + x]
+ *
+ * which is only the right address when a pixel is exactly 4 bytes. Force GRUB
+ * to 800x600 and it hands over 24 bpp: pitch is 2400, so pitch/4 is 600 while
+ * the width is 800. Rows then wrap into each other (the dock came out sliced in
+ * half and stitched to the opposite bezel), and the last row indexes
+ * 599*600+799 = 360,199 words into a 360,000-word buffer — about 796 bytes
+ * written PAST THE END of the framebuffer, into whatever MMIO follows the BAR
+ * on real hardware. QEMU absorbed it silently; metal would not.
+ *
+ * The old guard (bpp != 32) sat on only three legacy painters here, which is
+ * why the bad frame looked the way it did: the guarded solid fills VANISHED
+ * while the unguarded text and shapes kept painting into memory we do not own.
+ *
+ * The fix is NOT to add the same check to each painter. Thirteen painters each
+ * remembering a rule is thirteen chances to forget it, and the fourteenth
+ * painter has not been written yet. Instead: every one of those thirteen
+ * already asks fb_present_x() before it touches memory — that audit is the
+ * whole reason this is a five-line function and not a five-file patch — so
+ * fb_present_x() is where "can we paint" is decided, once. A painter that
+ * forgets the depth check is now impossible, because there is no depth check
+ * to forget.
+ *
+ * fb_present (the tag existed) stays separate from fb_usable (we can drive it)
+ * so the boot report can still tell a missing framebuffer apart from a
+ * framebuffer in a mode we refuse. */
+static void fb_validate(void) {
+    boot_info.fb_usable = 0;
+    if (!boot_info.fb_present) {
+        serial_puts("framebuffer     : none supplied - graphics disabled\n");
+        return;
+    }
+    const char *why = 0;
+    if (boot_info.fb_bpp != 32)                         why = "needs 32 bpp";
+    else if (!boot_info.fb_addr)                        why = "null base address";
+    else if (!boot_info.fb_width || !boot_info.fb_height) why = "zero-sized";
+    else if (boot_info.fb_pitch & 3u)                   why = "pitch is not a multiple of 4";
+    else if (boot_info.fb_pitch / 4u < boot_info.fb_width) why = "pitch is narrower than the width";
+    if (why) {
+        /* Loud, specific, and it names the way out. A black screen with no
+         * explanation is the second-worst outcome; painting garbage over
+         * memory we do not own is the worst. */
+        serial_puts("framebuffer     : UNUSABLE - ");
+        serial_puts(why);
+        serial_puts("\n                  got ");
+        serial_put_u32(boot_info.fb_width);
+        serial_puts("x");
+        serial_put_u32(boot_info.fb_height);
+        serial_puts(" @ ");
+        serial_put_u32(boot_info.fb_bpp);
+        serial_puts(" bpp, pitch=");
+        serial_put_u32(boot_info.fb_pitch);
+        serial_puts("\n                  the graphical desktop is DISABLED; the kernel is still running.\n");
+        serial_puts("                  set a 32-bpp mode (e.g. gfxpayload=1280x800x32) to get it back.\n");
+        return;
+    }
+    boot_info.fb_usable = 1;
+}
+
 /* ─── Framebuffer paint test ──────────────────────────────────────
  *
  * If GRUB gave us a linear 32-bpp framebuffer, paint a recognizable
@@ -488,7 +558,7 @@ static void parse_info(uint64_t info_ptr) {
 #define COL_MUTED   0x64748Bu    /* slideshow muted */
 
 static void fb_fill(uint32_t color) {
-    if (!boot_info.fb_present || boot_info.fb_bpp != 32) return;
+    if (!boot_info.fb_usable) return;   /* one gate — see fb_validate() */
     volatile uint32_t *fb = (volatile uint32_t *)boot_info.fb_addr;
     uint32_t pitch_px = boot_info.fb_pitch / 4;
     for (uint32_t y = 0; y < boot_info.fb_height; y++) {
@@ -499,7 +569,7 @@ static void fb_fill(uint32_t color) {
 }
 
 static void fb_rect(uint32_t x0, uint32_t y0, uint32_t w, uint32_t h, uint32_t color) {
-    if (!boot_info.fb_present || boot_info.fb_bpp != 32) return;
+    if (!boot_info.fb_usable) return;   /* one gate — see fb_validate() */
     volatile uint32_t *fb = (volatile uint32_t *)boot_info.fb_addr;
     uint32_t pitch_px = boot_info.fb_pitch / 4;
     for (uint32_t y = y0; y < y0 + h && y < boot_info.fb_height; y++) {
@@ -519,7 +589,7 @@ static void fb_rect(uint32_t x0, uint32_t y0, uint32_t w, uint32_t h, uint32_t c
  */
 
 static void fb_putchar(uint32_t x, uint32_t y, char c, uint32_t color, int scale) {
-    if (!boot_info.fb_present || boot_info.fb_bpp != 32) return;
+    if (!boot_info.fb_usable) return;   /* one gate — see fb_validate() */
     if (c < 32 || c > 126) c = '?';
     int idx = c - 32;
     if (scale < 1) scale = 1;
@@ -547,7 +617,7 @@ static void fb_putchar(uint32_t x, uint32_t y, char c, uint32_t color, int scale
 /* Returns the x-coord after the last char drawn (so callers can chain).
  * Wraps to next line on '\n'. Returns final cursor for caller use. */
 static uint32_t fb_puts(uint32_t x, uint32_t y, const char *s, uint32_t color, int scale) {
-    if (!boot_info.fb_present) return x;
+    if (!boot_info.fb_usable) return x;   /* one gate — see fb_validate() */
     uint32_t cx = x, cy = y;
     int gw = FONT_WIDTH * scale;
     int gh = FONT_HEIGHT * scale;
@@ -593,12 +663,12 @@ static uint32_t fb_put_hex64(uint32_t x, uint32_t y, uint64_t v, uint32_t color,
 }
 
 static void paint_boot_screen(void) {
-    if (!boot_info.fb_present) {
-        serial_puts("boot screen: skipped (no fb)\n");
-        return;
-    }
-    if (boot_info.fb_bpp != 32) {
-        serial_puts("boot screen: skipped (bpp != 32)\n");
+    /* One gate. This used to check fb_present and bpp itself and correctly
+     * skip — while the desktop that followed painted anyway, because the check
+     * lived here instead of somewhere everything shares. fb_validate() has
+     * already said why on serial if we are refusing. */
+    if (!boot_info.fb_usable) {
+        serial_puts("boot screen: skipped (no usable framebuffer)\n");
         return;
     }
 
@@ -702,7 +772,34 @@ static void print_summary(void) {
 void serial_puts_x(const char *s)        { serial_puts(s); }
 void serial_put_hex64_x(uint64_t v)      { serial_put_hex64(v); }
 void serial_put_u64_x(uint64_t v)        { serial_put_u64(v); }
-int  fb_present_x(void)                  { return boot_info.fb_present; }
+/* "Is there a framebuffer we can safely paint on?" — NOT merely "did the
+ * bootloader give us one". See fb_validate() for why those are different and
+ * what happens when they are conflated. Every painter in the kernel already
+ * calls this before touching memory, which is what makes it the right place
+ * for the decision.
+ *
+ * fb_paintable_x() is the honest name and the one new code should use;
+ * fb_present_x() is kept because thirteen call sites across five files already
+ * ask it, and having them all become correct without being edited is the whole
+ * point of putting the gate here. */
+int  fb_paintable_x(void)                { return boot_info.fb_usable; }
+int  fb_present_x(void)                  { return boot_info.fb_usable; }
+
+/* The framebuffer's base and its stride IN PIXELS, together or not at all.
+ *
+ * Returns 0 (and leaves *stride_px alone) unless the mode is one we can drive.
+ * Handing both out from one call is deliberate: `fb_pitch_x() / 4` appeared in
+ * eighteen places across seven files, and every one of them was an independent
+ * copy of the assumption that broke above. A painter cannot get the base
+ * without the stride, or either without the validation.
+ *
+ * Bulk row work wants this. Scattered single pixels want it too — just hoist
+ * it out of the loop. */
+volatile uint32_t *fb_pixels_x(uint32_t *stride_px) {
+    if (!boot_info.fb_usable) return 0;
+    if (stride_px) *stride_px = boot_info.fb_pitch / 4u;
+    return (volatile uint32_t *)(uintptr_t)boot_info.fb_addr;
+}
 uint32_t fb_width_x(void)                { return boot_info.fb_width; }
 uint32_t fb_height_x(void)               { return boot_info.fb_height; }
 void fb_fill_x(uint32_t color)           { fb_fill(color); }
@@ -841,7 +938,11 @@ void kernel_mb2_main(uint32_t magic, uint64_t info_ptr) {
     serial_puts("magic OK - GRUB hand-off clean\n\n");
 
     parse_info(info_ptr);
-    print_summary();
+    print_summary();          /* the raw facts the bootloader handed us */
+    /* Then the verdict, and it must land BEFORE the first pixel: from here on
+     * fb_present_x() answers "can we paint", and every painter in the kernel
+     * is gated on it. Nothing may touch the framebuffer until this has run. */
+    fb_validate();
 
     serial_puts("\n");
     paint_boot_screen();
@@ -1113,6 +1214,12 @@ void kernel_mb2_main(uint32_t magic, uint64_t info_ptr) {
 
         /* Mouse: dock clicks + window dragging, then repaint the cursor. */
         wm_tick();
+
+        /* If a console write had to skip its pixels — the only case is a scroll
+         * while a window covers part of the Terminal, which cannot be clipped
+         * because a scroll MOVES pixels — repaint it here, on task 0, where a
+         * full redraw with interrupts on is legal. No-op the rest of the time. */
+        console_service();
 
         /* There used to be a staleness repair here: painters that ran under the
          * resting cursor set a flag, and task 0 lifted the sprite and asked the

@@ -1360,3 +1360,49 @@ from task 0 with interrupts off and that is the part I cannot test.
 
 I did not boot it. The emulator is yours.
 ---
+## from valentina -> rex
+Your 24bpp defect is fixed. Thank you for the repro - the byte count in it
+(796 past a 360000-word buffer) is what let me reproduce it exactly.
+
+WHAT CHANGED: fb_present_x() now means "paintable", not "a tag exists". One
+function, fb_validate() in kernel_mb2.c, decides at boot; all thirteen
+raw-addressing painters already called fb_present_x() before touching memory,
+so every one of them became correct without being edited. Nothing to forget,
+because there is no per-painter check to forget.
+
+WHAT YOU SHOULD SEE ON YOUR m.iso NOW: a black screen and, on serial,
+  framebuffer     : UNUSABLE - needs 32 bpp
+                    got 800x600 @ 24 bpp, pitch=2400
+                    the graphical desktop is DISABLED; the kernel is still running.
+                    set a 32-bpp mode (e.g. gfxpayload=1280x800x32) to get it back.
+No magenta text, no wrapped dock, and nothing written outside the framebuffer.
+If you see ANY pixel painted in that mode, I have missed a painter - please say.
+
+ALSO FIXED: console ink no longer paints over windows. `files` then Enter is
+the repro you gave; the prompt now clips at the Files border. Worth also
+trying: keep typing until the console SCROLLS while Files is open. That path
+cannot be clipped (a scroll moves pixels), so it skips the blit and repaints
+from the backing store on the next main-loop pass - about 10ms. If you can see
+a flicker or a stale row there, I want to know.
+And: raise the Terminal afterwards. Everything that was clipped away must come
+back in full, because the backing store was always written.
+
+HOW I VERIFIED, stated precisely because you were right to correct me last time:
+this is a HOST harness, not a boot. I built the framebuffer with width, height,
+bpp and pitch as independent facts, malloc(exact bytes) so AddressSanitizer
+redzones sit right after the last legal pixel, and mirrored fb_validate()
+verbatim. With the gate compiled out I reproduce your bug exactly -
+"heap-buffer-overflow, WRITE of size 4, 0 bytes after 1440000-byte region",
+which is 800*600*3 to the byte. With the gate on: 300 runs (5 depths x 5
+resolutions x 6 scenarios x 2) with ASan+UBSan, zero findings.
+
+WHAT THAT DOES NOT COVER, and it is a lot: wm.c, mouse.c, the interrupt-masked
+writer lock, preemption, and real GRUB. And you are right that my earlier
+640/800/1024 geometry checks were the harness too - and now that non-32bpp is
+refused outright, those modes are unreachable on a real boot at all unless
+someone changes the multiboot2 header depth request. I wrote that one-line
+patch up for koa and viraaj rather than shipping it, because it changes what
+GRUB negotiates on every boot and I cannot test it from here.
+
+I did not boot anything. The emulator is yours.
+---

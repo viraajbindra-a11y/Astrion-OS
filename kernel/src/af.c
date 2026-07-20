@@ -9,18 +9,21 @@
 #include "af.h"
 #include "af_font.h"
 
-extern uint64_t fb_addr_x(void);
-extern uint32_t fb_pitch_x(void);
 extern uint32_t fb_width_x(void);
 extern uint32_t fb_height_x(void);
 extern int      fb_present_x(void);
+/* Base + stride together or not at all — the single validated way to reach
+ * framebuffer memory. Returns 0 unless the mode is one we can drive; see
+ * fb_validate() in kernel_mb2.c for the out-of-bounds bug that motivated it. */
+extern volatile uint32_t *fb_pixels_x(uint32_t *stride_px);
 
 #define AF_NFACES ((int)(sizeof(af_faces) / sizeof(af_faces[0])))
 
 static void blend_glyph(int px, int py, const af_glyph *g,
                         const unsigned char *blob, uint32_t color) {
-    volatile uint32_t *fb = (volatile uint32_t *)(uintptr_t)fb_addr_x();
-    uint32_t pitch = fb_pitch_x() / 4;
+    uint32_t pitch;
+    volatile uint32_t *fb = fb_pixels_x(&pitch);
+    if (!fb) return;
     int W = (int)fb_width_x(), H = (int)fb_height_x();
     int fr = (int)((color >> 16) & 0xFF);
     int fg = (int)((color >> 8) & 0xFF);

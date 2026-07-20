@@ -15,8 +15,10 @@ extern uint32_t fb_height_x(void);
 extern void     fb_rect_x(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color);
 /* Dimming the desktop behind the power dialog needs to READ pixels, so we take
  * the same framebuffer accessors wm.c/af.c use. */
-extern uint64_t fb_addr_x(void);
-extern uint32_t fb_pitch_x(void);
+/* Base + stride together or not at all — the single validated way to reach
+ * framebuffer memory. Returns 0 unless the mode is one we can drive; see
+ * fb_validate() in kernel_mb2.c for the out-of-bounds bug that motivated it. */
+extern volatile uint32_t *fb_pixels_x(uint32_t *stride_px);
 extern int      fb_present_x(void);
 
 /* The power dialog actually turns the machine off, so it calls Koa's power
@@ -124,8 +126,9 @@ static void blend_px(int x, int y, uint32_t color, int a) {
     if (!fb_present_x()) return;
     if (x < 0 || y < 0 || x >= (int)fb_width_x() || y >= (int)fb_height_x()) return;
     if (a >= 255) { fb_rect_x((uint32_t)x, (uint32_t)y, 1, 1, color); return; }
-    volatile uint32_t *fb = (volatile uint32_t *)(uintptr_t)fb_addr_x();
-    uint32_t pitch = fb_pitch_x() / 4;
+    uint32_t pitch;
+    volatile uint32_t *fb = fb_pixels_x(&pitch);
+    if (!fb) return;
     uint32_t bg = fb[(uint32_t)y * pitch + (uint32_t)x];
     int br = (int)((bg >> 16) & 0xFF), bgc = (int)((bg >> 8) & 0xFF), bb = (int)(bg & 0xFF);
     int fr = (int)((color >> 16) & 0xFF), fg = (int)((color >> 8) & 0xFF), fbl = (int)(color & 0xFF);
@@ -253,8 +256,9 @@ void ac_fill_disc(int cx, int cy, int r, uint32_t color) {
 void ac_shadow(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
                uint32_t r, uint32_t spread) {
     if (!fb_present_x() || !w || !h || !spread) return;
-    volatile uint32_t *fb = (volatile uint32_t *)(uintptr_t)fb_addr_x();
-    uint32_t pitch = fb_pitch_x() / 4;
+    uint32_t pitch;
+    volatile uint32_t *fb = fb_pixels_x(&pitch);
+    if (!fb) return;
     int SWi = (int)fb_width_x(), SHi = (int)fb_height_x();
 
     /* Light comes from above, so the shadow sits slightly below the box. */
@@ -811,8 +815,9 @@ static void power_layout(void) {
  * Integer-only, once per open. */
 static void power_dim(void) {
     if (!fb_present_x()) return;
-    volatile uint32_t *fb = (volatile uint32_t *)(uintptr_t)fb_addr_x();
-    uint32_t pitch = fb_pitch_x() / 4;
+    uint32_t pitch;
+    volatile uint32_t *fb = fb_pixels_x(&pitch);
+    if (!fb) return;
     for (uint32_t y = 0; y < SH; y++)
         for (uint32_t x = 0; x < SW; x++) {
             uint32_t v = fb[y * pitch + x];

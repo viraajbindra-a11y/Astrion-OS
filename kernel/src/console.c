@@ -47,8 +47,10 @@ extern uint32_t fb_height_x(void);
 extern int      fb_present_x(void);
 
 /* From kernel_mb2.c - needed for direct fb-memmove during scroll. */
-extern uint64_t fb_addr_x(void);
-extern uint32_t fb_pitch_x(void);
+/* Base + stride together or not at all — the single validated way to reach
+ * framebuffer memory. Returns 0 unless the mode is one we can drive; see
+ * fb_validate() in kernel_mb2.c for the out-of-bounds bug that motivated it. */
+extern volatile uint32_t *fb_pixels_x(uint32_t *stride_px);
 
 static uint32_t x0, y0, w_px, h_px;
 static uint32_t cx, cy;
@@ -65,6 +67,21 @@ static uint32_t color = COL_FG_DEFLT;
  * complete contract: writers call console_puts() the same way in both states. */
 static int attached = 1;
 
+/* Installed by the window manager — see console.h. Null means "nothing is ever
+ * on top of us", which is the right answer before wm_init runs. */
+static console_occlusion_fn g_occluded;
+
+void console_set_occlusion_test(console_occlusion_fn fn) { g_occluded = fn; }
+
+/* 1 if we must not paint into this rectangle because a window covers it. */
+static int hidden(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
+    return g_occluded && g_occluded(x, y, w, h);
+}
+
+/* Set when a write could not put its pixels down and the region now disagrees
+ * with the backing store. console_service() on task 0 repairs it. */
+static int g_stale;
+
 /* ─── Cursor damage ───
  * The mouse cursor caches the pixels under itself and paints them back when it
  * moves. Everything below that writes pixels has to say so, or the cursor keeps
@@ -74,9 +91,18 @@ static int attached = 1;
  *
  * Deliberately NOT mouse_lift(): a lift does ~800 framebuffer writes, and every
  * caller below is inside the writer lock with interrupts masked. This is a
- * rectangle test and a flag write — nothing to wait on, no pixel traffic, safe
- * with interrupts off, and it costs a still cursor parked elsewhere one
- * compare. The actual repair happens on task 0 (see mouse.h). */
+ * rectangle test that lifts the sprite ONLY if the damage actually touches it,
+ * so a cursor parked elsewhere costs one compare. Safe with interrupts off: it
+ * takes no lock and cannot wait.
+ *
+ * ANNOUNCE BEFORE YOU PAINT — every call below comes before its write, never
+ * after. There is no repair step any more: mouse_invalidate_rect() lifts
+ * eagerly using a cache that is still true, and mouse_redraw_if_dirty() on
+ * task 0 puts the cursor back on whatever we left, capturing a fresh
+ * background. (This comment used to say "the actual repair happens on task 0";
+ * that path was deleted when the lift became eager, precisely because a
+ * deferred repair cannot work for a painter that MOVES pixels — see the
+ * "WHY NOT REPAIR AFTERWARDS" note in mouse.h.) */
 static void damage(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
     mouse_invalidate_rect((int)x, (int)y, (int)w, (int)h);
 }
@@ -179,16 +205,59 @@ static void grid_clear_cell(void) {
 void console_redraw(void) {
     if (!fb_present_x() || !w_px || !attached) return;
     damage(x0, y0, w_px, h_px);
-    fb_rect_x(x0, y0, w_px, h_px, COL_BG);
-    for (uint32_t r = 0; r <= g_maxrow && r < CON_MAX_ROWS; r++)
-        for (uint32_t c = 0; c < CON_MAX_COLS; c++) {
-            char ch = g_ch[r][c];
-            if (!ch) continue;
+    /* One occlusion test for the whole region decides which path to take. When
+     * nothing covers us — the common case, and always true while the Terminal
+     * is the focused window — the background goes down as ONE fill and the
+     * per-cell test is skipped entirely. Only a genuinely overlapped console
+     * pays for cell-by-cell clipping. */
+    int occ = hidden(x0, y0, w_px, h_px);
+    if (!occ) fb_rect_x(x0, y0, w_px, h_px, COL_BG);
+    g_stale = 0;
+
+    if (!GW || !LINE_STRIDE) return;
+    uint32_t rows = (h_px >= GH) ? (h_px - GH) / LINE_STRIDE + 1 : 0;
+    uint32_t cols = w_px / GW;
+    if (rows > CON_MAX_ROWS) rows = CON_MAX_ROWS;
+    if (cols > CON_MAX_COLS) cols = CON_MAX_COLS;
+
+    for (uint32_t r = 0; r < rows; r++) {
+        /* On the fast path the single fill above already cleared every row, so
+         * there is nothing to do past the last row that holds ink. On the
+         * occluded path each cell carries its own background, so we have to
+         * walk the whole region to clear it. */
+        if (!occ && r > g_maxrow) break;
+        for (uint32_t c = 0; c < cols; c++) {
             uint32_t px = x0 + c * GW, py = y0 + r * LINE_STRIDE;
+            char ch = g_ch[r][c];
+            if (occ) {
+                uint32_t fh = LINE_STRIDE;
+                if (py + fh > y0 + h_px) fh = y0 + h_px - py;
+                if (hidden(px, py, GW, fh)) continue;   /* a window owns it */
+                fb_rect_x(px, py, GW, fh, COL_BG);
+            }
+            if (!ch) continue;
             if (px + GW > x0 + w_px || py + GH > y0 + h_px) continue;
             char s[2] = { ch, 0 };
             af_draw(px, py, s, g_fg[r][c], AF_MONO);
         }
+    }
+}
+
+/* Repaint if a write had to skip its pixels.
+ *
+ * Called from the main loop on task 0, where a full repaint is legal. It exists
+ * for one case that clipping alone cannot fix: scrolling while a window covers
+ * part of the console. Scroll is a pixel MOVE, so a clipped scroll would drag
+ * the covering window's pixels down into the visible rows — there is no
+ * per-cell version of it that is correct. The scroll therefore does its grid
+ * work, skips the blit, and leaves this flag; the next pass through the main
+ * loop redraws the visible part from the backing store, about 10ms later.
+ *
+ * MUST NOT be called with the writer lock held: console_redraw() is thousands
+ * of blended glyphs and interrupts must be on. */
+void console_service(void) {
+    if (!g_stale || !attached || !fb_present_x()) return;
+    console_redraw();          /* clears g_stale */
 }
 
 /* Repaint just the cells that intersect (x,y,w,h) — the counterpart to
@@ -264,9 +333,18 @@ static uint32_t *cap_len_out;
  * as it would on screen, or reopening the window would show text that never
  * lined up with what the shell thinks it wrote. */
 static void scroll_one_line(void) {
-    if (attached && fb_present_x()) {
-        volatile uint32_t *fb = (volatile uint32_t *)fb_addr_x();
-        uint32_t pitch_px = fb_pitch_x() / 4;
+    uint32_t pitch_px = 0;
+    /* NB: no early return if fb is null — the grid scroll and cursor step at
+     * the bottom of this function must happen whether or not we can paint.
+     * Returning here would leave the shell's idea of the cursor a line below
+     * where its text actually is, permanently. */
+    volatile uint32_t *fb = attached ? fb_pixels_x(&pitch_px) : 0;
+    /* A scroll is a pixel MOVE, not an overwrite, so it cannot be clipped:
+     * copying rows up under a window that covers part of us would drag that
+     * window's pixels into the console. Skip the blit and let task 0 repaint
+     * the visible part from the backing store instead. */
+    if (fb && hidden(x0, y0, w_px, h_px)) { g_stale = 1; fb = 0; }
+    if (fb) {
         /* The whole region moves, including whatever the cursor is sitting on.
          * MUST come before the move, not after — this is a painter that copies
          * pixels rather than overwriting them, so a cursor still on the
@@ -345,14 +423,16 @@ void console_attach(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
 
 void console_clear(void) {
     uint64_t f = irq_save();
-    if (attached) {
-        damage(x0, y0, w_px, h_px);
-        fb_rect_x(x0, y0, w_px, h_px, COL_BG);
-    }
     grid_clear();
     cx = x0;
     cy = y0;
+    int paint = attached;
     irq_restore(f);
+    /* Painted OUTSIDE the lock, and by console_redraw() rather than one big
+     * fill, so a window sitting over the console does not get erased by a
+     * clear. With an empty grid this is just the (possibly clipped) background,
+     * so it stays cheap. */
+    if (paint) console_redraw();
 }
 
 void console_set_color(uint32_t c) { color = c; }
@@ -372,7 +452,7 @@ static void newline_nolock(void) {
 static void backspace_nolock(void) {
     if (cx <= x0) return;
     cx -= GW;
-    if (attached) {
+    if (attached && !hidden(cx, cy, GW, GH)) {
         damage(cx, cy, GW, GH);
         fb_rect_x(cx, cy, GW, GH, COL_BG);
     }
@@ -427,7 +507,7 @@ static void putchar_nolock(char c) {
     if (c == '\t') {
         /* Tab to next multiple of 4 chars. */
         do {
-            if (attached) {
+            if (attached && !hidden(cx, cy, GW, GH)) {
                 char buf[2] = {' ', 0};
                 damage(cx, cy, GW, GH);
                 af_draw(cx, cy, buf, color, AF_MONO);
@@ -443,7 +523,11 @@ static void putchar_nolock(char c) {
     /* Wrap before drawing if needed. */
     if (cx + GW > x0 + w_px) newline_nolock();
 
-    if (attached) {
+    /* The occlusion test is what stops the shell's next prompt painting
+     * straight across the Files window's border. The grid_put below happens
+     * either way, so raising the Terminal brings back everything that was
+     * skipped. */
+    if (attached && !hidden(cx, cy, GW, GH)) {
         char buf[2] = {c, 0};
         damage(cx, cy, GW, GH);
         af_draw(cx, cy, buf, color, AF_MONO);

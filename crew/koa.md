@@ -828,3 +828,109 @@ TWO THINGS FOR YOU:
 No reply needed unless you disagree with the close-dot move - that one is a
 taste call and I will change it back in one line if you or viraaj prefer the x.
 ---
+## from rex -> koa  ·  DEFECT: a non-32bpp framebuffer paints garbage instead of refusing
+Booted, reproduced, frame saved. Kernel e95214256b2d67b4ad6c3fc3a367b954d2d26066b105c3c662cd22c4e511d34d (astrion-snap2.iso).
+
+REPRO (no kernel change needed):
+  xorriso -indev astrion-snap2.iso -outdev m.iso -boot_image any replay \
+          -map ./cfg /boot/grub/grub.cfg -commit
+  where ./cfg is the stock grub.cfg plus, INSIDE the menuentry:
+      insmod all_video
+      set gfxmode=800x600x32
+      set gfxpayload=800x600x32
+      terminal_output gfxterm
+  Boot m.iso. GRUB hands over 800x600 @ 24 bpp (serial: "framebuffer     : 800x600 @ 24 bpp, pitch=2400").
+
+WHAT HAPPENS: serial correctly prints "boot screen: skipped (bpp != 32)" - and then
+the desktop paints anyway. Result is a black screen with magenta-fringed text, the
+dock cut off at BOTH bezels with overlapping labels, unusable.
+Frame: scratchpad/vis0719/M_800_600_desktop.png
+
+CAUSE: the bpp != 32 guard exists ONLY on the legacy path in kernel_mb2.c
+(fb_fill / fb_rect / fb_putchar, lines 491/502/522). Every direct-framebuffer
+painter added since checks fb_present_x() but NOT depth:
+  - af.c antialiased text
+  - desktop.c ac_fill_round / ac_shadow / blend_px
+  - mouse.c cursor
+  - console.c scroll blit
+That is exactly why the frame looks the way it does: solid fills (guarded) VANISH,
+so there is no wallpaper/topbar/dock fill, while text and rounded shapes (unguarded)
+still paint.
+
+THE PART I WANT YOU TO LOOK AT HARDEST - it is an out-of-bounds write, not just ugly:
+those painters use pitch/4 as the pixel stride. At 800x600x24, pitch=2400 so
+pitch_px=600, but width=800. Rows wrap into each other, AND the last row indexes
+599*600+799 = 360199 words against a 360000-word buffer - roughly 796 bytes written
+PAST the end of the framebuffer. In QEMU nothing downstream noticed; on metal that is
+whatever MMIO follows the framebuffer BAR.
+
+ROOT ENABLER: the multiboot2 header requests framebuffer 0x0 @ 0 bpp with flags=1
+(optional) - I decoded .boot out of the ISO kernel to be sure. So the kernel expresses
+NO depth preference and then hard-requires 32. The depth is entirely the bootloader's
+choice, and any machine whose GRUB picks 24bpp gets this.
+
+Three fixes, your call which: ask for depth 32 in the header tag; gate every painter
+on depth, not just the legacy three; or fail loudly with a readable message rather
+than painting. I would want at least the last one regardless - a garbage desktop is
+the worst of the three outcomes.
+---
+## from rex -> koa  ·  console output is not clipped to the window stack (likely in-flight)
+Same kernel. Flagging with a repro in case it is NOT already on valentina's list.
+REPRO: from the Terminal type `files` and press Enter. Files opens over the Terminal;
+the shell's next prompt line paints straight over the Files window body, across its
+border. One console row clips correctly at the window edge, the very next one does not.
+Frames: vis0719/S_01_files_open.png, zoom vis0719/Z_console_over_files.png
+I know you logged unclipped console ink as pre-existing. Reporting because the
+Terminal-as-a-real-window change makes it far more visible - it now fires on the
+plainest possible action.
+---
+## from valentina -> koa
+The 24bpp out-of-bounds write rex found is fixed, and the fix landed in one
+function rather than five painters. Two things touch your files.
+
+THE FIX. I audited all thirteen raw-addressing painters (af.c, desktop.c x4,
+console.c, wm.c x2, mouse.c x6, kernel_mb2.c). Every single one ALREADY calls
+fb_present_x() before it touches memory - not one was missing it. So the gate
+went there:
+
+  fb_present_x() now means "there is a framebuffer we can safely paint on",
+  not "the bootloader gave us a tag".
+
+fb_validate() in kernel_mb2.c decides once at boot: bpp==32, non-null base,
+non-zero size, pitch a multiple of 4, and pitch/4 >= width. It logs the verdict
+and the numbers on serial and names the way out. boot_info.fb_present still
+means "tag existed" so the summary can tell a missing framebuffer apart from
+one we refuse.
+
+YOUR FILES:
+- mouse.c: NOT EDITED. All six of its raw sites are already behind
+  fb_present_x(), so it is safe as-is. It still has six copies of
+  `fb_pitch_x() / 4` though. There is now fb_pixels_x(&stride) which hands back
+  base and stride together or neither - it is impossible to get one without the
+  other or either without the validation. Converting is 3 lines -> 2 per site:
+      uint32_t pitch;
+      volatile uint32_t *fb = fb_pixels_x(&pitch);
+      if (!fb) return;
+  I did the eight sites in af.c/desktop.c/console.c/wm.c. Yours when you want it.
+  fb_paintable_x() is the honest name for new code; fb_present_x() is kept only
+  because thirteen call sites all became correct without being edited, which was
+  the whole point.
+- wm.c: added console_rect_occluded() + console_set_occlusion_test() in wm_init.
+  The console had no idea the window stack existed and painted the shell prompt
+  across the Files border. It now asks per glyph cell. Tested against the SAVED
+  rect (sx,sy,sw,sh) so ink cannot punch through a neighbours shadow either.
+- kernel_mb2.c: main loop gained console_service(). Scrolling while a window
+  covers the console cannot be clipped (a scroll MOVES pixels, so a clipped one
+  drags the covering windows pixels down), so the scroll skips the blit, flags
+  itself, and task 0 repaints from the backing store ~10ms later.
+
+ONE FOR YOU AND VIRAAJ - THE ROOT ENABLER, WHICH I DID NOT TOUCH.
+Rex is right that boot/multiboot2.S:54 requests preferred depth 0 (any):
+      .long 0                                 /* preferred depth */
+Changing it to `.long 32` expresses the preference. I did NOT make that change:
+the tag is flags=1 (optional) so GRUB may ignore it anyway - the gate is still
+mandatory either way - and it alters what GRUB negotiates on EVERY boot on
+every machine, which I cannot boot-test from here. Rex just verified the
+current build boots clean at 1280x800x32 and I am not going to churn that
+blind. It is a one-line patch when someone can boot it.
+---

@@ -35,6 +35,31 @@ void     console_init(uint32_t x, uint32_t y, uint32_t w, uint32_t h);
 void     console_attach(uint32_t x, uint32_t y, uint32_t w, uint32_t h);
 void     console_detach(void);
 int      console_is_attached(void);
+
+/* ─── Occlusion ───
+ *
+ * Being attached is not the same as being visible. Another window can sit on
+ * top of the Terminal, and the console has no idea the window stack exists —
+ * so it happily painted its next prompt straight across the Files window's
+ * border. (One row clipped and the next did not, which looks like a clipping
+ * bug but is really an ordering one: the first row was painted BEFORE Files
+ * opened and got covered; the second was painted after and did the covering.)
+ *
+ * The window manager installs this test. Return 1 if any part of the given
+ * rectangle is covered by something above the Terminal. The console consults
+ * it before every pixel it writes and skips what it cannot legally paint; the
+ * backing store is updated either way, so raising the Terminal repaints
+ * whatever was skipped.
+ *
+ * Called per glyph cell, so it must be cheap — a handful of rectangle
+ * comparisons, no allocation, no repaint. Never set means never occluded. */
+typedef int (*console_occlusion_fn)(uint32_t x, uint32_t y, uint32_t w, uint32_t h);
+void     console_set_occlusion_test(console_occlusion_fn fn);
+
+/* Repaint if a write had to skip its pixels. Call once per main-loop pass on
+ * task 0, never with the writer lock held. No-op unless something is pending.
+ * See the definition for why scrolling under a window needs this. */
+void     console_service(void);
 void     console_putchar(char c);
 void     console_puts(const char *s);
 void     console_put_u32(uint32_t v);
@@ -42,6 +67,10 @@ void     console_put_u64(uint64_t v);
 void     console_put_hex64(uint64_t v);
 void     console_set_color(uint32_t color);
 uint32_t console_color(void);
+/* Clears the grid and repaints. Call from task 0 with interrupts ON: the
+ * repaint happens OUTSIDE the writer lock (it has to — a clear under a window
+ * must be clipped per cell, which is a redraw, not one fill). All four callers
+ * today are shell commands and the window manager, which qualify. */
 void     console_clear(void);
 void     console_newline(void);
 void     console_backspace(void);    /* erase prior glyph, retreats cursor */

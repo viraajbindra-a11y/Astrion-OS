@@ -29,8 +29,10 @@
 
 /* Framebuffer wrappers live in kernel_mb2.c with no header — declare them
  * here the same way console.c / mouse.c do. */
-extern uint64_t fb_addr_x(void);
-extern uint32_t fb_pitch_x(void);
+/* Base + stride together or not at all — the single validated way to reach
+ * framebuffer memory. Returns 0 unless the mode is one we can drive; see
+ * fb_validate() in kernel_mb2.c for the out-of-bounds bug that motivated it. */
+extern volatile uint32_t *fb_pixels_x(uint32_t *stride_px);
 extern int      fb_present_x(void);
 extern uint32_t fb_width_x(void);
 extern uint32_t fb_height_x(void);
@@ -169,8 +171,9 @@ static void draw_border(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t
 
 static void save_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t *buf) {
     if (!fb_present_x() || !buf) return;
-    volatile uint32_t *fb = (volatile uint32_t *)fb_addr_x();
-    uint32_t pitch = fb_pitch_x() / 4;
+    uint32_t pitch;
+    volatile uint32_t *fb = fb_pixels_x(&pitch);
+    if (!fb) return;
     for (uint32_t r = 0; r < h; r++)
         for (uint32_t c = 0; c < w; c++) {
             uint32_t px = x + c, py = y + r, v = 0;
@@ -180,8 +183,9 @@ static void save_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t *
 }
 static void restore_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t *buf) {
     if (!fb_present_x() || !buf) return;
-    volatile uint32_t *fb = (volatile uint32_t *)fb_addr_x();
-    uint32_t pitch = fb_pitch_x() / 4;
+    uint32_t pitch;
+    volatile uint32_t *fb = fb_pixels_x(&pitch);
+    if (!fb) return;
     for (uint32_t r = 0; r < h; r++)
         for (uint32_t c = 0; c < w; c++) {
             uint32_t px = x + c, py = y + r;
@@ -200,6 +204,33 @@ static void win_set_saverect(struct window *w) {
     w->sy = (w->y > p) ? w->y - p : 0;
     w->sw = (w->x - w->sx) + w->w + p;
     w->sh = (w->y - w->sy) + w->h + p;
+}
+
+/* ─── Console occlusion (installed into console.c at wm_init) ───
+ *
+ * The console draws straight to the framebuffer and knows nothing about the
+ * window stack, so it painted the shell's next prompt across the Files window.
+ * This is the missing half: given a rectangle inside the Terminal, is anything
+ * stacked ABOVE the Terminal covering it?
+ *
+ * Tested against each window's SAVED rect (sx,sy,sw,sh) rather than its outer
+ * rect, because that is the window's real footprint — it includes the shadow,
+ * and console ink punched through a neighbour's shadow looks just as wrong as
+ * ink punched through its body.
+ *
+ * Called once per glyph cell, so it stays a handful of integer compares. */
+static int console_rect_occluded(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
+    int ti = -1;
+    for (int i = 0; i < zn; i++)
+        if (wins[zord[i]].app == APP_TERM) { ti = i; break; }
+    if (ti < 0) return 1;          /* Terminal not open: nothing may be painted */
+    for (int i = ti + 1; i < zn; i++) {
+        struct window *o = &wins[zord[i]];
+        if (x + w <= o->sx || o->sx + o->sw <= x) continue;
+        if (y + h <= o->sy || o->sy + o->sh <= y) continue;
+        return 1;
+    }
+    return 0;
 }
 
 /* ─── Editor state ─── */
@@ -2938,6 +2969,8 @@ void wm_init(void) {
     dragging = 0; ed_buf = 0;
     mon_last_ms = 0;
     calc_reset(); st_row = 0;
+    /* Teach the console about the window stack before anything opens. */
+    console_set_occlusion_test(console_rect_occluded);
     /* Open the Terminal. The shell is an app, and at boot it is the app you
      * are looking at — so it comes up the same way clicking its dock tile
      * would. Everything the boot sequence prints afterwards lands inside a
