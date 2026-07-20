@@ -459,8 +459,17 @@ static void m_enter(struct as_model *m)
     } else if (s == AM_SUBMIT_CANCEL) {
         m->armed = 0; m->pend[0] = 0;
     } else {                                   /* AM_SUBMIT_PROMPT */
-        /* try_intent's order exactly: classify, then age the slot, then
-         * resolve "it", then dispatch on the REWRITE. */
+        /* try_intent's order EXACTLY, and the order is the point.
+         *
+         * The slot ages FIRST, before the classifier gets a chance to return.
+         * This model had it right and wm.c did not — the kernel aged the slot
+         * after the classifier's early return, so every recognised question
+         * aged it by nothing. The rows below passed anyway, because they were
+         * measuring this function rather than the kernel's.
+         *
+         * A model is only evidence while it mirrors the real control FLOW, not
+         * just the real logic. If you change try_intent's ordering, change it
+         * here in the same commit or these rows go back to proving nothing. */
         const char *q = m->buf;
         char rp[128];
         if (m->last[0] && am_ref_expired(++m->last_age)) { m->last[0] = 0; m->last_age = 0; }
@@ -1294,7 +1303,15 @@ int main(void)
         }
 
         /* The slot expires. Four unrelated prompts is further than any pronoun
-         * should reach back — resolving there would be a confident guess. */
+         * should reach back — resolving there would be a confident guess.
+         *
+         * EVERY prompt below is one the CLASSIFIER recognises. That is
+         * deliberate and it is the whole repro: those took an early return in
+         * try_intent before the slot was aged, so on a booted build twenty
+         * turns of machine questions left "it" pointing at a file from the top
+         * of the session. Machine questions ARE the topic drift the expiry
+         * exists for; a rule that only counts unparseable input is not the
+         * rule that was documented. */
         m_init(&m);
         m_line(&m, "make notes.txt");
         m_line(&m, "how much memory");
@@ -1309,6 +1326,20 @@ int main(void)
         }
         if (!m.refused_ref) {
             printf("  FAIL an expired slot did not produce a refusal\n");
+            failures++;
+        }
+
+        /* Rex's stronger form: the SAME recognised question, over and over.
+         * Nothing here is unparseable, so a rule counting unmatched prompts
+         * would let this run forever. */
+        m_init(&m);
+        m_line(&m, "make notes.txt");
+        for (int i = 0; i < 8; i++) m_line(&m, "uptime");
+        m_line(&m, "delete it");
+        if (m.armed) {
+            printf("  FAIL 'delete it' still resolved to \"%s\" after eight "
+                   "uptimes - a recognised question must age the slot too\n",
+                   m.pend);
             failures++;
         }
 

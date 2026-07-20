@@ -1308,12 +1308,22 @@ static void assist_answer_pending(const char *p, int confirmed) {
         if (!now.valid) {
             assist_say("no file called "); assist_say(a);
             assist_say(" any more - it went away while I was\nasking, so I've done nothing.\n");
-        } else {
+        } else if (id.size != now.size) {
             assist_say(a); assist_say(" changed while I was asking - it was ");
             assist_num((uint32_t)id.size); assist_say(" B, it's ");
             assist_num((uint32_t)now.size); assist_say(" B now.\n");
             assist_say("you agreed to the old one, so I've touched nothing.\n");
             assist_say("have a look at it and ask me again.\n");
+        } else {
+            /* Same byte count, different bytes. Printing "it was 9 B, it's
+             * 9 B now" is true and reads like a contradiction, which makes a
+             * correct refusal look like a bug — so say what actually changed.
+             * This is the case the content fingerprint exists for; a size
+             * check alone would have let the swap through. */
+            assist_say(a); assist_say(" changed while I was asking - same size (");
+            assist_num((uint32_t)now.size); assist_say(" B), different contents.\n");
+            assist_say("something replaced it between my question and your\n");
+            assist_say("answer, so I've touched nothing. have a look and ask again.\n");
         }
         return;
     }
@@ -1387,11 +1397,8 @@ static int try_intent(const char *p) {
      * treatment a typed filename does, including having its resolution shown
      * on screen before a destructive verb touches anything.
      *
-     * The age bump sits here rather than at a successful op because it has to
-     * count prompts that never reach a file at all. Anything that does touch
-     * one resets it. */
-    if (as_last_file[0] && am_ref_expired(++as_last_age)) assist_forget_file();
-
+     * (The slot's age was already stepped at the top of this function, where
+     * no early return can skip it.) */
     char rp[sizeof(as_prompt)];
     switch (am_resolve_ref(p, as_last_file, rp, sizeof(rp))) {
     case AM_REF_DONE:
@@ -1807,6 +1814,22 @@ static void assist_run(void) {
     case AM_SUBMIT_CANCEL:  assist_answer_pending(as_prompt, 0); return;
     case AM_SUBMIT_PROMPT:  break;
     }
+
+    /* A prompt was submitted, so the slot is one prompt older.
+     *
+     * HERE, not inside try_intent, and the placement is the fix. It used to
+     * sit after try_intent's classifier had already taken its early return,
+     * so every question the classifier recognised aged the slot by nothing:
+     * "uptime" twenty times left "it" pointing at a file from the top of the
+     * session. The documented rule counts prompts that touch no FILE; what the
+     * code counted was prompts that matched no INTENT, and machine questions
+     * are precisely the topic drift the expiry exists for.
+     *
+     * This spot is the one place a prompt is recognised as a prompt, it has no
+     * early return before it, and it is the same structural position the host
+     * model ages its slot in — so the model and the kernel can be compared by
+     * looking rather than by remembering. Touching a file resets it to zero. */
+    if (as_last_file[0] && am_ref_expired(++as_last_age)) assist_forget_file();
 
     if (try_intent(as_prompt)) return;   /* did a real action, offline */
 
