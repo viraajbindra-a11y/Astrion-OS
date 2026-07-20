@@ -246,12 +246,223 @@ static void gated(const char *prompt, const char *why)
  * already there with bytes in it, 0 when the name is free or the file is
  * empty. It is the whole difference between "this is a create" and "this
  * silently destroys what you had". */
+static void identis(unsigned long ts, unsigned long th, int tv,
+                    unsigned long ns, unsigned long nh, int nv,
+                    int expect, const char *why)
+{
+    struct am_ident then, now;
+    then.size = ts; then.hash = th; then.valid = tv;
+    now.size  = ns; now.hash  = nh; now.valid  = nv;
+    int got = am_ident_same(then, now);
+    if (got != expect) {
+        printf("  FAIL ident described(%lu B,%lx,v%d) vs now(%lu B,%lx,v%d) "
+               "= %s, expected %s  (%s)\n", ts, th, tv, ns, nh, nv,
+               got ? "SAME" : "changed", expect ? "SAME" : "changed", why);
+        failures++;
+    }
+}
+
 static void needs(enum am_action a, int content, int expect, const char *why)
 {
     int got = am_needs_confirm(a, content);
     if (got != expect) {
         printf("  FAIL am_needs_confirm(%s, dst_has_content=%d) = %d, "
                "expected %d  (%s)\n", aname(a), content, got, expect, why);
+        failures++;
+    }
+}
+
+/* ─── what a submitted line means, WITH a pending question ───
+ *
+ * These rows drive the decision, not the predicate. am_confirm_yes("") == 0
+ * was asserted here, passed, and protected nothing, because the key handler
+ * discarded empty submissions before that predicate was ever consulted. The
+ * function was correct and unreachable. Everything below asks the question the
+ * real path asks: "the user submitted this line while THIS was pending — what
+ * happens?" */
+static const char *sname(enum am_submit s)
+{
+    switch (s) {
+        case AM_SUBMIT_IGNORE: return "IGNORE";
+        case AM_SUBMIT_CANCEL: return "CANCEL";
+        case AM_SUBMIT_RUN:    return "RUN";
+        case AM_SUBMIT_PROMPT: return "PROMPT";
+    }
+    return "?";
+}
+
+/* `pending` is the FILE the question is about, or NULL for nothing armed. */
+static void sub(const char *line, const char *pending, enum am_submit expect,
+                const char *why)
+{
+    enum am_submit got = am_submit_action(line, pending);
+    if (got != expect) {
+        printf("  FAIL submit \"%s\" (pending=%s)\n"
+               "        expected %s, got %s  (%s)\n",
+               line, pending ? pending : "nothing", sname(expect), sname(got), why);
+        failures++;
+    }
+}
+
+/* A whole typed sequence, replayed the way a person would type it: each line
+ * is submitted in order and the pending flag carries between them, exactly as
+ * as_pending does in wm.c. Returns 1 if the armed action ever RAN.
+ *
+ * This is the shape of test the Enter bug needed and did not have. No single
+ * row could have caught it — the defect only exists in the JOIN between one
+ * submission and the next. */
+/* A model of the Assistant's input path, with a real buffer.
+ *
+ * Both of the last two bugs lived HERE — not in any predicate, but in what the
+ * key handler did with the buffer between one Enter and the next. A test that
+ * feeds whole lines to a pure function cannot see either of them. So this
+ * carries the state wm.c carries: the typed buffer, the armed action and its
+ * target, and whether the Assistant still has focus. */
+/* The model carries a small filesystem too, because the last defect needed a
+ * SECOND ACTOR: a shell changing a file between the question and the answer.
+ * Nothing smaller can express it — the Assistant's own inputs are identical in
+ * the safe case and the destructive one. */
+#define M_FILES 4
+struct m_file { char name[64]; unsigned long size, hash; int present; };
+
+struct as_model {
+    char buf[128];   /* as_prompt                          */
+    char pend[64];   /* as_pend_a — the file at risk       */
+    int  armed;      /* as_pending != AS_PEND_NONE         */
+    int  focus;      /* does the Assistant still have it   */
+    char died[64];   /* the file a fired action destroyed  */
+    int  opens;      /* how many times an app was launched */
+    int  blocked;    /* a yes refused because the file changed */
+    struct m_file fs[M_FILES];
+    struct am_ident armed_id;   /* as_pend_id — what we DESCRIBED */
+};
+
+static void m_init(struct as_model *m)
+{
+    m->buf[0] = 0; m->pend[0] = 0; m->died[0] = 0;
+    m->armed = 0; m->focus = 1; m->opens = 0; m->blocked = 0;
+    m->armed_id.size = 0; m->armed_id.hash = 0; m->armed_id.valid = 0;
+    for (int i = 0; i < M_FILES; i++) m->fs[i].present = 0;
+}
+
+static struct m_file *m_fs_get(struct as_model *m, const char *name)
+{
+    for (int i = 0; i < M_FILES; i++)
+        if (m->fs[i].present && !strcmp(m->fs[i].name, name)) return &m->fs[i];
+    return 0;
+}
+
+/* Create or replace — models `write X to f` from either actor. */
+static void m_fs_put(struct as_model *m, const char *name,
+                     unsigned long size, unsigned long hash)
+{
+    struct m_file *f = m_fs_get(m, name);
+    if (!f) for (int i = 0; i < M_FILES; i++)
+        if (!m->fs[i].present) { f = &m->fs[i]; break; }
+    if (!f) return;
+    snprintf(f->name, sizeof(f->name), "%s", name);
+    f->size = size; f->hash = hash; f->present = 1;
+}
+
+static void m_fs_rm(struct as_model *m, const char *name)
+{
+    struct m_file *f = m_fs_get(m, name);
+    if (f) f->present = 0;
+}
+
+static struct am_ident m_ident(struct as_model *m, const char *name)
+{
+    struct am_ident id; id.size = 0; id.hash = 0; id.valid = 0;
+    struct m_file *f = m_fs_get(m, name);
+    if (f) { id.size = f->size; id.hash = f->hash; id.valid = 1; }
+    return id;
+}
+
+static void m_type(struct as_model *m, const char *s)
+{
+    int k = 0; while (m->buf[k]) k++;
+    for (int i = 0; s[i] && k < (int)sizeof(m->buf) - 1; i++) m->buf[k++] = s[i];
+    m->buf[k] = 0;
+}
+
+/* assist_key's '\n' arm, then assist_run, then try_intent — in that order. */
+static void m_enter(struct as_model *m)
+{
+    enum am_submit s = am_submit_action(m->buf, m->armed ? m->pend : 0);
+    if (s == AM_SUBMIT_IGNORE) return;
+
+    if (s == AM_SUBMIT_RUN) {
+        /* The file has to still be the one the question described, and only
+         * then does the operation's own existence check run. Both, in that
+         * order, exactly as assist_answer_pending does it. */
+        if (!am_ident_same(m->armed_id, m_ident(m, m->pend))) {
+            m->blocked = 1;
+        } else if (m_fs_get(m, m->pend)) {
+            int k = 0; while (m->pend[k]) { m->died[k] = m->pend[k]; k++; }
+            m->died[k] = 0;
+            m_fs_rm(m, m->pend);
+        }
+        m->armed = 0; m->pend[0] = 0;
+    } else if (s == AM_SUBMIT_CANCEL) {
+        m->armed = 0; m->pend[0] = 0;
+    } else {                                   /* AM_SUBMIT_PROMPT */
+        if (am_classify(m->buf) == AM_NONE &&
+            am_action_of(m->buf) == AM_ACT_OPEN &&
+            am_open_target(m->buf) != AM_OPEN_NONE) {
+            m->opens++; m->focus = 0;          /* the new window takes focus */
+        } else if (am_classify(m->buf) == AM_NONE &&
+                   am_action_of(m->buf) == AM_ACT_DELETE &&
+                   am_named_file(m->buf, m->pend, (int)sizeof(m->pend))
+                       == AM_NAMED_ONE &&
+                   m_fs_get(m, m->pend)) {
+            /* Arming records what we are about to PUT ON SCREEN. That snapshot
+             * is the thing the user's yes refers to. */
+            m->armed_id = m_ident(m, m->pend);
+            m->armed = 1;
+        }
+    }
+    if (am_submit_consumes(s, m->focus)) m->buf[0] = 0;
+}
+
+/* Type a line and submit it. */
+static void m_line(struct as_model *m, const char *s) { m_type(m, s); m_enter(m); }
+
+static int replay(const char *const *lines, int n, char *ran_on, int cap)
+{
+    struct as_model m; m_init(&m);
+    /* Seed every file the sequence mentions — arming has to have a real file
+     * to describe, since the description is what the yes refers to. */
+    for (int i = 0; i < n; i++) {
+        char t[64]; int c = am_file_tokens(lines[i], 0, t, (int)sizeof(t));
+        for (int k = 0; k < c; k++) {
+            am_file_tokens(lines[i], k, t, (int)sizeof(t));
+            if (!m_fs_get(&m, t))
+                m_fs_put(&m, t, 8, 0x1000UL + (unsigned long)(unsigned char)t[0]);
+        }
+    }
+    for (int i = 0; i < n; i++) m_line(&m, lines[i]);
+    int k = 0; while (m.died[k] && k < cap - 1) { ran_on[k] = m.died[k]; k++; }
+    if (cap > 0) ran_on[k] = 0;
+    return ran_on[0] != 0;
+}
+
+/* `expect_died` is the file the sequence should actually destroy, or "" for
+ * none. Naming it rather than passing a ran/didn't-run flag is the same
+ * discipline as everywhere else here: "a file survived" is not the property,
+ * "this exact file was the one at risk" is. A sequence that fires on the wrong
+ * target would satisfy a boolean and fail this. */
+static void seq(const char *const *lines, int n, const char *expect_died,
+                const char *why)
+{
+    char died[64];
+    replay(lines, n, died, sizeof(died));
+    if (strcmp(died, expect_died) != 0) {
+        printf("  FAIL sequence [");
+        for (int i = 0; i < n; i++)
+            printf("%s\"%s\"", i ? ", " : "", lines[i]);
+        printf("]\n        fired on %s, expected %s  (%s)\n",
+               died[0] ? died : "nothing",
+               expect_died[0] ? expect_died : "nothing", why);
         failures++;
     }
 }
@@ -673,6 +884,250 @@ int main(void)
     yes("delete notes.txt", 0,
         "retyping the command is NOT an answer: one question, one deliberate yes");
     yes("list my files",    0, "an unrelated command cancels rather than confirming");
+
+    /* ═══ 4e. THE INPUT PATH. Rex booted this and the property was FALSE. ═══
+     *
+     * Every row above about the empty string was passing while an armed delete
+     * survived a bare Enter on the real build, because the key handler dropped
+     * empty submissions before the predicate ran. These rows ask what the real
+     * path asks, so the emptiness rule cannot be true here and false there. */
+    sub("",               "k2.txt", AM_SUBMIT_CANCEL,
+        "THE BUG: a bare Enter at a pending question must CANCEL it, not vanish");
+    sub("",               0,        AM_SUBMIT_IGNORE,
+        "...but with nothing pending an empty line is still a non-event");
+    sub(" ",              "k2.txt", AM_SUBMIT_CANCEL, "whitespace is not a yes either");
+    sub("y",              "k2.txt", AM_SUBMIT_RUN,    "the deliberate keystroke");
+    sub("yes",            "k2.txt", AM_SUBMIT_RUN,    "spelled out");
+    sub("n",              "k2.txt", AM_SUBMIT_CANCEL, "an explicit no");
+    sub("list my files",  "k2.txt", AM_SUBMIT_CANCEL,
+        "an unrelated command answers the question by cancelling it");
+    sub("list my files",  0,        AM_SUBMIT_PROMPT, "...and runs normally when nothing is pending");
+    sub("y",              0,        AM_SUBMIT_PROMPT,
+        "a stray 'y' with nothing pending is just a prompt - it cannot delete anything");
+    sub("delete notes.txt", 0,      AM_SUBMIT_PROMPT, "the arming submission is an ordinary prompt");
+
+    /* ═══ 4f. A YES TO WHAT? Rex booted the fix above and found this. ═══
+     *
+     * Every row here answers with a REAL AFFIRMATIVE, because that is the
+     * input that actually fires the pending payload. Probing with a
+     * non-affirmative is what made the bare-Enter case look safe last round —
+     * it cancelled for the wrong reason and the gate underneath was still
+     * live. So: assert with the input that would destroy the file. */
+    sub("yes delete k3.txt",  "k2.txt", AM_SUBMIT_CANCEL,
+        "DATA LOSS: a yes naming a DIFFERENT file deleted k2.txt, and k3.txt lived");
+    sub("sure, but delete k3.txt instead", "k4.txt", AM_SUBMIT_CANCEL,
+        "DATA LOSS: an explicit correction - 'instead' - and it deleted k4.txt anyway");
+    sub("yes copy to k3.txt",  "cbig.txt", AM_SUBMIT_CANCEL,
+        "DATA LOSS: same hole on the COPY gate - cbig.txt went 20 B -> 3 B");
+    sub("yes, k3.txt",         "k2.txt", AM_SUBMIT_CANCEL,
+        "the general case: redirection with NO correction word at all to match on");
+    sub("yes write to k3.txt", "wbig.txt", AM_SUBMIT_CANCEL,
+        "and on the WRITE gate - all three share one decision, so all three are fixed");
+
+    /* ...and the other direction, so this is not "fixed" into uselessness. */
+    sub("yes",                 "k2.txt", AM_SUBMIT_RUN, "a plain yes still confirms");
+    sub("yes please",          "k2.txt", AM_SUBMIT_RUN, "no file named -> still about k2.txt");
+    sub("yes delete k2.txt",   "k2.txt", AM_SUBMIT_RUN,
+        "naming the SAME file is agreement, not a correction");
+    sub("yes, delete k2.txt.", "k2.txt", AM_SUBMIT_RUN,
+        "...and sentence punctuation must not turn agreement into a mismatch");
+    sub("go ahead and delete k2.txt", "k2.txt", AM_SUBMIT_RUN, "restated in full");
+    sub("no delete k3.txt",    "k2.txt", AM_SUBMIT_CANCEL,
+        "not an affirmative either way - cancels on both counts");
+    sub("yes delete k2.txt and k3.txt", "k2.txt", AM_SUBMIT_CANCEL,
+        "names the target AND another - still ambiguous, still cancels");
+
+    /* The sequences. The defect lived in the JOIN between two submissions, so
+     * no single-row assertion could have found it. */
+    {
+        static const char *const arm_enter_yes[] = { "delete modal2.txt", "", "yes" };
+        static const char *const arm_enter_cmd[] = { "delete modal2.txt", "", "list my files" };
+        static const char *const arm_yes[]       = { "delete modal2.txt", "yes" };
+        static const char *const arm_no_yes[]    = { "delete modal2.txt", "n", "yes" };
+        static const char *const arm_enter_ent[] = { "delete modal2.txt", "", "" };
+
+        static const char *const arm_redirect[]  = { "delete k2.txt", "yes delete k3.txt" };
+        static const char *const arm_instead[]   = { "delete k4.txt",
+                                                     "sure, but delete k3.txt instead" };
+        static const char *const arm_redir_yes[] = { "delete k2.txt", "yes delete k3.txt", "yes" };
+
+        seq(arm_enter_yes, 3, "",
+            "THE DATA-LOSS PATH: arm, Enter (user believes it is dismissed), then an "
+            "unrelated 'yes' -> this DELETED THE FILE before the fix");
+        seq(arm_enter_cmd, 3, "",
+            "the sequence Rex actually ran: the file survived, but only because the "
+            "command was not a yes - the gate was still armed through the Enter");
+        seq(arm_yes, 2, "modal2.txt",
+            "and the real confirmation must still work - answering yes deletes, and "
+            "deletes THE FILE THAT WAS ARMED");
+        seq(arm_no_yes, 3, "",
+            "a no disarms for good: a later 'yes' must not resurrect the question");
+        seq(arm_enter_ent, 3, "",
+            "two Enters in a row cannot delete anything");
+
+        /* The new join. Note what the first row asserts: not "k3.txt survived"
+         * — k3.txt survived the BUG too — but that NOTHING fired at all. Under
+         * the defect this destroyed k2.txt, so a row checking only k3.txt
+         * would have passed against broken code. */
+        seq(arm_redirect, 2, "",
+            "DATA LOSS: 'yes delete k3.txt' fired the pending payload and killed k2.txt");
+        seq(arm_instead, 2, "",
+            "DATA LOSS: an explicit 'instead' correction killed k4.txt");
+        seq(arm_redir_yes, 3, "",
+            "and the correction must DISARM, not just skip once - a plain 'yes' "
+            "afterwards has nothing left to fire");
+    }
+
+    /* ═══ 4g. THE STALE INPUT BUFFER, open three rebuilds. ═══
+     *
+     * "open the calculator" hands focus to the Calculator, and wm.c used to
+     * clear the prompt only when the Assistant KEPT focus — so the text stayed
+     * in the buffer and a later bare Enter re-ran it. These need the buffer
+     * model above; no amount of predicate testing can see a bug that lives in
+     * what happens to the buffer between two Enters. */
+    {
+        struct as_model m;
+
+        m_init(&m);
+        m_line(&m, "open the calculator");
+        if (m.buf[0]) {
+            printf("  FAIL the prompt still holds \"%s\" after an app-open\n"
+                   "        (a dispatched line must be consumed even when "
+                   "another window took focus)\n", m.buf);
+            failures++;
+        }
+        m_enter(&m);                     /* the bare Enter, as Rex typed it */
+        if (m.opens != 1) {
+            printf("  FAIL a bare Enter after 'open the calculator' opened it "
+                   "again (%d opens, expected 1)\n", m.opens);
+            failures++;
+        }
+
+        /* The same shape once the stuck sentence is a DESTRUCTIVE one. This is
+         * why it gets fixed while it is still harmless: today the buffer can
+         * only stick on an app-open, and this is what it would cost the moment
+         * that stopped being true. */
+        m_init(&m);
+        m_fs_put(&m, "k9.txt", 8, 0x99);
+        m_line(&m, "delete k9.txt");      /* arms, and must clear the buffer */
+        if (m.buf[0]) {
+            printf("  FAIL the prompt still holds \"%s\" after arming a delete\n",
+                   m.buf);
+            failures++;
+        }
+        m_enter(&m);                      /* bare Enter -> cancels the gate */
+        m_enter(&m);                      /* and again -> nothing to re-fire */
+        if (m.died[0]) {
+            printf("  FAIL bare Enters after arming a delete destroyed %s\n",
+                   m.died);
+            failures++;
+        }
+
+        /* Normal commands were always fine — assert it so a future change to
+         * the clearing rule cannot quietly break the ordinary path either. */
+        m_init(&m);
+        m_line(&m, "how much memory");
+        if (m.buf[0]) {
+            printf("  FAIL the prompt still holds \"%s\" after a normal command\n",
+                   m.buf);
+            failures++;
+        }
+    }
+
+    /* ═══ 4h. THE CONFIRMATION MUST NOT LIE. ═══
+     *
+     * The confirm displays a byte count. The user reads it and consents to
+     * losing THOSE bytes. If the file is replaced between the question and the
+     * answer, the number we showed them has become false and their yes no
+     * longer means what they thought it meant.
+     *
+     * Two of us reasoned this was fine — "they said delete race.txt and
+     * race.txt is what went" — and we were both wrong, because the prompt does
+     * not merely name the file, it states a fact about it. Rex ran it. */
+    identis(9, 0xAA, 1,  9, 0xAA, 1, 1, "unchanged - the yes still means what it meant");
+    identis(9, 0xAA, 1, 15, 0xBB, 1, 0, "THE RACE: 9 B described, 15 B present");
+    identis(9, 0xAA, 1,  9, 0xBB, 1, 0,
+            "SAME SIZE, different bytes - a size check alone would wave this through");
+    identis(9, 0xAA, 1,  0, 0,    0, 0, "the file is gone - there is nothing to agree about");
+    identis(0, 0,    0,  9, 0xAA, 1, 0, "never had a valid description -> never act");
+
+    {
+        struct as_model m;
+
+        /* Rex's serial log, replayed. */
+        m_init(&m);
+        m_fs_put(&m, "race.txt", 9, 0xA1D);         /* write OLDOLDOLD */
+        m_line(&m, "delete race.txt");              /* confirm shows "(9 B)" */
+        m_fs_rm(&m, "race.txt");                    /* shell: rm race.txt   */
+        m_fs_put(&m, "race.txt", 15, 0x11E7);       /* shell: 15 B, new text */
+        m_line(&m, "yes");
+        if (m.died[0]) {
+            printf("  FAIL THE RACE: yes destroyed %s after it was replaced "
+                   "underneath the question (user was shown 9 B, file was 15 B)\n",
+                   m.died);
+            failures++;
+        }
+        if (!m.blocked) {
+            printf("  FAIL the race was not detected as a change at all\n");
+            failures++;
+        }
+
+        /* The same trick at an identical size — the one a size-only check
+         * would let through, which is why identity includes the content. */
+        m_init(&m);
+        m_fs_put(&m, "sneak.txt", 9, 0xA1D);
+        m_line(&m, "delete sneak.txt");
+        m_fs_put(&m, "sneak.txt", 9, 0xBEEF);       /* 9 B still, other bytes */
+        m_line(&m, "yes");
+        if (m.died[0]) {
+            printf("  FAIL a same-size replacement slipped through and "
+                   "destroyed %s\n", m.died);
+            failures++;
+        }
+
+        /* THE NEGATIVE. Nothing touched it, so yes must still delete — and
+         * delete the file that was armed. Without this row the whole check
+         * could be "return 0" and everything above would pass. */
+        m_init(&m);
+        m_fs_put(&m, "calm.txt", 9, 0xA1D);
+        m_line(&m, "delete calm.txt");
+        m_line(&m, "yes");
+        if (strcmp(m.died, "calm.txt") != 0) {
+            printf("  FAIL an UNCHANGED file did not delete on yes (died=\"%s\") "
+                   "- the check is fixed into uselessness\n", m.died);
+            failures++;
+        }
+
+        /* Churn on a DIFFERENT file must not block the one we asked about. */
+        m_init(&m);
+        m_fs_put(&m, "t.txt", 9, 0xA1D);
+        m_fs_put(&m, "other.txt", 3, 0x111);
+        m_line(&m, "delete t.txt");
+        m_fs_put(&m, "other.txt", 99, 0x222);       /* unrelated shell activity */
+        m_line(&m, "yes");
+        if (strcmp(m.died, "t.txt") != 0) {
+            printf("  FAIL unrelated file churn blocked a valid delete "
+                   "(died=\"%s\")\n", m.died);
+            failures++;
+        }
+
+        /* Rewritten with BYTE-IDENTICAL content: this must still delete.
+         * Destroying identical bytes destroys exactly what was described, so
+         * refusing would be false caution. This row is what pins the choice of
+         * a content fingerprint over a modification timestamp — swap one in
+         * and this is the row that objects. */
+        m_init(&m);
+        m_fs_put(&m, "same.txt", 9, 0xA1D);
+        m_line(&m, "delete same.txt");
+        m_fs_rm(&m, "same.txt");
+        m_fs_put(&m, "same.txt", 9, 0xA1D);         /* identical rewrite */
+        m_line(&m, "yes");
+        if (strcmp(m.died, "same.txt") != 0) {
+            printf("  FAIL an identical rewrite blocked the delete (died=\"%s\") "
+                   "- content identity, not mtime\n", m.died);
+            failures++;
+        }
+    }
 
     /* ═══ 5. Which app "open X" names. ═══ */
     opn("open the editor",             AM_OPEN_EDITOR,   "editor");

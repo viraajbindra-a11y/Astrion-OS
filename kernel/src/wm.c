@@ -656,10 +656,51 @@ static char         as_pend_b[FS_NAME_MAX + 1];
 /* The payload of a held-back write. Held here rather than re-parsed from the
  * prompt at confirm time, because by then the prompt is the word "y". */
 static char         as_pend_text[128];
+/* What as_pend_a looked like when we described it on screen. The answer is
+ * only good for the file the question was about. */
+static struct am_ident as_pend_id;
 
 static void assist_disarm(void) {
     as_pending = AS_PEND_NONE;
     as_pend_a[0] = 0; as_pend_b[0] = 0; as_pend_text[0] = 0;
+    as_pend_id.size = 0; as_pend_id.hash = 0; as_pend_id.valid = 0;
+}
+
+/* The file the pending question is about, or 0 when nothing is armed. Every
+ * gate stores the file that stands to lose something in as_pend_a — the one
+ * being unlinked, or the one whose bytes get replaced — so a confirmation can
+ * always be checked against the thing it is supposed to be confirming. */
+static const char *assist_pending_target(void) {
+    return as_pending != AS_PEND_NONE ? as_pend_a : 0;
+}
+
+/* FNV-1a over a file's bytes. Not a security hash and does not need to be —
+ * the job is to notice that a file was replaced between the question and the
+ * answer, and the other actor here is a person typing at a shell, not an
+ * adversary constructing collisions. One pass at arm and one at confirm; a
+ * file this filesystem can hold is a few KiB, so it costs nothing. */
+static unsigned long file_hash(const fs_node *n) {
+    unsigned long h = 2166136261UL;
+    if (!n->data) return h;                 /* an empty file has no bytes */
+    for (uint32_t i = 0; i < n->size; i++) {
+        h ^= (unsigned long)n->data[i];
+        h *= 16777619UL;
+    }
+    return h;
+}
+
+/* What `name` resolves to RIGHT NOW: the size we would put on screen and a
+ * fingerprint of the content behind it. Invalid when there is no regular file
+ * there, which is itself a change worth refusing on. */
+static struct am_ident ident_of(const char *name) {
+    struct am_ident id;
+    id.size = 0; id.hash = 0; id.valid = 0;
+    fs_node *n = fs_find(name);
+    if (!n || n->kind != FS_FILE) return id;
+    id.size  = (unsigned long)n->size;
+    id.hash  = file_hash(n);
+    id.valid = 1;
+    return id;
 }
 
 static void assist_reset(void) {
@@ -1174,8 +1215,9 @@ static void assist_report(enum am_intent w, const char *p) {
  *   was about may have been unlinked or replaced from the shell in between,
  *   and acting on a remembered pointer would be acting on whatever moved into
  *   its place. */
-static void assist_answer_pending(const char *p) {
+static void assist_answer_pending(const char *p, int confirmed) {
     enum as_pend op = as_pending;
+    struct am_ident id = as_pend_id;   /* what we told them they'd lose */
     char a[FS_NAME_MAX + 1], b[FS_NAME_MAX + 1], txt[sizeof(as_pend_text)];
     scopy(a, as_pend_a, sizeof(a));
     scopy(b, as_pend_b, sizeof(b));
@@ -1183,17 +1225,56 @@ static void assist_answer_pending(const char *p) {
     assist_disarm();
 
     assist_begin_output();
-    if (!am_confirm_yes(p)) {
+    if (!confirmed) {
         assist_say("cancelled - "); assist_say(a); assist_say(" is untouched.\n");
         assist_say("nothing was deleted and nothing was written.\n");
+        /* An affirmative that named a DIFFERENT file is the case worth
+         * spelling out: the user was correcting me, not agreeing with me, and
+         * a bare "cancelled" would leave them thinking I had simply misheard
+         * a yes. Name both files so it is obvious which question was on the
+         * table and which one they answered. */
+        char other[FS_NAME_MAX + 1];
+        am_confirm_other(p, a, other, sizeof(other));
+        if (other[0] && am_confirm_yes(p)) {
+            assist_say("\nyou said yes but named "); assist_say(other);
+            assist_say(", and the question was\nabout "); assist_say(a);
+            assist_say(". I won't guess which one you meant,\nso I've touched neither. say what you want and I'll ask again.\n");
+            return;
+        }
+        /* If they answered with a COMMAND rather than a yes or a no, say that
+         * it did not run. It is deliberately not executed — a command typed
+         * while a different question was on screen would be carried out in a
+         * context the user was not looking at, which is its own surprise. One
+         * retype is the cheaper end of that trade, but only if we admit the
+         * command was swallowed instead of quietly dropping it. */
+        if (p && p[0] && !am_word_any(p, "n|no|nope|nah|cancel|stop|wait")) {
+            assist_say("\nI didn't run \""); assist_say(p);
+            assist_say("\" - that was your answer to the\nquestion above. say it again and I will.\n");
+        }
+        return;
+    }
+
+    /* The answer is only good for the file the question DESCRIBED. Every gate
+     * put a byte count on screen, so every gate has to prove that count is
+     * still true before it acts on the strength of it. Hoisted above the
+     * three branches precisely so it cannot be true of one and forgotten in
+     * another. */
+    struct am_ident now = ident_of(a);
+    if (!am_ident_same(id, now)) {
+        if (!now.valid) {
+            assist_say("no file called "); assist_say(a);
+            assist_say(" any more - it went away while I was\nasking, so I've done nothing.\n");
+        } else {
+            assist_say(a); assist_say(" changed while I was asking - it was ");
+            assist_num((uint32_t)id.size); assist_say(" B, it's ");
+            assist_num((uint32_t)now.size); assist_say(" B now.\n");
+            assist_say("you agreed to the old one, so I've touched nothing.\n");
+            assist_say("have a look at it and ask me again.\n");
+        }
         return;
     }
 
     if (op == AS_PEND_WRITE) {
-        /* No "is it still there" check, and that is deliberate: the user asked
-         * for these bytes to BE the file's contents. If it was unlinked from
-         * the shell in between, fs_write creates it and the outcome is exactly
-         * what they asked for, minus the destruction they agreed to. */
         int tl = 0; while (txt[tl]) tl++;
         if (fs_write(a, (const uint8_t *)txt, (uint32_t)tl) < 0) {
             assist_say("couldn't write "); assist_say(a); assist_emit('\n');
@@ -1335,6 +1416,7 @@ static int try_intent(const char *p) {
             }
             if (am_needs_confirm(AM_ACT_COPY, dn && dn->size > 0)) {
                 as_pending = AS_PEND_OVERWRITE;
+                as_pend_id = ident_of(dst);   /* the bytes about to be replaced */
                 scopy(as_pend_a, dst, sizeof(as_pend_a));
                 scopy(as_pend_b, src, sizeof(as_pend_b));
                 assist_say(dst); assist_say(" already exists (");
@@ -1414,6 +1496,7 @@ static int try_intent(const char *p) {
          * that is the demo's headline command and it must not slow down. */
         if (am_needs_confirm(AM_ACT_WRITE, wn && wn->size > 0)) {
             as_pending = AS_PEND_WRITE;
+            as_pend_id = ident_of(file);  /* the bytes about to be replaced */
             scopy(as_pend_a, file, sizeof(as_pend_a));
             scopy(as_pend_text, text, sizeof(as_pend_text));
             assist_say(file); assist_say(" already exists and has ");
@@ -1501,6 +1584,7 @@ static int try_intent(const char *p) {
             return 1;
         }
         as_pending = AS_PEND_DELETE;
+        as_pend_id = ident_of(name);  /* the file about to be unlinked */
         scopy(as_pend_a, name, sizeof(as_pend_a));
         assist_say("delete "); assist_say(name); assist_say(" (");
         assist_num(n->size); assist_say(" B)?\n");
@@ -1616,12 +1700,17 @@ static int try_intent(const char *p) {
 
 
 static void assist_run(void) {
-    /* A destructive action is waiting on a yes or a no, and that question is
-     * modal: whatever gets typed next is read as the answer. Anything other
-     * than an explicit yes cancels, so the cost of answering it with an
-     * unrelated command is retyping that command — and the cost of NOT being
-     * modal here would be a file deleted by a keystroke aimed elsewhere. */
-    if (as_pending != AS_PEND_NONE) { assist_answer_pending(as_prompt); return; }
+    /* One decision, made in one place (include/assist_match.h) and asked the
+     * same way by the key handler above. A pending question is modal and
+     * consumes EVERY submission, the empty one included — that is what makes
+     * a bare Enter cancel instead of leaving the action armed behind a
+     * question the user thinks they dismissed. */
+    switch (am_submit_action(as_prompt, assist_pending_target())) {
+    case AM_SUBMIT_IGNORE:  return;
+    case AM_SUBMIT_RUN:     assist_answer_pending(as_prompt, 1); return;
+    case AM_SUBMIT_CANCEL:  assist_answer_pending(as_prompt, 0); return;
+    case AM_SUBMIT_PROMPT:  break;
+    }
 
     if (try_intent(as_prompt)) return;   /* did a real action, offline */
 
@@ -1678,18 +1767,28 @@ static void assist_key(char c) {
         return;
     }
     if (c == '\n') {
-        if (as_plen > 0) {
-            assist_run();
-            /* Reset the prompt for the next command — but only if the
-             * Assistant still has focus (an "open X" command may have raised
-             * another window, which also moves the cx/cy content rect). */
-            struct window *f = focused();
-            if (f && f->app == APP_ASSIST) {
-                set_content_rect(f);
-                as_plen = 0; as_prompt[0] = 0;
-                assist_prompt_line();
-            }
-        }
+        /* THE BUG THIS REPLACED: `if (as_plen > 0)`. An empty submission was
+         * discarded right here, so it never reached the pending-action check
+         * and a bare Enter left an armed delete armed — behind a question the
+         * user had every reason to believe they had just dismissed. A "yes"
+         * typed later for any unrelated reason then destroyed the file.
+         *
+         * am_confirm_yes("") returning 0 did not help and could not: the
+         * string never got that far. So the emptiness test lives in
+         * am_submit_action() now, BELOW the pending test, where an empty line
+         * is a real answer rather than a non-event. */
+        enum am_submit s = am_submit_action(as_prompt, assist_pending_target());
+        if (s == AM_SUBMIT_IGNORE) return;
+        assist_run();
+        /* Two separate questions, and conflating them was the bug. Whether the
+         * line is cleared depends on whether it was CONSUMED; whether we
+         * repaint depends on who has focus now. The clear used to live inside
+         * the focus test, so "open the calculator" left its text in the buffer
+         * for the next bare Enter to re-run. */
+        struct window *f = focused();
+        int kept = (f && f->app == APP_ASSIST);
+        if (am_submit_consumes(s, kept)) { as_plen = 0; as_prompt[0] = 0; }
+        if (kept) { set_content_rect(f); assist_prompt_line(); }
         return;
     }
     if (c == '\b') {

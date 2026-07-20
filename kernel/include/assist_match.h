@@ -591,6 +591,181 @@ static inline int am_confirm_yes(const char *p)
                           "proceed|do it|go ahead");
 }
 
+/* ─── what a submitted line MEANS ───────────────────────────────────────
+ *
+ * This exists because am_confirm_yes("") == 0 was true, tested, passing — and
+ * completely beside the point. The Assistant's key handler dropped empty
+ * submissions before dispatch (`if (as_plen > 0)`), so on the real path
+ * am_confirm_yes never saw the empty string and the pending action survived
+ * the Enter that was supposed to cancel it. The predicate was right and
+ * unreachable, which is the same as being wrong.
+ *
+ * What that cost, before this function existed:
+ *
+ *   delete modal2.txt   -> armed, question on screen
+ *   <Enter>             -> dropped upstream; STILL ARMED, and the user has
+ *                          every reason to think they dismissed it
+ *   yes                 -> typed a moment later for some unrelated reason
+ *                       -> THE FILE IS DELETED, against a question the user
+ *                          believed was already gone
+ *
+ * So the decision moved here, where the empty case cannot be special-cased
+ * away by an upstream guard and where a test can drive the whole sequence
+ * rather than one predicate out of the middle of it. A pending question
+ * consumes EVERY submission, including the empty one.
+ *
+ * The lesson worth keeping: a host test proves a function is correct. It can
+ * never prove the function is reached. When the property matters, test the
+ * decision, not the predicate. */
+/* ─── a yes to WHAT? ────────────────────────────────────────────────────
+ *
+ * am_confirm_yes reads the mood of a reply. It cannot read its object, and on
+ * a booted build that gap destroyed files:
+ *
+ *   pending delete k2.txt   "yes delete k3.txt"                -> k2.txt died
+ *   pending delete k4.txt   "sure, but delete k3.txt instead"  -> k4.txt died
+ *   pending copy  cbig.txt  "yes copy to k3.txt"               -> cbig.txt lost
+ *
+ * k3.txt is named in every one of those answers and is the only file none of
+ * them touched. An affirmative that names a DIFFERENT file is not agreement,
+ * it is a correction — the second says so in words, with "instead".
+ *
+ * Note what is NOT the fix here. am_negated carries "instead of", so a
+ * trailing bare "instead" slips past it, and adding the word would patch that
+ * one sentence and nothing else: a user can redirect with no keyword at all
+ * ("yes, k3.txt"). Reading the mood harder was never going to work. Read the
+ * OBJECT instead — a reply may name the pending target, or name no file at
+ * all; anything else is about a different file and cancels.
+ *
+ * Comparison is exact and case-sensitive on purpose. If two names differ in
+ * any way we do not know which file is meant, and not knowing must cancel. */
+
+/* The first file named in `reply` that is NOT `target`, or "" when there is
+ * none. The decision (am_confirm_targets) and the explanation the user reads
+ * both come from this one comparison, so they cannot drift apart. */
+static inline void am_confirm_other(const char *reply, const char *target,
+                                    char *out, int cap)
+{
+    /* Sized to hold any token the Assistant's prompt buffer can carry, so
+     * am_file_tokens never skips one for want of room — a skipped token would
+     * be a named file we silently failed to notice, which is the whole bug. */
+    char t[128];
+    if (cap > 0) out[0] = 0;
+    int n = am_file_tokens(reply, 0, t, (int)sizeof(t));
+    for (int i = 0; i < n; i++) {
+        am_file_tokens(reply, i, t, (int)sizeof(t));
+        int j = 0;
+        if (target) { while (t[j] && t[j] == target[j]) j++; }
+        if (!target || t[j] || target[j]) {      /* not the pending target */
+            int k = 0;
+            while (t[k] && k < cap - 1) { out[k] = t[k]; k++; }
+            if (cap > 0) out[k] = 0;
+            return;
+        }
+    }
+}
+
+static inline int am_confirm_targets(const char *reply, const char *target)
+{
+    char other[128];
+    am_confirm_other(reply, target, other, (int)sizeof(other));
+    return other[0] == 0;
+}
+
+enum am_submit {
+    AM_SUBMIT_IGNORE = 0,  /* empty line, nothing pending — do nothing  */
+    AM_SUBMIT_CANCEL,      /* a pending action is called off            */
+    AM_SUBMIT_RUN,         /* a pending action is confirmed             */
+    AM_SUBMIT_PROMPT,      /* ordinary input — hand it to the intents   */
+};
+
+/* `pending_target` is the file the pending question is about, or 0 when
+ * nothing is pending. Passing the NAME rather than a bare "is something
+ * armed" flag is deliberate: it is what lets this ask both halves of the
+ * question, and it makes a pending action without a target unrepresentable.
+ *
+ * Every gate — delete, copy-over, write-over — routes through here, so both
+ * halves apply to all three. Fixing this at one call site would have been
+ * half a fix. */
+/* ─── is it still the file we DESCRIBED? ────────────────────────────────
+ *
+ * The confirmation does not merely name a file, it states a fact about it:
+ * "delete race.txt (9 B)?". The user reads that number and consents to losing
+ * those nine bytes. On a booted build:
+ *
+ *   write OLDOLDOLD to race.txt     -> 9 B
+ *   [arm: the confirm displays "delete race.txt (9 B)?"]
+ *   rm race.txt                     ] from the shell, between the
+ *   write race.txt NEWNEWNEWNEWNEW  ] question and the answer -> 15 B
+ *   yes
+ *   -> "deleted race.txt". Fifteen bytes of DIFFERENT content died.
+ *
+ * The tempting defence — the user said delete race.txt, and race.txt is what
+ * went — is wrong, and it is worth being precise about why, because two of us
+ * believed it. It would hold if the prompt only named a file. It does not
+ * hold once the prompt states a FACT, because the consent was informed by
+ * that fact, and we are the ones who displayed it. A confirmation that shows
+ * a number which stops being true before it is answered defeats the entire
+ * reason for asking.
+ *
+ * So the question is not "does this name still resolve" — it always did — but
+ * "is what it resolves to still the thing the user agreed about". Identity is
+ * the SIZE (what we showed them) plus a fingerprint of the CONTENT (what they
+ * were actually agreeing to lose).
+ *
+ * Content, deliberately, and not a modification timestamp: if a file is
+ * rewritten with byte-identical contents then destroying it destroys exactly
+ * what was described, and an mtime check would refuse for no reason. What
+ * matters is the bytes, so the bytes are what gets compared. */
+struct am_ident {
+    unsigned long size;   /* the count the confirmation put on screen     */
+    unsigned long hash;   /* fingerprint of the bytes at that moment      */
+    int           valid;  /* 0 when the name resolved to no regular file  */
+};
+
+static inline int am_ident_same(struct am_ident then, struct am_ident now)
+{
+    /* An invalid side always fails: at arm time it means we never had a file
+     * to describe, and at confirm time it means the file is gone. Neither is
+     * "the thing you agreed about", so neither may act. */
+    return then.valid && now.valid &&
+           then.size == now.size && then.hash == now.hash;
+}
+
+/* Was this submission CONSUMED — must the input buffer be cleared?
+ *
+ * Everything except IGNORE consumes the line: it was dispatched, so it must
+ * not still be sitting there to be dispatched again.
+ *
+ * `kept_focus` is accepted and deliberately ignored, and that is the entire
+ * point of the parameter. wm.c used to clear the buffer only when the
+ * Assistant still had focus afterwards, so "open the calculator" — which
+ * hands focus to the Calculator — left its own text in the prompt. Esc the
+ * Calculator, press a bare Enter, and it opened again.
+ *
+ * That was harmless only by luck: opening an app destroys nothing. It is the
+ * same shape as the Enter bug, one destructive command away from being
+ * delete-on-stray-Enter, so it is fixed now rather than after it has teeth.
+ * Whether the window kept focus is a question about REDRAWING. It has nothing
+ * to do with whether the line was used up. */
+static inline int am_submit_consumes(enum am_submit s, int kept_focus)
+{
+    (void)kept_focus;
+    return s != AM_SUBMIT_IGNORE;
+}
+
+static inline enum am_submit am_submit_action(const char *line,
+                                              const char *pending_target)
+{
+    /* Pending first, unconditionally. Any ordering that tests the line for
+     * emptiness before testing `pending` reintroduces the bug above. */
+    if (pending_target)
+        return (am_confirm_yes(line) &&
+                am_confirm_targets(line, pending_target))
+               ? AM_SUBMIT_RUN : AM_SUBMIT_CANCEL;
+    return (line && line[0]) ? AM_SUBMIT_PROMPT : AM_SUBMIT_IGNORE;
+}
+
 /* Which app "open X" means. AM_OPEN_NONE means no app was named — the caller
  * then tries the last word as a filename, so "open notes.txt" works too. */
 enum am_open {
