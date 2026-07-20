@@ -25,6 +25,7 @@
 #include "calc.h"       /* the Calculator's arithmetic + state machine */
 #include "settings.h"   /* the session's accent / wallpaper / clock format */
 #include "pmm.h"        /* pmm_frames_* — the assistant reports physical RAM */
+#include "version.h"    /* ASTRION_VERSION — shared with the shell, not a second copy */
 
 /* Framebuffer wrappers live in kernel_mb2.c with no header — declare them
  * here the same way console.c / mouse.c do. */
@@ -660,6 +661,28 @@ static char         as_pend_text[128];
  * only good for the file the question was about. */
 static struct am_ident as_pend_id;
 
+/* ─── the conversation's one slot ───
+ *
+ * The last file an intent actually succeeded on. "it" / "that" / "the file"
+ * resolve to this and nothing else — one slot, never a stack.
+ *
+ * as_last_age counts prompts that went by without touching a file; the bound
+ * itself is AM_REF_MAX_AGE, in assist_match.h with the reasoning. */
+static char as_last_file[FS_NAME_MAX + 1];
+static int  as_last_age;
+
+/* Record a file as the thing "it" now means. Called only where an intent has
+ * genuinely succeeded on that file — a failed operation must not move the slot,
+ * or "it" starts meaning something the user never got. */
+static void assist_touch_file(const char *name) {
+    int k = 0;
+    while (name[k] && k < (int)sizeof(as_last_file) - 1) { as_last_file[k] = name[k]; k++; }
+    as_last_file[k] = 0;
+    as_last_age = 0;
+}
+
+static void assist_forget_file(void) { as_last_file[0] = 0; as_last_age = 0; }
+
 static void assist_disarm(void) {
     as_pending = AS_PEND_NONE;
     as_pend_a[0] = 0; as_pend_b[0] = 0; as_pend_text[0] = 0;
@@ -705,6 +728,9 @@ static struct am_ident ident_of(const char *name) {
 
 static void assist_reset(void) {
     as_plen = 0; as_prompt[0] = 0; as_olen = 0; assist_disarm();
+    /* The slot expires with the window. Reopening the Assistant is a new
+     * conversation, and "it" must not reach back into the last one. */
+    assist_forget_file();
 }
 
 static void assist_prompt_line(void) {
@@ -818,6 +844,24 @@ static fs_node *resolve_file(char *name, int cap) {
     return n;
 }
 
+/* The closest existing filename to what they typed, or 0 when nothing is near
+ * enough to be worth saying. Best match only.
+ *
+ * SUGGESTION ONLY. Nothing here is ever applied automatically, and least of
+ * all in front of a destructive verb: a near-miss on `delete` is exactly where
+ * a helpful guess destroys the wrong file. It turns a dead end into a
+ * retype, which is all it should ever do. */
+static const char *assist_did_you_mean(const char *typed) {
+    const char *best = 0; int bestd = 99;
+    for (fs_node *n = fs_first(); n; n = fs_next(n)) {
+        if (n->kind != FS_FILE) continue;
+        if (!am_did_you_mean(typed, n->name)) continue;
+        int d = am_edit_distance(typed, n->name);
+        if (d < bestd) { bestd = d; best = n->name; }
+    }
+    return best;
+}
+
 static void assist_begin_output(void) {
     uint32_t oy0 = cy + 96;
     fb_rect_x(cx, oy0, cw, (cy + ch) - oy0, AC_TERM_BG);
@@ -891,7 +935,7 @@ static void assist_report(enum am_intent w, const char *p) {
     case AM_VERSION: {
         const char *bl = mb_bootloader_name_x();
         assist_begin_output();
-        assist_say("Astrion v2.0 - kernel v2.0-stub\n");
+        assist_say(ASTRION_VERSION "\n");
         assist_say("  boot:       multiboot2, handed over by ");
         assist_say(bl ? bl : "(unknown)"); assist_emit('\n');
         assist_say("  arch:       x86_64 long mode, ring 0 + ring 3\n");
@@ -1281,6 +1325,7 @@ static void assist_answer_pending(const char *p, int confirmed) {
             return;
         }
         fs_sync();
+        assist_touch_file(a);
         assist_say("wrote to "); assist_say(a); assist_say(", replacing what was there:\n  ");
         assist_say(txt); assist_emit('\n');
         return;
@@ -1294,6 +1339,9 @@ static void assist_answer_pending(const char *p, int confirmed) {
             return;
         }
         fs_unlink(a); fs_sync();
+        /* Do NOT record a deleted file: "it" would then name something that no
+         * longer exists, and the next "open it" would fail confusingly. */
+        assist_forget_file();
         assist_say("deleted "); assist_say(a); assist_emit('\n');
         return;
     }
@@ -1310,6 +1358,7 @@ static void assist_answer_pending(const char *p, int confirmed) {
     if (wn < 0) {
         assist_say("couldn't write "); assist_say(a); assist_emit('\n');
     } else {
+        assist_touch_file(a);
         assist_say("copied "); assist_say(b); assist_say(" -> "); assist_say(a);
         assist_say(" ("); assist_num((uint32_t)wn); assist_say(" B, replaced)\n");
     }
@@ -1330,6 +1379,39 @@ static int try_intent(const char *p) {
      * into afterwards, and cx/cy would be pointing at a dead rect. */
     if (w == AM_CLOSE) { wm_close(); return 1; }
     if (w != AM_NONE)  { assist_report(w, p); return 1; }
+
+    /* ─── resolve "it" before anything looks for a filename ───
+     *
+     * The prompt is rewritten and everything downstream runs on the rewrite —
+     * extractor, guards, confirmation — so a pronoun gets exactly the same
+     * treatment a typed filename does, including having its resolution shown
+     * on screen before a destructive verb touches anything.
+     *
+     * The age bump sits here rather than at a successful op because it has to
+     * count prompts that never reach a file at all. Anything that does touch
+     * one resets it. */
+    if (as_last_file[0] && am_ref_expired(++as_last_age)) assist_forget_file();
+
+    char rp[sizeof(as_prompt)];
+    switch (am_resolve_ref(p, as_last_file, rp, sizeof(rp))) {
+    case AM_REF_DONE:
+        p = rp;                       /* act on the rewrite from here on */
+        break;
+    case AM_REF_UNSET: {
+        /* Refuse, and never fall back to the literal word — "open it" must not
+         * become a file called it.txt. */
+        char w2[32]; am_ref_word(p, w2, sizeof(w2));
+        assist_begin_output();
+        assist_say("I don't know what \""); assist_say(w2);
+        assist_say("\" refers to.\n\n");
+        assist_say("I only remember the last file I worked on, and right now\n");
+        assist_say("there isn't one. name the file and I'll keep track of it:\n");
+        assist_say("  read notes.txt   then   delete it\n");
+        return 1;
+    }
+    case AM_REF_NONE:
+        break;
+    }
 
     switch (am_action_of(p)) {
 
@@ -1374,6 +1456,8 @@ static int try_intent(const char *p) {
         assist_begin_output();
         if (!sn || sn->kind != FS_FILE) {
             assist_say("no file called "); assist_say(src); assist_emit('\n');
+        { const char *sg = assist_did_you_mean(src);
+          if (sg) { assist_say("did you mean "); assist_say(sg); assist_say("?\n"); } }
         } else if (fs_find(dst) == sn) {
             assist_say(src); assist_say(" is already called that.\n");
         } else if (fs_find(dst)) {
@@ -1384,6 +1468,7 @@ static int try_intent(const char *p) {
             uint32_t moved = sn->size;
             fs_unlink(src);          /* only after the copy landed */
             fs_sync();
+            assist_touch_file(dst);
             assist_say("renamed "); assist_say(src); assist_say(" -> ");
             assist_say(dst); assist_say(" ("); assist_num(moved); assist_say(" B)\n");
         }
@@ -1430,6 +1515,7 @@ static int try_intent(const char *p) {
             fs_sync();
             if (n < 0) { assist_say("couldn't write "); assist_say(dst); assist_emit('\n'); }
             else {
+                assist_touch_file(dst);
                 assist_say("copied "); assist_say(src); assist_say(" -> ");
                 assist_say(dst); assist_say(" ("); assist_num((uint32_t)n);
                 assist_say(" B)\n");
@@ -1460,6 +1546,7 @@ static int try_intent(const char *p) {
         if (existed) fs_append(file, (const uint8_t *)" ", 1);
         fs_append(file, (const uint8_t *)text, (uint32_t)tk);
         fs_sync();
+        assist_touch_file(file);
         assist_begin_output();
         assist_say("appended to "); assist_say(file); assist_say(":\n  ");
         assist_say(text); assist_emit('\n');
@@ -1508,6 +1595,7 @@ static int try_intent(const char *p) {
         }
         fs_write(file, (const uint8_t *)text, (uint32_t)tk);
         fs_sync();
+        assist_touch_file(file);
         assist_say("wrote to "); assist_say(file); assist_say(":\n  ");
         assist_say(text); assist_emit('\n');
         return 1;
@@ -1534,6 +1622,7 @@ static int try_intent(const char *p) {
             return 1;
         }
         fs_sync();
+        assist_touch_file(name);
         assist_say("made "); assist_say(name);
         if (want_dir) assist_say("/\nsay 'list my files' to see it.\n");
         else          assist_say("\nsay 'open the editor' to write in it.\n");
@@ -1581,6 +1670,8 @@ static int try_intent(const char *p) {
         fs_node *n = fs_find(name);
         if (!n || n->kind != FS_FILE) {
             assist_say("no file called "); assist_say(name); assist_emit('\n');
+            { const char *sg = assist_did_you_mean(name);
+          if (sg) { assist_say("did you mean "); assist_say(sg); assist_say("?\n"); } }
             return 1;
         }
         as_pending = AS_PEND_DELETE;
@@ -1604,6 +1695,7 @@ static int try_intent(const char *p) {
         int named_a_file = has(name, ".");
         fs_node *n = resolve_file(name, sizeof(name));
         if (n && n->kind == FS_FILE) {
+            assist_touch_file(name);
             assist_begin_output();
             assist_say("contents of "); assist_say(name); assist_say(":\n");
             for (uint32_t i = 0; i < n->size && i < 1024; i++) assist_emit((char)n->data[i]);
@@ -1619,6 +1711,8 @@ static int try_intent(const char *p) {
         if (named_a_file) {
             assist_begin_output();
             assist_say("no file called "); assist_say(name); assist_say(".\n");
+        { const char *sg = assist_did_you_mean(name);
+          if (sg) { assist_say("did you mean "); assist_say(sg); assist_say("?\n"); } }
             assist_say("say 'list my files' to see what's there.\n");
             return 1;
         }
@@ -1646,10 +1740,12 @@ static int try_intent(const char *p) {
         char name[64]; last_word(p, name, sizeof(name));
         int named_a_file = has(name, ".");
         fs_node *n = resolve_file(name, sizeof(name));
-        if (n && n->kind == FS_FILE) { wm_open_editor(name); return 1; }
+        if (n && n->kind == FS_FILE) { assist_touch_file(name); wm_open_editor(name); return 1; }
         if (named_a_file) {
             assist_begin_output();
             assist_say("no file or app called "); assist_say(name); assist_say(".\n");
+        { const char *sg = assist_did_you_mean(name);
+          if (sg) { assist_say("did you mean "); assist_say(sg); assist_say("?\n"); } }
             assist_say("say 'what apps do i have' for the list.\n");
             return 1;
         }

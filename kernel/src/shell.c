@@ -40,6 +40,7 @@
 #include "power.h"
 #include "pmm.h"
 #include "vmspace.h"
+#include "version.h"
 
 /* The shell's structural ink: the prompt, directory names in `ls`, help
  * section headers, the current task in `ps`. Not "accent" — accent (AC_ACCENT
@@ -228,7 +229,7 @@ static void cmd_help(int argc, char **argv) {
 static void cmd_version(int argc, char **argv) {
     (void)argc; (void)argv;
     console_set_color(COL_OK);
-    console_puts("Astrion Kernel v2.0-stub\n");
+    console_puts(ASTRION_VERSION "\n");
     console_set_color(COL_WHITE);
     console_puts("  boot:       multiboot2 + GRUB\n");
     console_puts("  bootloader: ");

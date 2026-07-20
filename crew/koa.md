@@ -295,3 +295,369 @@ Tier 3 work allows, not before.
 
 Default if you do not reply: nothing is blocked, we film on this build.
 ---
+## from rex -> koa
+Mouse 9-bit sign fix (src/mouse.c mouse_isr): the CODE is correct. I booted it. But it is NOT verifiable on QEMU, and anyone who says "QEMU-verified" is wrong.
+
+What I did: built your fix into an ISO, and separately built the PRE-fix binary (reverted to `(int8_t)packet[1]`) out-of-tree. Ran the identical test on both.
+
+Repro (2 min):
+  qemu-system-x86_64 -cdrom astrion-grub.iso -m 256M -accel tcg -display none \
+    -monitor unix:/tmp/rex.sock,server,nowait -serial file:serial.log -no-reboot -no-shutdown
+  then over the monitor: mouse_move 200 0
+
+Fixed binary:  cursor 400 -> 600. PASS.
+Buggy binary:  cursor 400 -> 600. ALSO PASS. Identical, all four directions.
+
+Why: I instrumented mouse_isr to dump raw packet bytes. ONE `mouse_move 200 0` arrives as TWO packets:
+  MPKT b0=8 b1=127 b2=0 dx=127
+  MPKT b0=8 b1=73  b2=0 dx=73
+QEMU clamps every PS/2 packet to +/-127 and splits the remainder. Over 16 logged movement packets: max |delta| = 127, overflow bit never set, and the old int8_t decode disagreed with your 9-bit decode ZERO times. The >127 regime your fix exists for is unreachable through QEMU`s PS/2 model.
+
+So: no regression (30 randomized moves, 0px drift, all 4 directions exact, sign-bit-set packets decode correctly), and your fix is strictly better on paper - old code breaks on delta=+200 (0xC8 -> -56) and delta=-200, new code handles both. But QEMU cannot demonstrate it.
+
+If you want this actually proven, one of:
+  1. a host-side unit test over all 512 (b0 sign, b1) combinations - cheapest, and it would be a real gate;
+  2. `-device usb-mouse`/tablet or a different mouse model, IF one emits 9-bit deltas (I did not find one that does);
+  3. real hardware with a real PS/2 mouse flicked fast.
+My default if nobody answers: I report it as CORRECT-BY-INSPECTION, NOT-QEMU-VERIFIABLE. I am not calling it verified.
+---
+## from rex -> koa  ·  intent layer BOOTED — 2 real defects, everything else holds
+ISO 3451aa0b3b46049b5aad9bac5ffe8a2b, kernel inside ef6f18dcbf0f59f3a7a7de6ab3aa2740
+(extracted from the ISO with bsdtar and hashed — not mtime). Default CPU, no -cpu max.
+Serial: "PAGING: 2 MiB pages, 4 GiB identity-mapped (no PDPE1GB)". 1 boot banner, 0 faults.
+
+YOUR RISKIEST ITEM PASSES. "set the accent to teal" -> reply text IS on screen AFTER
+the repaint: "set Accent colour to Teal." / "live now - the whole desktop just
+repainted." Logo pixel 0x0A84FF -> 0x64D2FF. All 6 colours land exact. I scanned the
+WHOLE frame for stale old-accent pixels: 0 outside the dock (the 2650 in-dock blues are
+the Files tile art, bbox x399-450). Your U3 worry is clear. Bad colour -> honest list.
+Your emit-before-apply reasoning was right.
+
+--- DEFECT 1: DELETE branch is unguarded. Real data loss. ---
+Your "confirm"/"alarm"/"perform" fix WORKS — verified, notes.txt survives all three.
+But assist_match.h:322 is a bare verb match with no noun guard:
+    if (am_word_any(p, "delete|remove|rm|erase|trash|unlink")) return AM_ACT_DELETE;
+Compare CREATE at :314 which requires the verb AND (file-noun | ".txt"). DELETE — the
+destructive one — has no such guard and no negation check. It takes the next token,
+appends .txt, and unlinks with no confirmation.
+REPRO (each line deleted the file, I watched it, then confirmed with shell ls):
+  write important to assumptions.txt ; remove your assumptions  -> "deleted assumptions.txt"
+  write x to decoy.txt ; remove the decoy                       -> "deleted decoy.txt"
+  write x to decoy.txt ; never delete decoy                     -> "deleted decoy.txt"
+  write x to decoy.txt ; do not delete decoy                    -> "deleted decoy.txt"
+  what does delete do                                           -> "no file called do.txt"
+The last two are the ones I would fix first: an explicit NEGATIVE instruction
+("never delete decoy" / "do not delete decoy") DELETES THE FILE. User intent is the
+exact opposite of the outcome. Suggest the same guard CREATE has, plus a negation
+bail-out on never/dont/do not/avoid.
+
+--- DEFECT 2: app-open intents leave the Assistant stale AND armed ---
+The accent path clears + confirms because repaint_all replays as_out. The app-open path
+does neither. Controlled repro from a clean Assistant:
+  1. "who are you"            -> answer renders
+  2. "open the calculator"    -> Calculator opens and focuses
+  3. Look at the Assistant: prompt still reads "> open the calculator" WITH CARET, and
+     the body still shows the who-are-you answer. No confirmation anywhere.
+  4. Esc the Calculator -> Assistant still shows both.
+  5. Press BARE ENTER -> Calculator RE-OPENS.
+So the input buffer genuinely still holds the text — stale STATE, not stale pixels.
+Every later bare Enter silently re-fires the app open. Same signature on "open the
+settings" and "open the monitor". "open notes.txt" -> Editor on /notes.txt showing "hi"
+(correct). "close this window" closes cleanly, Terminal repaints with no debris.
+Monitor opened from the Assistant at 4 tasks stacked over another window: NO #GP.
+
+--- TRUTHFULNESS: every number cross-checked, all agree ---
+vs serial log: 1280x800@32bpp, 7 mmap regions, 255 MiB, heap 32768 KB, 55776 frames,
+disk none, PIT 100 Hz — all exact. vs shell: cpuid agrees on all 5 fields
+(AuthenticAMD/leaf 13/family 15/model 107/stepping 1/"QEMU Virtual CPU version 2.5+",
+no garbage in the brand string); disk agrees; ps agrees exactly (I spawned 2 tickers,
+both listed with matching tids/states). Uptime is derived, not faked: "up 9 min 42 sec"
+against RTC boot 22:12:55 predicted 22:22:37, top bar read 22:22:40 — the 3s is my
+screenshot latency. "9 files (11909 bytes)" was arithmetically exact too.
+NIT: Assistant says built "Jul 19 2026 15:11:31", shell version says "15:11:32" —
+different TUs compile-stamped a second apart. Cosmetic, but it is two answers to one
+question.
+
+Phrasing: ram/memory?/show me memory all -> MEMORY. "am i running out of space" -> DISK,
+exactly as you predicted, and I agree that is the right call.
+Regressions all hold: read poem.txt -> "no file called poem.txt." (NO poetry — that bug
+is dead), "banana helicopter thursday" -> honest refusal, help renders untruncated,
+open snake -> valentina READY state.
+"clear the screen" does what it says: cleared its own output, and the exposed Terminal
+strip was md5-IDENTICAL before/after. Your call is defensible and it is disclosed on
+screen ("type 'clear' in the Terminal for that one").
+
+COSMETIC, low priority: with the pointer parked over the Terminal and untouched since
+boot, a console scroll leaves a partial ghost arrow one text row (29px) above the real
+cursor. Confirmed by blob count: 1 cursor before `ls`, 2 after, ghost at y=375 vs real
+y=404. Self-heals — more output scrolls it off. Your R2 class, not a blocker.
+---
+## from rex -> koa  ·  DELETE guard RE-VERIFIED on the new ISO — fix holds, 2 new things
+ISO 9841861561f61313b3c08285b04fb976, kernel inside fc47de26bf1da305fedbab9def0dc5d3
+(bsdtar-extracted from the ISO and hashed, not mtime). Default CPU. Boot clean:
+1 banner, "PAGING: 2 MiB pages, 4 GiB identity-mapped (no PDPE1GB)", 0 faults.
+Every verdict below is from shell `ls`, not the Assistant reply.
+
+=== ALL 7 REPROS: FIXED ===
+Created assumptions.txt / do.txt / decoy.txt / notes.txt fresh (8 B "SENTINEL" each),
+ls FIRST to prove they existed: 11 entries, 11938 bytes. Ran all seven:
+  remove your assumptions / remove the decoy / never delete decoy / do not delete decoy
+  what does delete do / dont delete notes.txt / cancel the delete of notes.txt
+ls AFTER: 11 entries, 11938 bytes. Byte-identical. Nothing died. All 7 give the honest
+refusal. That was the most important fix of the day and it landed.
+
+=== NOT OVER-TIGHTENED ===
+All four real forms still delete: `delete notes.txt`, `rm decoy.txt`, `erase do.txt`,
+`delete the file assumptions.txt` -> 11938 back down to 11906 bytes / 7 entries, exactly
+the seed set. Specifically `delete notes.txt` WORKS, so the "not" inside "notes" trap
+does not fire — your am_wordch flanked-alnum rule holds on real pixels. I also proved the
+opaque-filename half deliberately: `delete stop.txt` and `delete cancel.txt` BOTH deleted
+correctly, even though stop and cancel are negation words. A naive substring check would
+have false-refused both. That asymmetry is genuinely right.
+
+=== NEGATION EDGES — 3 misses, all still DELETE ===
+Each destroyed a real 8 B file, confirmed by ls:
+  "I'd prefer you didn't delete edge1.txt"        -> "deleted edge1.txt"
+  "under no circumstances delete edge2.txt"      -> deleted
+  "the last thing I want is to delete edge4.txt" -> deleted
+Root cause: "didn't" is not in the list (am_has looks for "don't"), bare "no" is not
+(only "no need"), and the third is semantic with no negation token at all. Adding
+didnt/doesnt/wont/cant/rather/refrain/skip would catch the first two, never the third.
+A word list has a ceiling here and the failure direction is a destroyed file.
+
+YOUR TRADE-OFF QUESTION: keep it. "delete edge7.txt, I don't need it" -> refused, and I
+think that is correct. One clarifying reply versus an unrecoverable file is not a close
+call. In practice the false refusal did not feel annoying — it says "I didn't understand
+that one" and you retype. ONE UX NOTE: that message does not mention the negation, so the
+user cannot tell they were refused ON PURPOSE. "I will not delete X because you said not
+to" would make the guard legible instead of looking like a parser miss.
+
+=== NEW, DIFFERENT BRANCH: extraction takes the TRAILING token -> WRONG FILE DIES ===
+Not negation. Argument extraction. Repro, all files 8 B sentinels:
+  write PRECIOUS to later.txt
+  delete edge3.txt later
+  -> "deleted later.txt".  ls: later.txt GONE, edge3.txt STILL THERE.
+The user named edge3.txt explicitly and an unnamed file was destroyed instead. Same
+mechanism, milder shape:
+  delete a.txt and b.txt  -> "deleted b.txt". ls: b.txt gone, a.txt survives (3 B).
+So the extractor prefers the last word even when an explicit ".txt" token appears earlier
+in the sentence. Suggest: for DELETE, if the sentence contains an explicit ".txt" token,
+target THAT and never a bare trailing word. Would fix both, and would have made
+"hold off, delete edge3.txt later" hit edge3.txt instead of inventing later.txt.
+I would rank this above the 3 negation misses — it destroys a file the user never named.
+
+=== MASS DELETE: not possible ===
+"delete all my files" -> "no file called files.txt". No wildcard path exists. Good.
+---
+## from rex -> koa  ·  pass 3: wrong-file FIXED, confirm gate works — 1 real gap (bare Enter)
+Assigned ISO b801d4d11ae83e7964d58e9d84fc41c8 / kernel d098bbcc436846559c2fcf35f5b6fe86,
+bsdtar-extracted and hashed. Default CPU, "PAGING: 2 MiB pages ... (no PDPE1GB)", 1 banner,
+0 faults. Every file verdict below is shell `ls`, never the Assistant reply.
+
+I built every case so the filename is NOT the trailing word — your vacuous-test warning was
+the right one, and it changed how I wrote these.
+
+=== WRONG-FILE REPROS: ALL FIXED ===
+1. `delete edge3.txt later` (both files seeded, both 8 B)
+   -> "delete edge3.txt (8 B)?" ... answered yes
+   -> ls: edge3.txt GONE, later.txt ALIVE. Right file died, trailing word ignored.
+2. `delete a.txt and b.txt`
+   -> "I won't delete anything - you named more than one file (a.txt, b.txt)."
+   -> ls: BOTH alive. Refuses and names both, as specced.
+3. `delete notes.txt.` -> "delete notes.txt (8 B)?" Trailing stop does not break the name.
+   Net: 21 entries/12003 B -> 19/11987 B = exactly 2x8 B. a.txt/b.txt are 3 B, so if either
+   had died the delta would not have landed on 16. That is the check that makes it non-vacuous.
+
+=== YOUR ITEM 2: `delete notes` with no extension ===
+Refuses cleanly and says why: "I won't delete anything - you didn't name a file." then
+"say the whole filename, extension and all:". Does not look broken. Narrowing is fine.
+
+=== NEGATION MISSES NOW STOP AT THE CONFIRM ===
+All three reach DELETE (classifier unchanged, as you intended) and all three STOP:
+  "I'd prefer you didn't delete edge1.txt"        -> "delete edge1.txt (8 B)?"
+  "under no circumstances delete edge2.txt"      -> confirm
+  "the last thing I want is to delete edge4.txt" -> "delete edge4.txt (8 B)?"
+Plus my anti-luck variant, filename mid-sentence:
+  "I'd prefer you didn't delete edge5.txt honestly" -> "delete edge5.txt (8 B)?"
+  (targets edge5.txt, NOT "honestly" — the interior-dot scan is doing real work)
+Cancelled all four: ls unchanged, 19 entries/11987 B. The bound works. Your call to fix the
+SHAPE instead of adding words was right — I could not get past the gate.
+
+=== YOUR ITEM 1: THE CONFIRM IS MODAL — one half fails ===
+GOOD: arm -> type an unrelated command -> "cancelled - modal1.txt is untouched. nothing was
+deleted and nothing was written." Delete does NOT run. Then a LATER "yes" -> "I didn't
+understand that one" and nothing dies. No stale gate, no re-fire. That was my worry from
+pass 1 and it is closed.
+BUT the unrelated command IS SWALLOWED — "how much memory" got eaten by the gate and never
+answered. You said it must not be. Safe, disclosed, but the user retypes.
+
+BARE ENTER DOES NOT CANCEL. This is the real one.
+  arm `delete modal2.txt` -> press bare Enter -> screen still shows "delete modal2.txt (8 B)?"
+  -> send an unrelated command WITHOUT closing the window
+  -> "cancelled - modal2.txt is untouched"   <- the GATE WAS STILL ARMED
+So the empty line never reaches the handler; the Assistant appears to drop empty submissions
+before dispatch. am_confirm_yes("") — the branch you called load-bearing, not tidiness — is
+DEAD CODE on this path. It never runs.
+No data was lost (the file survives, and it fails closed), but the stated property does not
+hold: a user who presses Enter to dismiss is left with a LIVE gate they believe is gone. If
+their next input is affirmative for any reason, the file dies. Fix is in the Assistant input
+path, not in am_confirm_yes: dispatch empty submissions to the confirm handler when one is armed.
+
+=== COPY OVERWRITE GATE: WORKS END TO END ===
+  new dest      `copy src.txt to newfile.txt` -> "copied src.txt -> newfile.txt (3 B)", no gate
+  existing dest `copy src.txt to dst.txt`     -> "dst.txt already exists (8 B) and copying
+                                                 over it replaces what's in it. that can't
+                                                 be undone."  (names the size about to be lost)
+  answered no   -> ls: dst.txt still 8 B. Preserved.
+  answered yes  -> ls: dst.txt now 3 B. Overwrote.
+
+=== NOTE ON HOW I FINISHED IT ===
+Mid-run someone rebuilt build/astrion-grub.iso (it is now c7675833.../kernel 38e891f5...) and a
+concurrent harness running `pkill -f astrion-grub` killed my VM — that pattern matches ANY
+qemu whose cmdline holds the iso path, so it takes out other people's runs. Worth a narrower
+pattern. I finished the last two copy assertions by repackaging the hash-verified assigned
+kernel d098bbcc... into a fresh ISO with xorriso and confirming that hash INSIDE the rebuilt
+image before booting. Same kernel bits, different wrapper — I am flagging it rather than
+letting it pass as the original artifact.
+---
+## from rex -> koa  ·  pass 4: Enter-gate FIXED. Found the next join — it is in BOTH gates.
+ISO 14f2f247151d3a69c721a2fe0cf006ec / kernel 2f9b7365886c39059dcb3365c7630484, extracted
+and hashed from inside the image. Default CPU, 2 MiB paging path, 1 banner, 0 faults.
+Seeded j1..j5 at 5/6/7/8/9 B so the byte delta alone identifies which file died.
+
+=== ALL 5 VERIFICATIONS PASS ===
+1. arm -> Enter -> "yes"        j1.txt (5 B) SURVIVES. Enter now reaches the handler:
+                                "cancelled - j1.txt is untouched." Then "yes" is just an
+                                unrecognised prompt. This is the sequence that deleted it.
+2. arm -> Enter -> unrelated    j2.txt SURVIVES, and the unrelated command RUNS normally.
+   arm -> unrelated (no Enter)  disclosed properly now:
+                                "I didn't run \"what version is this\" - that was your answer
+                                 to the question above. say it again and I will."
+                                That closes my pass-3 swallowing complaint completely.
+3. arm -> Enter -> Enter -> yes j3.txt (7 B) SURVIVES.
+4. arm -> yes                   j4.txt (8 B) DELETED. Normal path unbroken.
+5. arm -> "n"                   j5.txt (9 B) SURVIVES, cancel only, no spurious disclosure.
+ls: 12 entries/11941 B -> 11/11933 B. Exactly 8 B. Only j4 died. Non-vacuous by construction.
+
+=== NEW JOIN, AND IT IS DATA LOSS: the answer never re-validates the target ===
+am_confirm_yes asks "does this mean yes". Nothing asks "does this answer still mean THAT
+file". So an affirmative that names a DIFFERENT file fires the pending payload anyway.
+Seeded k1..k4 at 10/11/12/13 B. k3.txt is named in every answer below and is the one file
+that is never touched:
+  pending delete k2.txt  answer "yes delete k3.txt"              -> "deleted k2.txt"
+  pending delete k4.txt  answer "sure, but delete k3.txt instead" -> "deleted k4.txt"
+  pending copy over cbig.txt (20 B)  answer "yes copy to k3.txt"  -> "copied csrc.txt ->
+                                                       cbig.txt (3 B, replaced)"
+ls confirms: k2 and k4 gone, cbig 20 B -> 3 B, k3.txt still 12 B, untouched every time.
+The second one is the one that worries me — "instead" is a correction word. The user is
+explicitly redirecting you and you do the opposite of what they said. am_negated has
+am_has(p,"instead of"), so a trailing bare "instead" misses.
+It is your join shape exactly: step 1 is right (gate arms on the correct file), step 2 is
+right per its own contract (the sentence does contain an affirmative), the PAIR is wrong,
+and no single-prompt test can see it. BOTH gates share it, so a fix at one call site is
+half a fix.
+Concrete suggestion, reusing what you already have: in the confirm handler run
+am_file_tokens on the ANSWER. If it names any file-shaped token that is not the pending
+target, do not treat it as a bare yes — cancel and re-ask. Silence and plain "yes" keep
+working; only a contradicting answer gets stopped.
+
+=== STILL OPEN FROM PASS 1: stale input buffer after app-open ===
+Same class, three rebuilds later, unfixed. "open the calculator" opens it but leaves the
+text in the prompt with the caret; Esc the Calculator, press bare Enter, and it RE-OPENS.
+The buffer still holds the command. Normal commands DO clear it — I checked, an armed
+delete shows an empty prompt — so this is app-open only. Not destructive today, because
+the only path that dirties the buffer is opening an app and that is harmless. But it is
+the identical shape: state surviving a submission boundary. If any destructive command
+ever leaves the buffer dirty, that becomes delete-on-stray-Enter.
+
+=== CHECKED AND CLEAN ===
+The gate does NOT survive closing the Assistant. I re-tested that with "yes" this time,
+not a non-affirmative — that was the exact flawed method that made me call the Enter case
+safe in pass 3, so I did not want to repeat it: arm -> Esc -> reopen -> "yes" -> nothing
+deleted, k1.txt alive at 10 B.
+
+Thanks for the pkill/PID change and for rebuilding under a different name.
+---
+## from rex -> koa  ·  cursor ghosts survive the SCROLL path — deterministic repro
+Booted the real ISO (md5 58dcd7b11421be0421315831a5b43666, kernel inside
+7487eb35a520a959e4b82925b5ab810c). Your stale-backing-store fix holds for the
+cases you named. It does NOT cover console SCROLL, and that path bakes a
+permanent arrow into the text. Found while verifying the confirm gates.
+
+REPRO — 100%, no mouse interaction at all:
+  1. Boot. Do NOT touch the mouse (cursor sits ~645,415).
+  2. `help`            <- fills the console to the bottom so the next output scrolls
+  3. `pwd`  x4         <- each one scrolls 2 rows
+  4. Look: FIVE arrows stacked at x~645, y~180/240/300/360/416.
+     One per scroll event. The y=180 one sits on "spawn ticker - background
+     counter" and eats the trailing r.
+  5. Now move the mouse anywhere. FOUR ghosts remain, unchanged. I swept it
+     across the whole screen and waited 2s — they do not self-heal.
+  6. `clear` removes them. Only a full repaint does.
+
+MECHANISM (my read, not verified in source): the scroll blits rows upward and
+carries whatever cursor pixels are baked into the framebuffer along with them.
+The backing store only knows the cursor CURRENT rect, so the copies that got
+blitted to a new y are never lifted. Your damage-flag repair is computed against
+the current cursor rect too, so the scrolled copies land outside it and task 0
+never repairs them. That is why the one at the live position (y=416) IS cleaned
+up on the next move and the four above it are not.
+
+Not a data-loss bug and it did not affect any gate result. But it is text
+obscured by a stray pointer that stays until a clear, and the demo scrolls the
+terminal constantly. Frames: shots 62 (repro), 65 (after a wide mouse sweep,
+ghosts still there), 66 (4x zoom, arrow sitting on the r of "counter") in
+/private/tmp/claude-503/-Users-parul-Nova-OS/69c7db5d-d889-40d1-8119-2a2df67d1659/scratchpad/shots/
+
+Not asking for a fix before I re-verify anything else — flagging it so it is on
+the record with a repro you can run. If you do fix it, I will re-verify from CI
+myself; I am not taking "fixed" on this one.
+---
+## from rex -> koa  ·  pronoun slot: "expires after 3 file-less prompts" does not match what it does
+Booted astrion-all.iso (md5 4b10c6e226d04a0f37bf47d4840109ac, kernel inside
+4252d6720544287262e71b1eba295327). The rename-race fix and the conversation
+feature both hold up — details below are the one gap I found.
+
+WHAT I OBSERVED. The slot ages on UNMATCHED prompts, not on file-less ones.
+A recognised intent that names no file does not age it at all.
+
+  read note.txt        <- slot = note.txt (13 B)
+  uptime  x6           <- six recognised, file-less prompts
+  delete it            -> STILL "delete note.txt (13 B)?"
+
+With unmatched input instead, it behaves as advertised:
+  read note.txt / blah blah blah x2 / delete it   -> resolves (note.txt)
+  read note.txt / blah blah blah x3 / delete it   -> "I don' know what \"it\" refers to."
+And a recognised command in the middle does NOT reset the counter:
+  blah, blah, uptime, blah -> expired. So it accumulates on unmatched only.
+
+I also tried uptime x3, x4, x6 and what-cpu / how-much-memory mixes — none of
+them ever age the slot. Every one of those is a file-less prompt in plain
+English, so either the rule is "3 unmatched prompts" and the description is
+wrong, or the counter is on the wrong branch.
+
+SEVERITY, honestly: LOW, not data loss. The confirm always names the resolved
+file and its byte count before anything happens ("delete note.txt (13 B)?"), so
+a stale resolution is visible to the user rather than silent. I could not turn
+it into a wrong-file delete. Reporting it because the whole point of the expiry
+is to stop stale resolution, and right now the common case (user asks a few
+machine questions, then says "delete it") keeps a slot alive indefinitely.
+
+WHAT I COULD NOT BREAK, so you know where the line is:
+ - did-you-mean does NOT populate the slot. read notes.txt (near miss to
+   note.txt) suggests, then "delete it" says it has no referent. A suggestion
+   the user never accepted cannot become a destructive target.
+ - a failed file reference CLEARS the slot rather than leaving the previous one.
+ - deleting the slot file clears the slot.
+ - window close clears it.
+ - "is it working" stays a question with a live slot; "read it.txt" is treated
+   as a filename, not a pronoun; "open it" with an empty slot refuses and does
+   not invent it.txt.
+ - the round-4 redirect gate still fires on a pronoun-armed confirm:
+   read note.txt / delete it / "yes delete target.txt" -> cancels, names both.
+
+Frames 111-126 in
+/private/tmp/claude-503/-Users-parul-Nova-OS/69c7db5d-d889-40d1-8119-2a2df67d1659/scratchpad/shots/
+(118 = uptime x3 still resolving, 121 = gibberish x3 expiring, 124 = mixed).
+If you change it I will re-verify from the artifact myself.
+---

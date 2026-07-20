@@ -246,6 +246,48 @@ static void gated(const char *prompt, const char *why)
  * already there with bytes in it, 0 when the name is free or the file is
  * empty. It is the whole difference between "this is a create" and "this
  * silently destroys what you had". */
+/* ─── "it" — resolution against the one-file slot ─── */
+static const char *rfname(enum am_ref r)
+{
+    switch (r) {
+        case AM_REF_NONE:  return "NONE";
+        case AM_REF_DONE:  return "DONE";
+        case AM_REF_UNSET: return "UNSET";
+    }
+    return "?";
+}
+
+/* `last` is what the slot holds ("" for empty). `expect_out` is the rewritten
+ * prompt, asserted in full — "it resolved" is not the property, "it resolved
+ * to THIS sentence" is. */
+static void ref(const char *prompt, const char *last, enum am_ref expect,
+                const char *expect_out, const char *why)
+{
+    char out[128];
+    enum am_ref got = am_resolve_ref(prompt, last, out, sizeof(out));
+    if (got != expect) {
+        printf("  FAIL ref \"%s\" (slot=%s)\n        expected %s, got %s  (%s)\n",
+               prompt, last[0] ? last : "empty", rfname(expect), rfname(got), why);
+        failures++;
+        return;
+    }
+    if (got == AM_REF_DONE && strcmp(out, expect_out) != 0) {
+        printf("  FAIL ref \"%s\" (slot=%s)\n        rewrote to \"%s\", expected \"%s\"  (%s)\n",
+               prompt, last, out, expect_out, why);
+        failures++;
+    }
+}
+
+static void dym(const char *typed, const char *cand, int expect, const char *why)
+{
+    int got = am_did_you_mean(typed, cand);
+    if (got != expect) {
+        printf("  FAIL did-you-mean(\"%s\", \"%s\") = %d, expected %d  (%s)\n",
+               typed, cand, got, expect, why);
+        failures++;
+    }
+}
+
 static void identis(unsigned long ts, unsigned long th, int tv,
                     unsigned long ns, unsigned long nh, int nv,
                     int expect, const char *why)
@@ -335,6 +377,9 @@ struct as_model {
     int  blocked;    /* a yes refused because the file changed */
     struct m_file fs[M_FILES];
     struct am_ident armed_id;   /* as_pend_id — what we DESCRIBED */
+    char last[64];   /* as_last_file — what "it" means right now  */
+    int  last_age;   /* prompts since a file was last touched     */
+    int  refused_ref;/* a pronoun with nothing recorded           */
 };
 
 static void m_init(struct as_model *m)
@@ -342,7 +387,14 @@ static void m_init(struct as_model *m)
     m->buf[0] = 0; m->pend[0] = 0; m->died[0] = 0;
     m->armed = 0; m->focus = 1; m->opens = 0; m->blocked = 0;
     m->armed_id.size = 0; m->armed_id.hash = 0; m->armed_id.valid = 0;
+    m->last[0] = 0; m->last_age = 0; m->refused_ref = 0;
     for (int i = 0; i < M_FILES; i++) m->fs[i].present = 0;
+}
+
+static void m_touch(struct as_model *m, const char *name)
+{
+    snprintf(m->last, sizeof(m->last), "%s", name);
+    m->last_age = 0;
 }
 
 static struct m_file *m_fs_get(struct as_model *m, const char *name)
@@ -401,24 +453,42 @@ static void m_enter(struct as_model *m)
             int k = 0; while (m->pend[k]) { m->died[k] = m->pend[k]; k++; }
             m->died[k] = 0;
             m_fs_rm(m, m->pend);
+            m->last[0] = 0;   /* "it" must not go on naming a deleted file */
         }
         m->armed = 0; m->pend[0] = 0;
     } else if (s == AM_SUBMIT_CANCEL) {
         m->armed = 0; m->pend[0] = 0;
     } else {                                   /* AM_SUBMIT_PROMPT */
-        if (am_classify(m->buf) == AM_NONE &&
-            am_action_of(m->buf) == AM_ACT_OPEN &&
-            am_open_target(m->buf) != AM_OPEN_NONE) {
-            m->opens++; m->focus = 0;          /* the new window takes focus */
-        } else if (am_classify(m->buf) == AM_NONE &&
-                   am_action_of(m->buf) == AM_ACT_DELETE &&
-                   am_named_file(m->buf, m->pend, (int)sizeof(m->pend))
-                       == AM_NAMED_ONE &&
-                   m_fs_get(m, m->pend)) {
-            /* Arming records what we are about to PUT ON SCREEN. That snapshot
-             * is the thing the user's yes refers to. */
-            m->armed_id = m_ident(m, m->pend);
-            m->armed = 1;
+        /* try_intent's order exactly: classify, then age the slot, then
+         * resolve "it", then dispatch on the REWRITE. */
+        const char *q = m->buf;
+        char rp[128];
+        if (m->last[0] && am_ref_expired(++m->last_age)) { m->last[0] = 0; m->last_age = 0; }
+        enum am_ref r = am_resolve_ref(q, m->last, rp, sizeof(rp));
+        if (r == AM_REF_UNSET) {
+            m->refused_ref = 1;                /* refuse — never guess a name */
+        } else {
+            if (r == AM_REF_DONE) q = rp;
+            char f[64];
+            int named = (am_named_file(q, f, (int)sizeof(f)) == AM_NAMED_ONE);
+            enum am_action a = (am_classify(q) == AM_NONE) ? am_action_of(q)
+                                                           : AM_ACT_NONE;
+            if (a == AM_ACT_OPEN && am_open_target(q) != AM_OPEN_NONE) {
+                m->opens++; m->focus = 0;      /* the new window takes focus */
+            } else if (a == AM_ACT_CREATE && named) {
+                m_fs_put(m, f, 0, 0x0); m_touch(m, f);
+            } else if (a == AM_ACT_WRITE && named) {
+                m_fs_put(m, f, 5, 0x5EED); m_touch(m, f);
+            } else if ((a == AM_ACT_READ || a == AM_ACT_OPEN) && named &&
+                       m_fs_get(m, f)) {
+                m_touch(m, f);
+            } else if (a == AM_ACT_DELETE && named && m_fs_get(m, f)) {
+                snprintf(m->pend, sizeof(m->pend), "%s", f);
+                /* Arming records what we are about to PUT ON SCREEN. That
+                 * snapshot is the thing the user's yes refers to. */
+                m->armed_id = m_ident(m, m->pend);
+                m->armed = 1;
+            }
         }
     }
     if (am_submit_consumes(s, m->focus)) m->buf[0] = 0;
@@ -1128,6 +1198,157 @@ int main(void)
             failures++;
         }
     }
+
+    /* ═══ 4i. "IT" — the conversation's one slot. ═══
+     *
+     * The rewrite is asserted in full, not just "it resolved": a pronoun that
+     * resolves to the wrong sentence is the same class of bug as an extractor
+     * that picks the wrong token, and this arc has already shipped one of those. */
+    ref("write hello to it",  "notes.txt", AM_REF_DONE, "write hello to notes.txt",
+        "THE SPEC'S CASE: today this creates a file called it.txt");
+    ref("open it",            "notes.txt", AM_REF_DONE, "open notes.txt",     "open");
+    ref("actually delete it", "notes.txt", AM_REF_DONE, "actually delete notes.txt",
+        "and straight into the confirm gate, which will NAME notes.txt on screen");
+    ref("read it",            "notes.txt", AM_REF_DONE, "read notes.txt",     "read");
+    ref("delete that",        "notes.txt", AM_REF_DONE, "delete notes.txt",   "that");
+    ref("read this",          "notes.txt", AM_REF_DONE, "read notes.txt",     "this");
+    ref("delete the file",    "notes.txt", AM_REF_DONE, "delete notes.txt",   "the file");
+    ref("read the same file", "notes.txt", AM_REF_DONE, "read notes.txt",
+        "longest phrase wins - not 'the' + debris");
+    ref("append bye to the same", "notes.txt", AM_REF_DONE, "append bye to notes.txt",
+        "bare 'the same'");
+    ref("copy it to backup.txt",  "notes.txt", AM_REF_NONE, "",
+        "an explicit filename is present, so the pronoun path stands down entirely");
+
+    /* Nothing recorded -> REFUSE. Never a literal it.txt. */
+    ref("open it",         "", AM_REF_UNSET, "", "THE RULE: refuse, never invent it.txt");
+    ref("delete it",       "", AM_REF_UNSET, "", "and especially not in front of delete");
+    ref("write hi to it",  "", AM_REF_UNSET, "", "nor as a write destination");
+
+    /* Negatives — the words appear but nothing may be rewritten. */
+    ref("read it.txt",     "notes.txt", AM_REF_NONE, "",
+        "SPEC NEGATIVE: it.txt is a real filename, not a pronoun");
+    ref("delete it.txt",   "notes.txt", AM_REF_NONE, "",
+        "...and that has to hold in front of a destructive verb too");
+    ref("is it working",   "notes.txt", AM_REF_NONE, "",
+        "SPEC NEGATIVE: a question about the machine, not a file operation");
+    ref("what is this",    "notes.txt", AM_REF_NONE, "",
+        "the classifier owns this one - IDENTITY, and it must not be rewritten");
+    ref("close it",        "notes.txt", AM_REF_NONE, "",
+        "CLOSE claims this first: it means the window, not the file");
+    ref("what time is it", "notes.txt", AM_REF_NONE, "", "DATE owns it");
+    ref("make a file called it", "notes.txt", AM_REF_NONE, "",
+        "create NAMES something new - there is nothing to refer back to");
+    ref("how much memory", "notes.txt", AM_REF_NONE, "", "no referring word at all");
+    ref("delete notes.txt","notes.txt", AM_REF_NONE, "", "an ordinary named delete");
+    ref("split it",        "notes.txt", AM_REF_NONE, "",
+        "'it' is there but no file action wants a name - nothing to rewrite");
+
+    /* The conversation, end to end. This is the whole feature: it lives in the
+     * join between submissions and nothing standalone can express it. */
+    {
+        struct as_model m;
+
+        m_init(&m);
+        m_line(&m, "make notes.txt");
+        if (strcmp(m.last, "notes.txt")) {
+            printf("  FAIL after 'make notes.txt' the slot holds \"%s\"\n", m.last);
+            failures++;
+        }
+        m_line(&m, "write hello to it");
+        if (m_fs_get(&m, "it.txt")) {
+            printf("  FAIL 'write hello to it' created a file called it.txt "
+                   "- the exact bug this feature exists to kill\n");
+            failures++;
+        }
+        if (!m_fs_get(&m, "notes.txt")) {
+            printf("  FAIL 'write hello to it' did not write notes.txt\n");
+            failures++;
+        }
+        m_line(&m, "delete it");
+        if (strcmp(m.pend, "notes.txt")) {
+            printf("  FAIL 'delete it' armed on \"%s\", expected notes.txt "
+                   "- the confirm would have shown the wrong name\n", m.pend);
+            failures++;
+        }
+        m_line(&m, "yes");
+        if (strcmp(m.died, "notes.txt")) {
+            printf("  FAIL the conversation deleted \"%s\", expected notes.txt\n", m.died);
+            failures++;
+        }
+        if (m.last[0]) {
+            printf("  FAIL the slot still names \"%s\" after it was deleted\n", m.last);
+            failures++;
+        }
+
+        /* Nothing recorded: refuse, and create nothing. */
+        m_init(&m);
+        m_line(&m, "open it");
+        if (!m.refused_ref) {
+            printf("  FAIL 'open it' with an empty slot did not refuse\n");
+            failures++;
+        }
+        if (m_fs_get(&m, "it.txt")) {
+            printf("  FAIL 'open it' invented it.txt\n");
+            failures++;
+        }
+
+        /* The slot expires. Four unrelated prompts is further than any pronoun
+         * should reach back — resolving there would be a confident guess. */
+        m_init(&m);
+        m_line(&m, "make notes.txt");
+        m_line(&m, "how much memory");
+        m_line(&m, "what time is it");
+        m_line(&m, "what cpu is this");
+        m_line(&m, "who are you");
+        m_line(&m, "delete it");
+        if (m.armed) {
+            printf("  FAIL 'delete it' resolved to \"%s\" after five unrelated "
+                   "prompts - the slot never expired\n", m.pend);
+            failures++;
+        }
+        if (!m.refused_ref) {
+            printf("  FAIL an expired slot did not produce a refusal\n");
+            failures++;
+        }
+
+        /* ...but it must survive a NORMAL gap, or the feature is useless. */
+        m_init(&m);
+        m_line(&m, "make notes.txt");
+        m_line(&m, "how much memory");
+        m_line(&m, "delete it");
+        if (strcmp(m.pend, "notes.txt")) {
+            printf("  FAIL the slot expired too eagerly - 'delete it' after one "
+                   "unrelated question armed on \"%s\"\n", m.pend);
+            failures++;
+        }
+
+        /* The slot follows the most recent file, not the first one. */
+        m_init(&m);
+        m_line(&m, "make a.txt");
+        m_line(&m, "make b.txt");
+        m_line(&m, "delete it");
+        if (strcmp(m.pend, "b.txt")) {
+            printf("  FAIL 'it' should mean the most recent file b.txt, got \"%s\"\n",
+                   m.pend);
+            failures++;
+        }
+    }
+
+    /* ═══ 4j. did you mean? Suggest, never correct. ═══ */
+    dym("notes.txt", "note.txt",  1, "THE SPEC'S CASE: one deletion");
+    dym("note.txt",  "notes.txt", 1, "and the other direction");
+    dym("notes.txt", "notes.txt", 0, "an exact match is not a suggestion");
+    dym("notes.txt", "notez.txt", 1, "one substitution");
+    dym("notes.txt", "backup.txt", 0, "nothing like it - say nothing at all");
+    dym("a.txt",     "b.txt",     0,
+        "one edit apart and 80% identical BY WHOLE NAME - but the stems share "
+        "nothing, and these are two different files, not a typo");
+    dym("notes.txt", "notes.doc", 0, "three edits - a different extension, not a slip");
+    dym("log.txt",   "dog.txt",   1, "3-char stem, one edit: the tightest thing offered");
+    dym("ab.txt",    "cd.txt",    0, "2-char stems are below the floor entirely");
+    dym("assumptions.txt", "assumption.txt", 1, "long names tolerate an edit");
+    dym("",          "notes.txt", 0, "empty input suggests nothing");
 
     /* ═══ 5. Which app "open X" names. ═══ */
     opn("open the editor",             AM_OPEN_EDITOR,   "editor");

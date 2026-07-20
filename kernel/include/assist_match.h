@@ -471,6 +471,205 @@ static inline enum am_action am_action_of(const char *p)
     return AM_ACT_NONE;
 }
 
+/* ─── "it" ──────────────────────────────────────────────────────────────
+ *
+ * Every prompt here has been standalone, and nobody talks like that:
+ *
+ *   > make notes.txt
+ *   > write hello to it     <- means notes.txt. Made a file called it.txt.
+ *   > open it               <- still notes.txt. Failed.
+ *
+ * So one slot holds the last file that was actually touched, and the referring
+ * words resolve to it. ONE slot, not a history: "it" means the most recent
+ * file, full stop. A two-deep stack invites "the other one" and there is no
+ * way to be sure which was meant — and when we cannot be sure, we ask, which
+ * is the same rule the delete gate runs on.
+ *
+ * The resolution is a REWRITE: "delete it" becomes "delete notes.txt" and then
+ * takes the ordinary path, extractor and confirmation gate and all. That is
+ * what makes attaching a pronoun to a destructive verb safe — the gate names
+ * the file it resolved to, on screen, before anything happens:
+ *
+ *   > delete it
+ *   delete notes.txt (14 B)?
+ *
+ * A wrong resolution shows a wrong name and the user says no. This feature
+ * could not have been built before that gate existed.
+ *
+ * THREE THINGS IT MUST NOT DO:
+ *
+ *   Never guess. With nothing recorded, "open it" says so. It must NEVER fall
+ *   back to a literal it.txt — a confident action on a name the user never
+ *   typed is the exact shape of every bug this file has had.
+ *
+ *   Never claim an explicit name. "read it.txt" names a real file, so the
+ *   pronoun path does not run at all: an explicit filename always wins.
+ *
+ *   Never rewrite a question. "is it working" and "what is this" are not file
+ *   operations; the classifier and the action table both have to want a file
+ *   before a word gets replaced. */
+
+/* Where the referring phrase sits in p. Longest alternatives first, so "the
+ * same file" is not matched as a bare "file" with debris left around it. */
+static inline int am_ref_span(const char *p, int *at, int *len)
+{
+    static const char *const refs[] = {
+        "the same file", "the same one", "that same file", "the same",
+        "that file", "this file", "the file", "it", "that", "this", "same",
+    };
+    for (unsigned k = 0; k < sizeof(refs) / sizeof(refs[0]); k++) {
+        int nl = 0; while (refs[k][nl]) nl++;
+        for (int i = 0; p[i]; i++) {
+            int j = 0;
+            while (j < nl && p[i + j] && am_lc(p[i + j]) == am_lc(refs[k][j])) j++;
+            if (j != nl) continue;
+            if (i > 0 && am_wordch(p, i - 1)) continue;
+            if (p[i + nl] && am_wordch(p, i + nl)) continue;
+            *at = i; *len = nl; return 1;
+        }
+    }
+    return 0;
+}
+
+enum am_ref {
+    AM_REF_NONE = 0,   /* no referring word — nothing to do        */
+    AM_REF_DONE,       /* rewritten; act on `out`                  */
+    AM_REF_UNSET,      /* referring word, nothing recorded: REFUSE */
+};
+
+/* How many prompts the slot survives without a file being touched.
+ *
+ * A pronoun that reaches back through ten minutes and four topics is worse
+ * than one that does not resolve at all: it acts confidently on a guess, and
+ * the user has long since stopped thinking about that file. So the bound has
+ * to be smaller than "a few topics" — three lets an ordinary aside ("how much
+ * memory?") sit in the middle of a conversation about a file without breaking
+ * it, and stops anything longer. */
+#define AM_REF_MAX_AGE 3
+
+static inline int am_ref_expired(int age) { return age > AM_REF_MAX_AGE; }
+
+/* Splice `with` into p in place of the referring phrase. 1 if there was one. */
+static inline int am_ref_rewrite(const char *p, const char *with,
+                                 char *out, int cap)
+{
+    int at, len, k = 0;
+    if (cap > 0) out[0] = 0;
+    if (!am_ref_span(p, &at, &len)) return 0;
+    for (int i = 0; i < at && k < cap - 1; i++)      out[k++] = p[i];
+    for (int i = 0; with[i] && k < cap - 1; i++)     out[k++] = with[i];
+    for (int i = at + len; p[i] && k < cap - 1; i++) out[k++] = p[i];
+    out[k] = 0;
+    return 1;
+}
+
+/* Does this prompt want a file from the slot at all? Kept separate because
+ * both the rewrite and the refusal have to agree on it exactly — a sentence
+ * we would not rewrite must not produce "I don't know what 'it' refers to"
+ * either. Answering a question about the machine with a complaint about
+ * pronouns is its own kind of wrong. */
+static inline int am_ref_wanted(const char *p)
+{
+    /* A question is not a file operation. "what is this" is about the OS. */
+    if (am_classify(p) != AM_NONE) return 0;
+    /* An explicitly named file always wins: "read it.txt" is a filename. */
+    { char t[128]; if (am_file_tokens(p, 0, t, (int)sizeof(t)) > 0) return 0; }
+    /* Creating names something NEW, so there is nothing to refer back to —
+     * and without this "make a file called it" would be rewritten. */
+    if (am_action_of(p) == AM_ACT_CREATE) return 0;
+
+    /* The real test: would substituting a filename here even BE a file
+     * operation? Splice in a probe and ask. "is it working" becomes "is
+     * probe.txt working", which is not an action, so the sentence keeps its
+     * own words and never hears about pronouns. "delete it" becomes "delete
+     * probe.txt", which plainly is one.
+     *
+     * This has to be asked on the rewrite rather than the original, because
+     * the original is exactly what the action table cannot parse — "delete it"
+     * fails DELETE's file-noun guard, which is the whole reason it needed
+     * resolving. */
+    char probe[192];
+    if (!am_ref_rewrite(p, "probe.txt", probe, (int)sizeof(probe))) return 0;
+    return am_classify(probe) == AM_NONE && am_action_of(probe) != AM_ACT_NONE;
+}
+
+/* Copy the referring word itself out, for the refusal to quote back. */
+static inline void am_ref_word(const char *p, char *out, int cap)
+{
+    int at, len, k = 0;
+    if (cap > 0) out[0] = 0;
+    if (!am_ref_wanted(p) || !am_ref_span(p, &at, &len)) return;
+    while (k < len && k < cap - 1) { out[k] = p[at + k]; k++; }
+    out[k] = 0;
+}
+
+/* Rewrite p into out with the referring phrase replaced by `last`. */
+static inline enum am_ref am_resolve_ref(const char *p, const char *last,
+                                         char *out, int cap)
+{
+    if (cap > 0) out[0] = 0;
+    if (!am_ref_wanted(p)) return AM_REF_NONE;
+    if (!last || !last[0]) return AM_REF_UNSET;
+    return am_ref_rewrite(p, last, out, cap) ? AM_REF_DONE : AM_REF_NONE;
+}
+
+/* ─── did you mean? ─────────────────────────────────────────────────────
+ * Levenshtein, two rows rather than a full table: a 64x64 table of ints is
+ * 16 KiB and the kernel stack is 16 KiB total. Bails early when the lengths
+ * are too far apart to come within the caller's threshold. */
+#define AM_NAME_CAP 64
+
+static inline int am_edit_distance(const char *a, const char *b)
+{
+    int la = 0; while (a[la]) la++;
+    int lb = 0; while (b[lb]) lb++;
+    if (la >= AM_NAME_CAP || lb >= AM_NAME_CAP) return 99;
+    int diff = la > lb ? la - lb : lb - la;
+    if (diff > 2) return diff;            /* already past any useful threshold */
+
+    int prev[AM_NAME_CAP + 1], cur[AM_NAME_CAP + 1];
+    for (int j = 0; j <= lb; j++) prev[j] = j;
+    for (int i = 1; i <= la; i++) {
+        cur[0] = i;
+        for (int j = 1; j <= lb; j++) {
+            int sub = prev[j - 1] + (am_lc(a[i - 1]) == am_lc(b[j - 1]) ? 0 : 1);
+            int del = prev[j] + 1;
+            int ins = cur[j - 1] + 1;
+            int m = sub < del ? sub : del;
+            cur[j] = m < ins ? m : ins;
+        }
+        for (int j = 0; j <= lb; j++) prev[j] = cur[j];
+    }
+    return prev[lb];
+}
+
+/* Everything before the last dot. */
+static inline int am_stem_len(const char *n)
+{
+    int len = 0, dot = -1;
+    for (int i = 0; n[i]; i++) { if (n[i] == '.') dot = i; len = i + 1; }
+    return dot > 0 ? dot : len;
+}
+
+/* Is `cand` close enough to `typed` to be worth offering? A bad suggestion is
+ * worse than none, so this is tight: within 2 edits, and those edits must be
+ * small relative to the STEM.
+ *
+ * The stem rather than the whole name, because nearly every file here ends in
+ * ".txt" — four characters of shared noise that make any two names look
+ * alike. By whole-name length "a.txt" and "b.txt" are 80% identical and one
+ * edit apart, which would have the assistant suggesting every short file in
+ * the directory for every other one. By stem they are completely unrelated,
+ * which is the truth. */
+static inline int am_did_you_mean(const char *typed, const char *cand)
+{
+    int d = am_edit_distance(typed, cand);
+    if (d == 0 || d > 2) return 0;
+    int st = am_stem_len(typed), sc = am_stem_len(cand);
+    int shorter = st < sc ? st : sc;
+    return shorter >= 3 && d * 3 <= shorter;
+}
+
 /* ─── why a destructive sentence was turned down ────────────────────────
  *
  * am_action_of() answers "what should I do", and for a refused delete the
