@@ -35,7 +35,7 @@
  * Mono) in console_init(). Kept as variables (not macros) with the SAME names
  * the cursor/scroll/wrap/tab code below already uses, so that logic is
  * unchanged: it still works one glyph cell at a time. */
-static uint32_t GW = 12, GH = 27, LINE_STRIDE = 29;   /* real values set at init */
+static uint32_t GW = 10, GH = 22, LINE_STRIDE = 24;   /* real values set at init */
 
 /* From kernel_mb2.c (exported _x wrappers). */
 extern void     fb_rect_x(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t color);

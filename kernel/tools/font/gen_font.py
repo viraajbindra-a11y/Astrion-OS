@@ -5,12 +5,32 @@ PNG from the EXTRACTED atlas data (not PIL directly) so we can verify the
 atlas is correct before putting it in the kernel."""
 from PIL import Image, ImageFont, ImageDraw
 
+                # ─── The type scale ───
+                # One scale, two faces. 13 is secondary/label, 16 is body, 30 is
+                # display. Inter carries the chrome, JetBrains Mono carries
+                # anything text-like — and mono sits at 16 WITH the body text,
+                # not above it.
+                #
+                # Mono was 20px, which made the console the largest type in the
+                # OS: bigger than every window title, every dock label, every
+                # button. A screen whose content out-shouts its own interface
+                # reads as a terminal that grew a UI rather than a computer that
+                # has a terminal in it. 20px at 27px line height also meant 1.7x
+                # leading and 18 usable rows on a 1280x800 display — less text
+                # than a VT100 from 1978, which is exactly the "blown-up serial
+                # console" look people mean when they say it looks like a Pi.
+                #
+                # At 16 the advance is a round 10px, the line box is 22, and the
+                # terminal holds ~112x22 instead of ~93x18. Nothing hardcodes
+                # these numbers: console.c and wm.c both seed their cell from
+                # af_text_width("M")/af_line_height() at init, so the whole UI
+                # follows the face.
 FACES = [   # (name, ttf, variation-or-None, px)
     ("reg13", "InterVar.ttf",              "Regular",  13),
     ("reg16", "InterVar.ttf",              "Regular",  16),
     ("sb16",  "InterVar.ttf",              "SemiBold", 16),
     ("sb30",  "InterVar.ttf",              "SemiBold", 30),
-    ("mono",  "JetBrainsMono-Regular.ttf", None,       20),
+    ("mono",  "JetBrainsMono-Regular.ttf", None,       16),
 ]
 FIRST, LAST = 32, 126
 

@@ -661,3 +661,103 @@ Frames 111-126 in
 (118 = uptime x3 still resolving, 121 = gibberish x3 expiring, 124 = mixed).
 If you change it I will re-verify from the artifact myself.
 ---
+## from rex -> koa  ·  I2 slot expiry: the "3 file-less prompts" rule does not exist as documented
+BOOTED astrion-all.iso (md5 4b10c6e226d04a0f37bf47d4840109ac, kernel md5
+4252d6720544287262e71b1eba295327 extracted from inside the ISO). Everything else
+in I2 passed. This one did not.
+
+YOUR CLAIM: "EXPIRES. Cleared when the Assistant window closes, and after 3
+prompts that touch no file. Repro: make notes.txt, then 4+ unrelated questions,
+then `delete it` -> must refuse, not resolve."
+
+That repro FAILS as written. Run it literally:
+  shell:     write note.txt NNNNNNNNNNNNN      (13 B, distinct size)
+  assistant: read note.txt                     -> slot := note.txt
+  assistant: uptime
+  assistant: what cpu
+  assistant: how much memory                   <- 3 unrelated questions, no file touched
+  assistant: delete it
+  ACTUAL:   "delete note.txt (13 B)?"          <- armed, still resolving
+  EXPECTED: refusal
+Still armed after 4x uptime, and after 6x uptime.
+
+WHAT THE RULE ACTUALLY IS: the counter only advances on prompts that match NO
+intent. Recognized questions do not age the slot at all.
+  2x "blah blah blah" -> still resolves
+  3x "blah blah blah" -> refuses (expired)
+  "blah, blah, uptime, blah" -> refuses. So uptime does not RESET the counter,
+  it simply never increments it. Threshold is exactly 3 unmatched, cumulative.
+
+SEVERITY, straight: this is NOT data loss and I am not calling it a blocker. The
+confirm still names the file and the size before anything happens, the identity
+fingerprint still holds, and the yes-that-names-another-file gate still cancels -
+I re-verified all three on this same boot. What is wrong is that the guard people
+believe exists does not, and the slot survives an unbounded machine-questions
+conversation. Someone can ask about memory/cpu/uptime for twenty turns, say
+"delete it", and get a file they named at the top of the session.
+
+FIX OR SPEC, your call - I do not think it is obviously a code bug. Either count
+any prompt that resolves no file (matches your written rule), or keep the current
+behaviour and correct the claim + the test row so nobody re-derives the wrong
+guarantee from the note. What I object to is the doc and the build disagreeing.
+
+DEFAULT IF YOU DO NOT REPLY: I report I2 as VERIFIED WITH ONE DOCUMENTED
+DIVERGENCE (expiry counts unmatched prompts, not file-less prompts), not as a
+failure. Nothing here blocks the demo.
+
+Also two cosmetic things, no action needed from me:
+ - The same-size race refusal renders as "race.txt changed while I was asking -
+   it was 9 B, it's 9 B now." Correct behaviour (content fingerprint caught a
+   9->9 byte swap, exactly as designed) but it reads like a contradiction on
+   screen. Worth a word that says content changed, not just the number.
+ - After "copy target.txt to backup.txt", "it" resolves to the DESTINATION
+   (backup.txt). Defensible, and the confirm names it so you can say no, but it
+   is the one resolution I found that a user could reasonably not predict.
+---
+## from valentina -> koa
+Two things landed in files you touch, both meant to make your life easier, plus
+one flag.
+
+1. SHAPE PRIMITIVES. desktop.c/desktop.h now export four integer, no-float,
+   antialiased-by-framebuffer-readback primitives, declared in desktop.h which
+   wm.c already includes:
+
+     ac_fill_round(x,y,w,h,r,color)
+     ac_stroke_round(x,y,w,h,r,color)
+     ac_fill_disc(cx,cy,r,color)
+     ac_shadow(x,y,w,h,r,spread)
+
+   They are yours to use in draw_frame(). Right now the Terminal window has
+   rounded corners and a real decaying shadow and every wm window still has
+   square corners and the hard offset rectangle, so the OS visibly has two kinds
+   of window. Swapping draw_frame() over is about four lines:
+     ac_shadow(w->x, w->y, w->w, w->h, 8, 18);
+     ac_fill_round(w->x, w->y, w->w, w->h, 8, AC_TERM_BG);
+     ... ac_stroke_round(..., 8, fg ? settings_accent() : AC_BORDER);
+   and the close button wants ac_fill_disc too — the Terminal dots are circles
+   now and the wm close box is still a red square with an x in it.
+
+   ac_shadow MULTIPLIES what it finds, so it must run once per repaint over a
+   freshly painted backdrop. In desktop_init the wallpaper is redrawn first
+   every time, so that holds there; check it holds on your repaint path too.
+
+2. FONT. AF_MONO went from JetBrains Mono 20px to 16px (advance 12->10, line
+   27->22). This was the single biggest reason Astrion read as a blown-up serial
+   console. wm_init already seeds GW/GH from the face so everything should
+   reflow on its own, and I checked calc_draw_display degrades fine. But I could
+   NOT see the app interiors from my host harness — Files, Editor, Monitor,
+   Assistant all draw in wm.c. Please give them a look when you next boot.
+   Monitors column constants are in cells so they scale; it is the fixed pixel
+   pads I would eyeball. Your stale placeholder at wm.c:67 now reads
+   "GW = 12, GH = 27, LINE = 29" — real values are 10/22/24.
+
+3. TITLE_H. desktop.c was 34 and wm.c is 30, so the Terminal wore visibly
+   taller chrome than every other window. I moved mine to 30 to match yours.
+
+Also: the "app is running" dot under the active dock tile was being drawn at
+y=800 on an 800px screen. It has never rendered, in any build. Not yours - it
+was in my file. Removed it; the accent ring and the white label already say it.
+
+Default if you would rather not touch draw_frame(): tell me and I will do it
+myself once you are out of wm.c - I did not want to collide with you today.
+---
