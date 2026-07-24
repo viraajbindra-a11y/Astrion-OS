@@ -79,7 +79,7 @@ def rope(x, pos, theta, head_dim):
     return out
 
 
-def attention(x, w, cfg, kv_cache, pos):
+def attention(x, w, cfg, kv_cache, pos, rec=None):
     H, KV, D = cfg["n_heads"], cfg["n_kv_heads"], cfg["head_dim"]
     group = H // KV
 
@@ -95,6 +95,12 @@ def attention(x, w, cfg, kv_cache, pos):
         q[h] = rope(q[h], pos, cfg["rope_theta"], D)
     for h in range(KV):
         k[h] = rope(k[h], pos, cfg["rope_theta"], D)
+
+    # The C test checks Q and K right here, post-RoPE — the op most likely to be
+    # subtly wrong, and the one whose control (drop RoPE) is a no-op at pos 0.
+    if rec is not None:
+        rec["qrope"] = q.reshape(-1).copy()
+        rec["krope"] = k.reshape(-1).copy()
 
     # Append this step's k,v to the per-layer cache.
     kv_cache["k"].append(k)
@@ -120,18 +126,45 @@ def mlp(x, w):
     return (silu(x @ w["w_gate"].T) * (x @ w["w_up"].T)) @ w["w_down"].T
 
 
-def forward(tokens, w, cfg):
-    """Full stack over a sequence, returning logits at each position."""
+def forward(tokens, w, cfg, trace=None):
+    """Full stack over a sequence, returning logits at each position.
+
+    When `trace` is a list it is filled with one dict per position, each holding
+    every op's output for every layer — the exact points model.c's model_trace
+    captures, so the C test can diff op-by-op instead of only at the logits,
+    where a mid-layer sign error would hide."""
     caches = [{"k": [], "v": []} for _ in range(cfg["n_layers"])]
     logits_seq = []
     for pos, tok in enumerate(tokens):
         x = w["embed"][tok].astype(np.float64).copy()
+        rec = None
+        if trace is not None:
+            rec = {k: [] for k in ("ln1", "qrope", "krope", "attn",
+                                   "ln2", "mlp", "xout")}
         for l in range(cfg["n_layers"]):
             lw = w["layers"][l]
-            x = x + attention(rmsnorm(x, lw["ln1"], cfg["rms_eps"]), lw, cfg, caches[l], pos)
-            x = x + mlp(rmsnorm(x, lw["ln2"], cfg["rms_eps"]), lw)
-        x = rmsnorm(x, w["final_ln"], cfg["rms_eps"])
-        logits_seq.append(x @ w["lm_head"].T)
+            n1 = rmsnorm(x, lw["ln1"], cfg["rms_eps"])
+            arec = {} if rec is not None else None
+            a = attention(n1, lw, cfg, caches[l], pos, arec)
+            x = x + a
+            n2 = rmsnorm(x, lw["ln2"], cfg["rms_eps"])
+            m = mlp(n2, lw)
+            x = x + m
+            if rec is not None:
+                rec["ln1"].append(n1.copy())
+                rec["qrope"].append(arec["qrope"])
+                rec["krope"].append(arec["krope"])
+                rec["attn"].append(a.copy())
+                rec["ln2"].append(n2.copy())
+                rec["mlp"].append(m.copy())
+                rec["xout"].append(x.copy())
+        xf = rmsnorm(x, w["final_ln"], cfg["rms_eps"])
+        lg = xf @ w["lm_head"].T
+        if rec is not None:
+            rec["final"] = xf.copy()
+            rec["logits"] = lg.copy()
+            trace.append(rec)
+        logits_seq.append(lg)
     return np.array(logits_seq)
 
 
@@ -164,11 +197,98 @@ def make_weights(cfg, seed=1):
     }
 
 
+def _carr(f, name, length, flat):
+    """Emit `static const double NAME[LENGTH] = { ... };`, flat and 1-D.
+
+    Flat 1-D (not multidimensional) on purpose: a nested-brace initializer trips
+    -Wmissing-braces under the test's -Werror, and the C side indexes these with
+    plain stride math anyway. repr(float(v)) is the shortest round-trippable
+    literal, so the C test reads back the SAME doubles the oracle computed."""
+    vals = [repr(float(v)) for v in np.asarray(flat).ravel()]
+    assert len(vals) == length, (name, len(vals), length)
+    f.write("static const double %s[%d] = {\n" % (name, length))
+    for i in range(0, len(vals), 6):
+        f.write("  " + ", ".join(vals[i:i + 6]) + ",\n")
+    f.write("};\n\n")
+
+
+def emit_c_header(path, cfg, tokens, w, trace):
+    """Dump config + weights + every per-op intermediate as a C header.
+
+    Layout mirrors model.h's structs exactly so test_model.c can convert the
+    double weights to int64 fixed-point / int8 and diff the C forward pass
+    against RF_T_* op-by-op. Weight rows are [out][in]; per-layer arrays are
+    concatenated over layers, intermediates over [pos][layer]."""
+    D, NL = cfg["dim"], cfg["n_layers"]
+    H, KV, HD = cfg["n_heads"], cfg["n_kv_heads"], cfg["head_dim"]
+    F, V = cfg["ffn_dim"], cfg["vocab"]
+    HHD, KVD = H * HD, KV * HD
+    ntok = len(tokens)
+    eps_shift = 40
+    rms_eps_fp = int(round(cfg["rms_eps"] * (1 << eps_shift)))
+
+    def layers(key):   # concat one weight over all layers
+        return np.concatenate([np.asarray(w["layers"][l][key]).ravel()
+                               for l in range(NL)])
+
+    def tr(key):       # concat one intermediate over [pos][layer]
+        return np.concatenate([np.asarray(trace[p][key][l]).ravel()
+                               for p in range(ntok) for l in range(NL)])
+
+    def trp(key):      # concat a per-position intermediate over [pos]
+        return np.concatenate([np.asarray(trace[p][key]).ravel()
+                               for p in range(ntok)])
+
+    with open(path, "w") as f:
+        f.write("/* GENERATED by tools/ref_forward.py — do not edit by hand.\n"
+                " * The oracle's config, weights and per-op intermediates as C\n"
+                " * arrays, so kernel/tests/test_model.c needs no JSON parser and\n"
+                " * checks the SAME numbers off the SAME weights. */\n")
+        f.write("#ifndef REF_FORWARD_FIXTURE_H\n#define REF_FORWARD_FIXTURE_H\n\n")
+        for name, val in [("RF_DIM", D), ("RF_NL", NL), ("RF_H", H), ("RF_KV", KV),
+                          ("RF_HD", HD), ("RF_HHD", HHD), ("RF_KVD", KVD),
+                          ("RF_FFN", F), ("RF_VOCAB", V), ("RF_NTOK", ntok),
+                          ("RF_MAX_SEQ", ntok), ("RF_ROPE_THETA", int(cfg["rope_theta"])),
+                          ("RF_EPS_SHIFT", eps_shift)]:
+            f.write("#define %s %d\n" % (name, val))
+        f.write("#define RF_RMS_EPS_FP %dLL\n\n" % rms_eps_fp)
+        f.write("static const int RF_TOKENS[RF_NTOK] = { %s };\n\n"
+                % ", ".join(str(t) for t in tokens))
+
+        _carr(f, "RF_EMBED",    V * D,        w["embed"])
+        _carr(f, "RF_LN1",      NL * D,       layers("ln1"))
+        _carr(f, "RF_LN2",      NL * D,       layers("ln2"))
+        _carr(f, "RF_WQ",       NL * HHD * D, layers("wq"))
+        _carr(f, "RF_BQ",       NL * HHD,     layers("bq"))
+        _carr(f, "RF_WK",       NL * KVD * D, layers("wk"))
+        _carr(f, "RF_BK",       NL * KVD,     layers("bk"))
+        _carr(f, "RF_WV",       NL * KVD * D, layers("wv"))
+        _carr(f, "RF_BV",       NL * KVD,     layers("bv"))
+        _carr(f, "RF_WO",       NL * D * HHD, layers("wo"))
+        _carr(f, "RF_WGATE",    NL * F * D,   layers("w_gate"))
+        _carr(f, "RF_WUP",      NL * F * D,   layers("w_up"))
+        _carr(f, "RF_WDOWN",    NL * D * F,   layers("w_down"))
+        _carr(f, "RF_FINAL_LN", D,            w["final_ln"])
+        _carr(f, "RF_LMHEAD",   V * D,        w["lm_head"])
+
+        _carr(f, "RF_T_LN1",    ntok * NL * D,   tr("ln1"))
+        _carr(f, "RF_T_QROPE",  ntok * NL * HHD, tr("qrope"))
+        _carr(f, "RF_T_KROPE",  ntok * NL * KVD, tr("krope"))
+        _carr(f, "RF_T_ATTN",   ntok * NL * D,   tr("attn"))
+        _carr(f, "RF_T_LN2",    ntok * NL * D,   tr("ln2"))
+        _carr(f, "RF_T_MLP",    ntok * NL * D,   tr("mlp"))
+        _carr(f, "RF_T_XOUT",   ntok * NL * D,   tr("xout"))
+        _carr(f, "RF_T_FINAL",  ntok * D,        trp("final"))
+        _carr(f, "RF_LOGITS",   ntok * V,        trp("logits"))
+        f.write("#endif /* REF_FORWARD_FIXTURE_H */\n")
+
+
 def main():
     cfg = CFG
     w = make_weights(cfg)
     tokens = [3, 14, 7, 0, 41, 2]        # arbitrary, within vocab
-    logits = forward(tokens, w, cfg)
+    trace = []
+    logits = forward(tokens, w, cfg, trace)
 
     # Sanity the oracle before anyone trusts it as one.
     assert logits.shape == (len(tokens), cfg["vocab"]), logits.shape
@@ -193,6 +313,12 @@ def main():
     with open("ref_forward_fixture.json", "w") as f:
         json.dump(out, f, indent=1)
     print("wrote ref_forward_fixture.json")
+
+    # The C header is the real gate: config, weights and EVERY per-op
+    # intermediate, so test_model.c diffs layer-by-layer, not just at the logits.
+    emit_c_header("ref_forward_fixture.h", cfg, tokens, w, trace)
+    print("wrote ref_forward_fixture.h  (%d positions x %d layers traced)"
+          % (len(tokens), cfg["n_layers"]))
     return 0
 
 

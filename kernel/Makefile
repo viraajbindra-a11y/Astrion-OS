@@ -248,6 +248,7 @@ kernel-mb2: src/hello_elf.h src/rogue_elf.h src/iodemo_elf.h \
 	$(CC) $(MB2_CFLAGS) -c src/wm.c -o $(BUILD_DIR)/wm.o
 	$(CC) $(MB2_CFLAGS) -c src/af.c -o $(BUILD_DIR)/af.o
 	$(CC) $(GPT_CFLAGS) -c src/gpt.c -o $(BUILD_DIR)/gpt.o
+	$(CC) $(MB2_CFLAGS) -c src/model.c -o $(BUILD_DIR)/model.o
 	$(CC) $(MB2_CFLAGS) -c src/shell.c -o $(BUILD_DIR)/shell.o
 	$(CC) $(MB2_CFLAGS) -c src/mouse.c -o $(BUILD_DIR)/mouse.o
 	$(CC) $(MB2_CFLAGS) -c src/snake.c -o $(BUILD_DIR)/snake.o
@@ -281,6 +282,7 @@ kernel-mb2: src/hello_elf.h src/rogue_elf.h src/iodemo_elf.h \
 	    $(BUILD_DIR)/wm.o \
 	    $(BUILD_DIR)/af.o \
 	    $(BUILD_DIR)/gpt.o \
+	    $(BUILD_DIR)/model.o \
 	    $(BUILD_DIR)/shell.o \
 	    $(BUILD_DIR)/mouse.o \
 	    $(BUILD_DIR)/snake.o \
@@ -391,6 +393,12 @@ $(BUILD_DIR):
 
 $(BUILD_DIR)/test_%: tests/test_%.c $(HOST_TEST_HDRS) | $(BUILD_DIR)
 	$(HOSTCC) -std=c11 -Wall -Wextra -Werror -Iinclude -o $@ $<
+
+# test_model.c #includes the engine source and the generated oracle fixture,
+# neither of which the generic rule above tracks; name them so an edit to the
+# forward pass or a regenerated fixture rebuilds the gate instead of re-running
+# a stale binary (the "a gate that cannot fail is not a gate" trap).
+$(BUILD_DIR)/test_model: src/model.c tools/ref_forward_fixture.h
 
 test: $(HOST_TESTS)
 	@[ -n "$(HOST_TEST_SRCS)" ] || { echo "FAIL: no tests found in tests/ - refusing to report a pass"; exit 1; }
