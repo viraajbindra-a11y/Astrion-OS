@@ -47,6 +47,8 @@ CFG = {
     "vocab":     48,
     "rope_theta": 10000.0,
     "rms_eps":   1e-6,
+    "qk_norm":   False,  # RMSNorm on Q,K per head before RoPE. Off = Qwen; the
+                         # Astrion custom model (custom-model/train.py) sets it True.
 }
 
 
@@ -90,6 +92,14 @@ def attention(x, w, cfg, kv_cache, pos, rec=None):
     q = q.reshape(H, D)
     k = k.reshape(KV, D)
     v = v.reshape(KV, D)
+
+    # qk-norm (config-gated): RMSNorm each Q and K head over head_dim, BEFORE RoPE.
+    # Off for Qwen; ON for the Astrion custom model, matching custom-model/train.py's
+    # qk_norm=True (one shared gain vector for both q and k). This is why a model
+    # trained with qk_norm stays a drop-in file-swap for this engine.
+    if cfg.get("qk_norm", False):
+        q = np.stack([rmsnorm(q[h], w["qk_g"], cfg["rms_eps"]) for h in range(H)])
+        k = np.stack([rmsnorm(k[h], w["qk_g"], cfg["rms_eps"]) for h in range(KV)])
 
     for h in range(H):
         q[h] = rope(q[h], pos, cfg["rope_theta"], D)
@@ -199,14 +209,17 @@ def make_weights(cfg, seed=1):
 
     layers = []
     for _ in range(cfg["n_layers"]):
-        layers.append({
+        lw = {
             "ln1": (1.0 + r(D)), "ln2": (1.0 + r(D)),
             "wq": r(H * HD, D),  "bq": r(H * HD),
             "wk": r(KV * HD, D), "bk": r(KV * HD),
             "wv": r(KV * HD, D), "bv": r(KV * HD),
             "wo": r(D, H * HD),
             "w_gate": r(F, D), "w_up": r(F, D), "w_down": r(D, F),
-        })
+        }
+        if cfg.get("qk_norm", False):
+            lw["qk_g"] = (1.0 + r(HD))   # shared gain for q & k, over head_dim
+        layers.append(lw)
     return {
         "embed":    r(cfg["vocab"], D),
         "layers":   layers,

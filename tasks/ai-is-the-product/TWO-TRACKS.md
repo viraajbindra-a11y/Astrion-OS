@@ -41,23 +41,48 @@ A model file is therefore: `[header: config + checksums][quantized weights]`,
 and the loader refuses a header whose dims do not match the weight-section size.
 Qwen's converter (M6) and the custom-model converter both emit this one format.
 
-## The memory / "self-learning" layer sits ABOVE the model
+## The memory layer — "learns what YOU mean," and it needs no cloud
 
-Weights stay fixed, tested, predictable. Learning happens as DATA — the
-assistant keeps notes (files, corrections, phrasing, recent context) on disk and
-feeds them back as context. It feels like it learns you because it does, without
-touching weights.
+Clarified 2026-07-23. The goal is NOT the model getting globally smarter. It is
+the AI adapting to its one user — learning what this person means when they say
+something, getting more efficient for them specifically. That is a MEMORY
+problem, not a training problem: the model's weights never change, and nothing
+ever leaves the device.
 
-Why above the model and not inside it:
+The model provides general language understanding (shared, fixed). The memory
+layer provides the you-specific layer on top (personal, growing, local). Three
+things, all just files on disk:
+
+- **Learned phrasings.** User says something unmatched, then rephrases into
+  something matched → record "for THIS user, phrase X → intent Y." Next time X
+  resolves directly. A synonym table that grows on every correction, sitting in
+  front of the intent layer that already exists.
+- **Corrections.** "No, the other one" → remember which one was meant.
+- **Habits.** Which files/apps get used, naming patterns → "open my notes"
+  resolves to the file they actually use, not a guess.
+
+Why this shape:
+- **No cloud, ever.** Nothing about "learns what you mean" requires a server —
+  it is per-user, small, and local. This is the whole resolution of the
+  cloud-vs-offline tension: personalization is inherently local, so the "can't
+  phone home" promise stays absolute.
 - Bad memory is one file you delete; a corrupted weight is a week.
-- It is inspectable — just text, no black box.
-- It fits the pitch: an AI that learns YOU, on YOUR machine, learning that never
-  leaves the device.
+- Inspectable — the user can open the file and read what it learned about them.
 - Build it ONCE and it works for Qwen and the custom model both.
 
-Explicitly NOT doing: on-device weight updates / online backprop. That is how
-models get worse — drift and catastrophic forgetting — and it is brutal without
-SSE. The memory layer is the safe, shippable version of "self-learning."
+**Strategic point:** a small, mediocre model feels great once it knows you. The
+memory layer covers what a 0.6B model lacks — a giant cloud model meets you cold
+every time, yours already knows you. Personalization is how a tiny local model
+beats a big remote one FOR ITS ONE USER. The seed already exists: today's "it"
+pronoun slot and did-you-mean are baby versions of exactly this.
+
+Explicitly NOT doing: on-device weight updates / online backprop (drift +
+catastrophic forgetting = how models get worse, brutal without SSE), and NOT
+sending any user data to the cloud to personalize (breaks the one promise no
+competitor can copy). Model improvement is a SEPARATE track — we train better
+weights on our own GPUs from public data and ship them as updates, which is just
+normal development and touches no user's private data. The cloud can make the
+model better for everyone; it is never where a user's data goes.
 
 ## The custom-model build track — honest scope
 
