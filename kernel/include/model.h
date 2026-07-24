@@ -172,6 +172,14 @@ void model_rope_init(struct model_state *st, const struct model_config *cfg);
 void model_forward(const struct model_weights *w, struct model_state *st,
                    uint32_t token, int64_t *logits);
 
+/* Greedy sample: the index of the largest logit, ties broken to the LOWEST
+ * index so the choice is fully deterministic. This is the whole "pick a word"
+ * step of greedy decode — a generation loop is model_forward then model_argmax,
+ * fed back in. Integer, no float, like everything else here. Temperature and
+ * top-k sampling layer on top of this later; greedy is the exact, testable
+ * floor. vocab must be >= 1; returns 0 for vocab == 0 without reading logits. */
+uint32_t model_argmax(const int64_t *logits, uint32_t vocab);
+
 /* ── size helpers (pure arithmetic; the caller allocates) ── */
 
 /* Longest matmul contraction axis, padded — the size act_fix/act_q must be. */

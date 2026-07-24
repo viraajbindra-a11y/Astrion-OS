@@ -168,6 +168,24 @@ def forward(tokens, w, cfg, trace=None):
     return np.array(logits_seq)
 
 
+def greedy_generate(start, n_new, w, cfg):
+    """Feed `start`, then repeatedly take argmax of the last position and feed
+    it back in. Returns start + the generated tokens.
+
+    Deliberately re-runs the whole `forward` each step rather than keeping an
+    incremental cache. That reuses the EXACT forward code above, so there is no
+    second decode path in the oracle that could drift from the first — the
+    oracle trades speed for obvious-correctness, which is its only job. The C
+    side (test_model.c) does the efficient incremental-KV-cache version, and the
+    test asserting the two produce the same tokens is precisely what proves the
+    C cache-reuse-across-generated-tokens is correct."""
+    seq = list(start)
+    for _ in range(n_new):
+        lg = forward(seq, w, cfg)                 # (len(seq), vocab), trace off
+        seq.append(int(np.asarray(lg[-1]).argmax()))
+    return seq
+
+
 def make_weights(cfg, seed=1):
     # Deterministic pseudo-random weights. Small magnitude so activations stay
     # in a sane range and a human can read the fixture. Seed fixed so the C
@@ -212,7 +230,7 @@ def _carr(f, name, length, flat):
     f.write("};\n\n")
 
 
-def emit_c_header(path, cfg, tokens, w, trace):
+def emit_c_header(path, cfg, tokens, w, trace, gen_new):
     """Dump config + weights + every per-op intermediate as a C header.
 
     Layout mirrors model.h's structs exactly so test_model.c can convert the
@@ -248,12 +266,21 @@ def emit_c_header(path, cfg, tokens, w, trace):
         for name, val in [("RF_DIM", D), ("RF_NL", NL), ("RF_H", H), ("RF_KV", KV),
                           ("RF_HD", HD), ("RF_HHD", HHD), ("RF_KVD", KVD),
                           ("RF_FFN", F), ("RF_VOCAB", V), ("RF_NTOK", ntok),
-                          ("RF_MAX_SEQ", ntok), ("RF_ROPE_THETA", int(cfg["rope_theta"])),
+                          # Cache must hold the prompt AND the generated tokens,
+                          # or generation past the prompt is a silent no-op.
+                          ("RF_MAX_SEQ", ntok + len(gen_new)),
+                          ("RF_ROPE_THETA", int(cfg["rope_theta"])),
                           ("RF_EPS_SHIFT", eps_shift)]:
             f.write("#define %s %d\n" % (name, val))
         f.write("#define RF_RMS_EPS_FP %dLL\n\n" % rms_eps_fp)
         f.write("static const int RF_TOKENS[RF_NTOK] = { %s };\n\n"
                 % ", ".join(str(t) for t in tokens))
+        # Greedy generation: prime with RF_TOKENS, then this many tokens are
+        # produced by feeding argmax back in. The C test reproduces the loop
+        # with its incremental KV cache and must match these exactly.
+        f.write("#define RF_GEN_N %d\n" % len(gen_new))
+        f.write("static const int RF_GEN[RF_GEN_N] = { %s };\n\n"
+                % ", ".join(str(t) for t in gen_new))
 
         _carr(f, "RF_EMBED",    V * D,        w["embed"])
         _carr(f, "RF_LN1",      NL * D,       layers("ln1"))
@@ -314,9 +341,14 @@ def main():
         json.dump(out, f, indent=1)
     print("wrote ref_forward_fixture.json")
 
+    # Greedy generation on top of the primed prompt — the full pick-a-word loop.
+    gen_seq = greedy_generate(tokens, 6, w, cfg)
+    gen_new = gen_seq[len(tokens):]
+    print(f"greedy:  {tokens} -> {gen_new}")
+
     # The C header is the real gate: config, weights and EVERY per-op
     # intermediate, so test_model.c diffs layer-by-layer, not just at the logits.
-    emit_c_header("ref_forward_fixture.h", cfg, tokens, w, trace)
+    emit_c_header("ref_forward_fixture.h", cfg, tokens, w, trace, gen_new)
     print("wrote ref_forward_fixture.h  (%d positions x %d layers traced)"
           % (len(tokens), cfg["n_layers"]))
     return 0

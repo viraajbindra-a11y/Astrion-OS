@@ -405,3 +405,15 @@ void model_forward(const struct model_weights *w, struct model_state *st,
     mdl_matmul(st, logits, st->xn, D, &w->lm_head, 0);
     st->pos++;
 }
+
+uint32_t model_argmax(const int64_t *logits, uint32_t vocab)
+{
+    /* Strict '>' so a tie keeps the earlier (lower) index — the deterministic
+     * tie-break the header promises. A '>=' here would silently prefer the
+     * LAST of equal logits, which no test with distinct random logits would
+     * catch and which would make greedy decode depend on scan direction. */
+    uint32_t best = 0;
+    for (uint32_t i = 1; i < vocab; i++)
+        if (logits[i] > logits[best]) best = i;
+    return best;
+}

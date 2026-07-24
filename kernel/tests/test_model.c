@@ -241,22 +241,73 @@ int main(void)
     print_diffs("Q8", &q8);
     want_below("q8 logits", q8.logits, TOL_Q8);
 
-    /* argmax must survive quantization — the property sampling actually needs */
+    /* argmax must survive quantization — the property sampling actually needs.
+     * Uses model_argmax, the SHIPPED sampler, not a test-local copy: a test that
+     * reimplements the thing it checks can pass while the real function is
+     * broken (exactly how the confirm-gate's dead am_confirm_yes slipped past
+     * its own green test). The oracle side stays inline — it is the reference,
+     * and must not share code with what it audits. */
     {
         int64_t logits[RF_VOCAB];
         int argmax_ok = 1;
         st.mode = MODEL_Q8; st.pos = 0; st.trace = NULL;
         for (int p = 0; p < RF_NTOK; p++) {
             model_forward(&w, &st, (uint32_t)RF_TOKENS[p], logits);
-            int am = 0;
-            for (int i = 1; i < RF_VOCAB; i++) if (logits[i] > logits[am]) am = i;
+            uint32_t am = model_argmax(logits, RF_VOCAB);
             int ref = 0;
             for (int i = 1; i < RF_VOCAB; i++)
                 if (RF_LOGITS[p * RF_VOCAB + i] > RF_LOGITS[p * RF_VOCAB + ref]) ref = i;
-            if (am != ref) { argmax_ok = 0; printf("  argmax pos %d: q8 %d, oracle %d\n", p, am, ref); }
+            if ((int)am != ref) { argmax_ok = 0; printf("  argmax pos %d: q8 %u, oracle %d\n", p, am, ref); }
         }
         if (!argmax_ok) { printf("  FAIL q8 argmax diverged from oracle\n"); failures++; }
         else printf("argmax     q8 matches the oracle at all %d positions\n", RF_NTOK);
+    }
+
+    /* model_argmax's tie-break contract: equal logits keep the LOWEST index.
+     * Distinct random logits never exercise this, so it gets its own case — a
+     * '>=' scan (last-wins) would return 3 here and this is the only thing that
+     * would catch it. */
+    {
+        int64_t t[4] = { 5LL << Q8_SCALE_SHIFT, 9LL << Q8_SCALE_SHIFT,
+                         9LL << Q8_SCALE_SHIFT, 1LL << Q8_SCALE_SHIFT };
+        uint32_t am = model_argmax(t, 4);
+        if (am != 1) { printf("  FAIL argmax tie-break: got %u, want 1 (lowest of the tied max)\n", am); failures++; }
+        else printf("argmax     tie-break keeps the lowest index\n");
+    }
+
+    /* ── Gate 3: greedy generation — the whole pick-a-word loop, end to end ──
+     * The one path the op-by-op trace does NOT cover: generating ON TOP of a
+     * primed prompt, the KV cache growing one slot per generated token. The
+     * oracle produced RF_GEN by re-running the entire forward each step; this
+     * reproduces it with the efficient incremental cache. They must match — and
+     * matching is exactly what proves the cache-reuse-across-generated-tokens is
+     * correct, since a stale or mis-indexed cache would drift the trajectory. */
+    {
+        int64_t logits[RF_VOCAB];
+        uint32_t got[RF_GEN_N];
+        st.mode = MODEL_FULL; st.pos = 0; st.trace = NULL; model_ctrl = 0;
+        uint32_t next = 0;
+        for (int p = 0; p < RF_NTOK; p++) {            /* prime the cache */
+            model_forward(&w, &st, (uint32_t)RF_TOKENS[p], logits);
+            next = model_argmax(logits, RF_VOCAB);      /* argmax after last prompt tok */
+        }
+        int gen_ok = 1;
+        for (int g = 0; g < RF_GEN_N; g++) {           /* generate, feeding back */
+            got[g] = next;
+            if ((int)next != RF_GEN[g]) gen_ok = 0;
+            model_forward(&w, &st, next, logits);
+            next = model_argmax(logits, RF_VOCAB);
+        }
+        if (!gen_ok) {
+            printf("  FAIL greedy generation diverged from oracle\n    got:");
+            for (int g = 0; g < RF_GEN_N; g++) printf(" %u", got[g]);
+            printf("\n    ref:");
+            for (int g = 0; g < RF_GEN_N; g++) printf(" %d", RF_GEN[g]);
+            printf("\n");
+            failures++;
+        } else {
+            printf("generate   greedy loop matches the oracle for all %d tokens\n", RF_GEN_N);
+        }
     }
 
     /* ── Controls: a gate that cannot fail is not a gate ── */
