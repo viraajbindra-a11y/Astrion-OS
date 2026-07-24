@@ -60,27 +60,45 @@ Established by inspection today, not assumed:
 ## Milestones
 
 Ordered so each one is independently verifiable and nothing is a big-bang.
+Status as of 2026-07-23.
 
-- [ ] **M1 — lift the 4 GiB ceiling.** Switch the PDPT to 1 GiB pages
-      (`PDPTE.PS=1`), guarded by a CPUID `PDPE1GB` check with the 2 MiB path as
-      fallback. *Verify:* boot with `-m 8G`, write and read back a pattern at a
-      physical address above 4 GiB.
-- [ ] **M2 — multiboot2 module loading.** Parse the MB2 module tag, expose base
-      and length. *Verify:* pass a known blob, checksum it from inside the
-      kernel and compare against the host's checksum.
-- [ ] **M3 — XSAVE/FXSAVE in the context switch.** Prerequisite for SSE/AVX
-      under a preemptive scheduler; without it vector state corrupts across
-      tasks. *Verify:* two tasks each spinning on distinct vector values,
-      neither observes the other's.
-- [ ] **M4 — int8 quantized matmul.** The hot loop, `int8 x int8 -> int32`.
-      Scalar first (works today, no SSE), then AVX2. *Verify:* host test with
-      exhaustive small cases + a reference implementation.
-- [ ] **M5 — BPE tokenizer.** Qwen vocab is ~150K. *Verify:* host test,
-      round-trip a corpus against the reference tokenizer's output.
-- [ ] **M6 — weight format.** GGUF parse, or a custom format converted on the
-      host. Prefer custom: less surface, and the converter is host-side Python
-      where it's cheap to test.
-- [ ] **M7 — wire to the Assistant**, behind the intent layer.
+- [x] **M1 — lift the 4 GiB ceiling.** 1 GiB pages via CPUID PDPE1GB, 2 MiB
+      fallback. Booted `-m 12G`, sentinel written and read back at 6 GiB.
+      Commit 2075e31. PMM freed to follow it (a0480df): 3 GB → 12 GB usable.
+- [x] **M2 — multiboot2 module loading.** Parsed, bounds-checked, exposed as
+      `boot_module()`. Kernel-side FNV-1a matched the host hash exactly — which
+      caught the heap eating half the module (00f5222).
+- [ ] **M3 — XSAVE/FXSAVE in the context switch.** DEFERRED, and possibly
+      never needed: M4's int8 path emits zero SSE and runs today. This is only
+      required if the AVX2 rewrite happens, and the scalar path may be fast
+      enough that it doesn't. Re-decide after the forward pass runs and we have
+      a real tokens/sec number.
+- [x] **M4 — int8 quantized matmul.** `q8_dot` / `q8_quantize` in include/q8.h,
+      scalar. Compiles under `-mno-sse -mgeneral-regs-only` emitting zero xmm.
+      Exhaustive host test, both controls fail correctly. Commit c4da575.
+      AVX2 rewrite is a later option, gated on M3, gated on need.
+- [~] **M5 — BPE tokenizer.** Converter (tools/mktok.py) done and run against
+      real Qwen2.5: 4.01 MB table, commit 8c2f1b4. KERNEL SIDE NOT BUILT —
+      needs the merge loop, the ASCII pretokenizer, and offset validation over
+      the mapped module. Host test diffs against HF reference.
+- [ ] **M5.5 — THE FORWARD PASS.** *This was missing and it is the largest
+      piece.* A Qwen block is RMSNorm → RoPE → grouped-query attention with a KV
+      cache → RMSNorm → SwiGLU MLP, times N layers, then a final norm and the
+      logit projection, then sampling. `q8_dot` is one line inside this; the
+      rest — attention, the KV cache, RoPE, softmax, the residual stream — does
+      not exist yet. Everything before this milestone is plumbing that carries
+      data to a loop that has not been written. *Verify:* host-run one layer
+      against a PyTorch reference on fixed weights, then the full stack on a
+      tiny config before Qwen.
+- [ ] **M6 — weight format.** Host converter, Qwen `.safetensors` → the grouped
+      int8 layout q8.h expects, emitted as a second multiboot module. Prefer
+      custom over GGUF: less parser surface in the kernel, and the converter is
+      host-side Python where it is cheap to test and checksum.
+- [ ] **M7 — wire to the Assistant**, behind the intent layer. The intent table
+      stays in front; the model only runs on what the table doesn't claim.
+- [x] **I1 — expand the intent layer.** Done and QA-signed: 18 questions, 8
+      actions, 8 apps, plus the "it" pronoun and did-you-mean. All real numbers,
+      cross-checked against the serial log by Rex.
 
 Parallel track, no dependency on the above:
 
