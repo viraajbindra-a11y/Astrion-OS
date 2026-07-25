@@ -249,6 +249,7 @@ kernel-mb2: src/hello_elf.h src/rogue_elf.h src/iodemo_elf.h \
 	$(CC) $(MB2_CFLAGS) -c src/af.c -o $(BUILD_DIR)/af.o
 	$(CC) $(GPT_CFLAGS) -c src/gpt.c -o $(BUILD_DIR)/gpt.o
 	$(CC) $(MB2_CFLAGS) -c src/model.c -o $(BUILD_DIR)/model.o
+	$(CC) $(MB2_CFLAGS) -c src/tok.c -o $(BUILD_DIR)/tok.o
 	$(CC) $(MB2_CFLAGS) -c src/shell.c -o $(BUILD_DIR)/shell.o
 	$(CC) $(MB2_CFLAGS) -c src/mouse.c -o $(BUILD_DIR)/mouse.o
 	$(CC) $(MB2_CFLAGS) -c src/snake.c -o $(BUILD_DIR)/snake.o
@@ -283,6 +284,7 @@ kernel-mb2: src/hello_elf.h src/rogue_elf.h src/iodemo_elf.h \
 	    $(BUILD_DIR)/af.o \
 	    $(BUILD_DIR)/gpt.o \
 	    $(BUILD_DIR)/model.o \
+	    $(BUILD_DIR)/tok.o \
 	    $(BUILD_DIR)/shell.o \
 	    $(BUILD_DIR)/mouse.o \
 	    $(BUILD_DIR)/snake.o \
@@ -399,6 +401,11 @@ $(BUILD_DIR)/test_%: tests/test_%.c $(HOST_TEST_HDRS) | $(BUILD_DIR)
 # forward pass or a regenerated fixture rebuilds the gate instead of re-running
 # a stale binary (the "a gate that cannot fail is not a gate" trap).
 $(BUILD_DIR)/test_model: src/model.c tools/ref_forward_fixture.h
+
+# test_tok.c #includes the engine source and the generated Qwen reference
+# fixture; name them so an edit to tok.c or a regenerated fixture rebuilds the
+# gate instead of re-running a stale binary.
+$(BUILD_DIR)/test_tok: src/tok.c tools/tok_ref_fixture.h
 
 test: $(HOST_TESTS)
 	@[ -n "$(HOST_TEST_SRCS)" ] || { echo "FAIL: no tests found in tests/ - refusing to report a pass"; exit 1; }
