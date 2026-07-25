@@ -58,6 +58,8 @@ struct model_config {
     uint32_t ffn_dim;      /* SwiGLU inner width                              */
     uint32_t vocab;        /* logit count                                     */
     uint32_t max_seq;      /* KV-cache capacity in positions                  */
+    uint32_t qk_norm;      /* 1 = RMSNorm each Q,K head before RoPE (Ember/    */
+                           /* Qwen3); 0 = off (Qwen2). See the note in model.c */
     int64_t  rope_theta;   /* integer RoPE base (Qwen2: 10000, Qwen3: 1e6)    */
     int64_t  rms_eps_fp;   /* RMS epsilon, fixed-point at MODEL_EPS_SHIFT      */
 };
@@ -96,6 +98,7 @@ struct model_layer {
     const int64_t *bq;             /* [n_heads*head_dim]                       */
     const int64_t *bk;             /* [n_kv_heads*head_dim]                    */
     const int64_t *bv;             /* [n_kv_heads*head_dim]                    */
+    const int64_t *qk_g;           /* [head_dim] QK-norm gain, or NULL if off  */
     struct model_matrix w_gate, w_up, w_down;
 };
 

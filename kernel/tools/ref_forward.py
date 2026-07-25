@@ -243,7 +243,7 @@ def _carr(f, name, length, flat):
     f.write("};\n\n")
 
 
-def emit_c_header(path, cfg, tokens, w, trace, gen_new):
+def emit_c_header(path, cfg, tokens, w, trace, gen_new, qk_g_flat, qk_logits):
     """Dump config + weights + every per-op intermediate as a C header.
 
     Layout mirrors model.h's structs exactly so test_model.c can convert the
@@ -320,6 +320,13 @@ def emit_c_header(path, cfg, tokens, w, trace, gen_new):
         _carr(f, "RF_T_XOUT",   ntok * NL * D,   tr("xout"))
         _carr(f, "RF_T_FINAL",  ntok * D,        trp("final"))
         _carr(f, "RF_LOGITS",   ntok * V,        trp("logits"))
+
+        # QK-norm ON: the SAME base weights (above) plus a per-layer gain, run
+        # with qk_norm=True. The C test reuses every RF_W* array and only adds
+        # these two, then flips cfg.qk_norm=1 and must reproduce RF_QK_LOGITS —
+        # which also differs from RF_LOGITS, so a no-op qk-norm fails too.
+        _carr(f, "RF_QK_G",      NL * HD,   qk_g_flat)
+        _carr(f, "RF_QK_LOGITS", ntok * V,  qk_logits)
         f.write("#endif /* REF_FORWARD_FIXTURE_H */\n")
 
 
@@ -359,9 +366,24 @@ def main():
     gen_new = gen_seq[len(tokens):]
     print(f"greedy:  {tokens} -> {gen_new}")
 
+    # QK-norm ON fixture (for Ember). Inject a per-layer gain into the SAME base
+    # weights via an INDEPENDENT rng — every other weight stays byte-identical to
+    # the qk-off run, so the C test reuses RF_W* unchanged — then run qk_norm=True.
+    # The gate: C with cfg.qk_norm=1 reproduces these logits, AND they differ from
+    # RF_LOGITS, so a no-op qk-norm fails too.
+    rng2 = np.random.default_rng(2)
+    HD = cfg["head_dim"]
+    for l in range(cfg["n_layers"]):
+        w["layers"][l]["qk_g"] = (1.0 + rng2.standard_normal(HD) * 0.08).astype(np.float64)
+    qk_g_flat = np.concatenate([w["layers"][l]["qk_g"] for l in range(cfg["n_layers"])])
+    cfg_qk = dict(cfg); cfg_qk["qk_norm"] = True
+    qk_logits = forward(tokens, w, cfg_qk).astype(np.float64).ravel()
+    assert not np.allclose(qk_logits, logits.ravel()), "qk-norm made no difference — fixture is vacuous"
+    print(f"qk-norm: logits shifted (max |d| {float(np.abs(qk_logits - logits.ravel()).max()):.3f})")
+
     # The C header is the real gate: config, weights and EVERY per-op
     # intermediate, so test_model.c diffs layer-by-layer, not just at the logits.
-    emit_c_header("ref_forward_fixture.h", cfg, tokens, w, trace, gen_new)
+    emit_c_header("ref_forward_fixture.h", cfg, tokens, w, trace, gen_new, qk_g_flat, qk_logits)
     print("wrote ref_forward_fixture.h  (%d positions x %d layers traced)"
           % (len(tokens), cfg["n_layers"]))
     return 0

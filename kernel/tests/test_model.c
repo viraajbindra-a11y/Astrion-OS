@@ -96,6 +96,9 @@ static void build_weights(struct model_weights *w)
     c->dim = RF_DIM;   c->n_layers = RF_NL;   c->n_heads = RF_H;   c->n_kv_heads = RF_KV;
     c->head_dim = RF_HD; c->ffn_dim = RF_FFN; c->vocab = RF_VOCAB; c->max_seq = RF_MAX_SEQ;
     c->rope_theta = RF_ROPE_THETA;            c->rms_eps_fp = RF_RMS_EPS_FP;
+    c->qk_norm = 0;   /* explicit: an uninitialized flag would apply QK-norm on
+                       * garbage stack luck and read a NULL qk_g. The qk-on gate
+                       * below sets it to 1 deliberately. */
 
     w->embed    = vecfix(RF_EMBED, RF_VOCAB * RF_DIM);
     w->final_ln = vecfix(RF_FINAL_LN, RF_DIM);
@@ -105,6 +108,7 @@ static void build_weights(struct model_weights *w)
         struct model_layer *L = &layers[l];
         L->ln1 = vecfix(RF_LN1 + (size_t)l * RF_DIM, RF_DIM);
         L->ln2 = vecfix(RF_LN2 + (size_t)l * RF_DIM, RF_DIM);
+        L->qk_g = NULL;   /* set by the qk-on gate; NULL is never read while qk_norm==0 */
         build_matrix(&L->wq, RF_WQ + (size_t)l * RF_HHD * RF_DIM, RF_HHD, RF_DIM);
         L->bq  = vecfix(RF_BQ + (size_t)l * RF_HHD, RF_HHD);
         build_matrix(&L->wk, RF_WK + (size_t)l * RF_KVD * RF_DIM, RF_KVD, RF_DIM);
@@ -338,6 +342,37 @@ int main(void)
     model_ctrl = 0;
     print_diffs("misGQA", &c_gqa);
     want_above("control: GQA mis-group moves attn", c_gqa.attn, TOL_FULL);
+
+    /* ── Gate 4: QK-norm ON — the Ember path ──
+     * Attach the per-layer gain, flip cfg.qk_norm=1, and reproduce RF_QK_LOGITS
+     * (the oracle's qk_norm=True run over the SAME base weights). Two assertions,
+     * because either alone is foolable: it must MATCH the oracle (qk-norm is
+     * arithmetically right) AND DIFFER from the qk-off logits (qk-norm actually
+     * runs — a stubbed no-op would still match RF_LOGITS and pass a match-only
+     * test). Left last so nothing downstream sees qk_norm set. */
+    {
+        for (int l = 0; l < RF_NL; l++)
+            ((struct model_layer *)w.layers)[l].qk_g =
+                vecfix(RF_QK_G + (size_t)l * RF_HD, RF_HD);
+        w.cfg.qk_norm = 1;
+        int64_t logits[RF_VOCAB];
+        double vs_oracle = 0.0, vs_off = 0.0;
+        st.mode = MODEL_FULL; st.pos = 0; st.trace = NULL; model_ctrl = 0;
+        for (int p = 0; p < RF_NTOK; p++) {
+            model_forward(&w, &st, (uint32_t)RF_TOKENS[p], logits);
+            for (int i = 0; i < RF_VOCAB; i++) {
+                double got = fix2d(logits[i]);
+                double d  = dabs(got - RF_QK_LOGITS[p * RF_VOCAB + i]);
+                double o  = dabs(RF_QK_LOGITS[p * RF_VOCAB + i] - RF_LOGITS[p * RF_VOCAB + i]);
+                if (d > vs_oracle) vs_oracle = d;
+                if (o > vs_off)    vs_off    = o;
+            }
+        }
+        w.cfg.qk_norm = 0;
+        printf("qk-norm    on: max|d| vs oracle %.2e, vs qk-off %.3f\n", vs_oracle, vs_off);
+        want_below("qk-norm ON matches the oracle", vs_oracle, TOL_FULL);
+        want_above("qk-norm ON actually changes the logits (not a no-op)", vs_off, TOL_FULL);
+    }
 
     printf("\nfailures  %d\n", failures);
     printf(failures ? "FAILED\n" : "PASS\n");

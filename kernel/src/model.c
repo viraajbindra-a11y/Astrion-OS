@@ -226,23 +226,33 @@ static void mdl_matmul(struct model_state *st, int64_t *out, const int64_t *in,
 /* RMSNorm: out = x / sqrt(mean(x^2) + eps) * weight. No mean subtraction — the
  * LayerNorm difference the port must not reintroduce. Everything integer:
  * mean(x^2)+eps is @Q40, its isqrt is the RMS @Q20, and 2^40/RMS is 1/RMS @Q20. */
-static void mdl_rmsnorm(const struct model_config *cfg, int64_t *out,
-                        const int64_t *in, const int64_t *weight)
+/* RMSNorm over `n` elements. One implementation, called both for the residual
+ * stream (n = dim) and for QK-norm (n = head_dim) — a second copy sized to
+ * head_dim would be one more place for the fixed-point rounding to drift.
+ * Safe in place (out == in): the sum-of-squares is taken over all of `in`
+ * before any element of `out` is written. */
+static void mdl_rmsnorm_n(const struct model_config *cfg, int64_t *out,
+                          const int64_t *in, const int64_t *weight, uint32_t n)
 {
-    uint32_t D = cfg->dim;
     __int128 ss = 0;
-    for (uint32_t i = 0; i < D; i++) ss += (__int128)in[i] * in[i];   /* @Q40 */
-    __int128 M = ss / D + cfg->rms_eps_fp;                            /* @Q40 (eps @Q40) */
+    for (uint32_t i = 0; i < n; i++) ss += (__int128)in[i] * in[i];   /* @Q40 */
+    __int128 M = ss / n + cfg->rms_eps_fp;                            /* @Q40 (eps @Q40) */
     int64_t rms = fx_isqrt(M);                                       /* RMS @Q20 */
     if (rms <= 0) rms = 1;
     int64_t inv = (int64_t)(((__int128)1 << (2 * SHIFT)) / rms);      /* 1/RMS @Q20 */
 
-    for (uint32_t i = 0; i < D; i++) {
+    for (uint32_t i = 0; i < n; i++) {
         __int128 p = (__int128)in[i] * inv;      /* @Q40 */
         p = p * weight[i];                        /* @Q60 */
         p += (__int128)1 << (2 * SHIFT - 1);      /* round the >>40 */
         out[i] = (int64_t)(p >> (2 * SHIFT));
     }
+}
+
+static void mdl_rmsnorm(const struct model_config *cfg, int64_t *out,
+                        const int64_t *in, const int64_t *weight)
+{
+    mdl_rmsnorm_n(cfg, out, in, weight, cfg->dim);
 }
 
 /* RoPE on one head_dim slice: rotate each adjacent (2i, 2i+1) pair by
@@ -290,6 +300,18 @@ static void mdl_attention(const struct model_weights *w, struct model_state *st,
     mdl_matmul(st, st->q, xn, D, &L->wq, L->bq);
     mdl_matmul(st, kdst,  xn, D, &L->wk, L->bk);
     mdl_matmul(st, vdst,  xn, D, &L->wv, L->bv);
+
+    /* QK-norm: RMSNorm each Q and K head over head_dim, BEFORE RoPE, with one
+     * shared gain (Ember/Qwen3; off for Qwen2). Ordering matters — normalize
+     * then rotate, matching the oracle (ref_forward.py) and the converter, or a
+     * qk-normed model silently attends wrong. In place: each head is its own
+     * contiguous HD slice. */
+    if (cfg->qk_norm) {
+        for (uint32_t h = 0; h < H;  h++)
+            mdl_rmsnorm_n(cfg, st->q + (uint64_t)h * HD, st->q + (uint64_t)h * HD, L->qk_g, HD);
+        for (uint32_t h = 0; h < KV; h++)
+            mdl_rmsnorm_n(cfg, kdst + (uint64_t)h * HD, kdst + (uint64_t)h * HD, L->qk_g, HD);
+    }
 
     if (!(model_ctrl & MODEL_CTRL_NO_ROPE)) {
         for (uint32_t h = 0; h < H;  h++) mdl_rope(st, cfg, st->q + (uint64_t)h * HD, pos);
