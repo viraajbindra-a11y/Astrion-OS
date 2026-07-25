@@ -183,6 +183,26 @@ void model_forward(const struct model_weights *w, struct model_state *st,
  * floor. vocab must be >= 1; returns 0 for vocab == 0 without reading logits. */
 uint32_t model_argmax(const int64_t *logits, uint32_t vocab);
 
+/* ── weight-file loader (the "brain file"; on-disk format in src/model_load.c) ──
+ *
+ * Parse `len` bytes of a converted weight blob (tools/mkweights.py output, magic
+ * "AMW1") into `out`, reading the model's whole shape from the file's header
+ * rather than any #define — the one hook that makes swapping Qwen for a custom
+ * Astrion model a file-swap (tasks/ai-is-the-product/TWO-TRACKS.md). Zero-copy,
+ * like tok_parse: every weight pointer (embed, ln, M->q, M->qg, …) points STRAIGHT
+ * into the blob, which must outlive `out`. `layers` is caller storage for at
+ * least `max_layers` struct model_layer — the pointers need a home; the weight
+ * bytes are never copied. Matrices come back int8-only (full == NULL), so a
+ * loaded model runs MODEL_Q8 (the shipped path).
+ *
+ * UNTRUSTED PARSER, tok.c/elf.c discipline: validates magic + version, range-
+ * checks every dimension, and proves every section fits inside `len` wrap-safely
+ * BEFORE reading a weight byte. Returns NULL on success, or a short reason on
+ * failure; on failure *out is zeroed and nothing past the buffer is read. */
+const char *model_load(const void *base, uint64_t len,
+                       struct model_weights *out,
+                       struct model_layer *layers, uint32_t max_layers);
+
 /* ── size helpers (pure arithmetic; the caller allocates) ── */
 
 /* Longest matmul contraction axis, padded — the size act_fix/act_q must be. */

@@ -249,6 +249,7 @@ kernel-mb2: src/hello_elf.h src/rogue_elf.h src/iodemo_elf.h \
 	$(CC) $(MB2_CFLAGS) -c src/af.c -o $(BUILD_DIR)/af.o
 	$(CC) $(GPT_CFLAGS) -c src/gpt.c -o $(BUILD_DIR)/gpt.o
 	$(CC) $(MB2_CFLAGS) -c src/model.c -o $(BUILD_DIR)/model.o
+	$(CC) $(MB2_CFLAGS) -c src/model_load.c -o $(BUILD_DIR)/model_load.o
 	$(CC) $(MB2_CFLAGS) -c src/tok.c -o $(BUILD_DIR)/tok.o
 	$(CC) $(MB2_CFLAGS) -c src/shell.c -o $(BUILD_DIR)/shell.o
 	$(CC) $(MB2_CFLAGS) -c src/mouse.c -o $(BUILD_DIR)/mouse.o
@@ -284,6 +285,7 @@ kernel-mb2: src/hello_elf.h src/rogue_elf.h src/iodemo_elf.h \
 	    $(BUILD_DIR)/af.o \
 	    $(BUILD_DIR)/gpt.o \
 	    $(BUILD_DIR)/model.o \
+	    $(BUILD_DIR)/model_load.o \
 	    $(BUILD_DIR)/tok.o \
 	    $(BUILD_DIR)/shell.o \
 	    $(BUILD_DIR)/mouse.o \
@@ -401,6 +403,12 @@ $(BUILD_DIR)/test_%: tests/test_%.c $(HOST_TEST_HDRS) | $(BUILD_DIR)
 # forward pass or a regenerated fixture rebuilds the gate instead of re-running
 # a stale binary (the "a gate that cannot fail is not a gate" trap).
 $(BUILD_DIR)/test_model: src/model.c tools/ref_forward_fixture.h
+
+# test_model_load.c #includes model.c + model_load.c and, at RUN time, shells out
+# to tools/mkweights.py to produce the blob it round-trips. Name all three so an
+# edit to the loader, the converter or the fixture rebuilds the gate rather than
+# re-running a stale binary (the "a gate that cannot fail is not a gate" trap).
+$(BUILD_DIR)/test_model_load: src/model.c src/model_load.c tools/ref_forward_fixture.h tools/mkweights.py
 
 # test_tok.c #includes the engine source and the generated Qwen reference
 # fixture; name them so an edit to tok.c or a regenerated fixture rebuilds the
