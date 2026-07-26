@@ -133,9 +133,13 @@ Verified by arithmetic against `kernel/src/heap.c`, not guessed.
   heap. Proven on the shipped kernel: a 56 MB cache generated live, frame
   accounting confirmed both caches came from the PMM, and the pre-fix control
   OOMs. So `max_seq=1024` is fine now — no need to shrink it.
-- **Still open (needs a real model):** the ~775 MB module-MAPPING path is
-  untested until a real Ember `.astrion` exists. That's separate from the cache
-  (which was the actual blocker). If it turns out GRUB/the loader struggles with
-  a 775 MB module, the `--max-seq`/`embed int8` levers shrink it.
+- **Module-MAPPING path — DE-RISKED (2026-07-25).** Booted a **492 MB**
+  real-Ember-shape module (dim 1024, vocab 50304 — the real 412 MB embedding)
+  headless: GRUB loaded it, the heap pushed itself clear past it (no collision),
+  FNV ran over all 492 MB, and `model_load` parsed it zero-copy — `brain loaded
+  — dim=1024 ... vocab=50304`, no fault, no OOM. The real 775 MB file is the same
+  path with more layers + uint64-safe offset math, so it's structurally proven;
+  the only thing left is the byte-exact run with the actual Ember file. If GRUB
+  ever balks at 775 MB, the `--max-seq`/`embed int8` levers shrink it.
 
 The tiny test brain (M7) sidesteps all of this — its cache is a few KB.
