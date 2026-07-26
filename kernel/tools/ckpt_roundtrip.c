@@ -51,7 +51,17 @@
  * guard against gross corruption, set well below bug-scale but above honest deep
  * quantization; override it per-model with argv[3] when you want it tight. The
  * CKPT_CTRL env var ORs a MODEL_CTRL_* bit in to prove this harness actually
- * fails on a planted bug — a gate that cannot fail is not a gate. */
+ * fails on a planted bug — a gate that cannot fail is not a gate.
+ *
+ * USE A SHALLOW MODEL FOR A CLEAN ARGMAX GATE. On RANDOM weights at depth, int8
+ * quantization ALONE flips near-tied argmaxes: a dim-256/16-layer/vocab-4096
+ * random model diverges from the float oracle at ~13/64 positions — but that is
+ * NOT a bug. A numpy weight-only int8 simulation reproduces it (11/64, the SAME
+ * positions), so the engine is faithfully tracking quantization, not miscomputing.
+ * Convention/format bugs are layer-count-independent — they show at 2-3 layers
+ * just as loudly (the controls prove it). So verify the CONVERTER with a shallow
+ * model, where argmax is decisive; a trained model's confident logits (not random
+ * near-ties) are what keep argmax robust at Ember's real depth. */
 #define DEF_TOL 3.0e-1
 
 static double dabs(double x) { return x < 0.0 ? -x : x; }

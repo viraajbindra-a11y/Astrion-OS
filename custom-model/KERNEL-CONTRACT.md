@@ -79,10 +79,24 @@ planted; a clean run sits at 3%).
 - **Mac chain** (`emit_blob` → `model_load` → `model_forward`): **VERIFIED**
   today, numpy only, on a random Ember-shape model. Config-independent and
   bug-sensitive (`kernel/tools/rt_oracle.py` + `ckpt_roundtrip.c`).
+- **Engine fidelity at depth**: **VERIFIED**. A random dim-256 / 16-layer /
+  64-position model runs through the C engine and tracks a numpy int8 simulation
+  position-for-position — so RoPE at high positions, GQA, and 16-layer int8
+  accumulation are all correct, not just the 2-layer oracle.
 - **`from_ckpt`** (the torch `.pt` reader + name map): verified by inspection;
   `roundtrip_check.py` run-verifies it on the PC. **This is the one step left.**
 - **A real trained `ember.pt`**: the final gate is loading it live on Astrion
   and watching it generate.
+
+### Reading a round-trip result
+
+`roundtrip_check.py` uses a **3-layer** model on purpose: there, argmax is a
+clean gate and `0/N mismatches` means the converter is correct. Do **not** crank
+its depth up and read argmax flips as failure — on *random* weights, int8
+quantization alone flips near-tied logits at depth (that's expected, and proven
+to be quantization, not a bug). Convention/format bugs show at 3 layers just as
+loudly. Depth robustness comes from a *trained* model's confident logits, which
+is exactly why the final gate is a real Ember running live.
 
 ---
 
