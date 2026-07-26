@@ -250,6 +250,7 @@ kernel-mb2: src/hello_elf.h src/rogue_elf.h src/iodemo_elf.h \
 	$(CC) $(GPT_CFLAGS) -c src/gpt.c -o $(BUILD_DIR)/gpt.o
 	$(CC) $(MB2_CFLAGS) -c src/model.c -o $(BUILD_DIR)/model.o
 	$(CC) $(MB2_CFLAGS) -c src/model_load.c -o $(BUILD_DIR)/model_load.o
+	$(CC) $(MB2_CFLAGS) -c src/model_rt.c -o $(BUILD_DIR)/model_rt.o
 	$(CC) $(MB2_CFLAGS) -c src/tok.c -o $(BUILD_DIR)/tok.o
 	$(CC) $(MB2_CFLAGS) -c src/shell.c -o $(BUILD_DIR)/shell.o
 	$(CC) $(MB2_CFLAGS) -c src/mouse.c -o $(BUILD_DIR)/mouse.o
@@ -286,6 +287,7 @@ kernel-mb2: src/hello_elf.h src/rogue_elf.h src/iodemo_elf.h \
 	    $(BUILD_DIR)/gpt.o \
 	    $(BUILD_DIR)/model.o \
 	    $(BUILD_DIR)/model_load.o \
+	    $(BUILD_DIR)/model_rt.o \
 	    $(BUILD_DIR)/tok.o \
 	    $(BUILD_DIR)/shell.o \
 	    $(BUILD_DIR)/mouse.o \
@@ -330,8 +332,13 @@ kernel-mb2: src/hello_elf.h src/rogue_elf.h src/iodemo_elf.h \
 # exist. Set MODEL=<path> to include one; unset, the ISO is built exactly as
 # before so nothing here changes the normal build.
 #   make iso-grub MODEL=weights/qwen-0.6b-q4.bin
+# TOK=<path> is the same, for the BPE tokenizer module (ATK1). The kernel finds
+# each module by its MAGIC, so the order and names below don't matter:
+#   make run-grub MODEL=build/oracle.bin TOK=build/qwen.atk
 MODEL ?=
 MODEL_NAME := $(notdir $(MODEL))
+TOK ?=
+TOK_NAME := $(notdir $(TOK))
 
 iso-grub: kernel-mb2
 	@mkdir -p $(BUILD_DIR)/iso-grub/boot/grub
@@ -341,12 +348,20 @@ iso-grub: kernel-mb2
 	    cp "$(MODEL)" $(BUILD_DIR)/iso-grub/boot/$(MODEL_NAME); \
 	    echo "module: $(MODEL_NAME) ($$(wc -c < "$(MODEL)") bytes)"; \
 	fi
+	@if [ -n "$(TOK)" ]; then \
+	    [ -f "$(TOK)" ] || { echo "FAIL: TOK=$(TOK) does not exist"; exit 1; }; \
+	    cp "$(TOK)" $(BUILD_DIR)/iso-grub/boot/$(TOK_NAME); \
+	    echo "module: $(TOK_NAME) ($$(wc -c < "$(TOK)") bytes)"; \
+	fi
 	@echo 'set timeout=0'                                > $(BUILD_DIR)/iso-grub/boot/grub/grub.cfg
 	@echo 'set default=0'                               >> $(BUILD_DIR)/iso-grub/boot/grub/grub.cfg
 	@echo 'menuentry "Astrion v2.0 (multiboot2)" {'     >> $(BUILD_DIR)/iso-grub/boot/grub/grub.cfg
 	@echo '  multiboot2 /boot/kernel_mb2.elf'           >> $(BUILD_DIR)/iso-grub/boot/grub/grub.cfg
 	@if [ -n "$(MODEL)" ]; then \
 	    echo "  module2 /boot/$(MODEL_NAME) $(MODEL_NAME)" >> $(BUILD_DIR)/iso-grub/boot/grub/grub.cfg; \
+	fi
+	@if [ -n "$(TOK)" ]; then \
+	    echo "  module2 /boot/$(TOK_NAME) $(TOK_NAME)" >> $(BUILD_DIR)/iso-grub/boot/grub/grub.cfg; \
 	fi
 	@echo '  boot'                                      >> $(BUILD_DIR)/iso-grub/boot/grub/grub.cfg
 	@echo '}'                                           >> $(BUILD_DIR)/iso-grub/boot/grub/grub.cfg

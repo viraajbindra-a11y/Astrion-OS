@@ -17,6 +17,7 @@
 #include "snake.h"      /* snake_play */
 #include "mouse.h"      /* mouse_x/y/left_down/take_left_click/lift */
 #include "gpt.h"        /* on-device GPT for the Assistant */
+#include "model_rt.h"   /* the loaded brain: model_rt_ready/config/generate */
 #include "assist_match.h" /* prompt matching, unit-tested on the host */
 #include "af.h"         /* antialiased Inter text */
 #include "task.h"       /* task_get_info — the assistant reports what's running */
@@ -1904,9 +1905,26 @@ static void assist_run(void) {
      * explicitly asks for invented text, and label what they're getting. */
     if (am_wants_generation(as_prompt)) {
         assist_begin_output();
-        assist_say("on-device model, 212K parameters, no internet involved.\n");
-        assist_say("it writes English-shaped text, not sense - that's the size:\n\n");
-        gpt_generate(as_prompt, 220, assist_emit);
+        if (!model_rt_ready()) {
+            /* No brain module arrived at boot - say so plainly instead of
+             * inventing text. Every other Assistant answer is still live. */
+            assist_say("no brain loaded - I booted without a model module,\n");
+            assist_say("so there's no on-device model to generate text with.\n");
+            assist_say("everything else (files, machine, settings) still works.\n");
+            return;
+        }
+        /* The one path that runs the neural engine: tokenize the prompt, greedy-
+         * decode through model.c, detokenize, stream it out - all offline. The
+         * loaded brain is a tiny random test model, so the text is deliberately
+         * gibberish; the point is real tokens flowing through the in-kernel
+         * forward pass. */
+        const struct model_config *mc = model_rt_config();
+        assist_say("on-device model, ");
+        assist_num(mc->dim);      assist_say("-dim / ");
+        assist_num(mc->n_layers); assist_say("-layer, no internet involved.\n");
+        assist_say("it runs the real transformer inside the kernel - this brain\n");
+        assist_say("is random weights, so expect gibberish, not sense:\n\n");
+        model_rt_generate(as_prompt, 64, assist_emit);
         return;
     }
 

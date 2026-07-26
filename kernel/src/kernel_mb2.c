@@ -1045,6 +1045,16 @@ void kernel_mb2_main(uint32_t magic, uint64_t info_ptr) {
         serial_puts("\nMODULES: none\n");
     }
 
+    /* The brain. Scan those modules for the tokenizer (ATK1) and the model
+     * (AMW1), install/load whichever are present, and allocate the forward-pass
+     * scratch from the heap (up since above). Zero-copy: the weight pointers aim
+     * straight into the module pages. Logs the loaded config, and never faults -
+     * no model module just means the Assistant says "no brain loaded". This is
+     * the first time anything in the RUNNING kernel calls the model engine. */
+    serial_puts("\nMODEL: loading the brain...\n");
+    extern void model_rt_init(void);
+    model_rt_init();
+
     /* Physical frame allocator over the RAM above the heap - the foundation
      * for per-process address spaces (Tier 3). Needs the heap (for its bitmap)
      * and the mmap (already parsed above), so it goes here. */
