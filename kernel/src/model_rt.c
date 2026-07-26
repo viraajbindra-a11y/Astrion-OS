@@ -7,9 +7,13 @@
  *
  * ZERO-COPY WEIGHTS. model_load() points struct model_weights straight into the
  * module's mapped pages — we never memcpy the blob (Ember is hundreds of MB).
- * The only heap we take is the layer-pointer table, the forward-pass scratch,
- * the KV cache, and the logits vector; all sized from the loaded config, all
- * freed back if any single allocation fails so a partial init leaves no leak.
+ * The layer-pointer table, forward-pass scratch and logits vector come from the
+ * 32 MiB heap; the KV cache does NOT — a real Ember's kcache/vcache are ~50 MiB
+ * EACH, far past the whole heap, so they come as contiguous frame runs from the
+ * PMM (the physical allocator over the RAM above the heap; its arena is inside
+ * the boot identity map, so a frame run is a single virtually-contiguous
+ * buffer). Every buffer is sized from the loaded config and freed back if any
+ * single allocation fails, so a partial init leaves no leak.
  *
  * NO FLOAT. Everything here is integer: the engine is fixed-point (see model.h)
  * and this file adds only pointer bookkeeping and a greedy loop. It builds under
@@ -26,6 +30,7 @@
 #include "tok.h"            /* tok_init/tok_ready/tok_encode/tok_decode         */
 #include "q8.h"             /* struct q8_group, Q8_GROUP                        */
 #include "heap.h"           /* kmalloc/kfree                                    */
+#include "pmm.h"            /* pmm_alloc_contig/pmm_free_contig — the KV cache  */
 
 /* Section magics, little-endian at offset 0 of each module. AMW_MAGIC mirrors
  * the #define in model_load.c (kept local: model.h does not export it); TOK_MAGIC
@@ -67,6 +72,7 @@ static struct model_state   g_st;      /* scratch + KV cache pointers           
 static struct model_layer  *g_layers;  /* [n_layers] pointer table (heap)        */
 static int64_t             *g_logits;  /* [vocab] decode output (heap)           */
 static int                  g_ready;   /* 1 once generation is live              */
+static uint64_t             g_kv_frames; /* PMM frames backing EACH KV cache      */
 
 /* ── generation scratch. File-scope, not on the stack: generation is inherently
  * single-shot (it drives the one global g_st) and the Assistant calls it from a
@@ -91,8 +97,14 @@ static uint32_t rt_strlen(const char *s) {
  * for both a failed init and (in principle) a teardown. kfree(NULL) is a no-op,
  * so calling this on a partially-built state is safe. */
 static void rt_free_all(void) {
-    kfree(g_st.kcache);   g_st.kcache   = 0;
-    kfree(g_st.vcache);   g_st.vcache   = 0;
+    /* kcache/vcache are PMM frame runs (rt_pmm_i64), NOT heap blocks — return
+     * them with the matching pmm_free_contig, guarded on non-NULL so a failed
+     * kcache alloc (frames still 0) never double-frees. */
+    if (g_st.kcache) pmm_free_contig((uint64_t)(uintptr_t)g_st.kcache, g_kv_frames);
+    g_st.kcache = 0;
+    if (g_st.vcache) pmm_free_contig((uint64_t)(uintptr_t)g_st.vcache, g_kv_frames);
+    g_st.vcache = 0;
+    g_kv_frames = 0;
     kfree(g_st.inv_freq); g_st.inv_freq = 0;
     kfree(g_st.x);        g_st.x        = 0;
     kfree(g_st.xn);       g_st.xn       = 0;
@@ -111,6 +123,22 @@ static void rt_free_all(void) {
 
 static int64_t *rt_i64(uint64_t n) { return (int64_t *)kmalloc(n * sizeof(int64_t)); }
 
+/* The KV cache is the one allocation that outgrows the whole 32 MiB heap: a real
+ * Ember's kcache and vcache are ~50 MiB EACH. So it does NOT come from kmalloc —
+ * it comes from the PMM as a run of contiguous frames. The arena is inside the
+ * boot identity map, so that run is a single valid, virtually-contiguous int64*,
+ * which is what model.c's flat kcache[(layer*max_seq+pos)*...] indexing needs.
+ * `n` is the int64 count; on success returns the base and records the frame
+ * count in *frames (rt_free_all needs it to release the run), else returns 0. */
+static int64_t *rt_pmm_i64(uint64_t n, uint64_t *frames) {
+    uint64_t bytes = n * (uint64_t)sizeof(int64_t);   /* n from capped dims: no wrap */
+    uint64_t nfr   = bytes / PMM_FRAME_SIZE + (bytes % PMM_FRAME_SIZE ? 1u : 0u);
+    uint64_t phys  = pmm_alloc_contig(nfr);
+    if (!phys) return 0;
+    *frames = nfr;
+    return (int64_t *)(uintptr_t)phys;
+}
+
 /* Allocate the forward-pass scratch + KV cache for `c`. Every field of g_st is
  * sized exactly as model.h documents. Returns 1 on success; on the first failed
  * allocation it frees everything and returns 0 (caller reports OOM). */
@@ -119,8 +147,11 @@ static int rt_alloc_scratch(const struct model_config *c) {
     uint32_t nin = model_max_nin(c);
     uint32_t HHD = c->n_heads * c->head_dim;
 
-    g_st.kcache   = rt_i64(kv);
-    g_st.vcache   = rt_i64(kv);
+    /* The two big ones from the PMM (both the same length, so one frame count
+     * covers both); everything below stays on the heap. */
+    g_kv_frames   = 0;
+    g_st.kcache   = rt_pmm_i64(kv, &g_kv_frames);
+    g_st.vcache   = rt_pmm_i64(kv, &g_kv_frames);
     g_st.inv_freq = rt_i64(c->head_dim / 2u);
     g_st.x        = rt_i64(c->dim);
     g_st.xn       = rt_i64(c->dim);

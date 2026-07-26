@@ -161,6 +161,43 @@ void pmm_free(uint64_t phys) {
     nfree++;
 }
 
+/* Allocate a RUN of `n` physically contiguous frames, returning the base
+ * physical address — which, because the whole arena sits inside the boot
+ * identity map, is ALSO a valid kernel pointer, and the run is therefore
+ * virtually contiguous. The whole run is zeroed, like pmm_alloc. Returns 0 if
+ * no run of `n` free frames exists.
+ *
+ * This backs an allocation too big for the 32 MiB kernel heap: the model KV
+ * cache is tens of MiB and model.c indexes it as ONE flat int64* array, so it
+ * needs a single contiguous buffer, not a scatter of frames. First-fit linear
+ * scan for `n` consecutive clear bits — the bitmap is small and this runs a
+ * handful of times at boot, so a plain scan is the right amount of machinery. */
+uint64_t pmm_alloc_contig(uint64_t n) {
+    if (n == 0 || nframes == 0 || !bitmap) return 0;
+    if (n > nfree) return 0;                  /* cheap reject before scanning  */
+
+    uint64_t run = 0;
+    for (uint64_t i = 0; i < nframes; i++) {
+        if (bit_get(i)) { run = 0; continue; }
+        if (++run < n) continue;
+        uint64_t start = i + 1 - n;            /* frames [start..i] all free    */
+        for (uint64_t f = start; f <= i; f++) bit_set(f);
+        nfree -= n;
+        hint = (i + 1 >= nframes) ? 0 : i + 1; /* like pmm_alloc: rotate past it */
+        uint64_t phys = arena_base + start * PMM_FRAME_SIZE;
+        for (uint64_t f = 0; f < n; f++) zero_frame(phys + f * PMM_FRAME_SIZE);
+        return phys;
+    }
+    return 0;
+}
+
+/* Free a run pmm_alloc_contig returned. Per-frame pmm_free reuses its own
+ * range / alignment / double-free guards, so a bad base or count cannot corrupt
+ * the bitmap — the frames that are not really ours are simply ignored. */
+void pmm_free_contig(uint64_t phys, uint64_t n) {
+    for (uint64_t f = 0; f < n; f++) pmm_free(phys + f * PMM_FRAME_SIZE);
+}
+
 uint64_t pmm_frames_total(void) { return nframes; }
 uint64_t pmm_frames_free(void)  { return nfree; }
 uint64_t pmm_arena_base(void)   { return arena_base; }

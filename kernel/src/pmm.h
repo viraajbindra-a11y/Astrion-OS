@@ -21,6 +21,14 @@ void     pmm_init(void);
 uint64_t pmm_alloc(void);          /* a zeroed 4 KiB phys frame; 0 = out of memory */
 void     pmm_free(uint64_t phys);  /* phys must be a frame pmm_alloc returned       */
 
+/* A RUN of `n` physically contiguous, zeroed frames. The base is a valid kernel
+ * pointer (the arena is identity-mapped) and the run is virtually contiguous, so
+ * it backs a single flat buffer too large for the 32 MiB heap — the model KV
+ * cache. alloc returns the base phys addr, or 0 if no run of `n` free frames
+ * exists; free takes that same base and the same count. */
+uint64_t pmm_alloc_contig(uint64_t n);
+void     pmm_free_contig(uint64_t phys, uint64_t n);
+
 uint64_t pmm_frames_total(void);
 uint64_t pmm_frames_free(void);
 uint64_t pmm_arena_base(void);
