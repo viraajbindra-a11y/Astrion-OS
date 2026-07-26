@@ -128,11 +128,14 @@ vcache). Today's kernel heap is **32 MiB** — so a real Ember would load, then
 fail to allocate its cache, and the Assistant would say "generation disabled".
 Verified by arithmetic against `kernel/src/heap.c`, not guessed.
 
-Two ways through, before a real Ember runs live:
-- **Kernel side (the real fix):** allocate the KV cache from the page allocator
-  (PMM, which manages all 12 GB), not the 32 MiB heap. Tracked as a follow-up.
-- **Short-term / training side:** export with `--max-seq 128` (~13 MB cache,
-  fits the current heap) for early live runs. Costs context length, not
-  correctness. `mkweights.py --ckpt --max-seq 128 …`.
+- **Kernel side — DONE (commit `b8e1cff`, rex-verified).** The KV cache now
+  comes from the page allocator (PMM) as a contiguous frame run, not the 32 MiB
+  heap. Proven on the shipped kernel: a 56 MB cache generated live, frame
+  accounting confirmed both caches came from the PMM, and the pre-fix control
+  OOMs. So `max_seq=1024` is fine now — no need to shrink it.
+- **Still open (needs a real model):** the ~775 MB module-MAPPING path is
+  untested until a real Ember `.astrion` exists. That's separate from the cache
+  (which was the actual blocker). If it turns out GRUB/the loader struggles with
+  a 775 MB module, the `--max-seq`/`embed int8` levers shrink it.
 
 The tiny test brain (M7) sidesteps all of this — its cache is a few KB.
