@@ -119,3 +119,20 @@ follow:
 2. **Obvious win, deferred:** store `embed` int8 like `lm_head` and the file
    drops to **~414 MB**. That's an engine change (`model.c` embed lookup +
    `model_load.c` + `mkweights.py`), so it waits until the basic path runs.
+
+### There are TWO memory costs, not one
+
+The file is only the first. Generation also needs a **KV cache**, allocated at
+runtime from the kernel heap. At `max_seq=1024` that's **~100 MB** (kcache +
+vcache). Today's kernel heap is **32 MiB** — so a real Ember would load, then
+fail to allocate its cache, and the Assistant would say "generation disabled".
+Verified by arithmetic against `kernel/src/heap.c`, not guessed.
+
+Two ways through, before a real Ember runs live:
+- **Kernel side (the real fix):** allocate the KV cache from the page allocator
+  (PMM, which manages all 12 GB), not the 32 MiB heap. Tracked as a follow-up.
+- **Short-term / training side:** export with `--max-seq 128` (~13 MB cache,
+  fits the current heap) for early live runs. Costs context length, not
+  correctness. `mkweights.py --ckpt --max-seq 128 …`.
+
+The tiny test brain (M7) sidesteps all of this — its cache is a few KB.
