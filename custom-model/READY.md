@@ -6,14 +6,18 @@ step below was tested end-to-end on a small stand-in model before it was written
 down; the only step that needs your actual PC is the weekend pretrain.
 
 ```
-pip install torch datasets tiktoken
+# SETUP on your 5080 PC. A 50-series card is new (Blackwell) — a plain
+# `pip install torch` often grabs a build that can't drive it, so use cu128:
+pip install torch --index-url https://download.pytorch.org/whl/cu128
+pip install datasets tiktoken
+python -c "import torch; print(torch.cuda.get_device_name(0))"   # must print your 5080
 
 python prepare_fineweb.py --mb 13500   # 0. get ~7B tokens of real web text
 python train_best.py --compile         # 1. PRETRAIN  (~weekend)  -> ember-base.pt
 python finetune.py                     # 2. FINE-TUNE (~minutes)  -> ember.pt
 python readiness.py                    # 3. READY?    -> "🔥 EMBER IS READY"
 python chat.py                         # 4. TALK to Ember
-python export_ember.py --verify        # 5. EXPORT    -> ember.astrion (for the kernel)
+python export_ember.py                 # 5. EXPORT    -> ember.astrion (kernel-loadable)
 ```
 
 ---
@@ -40,9 +44,19 @@ asked for is done: *it can tell you what it is.*
 
 **4. Chat.** [chat.py](chat.py) is a normal back-and-forth. Talk to it.
 
-**5. Export — the bridge into Astrion.** [export_ember.py](export_ember.py) shrinks
-Ember to an 8-bit `ember.astrion` file (~340 MB) your kernel loads. Same engine as
-Qwen, different file — the whole point of the two-track plan.
+**5. Export — the bridge into Astrion.** [export_ember.py](export_ember.py) writes
+`ember.astrion`, the binary **AMW1** file the kernel actually loads (it now delegates
+to `kernel/tools/mkweights.py` — one format, no drift). A trained 341M Ember comes
+out **~775 MB** (the token embedding dominates). Same engine as Qwen, different file
+— the whole point of the two-track plan.
+
+**Before you trust the export, prove it converts right — no training needed.** Run
+`python roundtrip_check.py`; it builds a small model, exports it, and dumps a
+reference. Send the two files it writes to the kernel chat — I run them through the
+real C engine and confirm the conversion is exact. The kernel side (engine, memory,
+loading a 775 MB module) is already built and verified; details in
+[KERNEL-CONTRACT.md](KERNEL-CONTRACT.md). The final gate is loading your real
+`ember.astrion` live on Astrion.
 
 ---
 
