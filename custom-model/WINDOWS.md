@@ -28,7 +28,10 @@ checkpoint is ~5 GB.
 
 Install these first if you don't have them:
 
-* **Python 3.10 or newer** from python.org. Tick **"Add Python to PATH"** during install.
+* **Python 3.13** from python.org. Tick **"Add Python to PATH"** during install.
+  **Not 3.14.** Triton has no 3.14 wheel (checked 2026-07-27: triton-windows
+  3.7.1.post27 ships cp310–cp313 only), and without Triton `torch.compile` cannot
+  work, which costs 2–3x wall-clock. See step 2.
 * **Git for Windows** from git-scm.com.
 * An **NVIDIA driver from 2025 or later**. The 5080 is Blackwell; old drivers won't do.
 
@@ -70,26 +73,50 @@ cd custom-model
 
 ## Step 2 — Install torch, and prove it sees the 5080
 
+Use `python -m pip`, not bare `pip` — a fresh Windows Python often has `pip` off
+PATH even when `python` is on it.
+
 A plain `pip install torch` often grabs a build that cannot drive a 50-series
 card. The `cu128` index is the one that can:
 
 ```powershell
-pip install torch --index-url https://download.pytorch.org/whl/cu128
+python -m pip install torch --index-url https://download.pytorch.org/whl/cu128
 ```
 
 That's ~2.5 GB. Then the rest:
 
 ```powershell
-pip install numpy datasets tiktoken
+python -m pip install numpy datasets tiktoken
 ```
+
+**Then Triton**, or `torch.compile` fails and the run takes 2–3x longer. Triton
+on Windows is an unofficial build and its version must pair with torch:
+
+| torch | triton-windows |
+|---|---|
+| 2.7 | 3.3 |
+| 2.8 | 3.4 |
+| 2.9 | 3.5 |
+| 2.11 | 3.7 |
+
+```powershell
+python -m pip install -U triton-windows
+```
+
+If that says **"no matching distribution"** you are on Python 3.14 — no wheel
+exists for it. Install Python 3.13 and redo this step under it.
+
+Triton also needs the **Visual C++ Redistributable 2015–2022** from Microsoft;
+`libtriton.pyd` links against it. Most PCs already have it. Full MSVC is *not*
+needed — that is only for CPU inductor, and this run is entirely on the GPU.
 
 Now the gate. This must print your card:
 
 ```powershell
-python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0))"
+python -c "import torch; print(torch.cuda.is_available()); print(torch.cuda.get_device_name(0))"
 ```
 
-Expected: `True NVIDIA GeForce RTX 5080`.
+Expected: `True` then `NVIDIA GeForce RTX 5080`.
 
 **If it prints `False`, stop.** Nothing after this point can work. Either the
 driver is too old, or pip installed the CPU-only build. Reinstall with the cu128
