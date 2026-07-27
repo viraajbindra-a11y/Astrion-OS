@@ -218,11 +218,21 @@ the run.
 
 **Leave the PowerShell window open.** Closing it stops training.
 
-**Check the pace at step 250.** The line ends with elapsed minutes, and 54 hours
-over 13500 steps means step 250 should land near **60m**. If it reads 120m+ the
-estimate is wrong and it is worth stopping to work out why on day one rather than
-day three. (The smoke test cannot tell you this — its batch is 32x smaller and
-compile warmup dominates the numbers.)
+**Check the pace at step 250.** MEASURED on the 5080, 2026-07-27: step 0 at 0.1m,
+step 250 at **88.6m** — 21.2 s/step, so 13500 steps is **~80 hours (3.3 days)**.
+
+The 54h figure in BEST.md was a projection, never a measurement, and it is 1.48x
+optimistic. 80h is the number to plan around. If your step 250 is much past 90m,
+something else is wrong.
+
+(The smoke test cannot tell you any of this — its batch is 32x smaller and compile
+warmup swamps the timing.)
+
+**Step 0 taking ~20 minutes to appear is not a hang.** Step 0 itself takes 0.1m.
+Python buffers stdout, so `torch.compile: working` and the `batch ...` line have
+usually already happened and are sitting in the buffer. The wait is inductor
+compiling, it happens once, and `nvidia-smi` showing a `python.exe` holding VRAM
+is enough to confirm it is alive.
 
 You'll see a line every 250 steps:
 
