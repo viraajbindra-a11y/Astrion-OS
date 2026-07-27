@@ -71,6 +71,8 @@ def main():
     ap.add_argument("--compile", action="store_true")
     ap.add_argument("--fresh", action="store_true")
     ap.add_argument("--sample_only", action="store_true")
+    ap.add_argument("--smoke", action="store_true",
+                    help="run 4 tiny steps to validate the whole pipeline, then stop")
     ap.add_argument("--prompt", default="\n")
     args = ap.parse_args()
 
@@ -147,9 +149,49 @@ def main():
         return out
 
     if args.compile:
-        model = torch.compile(model)
+        # torch.compile is a SPEEDUP, not a requirement — losing it costs 2-3x
+        # wall-clock, losing the run costs the weekend. It is also the single
+        # most likely thing to break here: this trains on Windows, where
+        # inductor needs a Triton build that is not officially supported.
+        #
+        # It fails LAZILY. torch.compile() itself almost always returns fine;
+        # inductor only runs on the first forward. So wrapping the call in a
+        # try is not a test — the test is doing one real forward AND backward
+        # and seeing if it survives. Better to spend two minutes finding out
+        # now than to have step 0 die after a 14 GB download.
+        compiled = torch.compile(model)
+        try:
+            xs, ys = get_batch("train")
+            with torch.autocast("cuda", dtype=torch.bfloat16):
+                _, probe = compiled(xs, ys)
+            probe.backward()
+            model = compiled
+            print("torch.compile: working")
+        except Exception as e:
+            print(f"torch.compile FAILED — continuing WITHOUT it.\n"
+                  f"  {type(e).__name__}: {e}\n"
+                  f"  The run is fine, just ~2-3x slower. Expect a smaller model\n"
+                  f"  for the same wall-clock, not a broken one.")
+        finally:
+            # The probe put real gradients in the parameters. The training loop
+            # zeroes at the top of every step, but leaving them is asking for a
+            # confusing first update if that ever changes.
+            opt_muon.zero_grad(set_to_none=True)
+            opt_adamw.zero_grad(set_to_none=True)
+
     def raw():
         return model._orig_mod if hasattr(model, "_orig_mod") else model
+
+    if args.smoke:
+        # Prove the whole path end to end in minutes: data -> forward ->
+        # backward -> both optimizers -> eval -> checkpoint -> resume. Writes
+        # to its OWN file so a smoke run can never clobber a real checkpoint.
+        cfg["grad_accum"] = 2
+        cfg["eval_every"] = 2
+        cfg["total_steps"] = start_step + 4
+        args.out = "ember-smoke.pt"
+        print("SMOKE TEST: 4 steps, tiny batch, saving to ember-smoke.pt\n"
+              "            (delete it when done; it is not a real model)")
 
     eff = cfg["micro_batch"] * cfg["block_size"] * cfg["grad_accum"]
     print(f"batch {eff:,} tok/update | {cfg['grad_accum']} micro-steps of {cfg['micro_batch']}\n")
