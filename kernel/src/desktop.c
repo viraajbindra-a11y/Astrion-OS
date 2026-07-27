@@ -734,6 +734,12 @@ void desktop_draw_clock(const char *hhmmss) {
      * punch a lit hole through the dim — hold the clock until the dialog closes
      * (repaint_all() then brings it back within a tick). */
     if (desktop_power_is_open()) return;
+    /* Same reason, different owner: a fullscreen app (Snake) paints the entire
+     * screen including where the top bar used to be, and it blocks task 0 for
+     * its whole run — so nothing repairs what we scribble. Without this guard
+     * the clock kept stamping its band every 250ms straight through the game,
+     * landing a black box over Snake's SCORE. Caught by dock_test.py. */
+    if (desktop_is_exclusive()) return;
     uint32_t w = af_text_width(hhmmss, AF_SB16);
     if (SW <= w + CLOCK_PAD) return;   /* absurdly narrow mode: nowhere to put it */
     uint32_t x = SW - w - CLOCK_PAD;   /* left of the power button + divider */
@@ -867,6 +873,18 @@ void desktop_power_open(void) {
 
 int  desktop_power_is_open(void) { return pwr_open; }
 void desktop_power_cancel(void)  { pwr_open = 0; }
+
+/* Screen ownership. An app that paints the whole framebuffer and blocks task 0
+ * for its run — snake_play() is the only one today — raises this so background
+ * painters on OTHER tasks hold off. volatile because the writer (task 0) and
+ * the reader (the clock task) are different tasks; a single int write is atomic
+ * on x86-64, so no lock is needed, only a guarantee it isn't cached in a
+ * register across the loop. Fail-safe by construction: if a caller forgot to
+ * clear it, the clock would stop rather than corrupt anything, and repaint_all()
+ * on the way out restores the bar regardless. */
+static volatile int exclusive_owner;
+void desktop_set_exclusive(int on) { exclusive_owner = on ? 1 : 0; }
+int  desktop_is_exclusive(void)    { return exclusive_owner; }
 
 int desktop_power_hit(int x, int y) {
     if (!SW) return 0;

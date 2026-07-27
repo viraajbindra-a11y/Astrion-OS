@@ -170,6 +170,14 @@ int  desktop_power_hit(int x, int y);
  * click/key here and does nothing else.) */
 int  desktop_power_is_open(void);
 
+/* Screen ownership, for apps that paint the WHOLE framebuffer and block task 0
+ * until they exit (snake_play() today). Raise it around such a run and
+ * background painters on other tasks — the clock — hold off instead of
+ * scribbling over a screen they no longer own. Set it before the app paints
+ * and clear it before the desktop repaint that follows. */
+void desktop_set_exclusive(int on);
+int  desktop_is_exclusive(void);
+
 /* Open the dialog: dim the desktop and paint the card. Call mouse_lift() first
  * so the cursor isn't baked into the dimmed snapshot. */
 void desktop_power_open(void);

@@ -2922,7 +2922,14 @@ void wm_open_editor(const char *name) {
 }
 
 static void run_snake(void) {
+    /* Claim the screen for the whole run. snake_play() blocks task 0, so
+     * nothing here can repair damage while it's inside — and the clock task
+     * repaints the top bar every 250ms regardless of who owns the pixels. It
+     * used to punch a black band over Snake's SCORE. Cleared before
+     * repaint_all() so the bar comes straight back. */
+    desktop_set_exclusive(1);
     snake_play();                   /* takes over the screen until ESC */
+    desktop_set_exclusive(0);
     console_clear();
     console_puts("Back from Snake. Type 'help'.\n");
     repaint_all();                  /* restore desktop + any open windows */
