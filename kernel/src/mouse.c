@@ -235,17 +235,39 @@ static void paint_ink_at(int x, int y) {
 
 void mouse_redraw_if_dirty(void) {
     if (!dirty) return;
-    /* Snapshot the ISR-owned position + button atomically. Without the
-     * cli/sti, IRQ12 could update mx/my BETWEEN save_bg_at(mx,my) and
-     * draw_cursor_at(mx,my) - we'd save the background at one spot and
-     * stamp the sprite at another, then the next restore_bg would paint
-     * stale pixels and trail garbage across the screen. Clearing `dirty`
-     * inside the critical section also avoids dropping an update that
-     * lands mid-redraw. */
+    /* The WHOLE redraw runs with interrupts masked, not just the snapshot.
+     * Two hazards, one guard.
+     *
+     * LOCAL: without masking, IRQ12 could update mx/my between save_bg_at()
+     * and draw_cursor_at() - we'd cache the background at one spot and stamp
+     * the sprite at another.
+     *
+     * CROSS-TASK (this is the one that trailed the cursor): mouse_invalidate_
+     * rect() runs from OTHER tasks - the clock and any spawned ticker paint the
+     * top bar, and a ring-3 program's SYS_PUTS drives console damage() anywhere
+     * in the terminal body - and it mutates the very state this function walks:
+     * lx/ly, saved_bg, first_paint. The old code left the save/restore/draw and
+     * the lx/ly commit OUTSIDE the masked region, so a timer tick could preempt
+     * task 0 right after save_bg_at(cx,cy) and let one of those painters call
+     * invalidate against a stale (lx,ly)/saved_bg pair: it stamps a sprite-
+     * shaped rectangle of the NEW background at the OLD spot, and flips
+     * first_paint so the next redraw bakes the drawn cursor into saved_bg - a
+     * ghost that outlives the move and only clears if a painter happens to
+     * repaint that exact rect.
+     *
+     * Masking the entire body makes the redraw and every cross-task invalidate
+     * mutually exclusive: on one CPU an invalidate can only run when interrupts
+     * are enabled, i.e. never inside here. The cost is ~2000 framebuffer ops
+     * with interrupts off - console.c's writer lock already masks a whole
+     * ~480k-pixel scroll blit in this same idiom, so this is two orders of
+     * magnitude under the latency the machine already accepts. Only ever called
+     * from task 0's main loop with interrupts on, so the bare cli/sti is safe:
+     * there is no interrupts-off caller whose flag we would clobber. Clearing
+     * `dirty` here can't drop an update either - a move that arrives after the
+     * sti sets it again and the next iteration catches it. */
     __asm__ volatile("cli");
     int cx = mx, cy = my, held = btn_left;
     dirty = 0;
-    __asm__ volatile("sti");
 
     if (first_paint) {
         save_bg_at(cx, cy);
@@ -264,6 +286,7 @@ void mouse_redraw_if_dirty(void) {
         /* Same position - just repaint to reflect button-color change. */
         draw_cursor_at(cx, cy);
     }
+    __asm__ volatile("sti");
 }
 
 /* Lift the cursor: restore the pixels under it and arm a fresh save+draw on
