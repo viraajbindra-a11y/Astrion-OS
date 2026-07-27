@@ -83,10 +83,30 @@ planted; a clean run sits at 3%).
   64-position model runs through the C engine and tracks a numpy int8 simulation
   position-for-position — so RoPE at high positions, GQA, and 16-layer int8
   accumulation are all correct, not just the 2-layer oracle.
-- **`from_ckpt`** (the torch `.pt` reader + name map): verified by inspection;
-  `roundtrip_check.py` run-verifies it on the PC. **This is the one step left.**
+- **`from_ckpt`** (the torch `.pt` reader + name map): **VERIFIED 2026-07-27** on
+  real torch output from the 5080. `roundtrip_check.py` ran on the training PC,
+  the two files came back over git, and the C engine reproduced them:
+  `argmax mismatches 0/7  max|d| 9.110e-03  (0.87% of peak logit, tol 30%)` —
+  33x inside tolerance. The `.pt` reader was the last unverified link; the export
+  path is now closed end to end.
+
+  Sensitivity was established on the *same* file pair rather than assumed, since
+  a PASS from a harness that cannot fail is worth nothing:
+
+  | control | result |
+  |---|---|
+  | reference logits perturbed, weights untouched | FAIL, 7/7 mismatches |
+  | 64 weight bytes flipped @ off 1024 (**0.04%** of blob) | FAIL, 4/7 mismatches |
+  | 512 / 4096 / 16384 bytes flipped | FAIL |
+  | 64KB+ flipped | `model_load` rejects cleanly, exit 2 — no crash, no silent pass |
+
+  One control did NOT fail: 64 bytes flipped at offset ~80000 (mid-FFN of layer 2)
+  moved `max|d|` 4x but flipped no argmax. That is the redundant region of the
+  model and 0.04% is far below the magnitude of any real convention bug — a wrong
+  orientation or head grouping scrambles whole matrices. Recorded because the
+  floor is a measured number now, not a claim.
 - **A real trained `ember.pt`**: the final gate is loading it live on Astrion
-  and watching it generate.
+  and watching it generate. This is the only thing left.
 
 ### Reading a round-trip result
 
