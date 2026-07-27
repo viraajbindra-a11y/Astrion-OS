@@ -104,7 +104,17 @@ python -m pip install -U triton-windows
 ```
 
 If that says **"no matching distribution"** you are on Python 3.14 — no wheel
-exists for it. Install Python 3.13 and redo this step under it.
+exists for it. Get 3.13 and redo this step under it. If `py -3.13` then says
+*"No runtime installed that matches 3.13"*, Python's install manager can fetch
+it — no python.org download needed:
+
+```powershell
+py install 3.13
+```
+
+Then prefix every command in this document with `py -3.13` instead of `python`.
+That is how you pick which Python runs when two are installed. Data files and
+checkpoints are shared between them; only packages need reinstalling.
 
 Triton also needs the **Visual C++ Redistributable 2015–2022** from Microsoft;
 `libtriton.pyd` links against it. Most PCs already have it. Full MSVC is *not*
@@ -207,6 +217,12 @@ Screen and sleep → set **sleep to Never**. Screen turning off is fine. Sleep k
 the run.
 
 **Leave the PowerShell window open.** Closing it stops training.
+
+**Check the pace at step 250.** The line ends with elapsed minutes, and 54 hours
+over 13500 steps means step 250 should land near **60m**. If it reads 120m+ the
+estimate is wrong and it is worth stopping to work out why on day one rather than
+day three. (The smoke test cannot tell you this — its batch is 32x smaller and
+compile warmup dominates the numbers.)
 
 You'll see a line every 250 steps:
 
