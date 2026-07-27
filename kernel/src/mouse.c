@@ -213,25 +213,25 @@ static void draw_cursor_at(int x, int y) {
     }
 }
 
-/* When the left button is held while moving, drop a small accent-blue dot
- * at the cursor tip. The dot is written directly to the framebuffer
- * BEFORE we save_bg at the new position, so it gets captured and
- * persists through subsequent cursor moves. */
-static void paint_ink_at(int x, int y) {
-    if (!fb_present_x()) return;
-    volatile uint32_t *fb = (volatile uint32_t *)fb_addr_x();
-    uint32_t pitch_px = fb_pitch_x() / 4;
-    int dot = 4;
-    /* Center the dot near the cursor tip (top-left of the arrow). */
-    for (int dy = 0; dy < dot; dy++) {
-        for (int dx = 0; dx < dot; dx++) {
-            int px = x + dx;
-            int py = y + dy;
-            if (px < 0 || py < 0 || (uint32_t)px >= sw || (uint32_t)py >= sh) continue;
-            fb[py * pitch_px + px] = COL_ACCENT;
-        }
-    }
-}
+/* There used to be a paint_ink_at() here: holding the left button and moving
+ * stamped a 4x4 accent dot at every position the cursor visited (f8800d1,
+ * "drag-to-paint trail"). It was removed deliberately.
+ *
+ * It was not a bug in the usual sense — it did exactly what it was written to
+ * do — but it made the desktop behave like a whiteboard nobody asked for. The
+ * dots went straight into the framebuffer and were then baked into saved_bg,
+ * so they were PERMANENT: no eraser, no undo, no app that owned them, and no
+ * way back except making some other painter happen to repaint that exact rect.
+ * Any ordinary drag — press, move, release — vandalised the wallpaper, which
+ * is why it read to a user as "the cursor smears everywhere."
+ *
+ * Dragging belongs to whoever the drag is over. The window manager already
+ * reads mouse_left_down() to move windows; the mouse driver's job is to draw a
+ * cursor and get out of the way. If a paint app ever wants ink, it asks for the
+ * button state and draws inside its own window, where it can be cleared.
+ *
+ * The cursor interior still turns accent-coloured while the button is held —
+ * that affordance is honest (the button IS down) and costs nothing. */
 
 void mouse_redraw_if_dirty(void) {
     if (!dirty) return;
@@ -266,7 +266,7 @@ void mouse_redraw_if_dirty(void) {
      * `dirty` here can't drop an update either - a move that arrives after the
      * sti sets it again and the next iteration catches it. */
     __asm__ volatile("cli");
-    int cx = mx, cy = my, held = btn_left;
+    int cx = mx, cy = my;
     dirty = 0;
 
     if (first_paint) {
@@ -276,9 +276,6 @@ void mouse_redraw_if_dirty(void) {
         first_paint = 0;
     } else if (cx != lx || cy != ly) {
         restore_bg_at(lx, ly);
-        /* Paint trail BEFORE saving the new bg, so the dot gets baked
-         * into saved_bg and persists across future moves. */
-        if (held) paint_ink_at(lx, ly);
         save_bg_at(cx, cy);
         draw_cursor_at(cx, cy);
         lx = cx; ly = cy;
