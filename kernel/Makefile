@@ -240,6 +240,7 @@ kernel-mb2: src/hello_elf.h src/rogue_elf.h src/iodemo_elf.h \
 	$(CC) $(MB2_CFLAGS) -c src/rtc.c -o $(BUILD_DIR)/rtc.o
 	$(CC) $(MB2_CFLAGS) -c src/acpi.c -o $(BUILD_DIR)/acpi.o
 	$(CC) $(MB2_CFLAGS) -c src/power.c -o $(BUILD_DIR)/power.o
+	$(CC) $(MB2_CFLAGS) -c src/serial.c -o $(BUILD_DIR)/serial.o
 	$(CC) $(MB2_CFLAGS) -c src/console.c -o $(BUILD_DIR)/console.o
 	$(CC) $(MB2_CFLAGS) -c src/clipboard.c -o $(BUILD_DIR)/clipboard.o
 	$(CC) $(MB2_CFLAGS) -c src/settings.c -o $(BUILD_DIR)/settings.o
@@ -277,6 +278,7 @@ kernel-mb2: src/hello_elf.h src/rogue_elf.h src/iodemo_elf.h \
 	    $(BUILD_DIR)/rtc.o \
 	    $(BUILD_DIR)/acpi.o \
 	    $(BUILD_DIR)/power.o \
+	    $(BUILD_DIR)/serial.o \
 	    $(BUILD_DIR)/console.o \
 	    $(BUILD_DIR)/clipboard.o \
 	    $(BUILD_DIR)/settings.o \
@@ -436,7 +438,24 @@ test: $(HOST_TESTS)
 	@for t in $(HOST_TESTS); do echo "--- $$t"; ./$$t || exit 1; done
 	@echo "host tests: all passed"
 
-.PHONY: test
+# The UI suite: boots the real ISO in QEMU, drives real mouse and keyboard over
+# QMP, and checks real pixels and real serial output. Separate from `test`
+# because these are minutes, not milliseconds — `test` is the fast host-side
+# gate you run constantly, this is the one you run before believing a demo.
+#
+# Deliberately does NOT depend on iso-grub: that target re-invokes the kernel
+# build with the default compiler and dies on -mcmodel=kernel, so the ISO is
+# assembled here from an already-built ELF. Build the kernel first:
+#   make CC=x86_64-elf-gcc LD=x86_64-elf-ld kernel-mb2
+ui-test: $(BUILD_DIR)/kernel_mb2.elf
+	@command -v i686-elf-grub-mkrescue >/dev/null || { \
+	    echo "FAIL: i686-elf-grub-mkrescue not installed - cannot build the ISO"; exit 1; }
+	@mkdir -p $(BUILD_DIR)/iso-grub/boot/grub
+	@cp $(BUILD_DIR)/kernel_mb2.elf $(BUILD_DIR)/iso-grub/boot/
+	@i686-elf-grub-mkrescue -o $(BUILD_DIR)/astrion-ui.iso $(BUILD_DIR)/iso-grub >/dev/null 2>&1
+	python3 tools/uitest.py $(BUILD_DIR)/astrion-ui.iso $(BUILD_DIR)/uitest
+
+.PHONY: test ui-test
 
 clean:
 	rm -rf $(BUILD_DIR)

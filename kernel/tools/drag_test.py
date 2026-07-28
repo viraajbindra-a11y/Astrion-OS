@@ -7,10 +7,10 @@ The claim under test: holding the left button and moving the mouse must not
 paint anything. Run it against the pre-fix kernel and it must FAIL — that is
 the control that proves this harness can see the bug at all.
 
-    python3 drag_test.py <iso> <tag>
+    python3 drag_test.py <iso> <tag> [outdir]
 
-Writes <tag>-before.ppm, <tag>-after.ppm, <tag>-serial.log next to itself and
-prints a verdict line.
+Writes <tag>-before.ppm, <tag>-after.ppm and <tag>-serial.log into outdir (or
+beside this script if you don't pass one) and prints a verdict line.
 """
 import json, os, socket, subprocess, sys, time
 
@@ -55,6 +55,40 @@ class Qmp:
     def btn(self, down):
         self.ev({"type": "btn", "data": {"down": down, "button": "left"}})
 
+    def key(self, qcode):
+        """One press+release of a QEMU qcode ('a', 'ret', 'esc', 'spc', ...)."""
+        self.ev({"type": "key", "data": {"down": True,
+                 "key": {"type": "qcode", "data": qcode}}})
+        self.ev({"type": "key", "data": {"down": False,
+                 "key": {"type": "qcode", "data": qcode}}})
+
+    def type_text(self, s, delay=0.03):
+        """Type an ASCII string into the guest, one qcode at a time.
+
+        Lowercase only. Astrion's shell commands are all lowercase, and adding
+        shift means holding a modifier ACROSS two events, which is a different
+        (and easy to get subtly wrong) thing to get right — better to not
+        pretend it works than to have it half-work. Unmapped characters raise
+        rather than silently vanish: a test that types 'ecno' because 'h' fell
+        out is worse than one that refuses to run."""
+        for ch in s:
+            code = QCODE.get(ch)
+            if code is None:
+                raise SystemExit(f"type_text: no qcode mapped for {ch!r}")
+            self.key(code)
+            time.sleep(delay)
+
+
+# QEMU QKeyCode names. Enough for shell commands and file names; extend as
+# tests need more, but keep it explicit — a wrong guess here types the wrong
+# character and the failure looks like a kernel bug.
+QCODE = {c: c for c in "abcdefghijklmnopqrstuvwxyz0123456789"}
+QCODE.update({
+    " ": "spc",    "\n": "ret",   "-": "minus",  ".": "dot",
+    "/": "slash",  ",": "comma",  ";": "semicolon", "=": "equal",
+    "'": "apostrophe",
+})
+
 
 def read_ppm(path):
     """Minimal binary-PPM (P6) reader -> (w, h, bytes). QEMU screendump emits P6."""
@@ -82,7 +116,12 @@ def read_ppm(path):
 
 def main():
     iso, tag = sys.argv[1], sys.argv[2]
-    here = os.path.dirname(os.path.abspath(__file__))
+    # Third arg is an output directory, matching every other test here. This
+    # used to always write beside the script, so a run left .ppm and .log files
+    # loose in tools/ and `git status` came back dirty every single time — which
+    # trains you to ignore it, which is how a real stray file gets committed.
+    here = sys.argv[3] if len(sys.argv) > 3 else os.path.dirname(os.path.abspath(__file__))
+    os.makedirs(here, exist_ok=True)
     sock = f"/tmp/qmp-{tag}.sock"
     before = os.path.join(here, f"{tag}-before.ppm")
     after = os.path.join(here, f"{tag}-after.ppm")

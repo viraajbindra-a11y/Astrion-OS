@@ -41,40 +41,14 @@
 #include "ata.h"
 #include "task.h"
 
-/* ─── COM1 UART (0x3F8) - identical to boot/boot.c ────────────────── */
-
-static inline void outb(uint16_t port, uint8_t val) {
-    __asm__ volatile("outb %0, %1" : : "a"(val), "Nd"(port));
-}
-
-static inline uint8_t inb(uint16_t port) {
-    uint8_t val;
-    __asm__ volatile("inb %1, %0" : "=a"(val) : "Nd"(port));
-    return val;
-}
-
-static void serial_init(void) {
-    outb(0x3F8 + 1, 0x00);
-    outb(0x3F8 + 3, 0x80);
-    outb(0x3F8 + 0, 0x03);
-    outb(0x3F8 + 1, 0x00);
-    outb(0x3F8 + 3, 0x03);
-    outb(0x3F8 + 2, 0xC7);
-    outb(0x3F8 + 4, 0x0B);
-}
-
-static void serial_putc(char c) {
-    while ((inb(0x3F8 + 5) & 0x20) == 0) { }
-    outb(0x3F8, (uint8_t)c);
-}
-
-static void serial_puts(const char *s) {
-    while (*s) {
-        if (*s == '\n') serial_putc('\r');
-        serial_putc(*s);
-        s++;
-    }
-}
+/* ─── COM1 UART ───
+ * These three used to live here as statics, which meant the boot path could
+ * talk to the serial port and nothing else could — the shell, the WM and the
+ * Assistant all printed to a framebuffer that a headless or pre-video machine
+ * has no way to show you. Moved to serial.c so console.c can mirror into it;
+ * the register programming is unchanged, minus a spin that could not time out.
+ * See serial.h. */
+#include "serial.h"
 
 /* Set by boot/multiboot2.S: 1 if it mapped with 1 GiB pages, 0 if it fell
  * back to the 4 GiB 2 MiB mapping. */
@@ -1201,6 +1175,14 @@ void kernel_mb2_main(uint32_t magic, uint64_t info_ptr) {
     task_spawn("clock", clock_task, 0);
     serial_puts("TASKS: scheduler up (task 0 = shell, task 1 = clock)\n");
 
+    /* From here the console stops writing to the UART inline and buffers
+     * instead — console_service() below drains it on this task with interrupts
+     * on. Everything above ran straight to the wire, which is what it needs to
+     * be: there was no scheduler to starve, and a boot that dies before this
+     * line must still have said why. Flipping it any earlier would park the
+     * early log in a ring nobody is draining yet. */
+    console_serial_async(1);
+
     /* Main loop = task 0. Drain keyboard into the shell, repaint the
      * mouse cursor, then yield so background tasks get their slice.
      * The hlt parks the CPU until the next IRQ (PIT @100 Hz at the
@@ -1213,15 +1195,25 @@ void kernel_mb2_main(uint32_t magic, uint64_t info_ptr) {
             if (c) {
                 /* If an app window is open it gets the keys; otherwise the
                  * shell does. */
-                if (!wm_handle_key(c)) shell_on_key(c);
-                /* Echo to serial. Emit CR before LF: serial_puts() already does
-                 * this, so this raw echo was the ONLY bare LF in the stream and
-                 * a real terminal staircased against otherwise-clean output.
-                 * Matters now that serial is a real input path, not just a log.
-                 * (The raw 0x80-0x83 arrow-key echo is left as-is on purpose —
-                 * one junk glyph, and it's useful when debugging over serial.) */
-                if (c == '\n') serial_putc('\r');
-                serial_putc(c);
+                int taken = wm_handle_key(c);
+                if (!taken) shell_on_key(c);
+
+                /* Serial echo, but ONLY for keys an app swallowed.
+                 *
+                 * This used to echo unconditionally, which was right when the
+                 * serial port was the only thing that ever saw a keystroke.
+                 * console.c now mirrors the whole console, and shell_on_key()
+                 * echoes to the console — so an unconditional echo here prints
+                 * every shell keystroke a second time. That is not cosmetic: it
+                 * turned `uptime` into `uuppttiimmee` in the log and made the
+                 * transcript ungreppable, which defeats the point of having it.
+                 *
+                 * Keys the WM took never reach the console (the Editor and the
+                 * Assistant draw their own text), so those still need echoing
+                 * here or they vanish from a headless log. Hence the condition.
+                 * Routed through the console's ring so it stays in order with
+                 * everything else rather than jumping the queue. */
+                if (taken) console_serial_echo(c);   /* CRLF is the ring's job */
             }
         }
 

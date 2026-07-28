@@ -56,10 +56,37 @@ int      console_is_attached(void);
 typedef int (*console_occlusion_fn)(uint32_t x, uint32_t y, uint32_t w, uint32_t h);
 void     console_set_occlusion_test(console_occlusion_fn fn);
 
-/* Repaint if a write had to skip its pixels. Call once per main-loop pass on
- * task 0, never with the writer lock held. No-op unless something is pending.
- * See the definition for why scrolling under a window needs this. */
+/* Repaint if a write had to skip its pixels, and push the serial mirror out.
+ * Call once per main-loop pass on task 0, never with the writer lock held.
+ * No-op unless something is pending. See the definition for why scrolling under
+ * a window needs this. */
 void     console_service(void);
+
+/* ─── COM1 mirror ───
+ *
+ * Every byte the console shows is also written to the serial port, which is the
+ * only output that survives a machine with no working display — real-hardware
+ * bring-up, and the QEMU test scripts in tools/, which assert on the shell's
+ * real words instead of on pixel counts.
+ *
+ * Writing to the UART means spinning ~260us per byte, and putchar runs with
+ * interrupts off, so the console buffers into a ring and drains it from
+ * console_service() on task 0 instead. Call console_serial_async(1) once, right
+ * before entering the main loop: until then writes go straight to the wire,
+ * which is what makes the boot log (and a panic) complete rather than stuck in
+ * a ring nobody is draining yet.
+ *
+ * console_serial_drain() is exposed for callers that are about to stop the
+ * machine — halt, shutdown, a panic path — and need the tail of the log out
+ * before it does. console_service() already calls it every pass. */
+void     console_serial_async(int on);
+void     console_serial_drain(void);
+
+/* Push one byte into the serial mirror WITHOUT drawing it. For keystrokes that
+ * never reach the console because an app window consumed them — otherwise they
+ * are missing from the log entirely. Do not use it to echo shell input: the
+ * shell already echoes to the console, and the console already mirrors. */
+void     console_serial_echo(char c);
 void     console_putchar(char c);
 void     console_puts(const char *s);
 void     console_put_u32(uint32_t v);

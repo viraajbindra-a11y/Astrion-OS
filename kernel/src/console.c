@@ -18,6 +18,7 @@
 #include "fb_font.h"
 #include "af.h"
 #include "mouse.h"      /* damage(): tell the cursor its cached pixels changed */
+#include "serial.h"     /* every console byte is mirrored to COM1 — see below */
 
 /* MUST match AC_TERM_BG in desktop.h — the console draws INSIDE the terminal
  * window body that desktop.c/wm.c fill with AC_TERM_BG, so if these two
@@ -256,6 +257,10 @@ void console_redraw(void) {
  * MUST NOT be called with the writer lock held: console_redraw() is thousands
  * of blended glyphs and interrupts must be on. */
 void console_service(void) {
+    /* Before the guard, deliberately. The serial log has to keep flowing when
+     * nothing is stale (the common case) and when the Terminal window is shut
+     * (detached — the console still records, so the transcript still matters). */
+    console_serial_drain();
     if (!g_stale || !attached || !fb_present_x()) return;
     console_redraw();          /* clears g_stale */
 }
@@ -491,8 +496,96 @@ void console_clear_capture(void) {
 
 int console_capture_active(void) { return cap_buf != 0; }
 
+/* ─── COM1 mirror ───
+ *
+ * Everything the console shows also goes out the serial port, so a headless
+ * boot has a readable transcript: real hardware bring-up with no working
+ * display, and the QEMU test scripts in tools/, which can then assert on the
+ * shell's actual words instead of counting changed pixels.
+ *
+ * The problem is timing. putchar_nolock runs with interrupts OFF (every public
+ * entry point wraps it in irq_save), and serial_putc SPINS until the UART is
+ * ready — ~260us per byte at 38400 baud. Writing straight through would hold
+ * interrupts off for ~20ms on a single 80-column line, which starves the
+ * scheduler, stalls the PIT, and drops mouse packets. The fix is not to make
+ * serial faster; it is to not do it here.
+ *
+ * So the locked path stores ONE byte into a ring and returns. console_service()
+ * drains the ring on task 0 with interrupts on, where a slow UART costs only
+ * some of task 0's slice and nothing else.
+ *
+ * Boot is the exception: there is no scheduler yet and nothing to starve, and
+ * panic output must reach the wire before the machine stops, so writes go
+ * straight through until kernel_mb2.c flips console_serial_async(1) just before
+ * entering the main loop. Boot is also the burstiest phase, so this is what
+ * keeps the early log complete instead of overflowing a ring nobody is draining.
+ *
+ * Single-producer/single-consumer: every producer holds the irq lock so they
+ * serialise against each other, producers only ever advance head, and the sole
+ * consumer only ever advances tail. */
+#define SER_RING 4096
+static volatile char     ser_ring[SER_RING];
+static volatile uint32_t ser_head, ser_tail;
+static volatile uint32_t ser_dropped;     /* bytes lost to a full ring */
+static volatile int      ser_async;       /* 0 = write through, 1 = buffer */
+
+void console_serial_async(int on) { ser_async = on ? 1 : 0; }
+
+static void ser_emit(char c);
+
+/* For keystrokes the console never sees. The main loop hands a key to the
+ * window manager first, and an open app (Editor, Assistant, Snake) draws it
+ * itself without going anywhere near console.c — so those keys would vanish
+ * from the serial log entirely, and "what did they type before it died" is
+ * exactly what you want a headless log for.
+ *
+ * It goes through the same ring rather than straight to the UART on purpose.
+ * A direct write would jump ahead of everything still queued and interleave
+ * the log out of order, which is worse than the gap it fixes. */
+void console_serial_echo(char c) { ser_emit(c); }
+
+static void ser_emit(char c) {
+    if (!ser_async) {                     /* boot / panic: straight to the wire */
+        if (c == '\n') serial_putc('\r');
+        serial_putc(c);
+        return;
+    }
+    uint32_t next = (ser_head + 1) % SER_RING;
+    if (next == ser_tail) { ser_dropped++; return; }   /* full: drop, count it */
+    ser_ring[ser_head] = c;
+    ser_head = next;
+}
+
+/* Drain on task 0, interrupts ON. Bounded per call so one enormous burst of
+ * output cannot turn a main-loop pass into a multi-second stall — the rest
+ * goes out on the next pass, a few milliseconds later. */
+void console_serial_drain(void) {
+    for (int budget = 0; budget < 256 && ser_tail != ser_head; budget++) {
+        char c = ser_ring[ser_tail];
+        ser_tail = (ser_tail + 1) % SER_RING;
+        if (c == '\n') serial_putc('\r');
+        serial_putc(c);
+    }
+    /* A gap in the log must announce itself. Silently missing bytes is worse
+     * than no log at all: it reads as "the kernel printed exactly this". */
+    if (ser_dropped && ser_tail == ser_head) {
+        uint32_t n = ser_dropped;
+        ser_dropped = 0;
+        serial_puts("\n[serial: dropped ");
+        char buf[12]; int i = 0;
+        if (!n) buf[i++] = '0';
+        while (n) { buf[i++] = (char)('0' + n % 10); n /= 10; }
+        while (i) serial_putc(buf[--i]);
+        serial_puts(" bytes — ring full]\n");
+    }
+}
+
 static void putchar_nolock(char c) {
-    /* Output redirect: append to capture buffer + skip pixel writes. */
+    /* Output redirect: append to capture buffer + skip pixel writes.
+     * Deliberately BEFORE the serial mirror: captured output is going to a
+     * file, not to the console, and the mirror's contract is "what the console
+     * showed". Echoing redirected text would make `cmd > file` look like it
+     * printed to the screen. */
     if (cap_buf) {
         if (cap_len_out && *cap_len_out + 1 < cap_cap) {
             cap_buf[(*cap_len_out)++] = (uint8_t)c;
@@ -500,6 +593,8 @@ static void putchar_nolock(char c) {
         }
         return;
     }
+
+    ser_emit(c);
 
     if (c == '\n') { newline_nolock(); return; }
     if (c == '\b') { backspace_nolock(); return; }

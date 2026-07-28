@@ -19,6 +19,14 @@ js/apps/.synthetic-target.js
 kernel/firmware/
 kernel/build/
 
+# UI-test leavings. The suite writes into kernel/build/uitest (already ignored),
+# but the individual scripts default to writing beside themselves when run by
+# hand — screenshots are megabytes of binary PPM and nothing here is a source.
+__pycache__/
+kernel/tools/*.ppm
+kernel/tools/*.png
+kernel/tools/*-serial.log
+
 # Font sources + generation intermediates. The TTFs (~1.1MB) are fetched at
 # generation time per kernel/tools/font/README.md; the atlas that actually
 # builds is committed at kernel/src/af_font.h.

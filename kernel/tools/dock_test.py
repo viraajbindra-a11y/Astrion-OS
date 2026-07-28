@@ -27,6 +27,15 @@ DOCK = [
 # A window opening repaints far more than this; a dead click repaints far less.
 OPEN_THRESHOLD = 20_000
 
+# Apps that are ALREADY on screen when the desktop comes up. Clicking their icon
+# is supposed to be a near no-op (the window is there and focused), so measuring
+# them against OPEN_THRESHOLD asks for the opposite of correct behaviour.
+#
+# Be honest about what this costs: for these icons the test proves the click
+# does no HARM, not that the icon can launch anything. Covering that properly
+# means closing the window first and clicking to reopen — worth doing, not done.
+OPEN_AT_BOOT = {"terminal"}
+
 
 def home_and_move(q, x, y):
     """Slam the cursor to (0,0) — the driver clamps — then step to (x, y)."""
@@ -110,9 +119,18 @@ def main():
         if only and name not in only:
             continue
         d, faults = try_one(iso, out, name, x)
-        ok = d >= OPEN_THRESHOLD and not faults
+        if name in OPEN_AT_BOOT:
+            # Clicking an app that is already on screen correctly does almost
+            # nothing, so the open-threshold does not apply. Scoring it as a
+            # failure made the suite permanently red — and a suite that is
+            # always red is one nobody reads, which is strictly worse than not
+            # having it. Faults still count.
+            ok = d < OPEN_THRESHOLD and not faults
+            note = "ALREADY OPEN (expected)" if ok else "UNEXPECTED REPAINT"
+        else:
+            ok = d >= OPEN_THRESHOLD and not faults
+            note = "OPENED" if d >= OPEN_THRESHOLD else "NO VISIBLE RESPONSE"
         results.append((name, d, faults, ok))
-        note = "OPENED" if d >= OPEN_THRESHOLD else "NO VISIBLE RESPONSE"
         if faults:
             note += f"  +{len(faults)} FAULT(S)"
         print(f"  {name:<10} {d:>9,} px changed   {note}", flush=True)
@@ -120,9 +138,12 @@ def main():
             print(f"      {f}")
 
     print()
-    opened = sum(1 for *_, ok in results if ok)
-    print(f"dock: {opened}/{len(results)} icons opened cleanly (fresh boot each)")
-    return 0 if opened == len(results) else 1
+    ok_n = sum(1 for *_, ok in results if ok)
+    print(f"dock: {ok_n}/{len(results)} icons behaved (fresh boot each)")
+    if OPEN_AT_BOOT & {n for n, _ in DOCK}:
+        print(f"  note: {', '.join(sorted(OPEN_AT_BOOT))} open at boot, so this "
+              f"proves the icon is harmless, NOT that it can launch the app.")
+    return 0 if ok_n == len(results) else 1
 
 
 if __name__ == "__main__":
