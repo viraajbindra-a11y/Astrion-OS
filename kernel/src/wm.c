@@ -822,6 +822,17 @@ static void assist_put(char c) {
 static void assist_emit(char c) {
     if (as_olen < (int)sizeof(as_out) - 1) as_out[as_olen++] = c;
     assist_put(c);
+    /* ...and out the serial port. The Assistant is the one part of Astrion that
+     * an onlooker actually judges, and it was invisible to every test we have:
+     * it paints its own text and never touches console.c, so a headless boot and
+     * a UI test both saw a window with SOMETHING in it and no way to tell a real
+     * answer from a wrong one.
+     *
+     * Here and not in assist_put(): assist_render_output() replays the recorded
+     * answer through assist_put on every repaint, so mirroring there would emit
+     * the whole reply again each time the window was uncovered or moved. This
+     * runs once, when the character is first produced. */
+    console_serial_echo(c);
 }
 
 /* Repaint the output area from the recorded answer. */

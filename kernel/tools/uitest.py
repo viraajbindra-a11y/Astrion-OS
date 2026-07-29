@@ -24,6 +24,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 # (script, extra args before outdir, what it proves). dock_test takes no tag.
 TESTS = [
     ("term_test.py",        ["ui"], "shell commands answer correctly over serial"),
+    ("assist_test.py",      ["ui"], "the Assistant answers correctly and admits ignorance"),
     ("drag_test.py",        ["ui"], "dragging the mouse paints nothing"),
     ("wdrag_test.py",       ["ui"], "moving a window leaves no residue"),
     ("snake_clock_test.py", ["ui"], "the clock keeps off Snake's screen"),
