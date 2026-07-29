@@ -390,6 +390,36 @@ run-grub: iso-grub
 	    -display none \
 	    -no-reboot
 
+# Same, but with a disk attached, so the filesystem actually persists.
+#
+# This target exists because it did NOT, and that was a real hole: nothing in
+# the build or the test path ever passed -drive, so every run had ata_present()
+# false and a RAM-only filesystem. `sync` printed "no disk attached" and no one
+# was watching for it. "Your files survive a reboot" was a documented claim that
+# the default way of running the OS could not demonstrate.
+#
+# The image is created once and then left alone — that is the entire point, so
+# deliberately NOT a phony that recreates it. Delete it by hand to start clean.
+DISK ?= $(BUILD_DIR)/astrion.disk
+DISK_MB ?= 64
+
+$(DISK):
+	@mkdir -p $(BUILD_DIR)
+	@dd if=/dev/zero of=$@ bs=1m count=$(DISK_MB) 2>/dev/null
+	@echo "created $@ ($(DISK_MB) MiB) - your files will persist here"
+
+run-disk: iso-grub $(DISK)
+	qemu-system-x86_64 \
+	    -cdrom $(BUILD_DIR)/astrion-grub.iso \
+	    -drive file=$(DISK),format=raw,if=ide \
+	    -cpu $(CPU) \
+	    -m $(MEM) \
+	    -serial stdio \
+	    -display none \
+	    -no-reboot
+
+.PHONY: run-disk
+
 # ── Host-side unit tests ───────────────────────────────────────────────
 # Compiled with the HOST compiler, not the cross one: these run logic that has
 # no hardware dependency, so they don't need a kernel or an emulator. Some

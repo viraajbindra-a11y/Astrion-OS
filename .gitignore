@@ -43,3 +43,6 @@ kernel/src/*_elf.h
 # reproducible via `gh run download`). Keep the AUDIT + frames, not the ISO.
 tasks/**/iso/
 tasks/**/iso-*/
+
+# UI-suite disk images (created by reboot_test.py / make run-disk)
+kernel/tools/*.disk
