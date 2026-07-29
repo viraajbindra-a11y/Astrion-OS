@@ -314,17 +314,24 @@ kernel-mb2: src/hello_elf.h src/rogue_elf.h src/iodemo_elf.h \
 	readelf -l $(BUILD_DIR)/kernel_mb2.elf | head -30
 	@echo "=== multiboot2 magic search (file offset of bytes d6 50 52 e8) ==="
 	@grep -obUaP "\xd6\x50\x52\xe8" $(BUILD_DIR)/kernel_mb2.elf | head -3 || echo "magic NOT FOUND"
-	# Verify the multiboot2 header is present + first in the binary. grub-file
-	# ships with GRUB, which a macOS dev box does not have — so gate on the tool
-	# and SAY when it didn't run rather than failing the whole build over a
-	# missing packaging tool (or, worse, quietly skipping and implying a pass).
-	# The magic-byte offset printed above is the local substitute evidence: the
-	# header must sit in the first 8192 bytes, and 4096 is correct.
+	# Verify the multiboot2 header. If it is wrong GRUB refuses the kernel and a
+	# real machine gives you a blank screen and no explanation, so this is one
+	# of the highest-stakes 16 bytes in the project.
+	#
+	# It used to be gated on grub-file, which ships with GRUB and therefore does
+	# not exist on a macOS dev box — the build said so honestly and carried on,
+	# which meant the check ran nowhere a developer would see it fail. The header
+	# is a documented byte layout, so tools/mb2check.py validates it against the
+	# spec with no GRUB involved: magic, architecture, checksum, the 32 KiB
+	# search window, 8-byte alignment, and the tag chain down to its end tag.
+	# `mb2check.py --selftest` corrupts each of those in turn and requires a
+	# rejection, so this is a gate that has been watched to fail.
+	@python3 tools/mb2check.py $(BUILD_DIR)/kernel_mb2.elf
+	# grub-file too when it exists — an independent implementation disagreeing
+	# with ours is worth knowing about, and CI has it.
 	@if command -v grub-file >/dev/null 2>&1; then \
 	    grub-file --is-x86-multiboot2 $(BUILD_DIR)/kernel_mb2.elf \
-	        && echo "grub-file: valid multiboot2 kernel"; \
-	else \
-	    echo "SKIPPED: grub-file not installed - multiboot2 header NOT verified here (CI does verify it)"; \
+	        && echo "  grub-file agrees: valid multiboot2 kernel"; \
 	fi
 	@echo "Multiboot2 kernel built: $(BUILD_DIR)/kernel_mb2.elf"
 
@@ -466,6 +473,8 @@ test: $(HOST_TESTS)
 	@[ -n "$(HOST_TEST_SRCS)" ] || { echo "FAIL: no tests found in tests/ - refusing to report a pass"; exit 1; }
 	@echo "running $(words $(HOST_TESTS)) host test(s)"
 	@for t in $(HOST_TESTS); do echo "--- $$t"; ./$$t || exit 1; done
+	@echo "--- tools/mb2check.py --selftest"
+	@python3 tools/mb2check.py --selftest
 	@echo "host tests: all passed"
 
 # The UI suite: boots the real ISO in QEMU, drives real mouse and keyboard over
