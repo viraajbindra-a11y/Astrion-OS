@@ -27,6 +27,7 @@ TESTS = [
     ("assist_test.py",      ["ui"], "the Assistant answers correctly and admits ignorance"),
     ("editor_test.py",      ["ui"], "editing and saving really reaches the disk"),
     ("reboot_test.py",      ["ui"], "files survive a full power cycle"),
+    ("learn_test.py",       ["ui"], "the Assistant learns your phrasing and remembers it"),
     ("drag_test.py",        ["ui"], "dragging the mouse paints nothing"),
     ("wdrag_test.py",       ["ui"], "moving a window leaves no residue"),
     ("snake_clock_test.py", ["ui"], "the clock keeps off Snake's screen"),

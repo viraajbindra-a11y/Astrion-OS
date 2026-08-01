@@ -260,6 +260,7 @@ kernel-mb2: src/hello_elf.h src/rogue_elf.h src/iodemo_elf.h \
 	$(CC) $(MB2_CFLAGS) -c src/pmm.c -o $(BUILD_DIR)/pmm.o
 	$(CC) $(MB2_CFLAGS) -c src/vmspace.c -o $(BUILD_DIR)/vmspace.o
 	$(CC) $(MB2_CFLAGS) -c src/fs.c -o $(BUILD_DIR)/fs.o
+	$(CC) $(MB2_CFLAGS) -c src/learn.c -o $(BUILD_DIR)/learn.o
 	$(CC) $(MB2_CFLAGS) -c src/ata.c -o $(BUILD_DIR)/ata.o
 	$(CC) $(MB2_CFLAGS) -c src/context_switch.S -o $(BUILD_DIR)/context_switch.o
 	$(CC) $(MB2_CFLAGS) -c src/task.c -o $(BUILD_DIR)/task.o
@@ -298,6 +299,7 @@ kernel-mb2: src/hello_elf.h src/rogue_elf.h src/iodemo_elf.h \
 	    $(BUILD_DIR)/pmm.o \
 	    $(BUILD_DIR)/vmspace.o \
 	    $(BUILD_DIR)/fs.o \
+	    $(BUILD_DIR)/learn.o \
 	    $(BUILD_DIR)/ata.o \
 	    $(BUILD_DIR)/context_switch.o \
 	    $(BUILD_DIR)/task.o \

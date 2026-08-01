@@ -14,6 +14,7 @@
 #include "clipboard.h"  /* copy the current line / paste at the cursor */
 #include "heap.h"       /* kmalloc/kfree (ksize_t) */
 #include "console.h"    /* console_clear/console_puts */
+#include "learn.h"      /* what the Assistant has learned from you */
 #include "snake.h"      /* snake_play */
 #include "mouse.h"      /* mouse_x/y/left_down/take_left_click/lift */
 #include "gpt.h"        /* on-device GPT for the Assistant */
@@ -692,6 +693,10 @@ static void files_key(char c) {
 
 /* ─── Assistant: the on-device GPT chat window ─── */
 static char     as_prompt[128];
+/* The last prompt that FAILED. If the very next one succeeds, the pair is a
+ * lesson worth keeping. Cleared the moment it is used or a lookup hits, so a
+ * failure can only ever teach the prompt that came directly after it. */
+static char     as_learn_pending[LEARN_TEXT];
 static int      as_plen;
 static uint32_t as_ox, as_oy;      /* streaming output cursor */
 /* Everything the assistant has emitted for the current answer. Kept so the
@@ -1907,7 +1912,42 @@ static void assist_run(void) {
      * looking rather than by remembering. Touching a file resets it to zero. */
     if (as_last_file[0] && am_ref_expired(++as_last_age)) assist_forget_file();
 
-    if (try_intent(as_prompt)) return;   /* did a real action, offline */
+    /* ─── what it has learned from you ───
+     *
+     * If this exact phrasing failed before and something worked right after it,
+     * replay the phrasing that worked. Tried BEFORE try_intent so a lesson can
+     * never lose to the built-in matcher — but learn_record only ever stores a
+     * phrasing that genuinely failed, so nothing that already works can end up
+     * in here to be shadowed.
+     *
+     * It says what it did. A machine that silently answers a different question
+     * than the one you asked is unsettling even when it is right, and "learned
+     * from you" is only a feature if you can see it happen. */
+    const char *taught = learn_lookup(as_prompt);
+    if (taught && try_intent(taught)) {
+        /* Said AFTER, not before: try_intent starts its answer with
+         * assist_begin_output(), which clears the output buffer, so anything
+         * announced first would be wiped before anyone saw it. */
+        assist_say("\n(you taught me that this means \"");
+        assist_say(taught);
+        assist_say("\")\n");
+        as_learn_pending[0] = 0;
+        return;
+    }
+
+    if (try_intent(as_prompt)) {         /* did a real action, offline */
+        /* The previous prompt failed and this one worked. That sequence is a
+         * free lesson and Astrion used to throw it away: ask the same way
+         * tomorrow, fail the same way, forever. Take it. */
+        if (as_learn_pending[0]) {
+            learn_record(as_learn_pending, as_prompt);
+            assist_say("\n(learned: \"");
+            assist_say(as_learn_pending);
+            assist_say("\" means this too)\n");
+            as_learn_pending[0] = 0;
+        }
+        return;
+    }
 
     /* The model is 212K parameters. It can produce English-shaped text; it
      * cannot answer a question. Routing every unmatched prompt into it is what
@@ -1939,11 +1979,24 @@ static void assist_run(void) {
         return;
     }
 
+    /* Remember WHAT failed, so that if the next prompt works we can learn the
+     * pair. This is the only place a phrasing enters the lesson book, which is
+     * what guarantees the book never contains something that already worked. */
+    {
+        int k = 0;
+        while (as_prompt[k] && k < (int)sizeof(as_learn_pending) - 1) {
+            as_learn_pending[k] = as_prompt[k]; k++;
+        }
+        as_learn_pending[k] = 0;
+    }
+
     /* Everything else: say so. An honest "I didn't get that" reads as a small
      * assistant that knows its limits; confident nonsense reads as a broken
      * one. Same information, and only one of them survives a demo. */
     assist_begin_output();
     assist_say("I didn't understand that one.\n\n");
+    assist_say("If you say it another way and that works, I'll remember this\n");
+    assist_say("wording meant the same thing.\n\n");
     assist_say("I'm not a chatbot - I run this machine. What I do:\n\n");
     assist_say("  machine: how much memory / how much disk space\n");
     assist_say("           what cpu / what's running / uptime\n");

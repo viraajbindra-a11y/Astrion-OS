@@ -38,6 +38,7 @@
 #include "heap.h"
 #include "pmm.h"
 #include "fs.h"
+#include "learn.h"
 #include "ata.h"
 #include "task.h"
 
@@ -1053,6 +1054,15 @@ void kernel_mb2_main(uint32_t magic, uint64_t info_ptr) {
     serial_puts("FS: initializing...\n");
     fs_init();
     serial_puts("FS: ready\n");
+
+    /* Whatever the Assistant learned about how THIS user phrases things, read
+     * back off the disk. Must follow fs_init (it reads a file) and precede any
+     * prompt being answered. No disk and no file is the normal first boot, not
+     * an error — a machine that has met nobody yet has learned nothing. */
+    learn_init();
+    serial_puts("LEARN: ");
+    serial_put_u32((uint32_t)learn_count());
+    serial_puts(" remembered phrasing(s)\n");
 
     /* GDT rebuild: replace the boot GDT (null + one ring-0 code seg) with a
      * full set — kernel code/data, ring-3 code/data, and a TSS — so we can
