@@ -1884,10 +1884,41 @@ static void cmd_run(int argc, char **argv) {
 
 void shell_install(void) {
     line_len = 0;
-    /* Boot banner inside the shell. */
+
+    /* ─── the first thirty seconds ───
+     *
+     * This used to be one line: "Astrion shell ready. Type 'help'." Which is
+     * correct, and is a DEVELOPER's first screen. Someone who has never seen
+     * Astrion boots it, is handed a prompt, types help, and gets forty-five
+     * shell commands — so the thing that makes this OS different from every
+     * other hobby kernel is an unlabelled "A" in the dock that nobody clicks.
+     *
+     * A tester's first half-minute decides what they think it is, so it says
+     * what it is, points at the part worth trying, and gives specific things to
+     * type. Specific matters: "ask it something" produces a blank stare,
+     * "how much memory" produces an answer. */
     console_set_color(COL_OK);
-    console_puts("Astrion shell ready. Type 'help'.\n\n");
+    console_puts("Astrion v2.0 - an operating system written from scratch in C.\n");
     console_set_color(COL_WHITE);
+    console_puts("No Linux underneath. This is the whole thing.\n\n");
+
+    console_puts("New here? Click ");
+    console_set_color(COL_OK);
+    console_puts("Assistant");
+    console_set_color(COL_WHITE);
+    console_puts(" in the dock and try:\n");
+    console_puts("    how much memory       list my files       what version\n\n");
+
+    console_puts("It runs offline and it learns from you: if it doesn't\n");
+    console_puts("understand something, say it another way and it remembers\n");
+    console_puts("that both mean the same thing - even after a reboot.\n\n");
+
+    console_puts("Or stay here. Type ");
+    console_set_color(COL_OK);
+    console_puts("help");
+    console_set_color(COL_WHITE);
+    console_puts(" for the shell commands.\n\n");
+
     print_prompt();
 }
 

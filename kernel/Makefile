@@ -477,6 +477,19 @@ test: $(HOST_TESTS)
 	@for t in $(HOST_TESTS); do echo "--- $$t"; ./$$t || exit 1; done
 	@echo "--- tools/mb2check.py --selftest"
 	@python3 tools/mb2check.py --selftest
+	# Nothing the console prints may contain non-ASCII. putchar_nolock maps
+	# anything outside 32..126 to '?', and a UTF-8 em dash is THREE bytes — so
+	# one "—" in the boot banner rendered as "???" on screen. Source that looks
+	# right and output that looks broken, which review does not catch and a
+	# screenshot does. This is the cheap permanent version of that screenshot.
+	@echo "--- console strings are ASCII-only"
+	@python3 -c "import pathlib,sys; \
+bad=[(f.name,n,l.strip()[:70]) for f in pathlib.Path('src').glob('*.c') \
+for n,l in enumerate(f.read_text().splitlines(),1) \
+if ('console_puts(' in l or 'assist_say(' in l) and any(ord(c)>126 for c in l)]; \
+[print('  FAIL %s:%d: %s'%b) for b in bad]; \
+print('  ok  all console output is ASCII' if not bad else ''); \
+sys.exit(1 if bad else 0)"
 	@echo "host tests: all passed"
 
 # The UI suite: boots the real ISO in QEMU, drives real mouse and keyboard over
