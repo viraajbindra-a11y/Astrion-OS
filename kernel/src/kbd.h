@@ -17,6 +17,21 @@
 #include <stdint.h>
 
 void kbd_install(void);     /* registers IRQ1 handler + unmasks the line */
+
+/* ─── real-hardware diagnostics ───
+ * Astrion reaches the keyboard through the PS/2 ports, and on a modern machine
+ * those only exist because the firmware emulates them for your USB keyboard.
+ * When that emulation is absent, the desktop comes up perfectly and nothing you
+ * type does anything — so these two exist to make that say so out loud.
+ *
+ * kbd_controller_present(): 0 only when the status port reads 0xFF, i.e. the
+ *   bus is floating and there is definitively no controller. Certain, cheap,
+ *   and checked without writing any command that could disturb a working one.
+ * kbd_scancodes_seen(): how many keys have actually arrived. Zero long after
+ *   boot is suspicious, but it is not proof — the user may simply not have
+ *   typed — so it is reported, never acted on. */
+int      kbd_controller_present(void);
+uint32_t kbd_scancodes_seen(void);
 int  kbd_available(void);
 char kbd_getchar(void);     /* returns 0 if buffer empty (non-blocking) */
 

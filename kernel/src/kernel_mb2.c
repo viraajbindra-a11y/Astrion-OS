@@ -1118,6 +1118,16 @@ void kernel_mb2_main(uint32_t magic, uint64_t info_ptr) {
     /* PS/2 keyboard on IRQ1. */
     kbd_install();
     serial_puts("KBD: PS/2 IRQ1 unmasked\n");
+    /* The first thing worth knowing on a machine nobody has booted this on.
+     * The desktop can come up perfectly and still be unusable if the firmware
+     * does not emulate an i8042 for the USB keyboard, and a status port reading
+     * 0xFF is the one form of that we can be certain about. Serial says so
+     * because serial is what you have when the keyboard is the broken part. */
+    if (!kbd_controller_present())
+        serial_puts("KBD: *** NO PS/2 CONTROLLER (status port reads 0xFF) ***\n"
+                    "KBD: typing will not work. This machine has no i8042 for\n"
+                    "KBD: the firmware to map a USB keyboard onto. Use the COM1\n"
+                    "KBD: serial console below to drive it instead.\n");
 
     /* Serial console keyboard on COM1 / IRQ4 - a second producer feeding the
      * SAME ring buffer as the PS/2 path, so anything that reads the keyboard

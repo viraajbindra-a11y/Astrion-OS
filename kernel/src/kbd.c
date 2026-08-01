@@ -103,6 +103,12 @@ char kbd_getchar(void) {
     return c;
 }
 
+static volatile uint32_t kbd_irqs;      /* scancodes seen since boot */
+static int kbd_ctrl_present = 1;        /* until proven otherwise */
+
+int kbd_controller_present(void) { return kbd_ctrl_present; }
+uint32_t kbd_scancodes_seen(void) { return kbd_irqs; }
+
 static void kbd_isr(struct registers *r) {
     (void)r;
     /* If the controller says this byte is mouse (AUX) data, it doesn't
@@ -113,6 +119,7 @@ static void kbd_isr(struct registers *r) {
     uint8_t st = inb_(KBD_STATUS_PORT);
     uint8_t sc = inb_(KBD_DATA_PORT);
     if (st & KBD_STAT_AUX) return;
+    kbd_irqs++;   /* proof that keys are really reaching us on this machine */
 
     /* 0xE0 = "extended prefix". The next byte is an extended scancode
      * (arrow keys, numpad navigation, right-ctrl, etc.). */
@@ -167,8 +174,39 @@ static void kbd_isr(struct registers *r) {
     if (c) rb_push(c);
 }
 
+/* ─── is there actually a keyboard controller here? ───
+ *
+ * Written for the first boot on real hardware, which has never happened.
+ *
+ * Astrion talks to the keyboard through the PS/2 ports at 0x60/0x64. Almost no
+ * machine built in the last decade HAS PS/2 ports — your keyboard is USB, and
+ * what makes this work at all is the firmware pretending otherwise. Most
+ * machines do. Some, especially newer UEFI ones with legacy support switched
+ * off, do not. On those Astrion boots to a perfect desktop where nothing you
+ * type does anything, and says nothing about why.
+ *
+ * A dead machine that explains itself is worth a great deal more than a dead
+ * machine that doesn't, so: read the status port. An absent controller leaves
+ * the ISA bus floating and every read comes back 0xFF. That is the one case we
+ * can be SURE about, and it is checked without writing a single command.
+ *
+ * Deliberately no controller self-test (0xAA) or port test (0xAB). Those reset
+ * state on some chipsets and can disable a port that was working fine, which
+ * would mean the diagnostic caused the failure it went looking for. Not on the
+ * one boot path nobody has ever run.
+ *
+ * The ambiguous case — controller present, no keys ever arrive — cannot be told
+ * apart from "the user hasn't typed yet", so it is reported as a count and
+ * judged by a human, not guessed at here. */
 void kbd_install(void) {
     rb_head = rb_tail = 0;
+    kbd_irqs = 0;
+
+    /* 0xFF from the status port means nothing is driving the bus. A real
+     * controller always has at least one status bit clear, so 0xFF is not a
+     * value a working one can return. */
+    kbd_ctrl_present = (inb_(KBD_STATUS_PORT) != 0xFF);
+
     irq_register(1, kbd_isr);
     pic_unmask_irq(1);
 }
