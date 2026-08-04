@@ -1,0 +1,71 @@
+name: Astrion UI Suite
+
+# Boots the real kernel in QEMU and drives it — mouse, keyboard, screenshots,
+# serial — then checks real pixels and real text. Nine tests, each with a
+# control that fails when the fix is removed.
+#
+# Separate from build-kernel.yml on purpose. That one proves the kernel COMPILES
+# and an ISO exists, which is a much weaker claim than "the desktop still works":
+# every bug this suite has caught so far — the cursor smear, the clock painting
+# over Snake, the doubled serial echo, the learn table never loading from disk —
+# was in a build that compiled perfectly.
+#
+# Runs on every kernel change. It takes ~4 minutes locally, and the tests wait
+# for the kernel's own boot marker rather than sleeping a fixed number of
+# seconds, so a slow runner without KVM makes it slower but never flaky.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'kernel/**'
+  push:
+    branches: [main]
+    paths:
+      - 'kernel/**'
+
+jobs:
+  ui-suite:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build + emulation tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            build-essential binutils xorriso mtools \
+            qemu-system-x86 grub-pc-bin grub-common python3
+
+      # The fast gates first: host unit tests, the multiboot2 header validator
+      # and its self-test, and the ASCII-only check on console strings. Seconds,
+      # and no point booting anything if these are red.
+      - name: Host tests + header gates
+        run: |
+          cd kernel
+          make test
+
+      - name: Build the multiboot2 kernel
+        run: |
+          cd kernel
+          make kernel-mb2
+
+      - name: Run the UI suite
+        run: |
+          cd kernel
+          make ui-test
+
+      # Screenshots and serial logs are the evidence. When something fails, the
+      # number in the log is never enough — three separate false failures in this
+      # suite's history were measurement bugs, caught only by opening the image.
+      - name: Upload screenshots and serial logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-suite-evidence
+          path: |
+            kernel/build/uitest/*.ppm
+            kernel/build/uitest/*.log
+          retention-days: 14

@@ -501,12 +501,20 @@ sys.exit(1 if bad else 0)"
 # build with the default compiler and dies on -mcmodel=kernel, so the ISO is
 # assembled here from an already-built ELF. Build the kernel first:
 #   make CC=x86_64-elf-gcc LD=x86_64-elf-ld kernel-mb2
+# macOS homebrew installs it as i686-elf-grub-mkrescue; Linux (and CI) has it
+# under the plain name. Resolved rather than hardcoded so the same target runs
+# in both places — the whole point of a suite is that it runs everywhere.
+GRUB_MKRESCUE := $(shell command -v i686-elf-grub-mkrescue 2>/dev/null || command -v grub-mkrescue 2>/dev/null)
+
 ui-test: $(BUILD_DIR)/kernel_mb2.elf
-	@command -v i686-elf-grub-mkrescue >/dev/null || { \
-	    echo "FAIL: i686-elf-grub-mkrescue not installed - cannot build the ISO"; exit 1; }
+	@[ -n "$(GRUB_MKRESCUE)" ] || { \
+	    echo "FAIL: no grub-mkrescue (tried i686-elf-grub-mkrescue and grub-mkrescue)"; exit 1; }
 	@mkdir -p $(BUILD_DIR)/iso-grub/boot/grub
 	@cp $(BUILD_DIR)/kernel_mb2.elf $(BUILD_DIR)/iso-grub/boot/
-	@i686-elf-grub-mkrescue -o $(BUILD_DIR)/astrion-ui.iso $(BUILD_DIR)/iso-grub >/dev/null 2>&1
+	@[ -f $(BUILD_DIR)/iso-grub/boot/grub/grub.cfg ] || printf \
+	    'set timeout=0\nset default=0\nmenuentry "Astrion v2.0 (multiboot2)" {\n  multiboot2 /boot/kernel_mb2.elf\n  boot\n}\n' \
+	    > $(BUILD_DIR)/iso-grub/boot/grub/grub.cfg
+	@$(GRUB_MKRESCUE) -o $(BUILD_DIR)/astrion-ui.iso $(BUILD_DIR)/iso-grub >/dev/null 2>&1
 	python3 tools/uitest.py $(BUILD_DIR)/astrion-ui.iso $(BUILD_DIR)/uitest
 
 .PHONY: test ui-test
