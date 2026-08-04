@@ -35,9 +35,14 @@ jobs:
       - name: Install build + emulation tools
         run: |
           sudo apt-get update -qq
+          # python3-numpy is not optional: tests/test_model_load.c shells out to
+          # tools/mkweights.py to generate the blob it checks, and mkweights
+          # imports numpy. Without it the gate cannot run at all — it says so
+          # honestly ("is python3+numpy present?") rather than passing
+          # vacuously, which is how this was caught on the first CI run.
           sudo apt-get install -y -qq \
             build-essential binutils xorriso mtools \
-            qemu-system-x86 grub-pc-bin grub-common python3
+            qemu-system-x86 grub-pc-bin grub-common python3 python3-numpy
 
       # The fast gates first: host unit tests, the multiboot2 header validator
       # and its self-test, and the ASCII-only check on console strings. Seconds,
