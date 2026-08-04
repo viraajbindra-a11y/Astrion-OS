@@ -90,6 +90,42 @@ QCODE.update({
 })
 
 
+# The last line the kernel prints before entering the main loop. Everything the
+# tests drive — dock clicks, typing, screenshots — needs the scheduler running,
+# and this is the moment it is.
+BOOT_MARKER = b"TASKS: scheduler up"
+
+
+def wait_for_boot(serial_path, timeout=120, settle=2.0):
+    """Block until the kernel SAYS it finished booting, instead of guessing.
+
+    Every test here used to sleep a flat 18 seconds. That is a guess about one
+    machine on one day, and it is wrong in both directions: this Mac is usually
+    ready sooner, so the suite wasted minutes per run, and a CI box without KVM
+    runs QEMU in software emulation where boot can take several times longer —
+    there, an 18-second sleep means every test drives a kernel that has not
+    finished starting and fails for a reason that has nothing to do with the
+    code under test.
+
+    Watching the serial log fixes both. It also fails HONESTLY: a kernel that
+    never reaches the marker gets a timeout that says so, rather than a
+    confusing downstream assertion about pixels or missing text.
+    """
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        try:
+            with open(serial_path, "rb") as fh:
+                if BOOT_MARKER in fh.read():
+                    time.sleep(settle)      # let the desktop finish painting
+                    return
+        except FileNotFoundError:
+            pass                            # QEMU has not created it yet
+        time.sleep(0.25)
+    raise SystemExit(
+        f"kernel never printed {BOOT_MARKER.decode()!r} within {timeout}s — it "
+        f"did not finish booting. Read {serial_path} for how far it got.")
+
+
 def read_ppm(path):
     """Minimal binary-PPM (P6) reader -> (w, h, bytes). QEMU screendump emits P6."""
     with open(path, "rb") as fh:
@@ -137,7 +173,7 @@ def main():
 
     try:
         q = Qmp(sock)
-        time.sleep(18)                           # GRUB + boot + desktop paint
+        wait_for_boot(serial)
 
         # Home the cursor at (0,0) — the driver clamps, so oversending is safe.
         for _ in range(30):

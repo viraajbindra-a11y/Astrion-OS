@@ -31,7 +31,7 @@ shots, so anything that differs is genuinely the window manager's fault.
 import os, subprocess, sys, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from drag_test import Qmp, read_ppm
+from drag_test import Qmp, read_ppm, wait_for_boot
 from dock_test import DOCK_Y, DOCK, home_and_move
 
 FILES_X = dict(DOCK)["files"]
@@ -86,7 +86,7 @@ def main():
     ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
         q = Qmp(sock)
-        time.sleep(18)
+        wait_for_boot(serial)
         # Park the cursor somewhere it will sit still for every shot, so the
         # sprite itself never shows up as a difference.
         home_and_move(q, 40, 400)

@@ -16,7 +16,7 @@ mouse.c unscaled, verified by homing to (0,0) and stepping a known distance.
 import os, subprocess, sys, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from drag_test import Qmp, read_ppm
+from drag_test import Qmp, read_ppm, wait_for_boot
 
 # Dock icon centres at 1280x800, read off a booted screendump.
 DOCK_Y = 750
@@ -88,7 +88,7 @@ def try_one(iso, out, name, x):
     ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
         q = Qmp(sock)
-        time.sleep(18)                                  # GRUB + boot + desktop
+        wait_for_boot(serial)
         base = os.path.join(out, f"{name}-before.ppm")
         shot = os.path.join(out, f"{name}-after.ppm")
         home_and_move(q, x, DOCK_Y)                     # park ON the icon first,

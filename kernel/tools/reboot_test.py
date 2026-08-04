@@ -28,7 +28,7 @@ so nothing survives in RAM between them.
 import os, subprocess, sys, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from drag_test import Qmp
+from drag_test import Qmp, wait_for_boot
 from dock_test import scan_faults
 
 TOKEN = "persisted-across-reboot-lynx"
@@ -50,7 +50,7 @@ def boot(iso, disk, serial, cmds, label):
     ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
         q = Qmp(sock)
-        time.sleep(18)
+        wait_for_boot(serial)
         start = os.path.getsize(serial)
         for c in cmds:
             q.type_text(c + "\n")

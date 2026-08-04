@@ -26,7 +26,7 @@ own expectations.
 import os, subprocess, sys, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from drag_test import Qmp
+from drag_test import Qmp, wait_for_boot
 
 # (command to type, string its OUTPUT must contain).
 #
@@ -76,7 +76,7 @@ def main():
     ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
         q = Qmp(sock)
-        time.sleep(18)                      # boot to the desktop
+        wait_for_boot(serial)
         # Mark where boot output ends. Everything the checks look for must come
         # AFTER this, or a string that happened to appear in the boot banner
         # would score as a passing command.

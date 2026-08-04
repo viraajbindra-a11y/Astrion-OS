@@ -23,7 +23,7 @@ Five steps, and the last two are the ones that make it mean anything:
 import os, subprocess, sys, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from drag_test import Qmp
+from drag_test import Qmp, wait_for_boot
 from dock_test import DOCK_Y, DOCK, home_and_move, scan_faults
 
 ASSIST_X = dict(DOCK)["assistant"]
@@ -51,7 +51,7 @@ def session(iso, disk, serial, prompts, label):
     spans = []
     try:
         q = Qmp(sock)
-        time.sleep(18)
+        wait_for_boot(serial)
         home_and_move(q, ASSIST_X, DOCK_Y)
         q.btn(True);  time.sleep(0.12)
         q.btn(False); time.sleep(2.5)

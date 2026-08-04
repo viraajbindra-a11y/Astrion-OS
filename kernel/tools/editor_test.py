@@ -22,7 +22,7 @@ is to distinguish "saved" from "looked like it saved".
 import os, subprocess, sys, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from drag_test import Qmp
+from drag_test import Qmp, wait_for_boot
 from dock_test import scan_faults
 
 # Not a word, so finding it after the save means it came off the disk. Lowercase
@@ -51,7 +51,7 @@ def main():
     ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
         q = Qmp(sock)
-        time.sleep(18)                          # Terminal is open and focused
+        wait_for_boot(serial)
 
         # 1. BEFORE. Whatever `cat` says about a missing file, the token must
         #    not be in it. This is the control.

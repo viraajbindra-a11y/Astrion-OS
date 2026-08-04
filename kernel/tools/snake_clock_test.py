@@ -18,7 +18,7 @@ must FAIL.
 import os, subprocess, sys, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from drag_test import Qmp, read_ppm
+from drag_test import Qmp, read_ppm, wait_for_boot
 from dock_test import DOCK_Y, DOCK, home_and_move
 
 SNAKE_X = dict(DOCK)["snake"]
@@ -46,7 +46,7 @@ def main():
     ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
         q = Qmp(sock)
-        time.sleep(18)
+        wait_for_boot(serial)
         home_and_move(q, SNAKE_X, DOCK_Y)
         q.btn(True);  time.sleep(0.12)
         q.btn(False); time.sleep(3.0)          # Snake paints its board
