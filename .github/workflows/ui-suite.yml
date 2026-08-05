@@ -14,15 +14,22 @@ name: Astrion UI Suite
 # for the kernel's own boot marker rather than sleeping a fixed number of
 # seconds, so a slow runner without KVM makes it slower but never flaky.
 
+# This file is in its own paths list deliberately. It was not, and the first fix
+# to it (a missing numpy) silently ran nothing: the trigger was kernel/** only,
+# the fix touched only .github/, so no run happened and the workflow looked
+# untested because it WAS untested. A CI config you cannot exercise by editing
+# it is a config nobody can trust.
 on:
   workflow_dispatch:
   pull_request:
     paths:
       - 'kernel/**'
+      - '.github/workflows/ui-suite.yml'
   push:
     branches: [main]
     paths:
       - 'kernel/**'
+      - '.github/workflows/ui-suite.yml'
 
 jobs:
   ui-suite:
