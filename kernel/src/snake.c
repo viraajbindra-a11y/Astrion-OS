@@ -186,6 +186,30 @@ static void draw_ready_head(int lit) {
     draw_cell(snake[head_idx].x, snake[head_idx].y, lit ? COL_HEAD : COL_BODY);
 }
 
+/* KNOWN UGLY, and the cheap fix does not work — tried it, kept the receipt.
+ *
+ * fb_font's '0' is an 8x12 bitmap with a 1px diagonal through the counter.
+ * Blown up here it becomes a square-cornered box with a chunky staircase
+ * through it, and since every game opens on a score of exactly 0, the first
+ * thing a new player sees is the one glyph in the font that falls apart when
+ * enlarged. (1 and 2 hold up fine, which is why it never looked like a font
+ * problem — it looks like a rendering bug.)
+ *
+ * Scale 4 was the obvious fix and it is worse. The zero is still a slashed
+ * box at 4, and it is now SMALLER than the "SCORE" label above it, so the
+ * type hierarchy inverts and the number stops reading as the headline number.
+ * An offline test of "120" said 4 was fine; the real screen shows a LONE 0
+ * with no neighbouring digits to give the eye any context, and that is the
+ * string that actually matters. Wrong test, wrong conclusion.
+ *
+ * The real fix is to stop using fb_font for Snake's chrome and draw the title,
+ * the SCORE label and this number with af.c, like every other app. That also
+ * closes the bigger gap: Snake is the only screen in Astrion that does not
+ * speak the desktop's typeface.
+ *
+ * One thing to know if you do touch the scale: at 6 the glyph box is 72px
+ * tall against the 60px rect this clears, and it only stays clean because
+ * digits have no descenders. True today, true by luck. */
 static void draw_score(void) {
     /* Just the number - blank then redraw. */
     fb_rect_x(grid_x0 + grid_cols * CELL - 280, 100, 280, 60, COL_BG);

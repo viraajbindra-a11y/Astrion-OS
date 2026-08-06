@@ -840,6 +840,19 @@ static void assist_emit(char c) {
     console_serial_echo(c);
 }
 
+/* Record + draw, but deliberately NOT to serial.
+ *
+ * Only the echoed question goes through here. assist_test.py reads the serial
+ * log to check that an ANSWER contained an expected string, and it is careful
+ * that the expected string must not also appear in what the user typed —
+ * mirroring the question would put the question's own words in the log and
+ * hand that test a way to pass without the assistant having said anything.
+ * Recording into as_out is still required so the echo survives a repaint. */
+static void assist_echo_char(char c) {
+    if (as_olen < (int)sizeof(as_out) - 1) as_out[as_olen++] = c;
+    assist_put(c);
+}
+
 /* Repaint the output area from the recorded answer. */
 static void assist_render_output(void) {
     uint32_t oy0 = cy + 96;
@@ -943,11 +956,39 @@ static const char *assist_did_you_mean(const char *typed) {
     return best;
 }
 
+/* ─── the answer starts by repeating the question ───
+ *
+ * Watching a stranger use this is what found it. The prompt line is pinned
+ * above the output area and is cleared the instant you press Enter, so asking
+ * three things in a row showed three answers and an empty prompt, and at no
+ * point could you see what you had asked. The screen said, in effect, "here is
+ * an answer to something." For the one feature the whole product leads with —
+ * and one whose pitch is that it REMEMBERS — reading as amnesia is the worst
+ * possible first impression.
+ *
+ * A scrolling transcript is the real fix and it is a bigger change than this
+ * one. This is the cheap 80%: every answer opens with the question that caused
+ * it, in the same ">" the prompt uses, so the output area always reads as an
+ * exchange instead of a fragment. It lives here, in the one function every
+ * intent calls before it says anything, so no reply can forget to do it. */
 static void assist_begin_output(void) {
     uint32_t oy0 = cy + 96;
     fb_rect_x(cx, oy0, cw, (cy + ch) - oy0, AC_TERM_BG);
     as_ox = cx; as_oy = oy0;
     as_olen = 0;                 /* start recording a fresh answer */
+    /* "you: ", not "> ". The first attempt echoed the question with the same
+     * ">" the prompt uses, and on screen that put two identical ">" markers a
+     * line and a half apart — the live empty one and the echoed one — with
+     * nothing but a caret to say which was which. Naming the speaker instead
+     * can't collide with the prompt, and it sets up the shape a real scrolling
+     * transcript wants later. Lowercase because that is the voice the whole
+     * assistant answers in. */
+    if (as_prompt[0]) {
+        const char *who = "you: ";
+        for (int i = 0; who[i]; i++) assist_echo_char(who[i]);
+        for (int i = 0; as_prompt[i]; i++) assist_echo_char(as_prompt[i]);
+        assist_echo_char('\n'); assist_echo_char('\n');
+    }
     mouse_lift();
 }
 static void assist_say(const char *s) { while (*s) assist_emit(*s++); }
@@ -1109,7 +1150,11 @@ static void assist_report(enum am_intent w, const char *p) {
         uint32_t ffree  = (uint32_t)pmm_frames_free();
         uint32_t ftotal = (uint32_t)pmm_frames_total();
         assist_begin_output();
-        assist_say("RAM this machine has: ");
+        /* A label, like the two lines under it. It read "RAM this machine
+         * has: 511 MiB usable." — the only sentence in the answer with its
+         * subject inverted, sitting on top of two clean "label: value" rows.
+         * Now all three parse the same way. */
+        assist_say("RAM: ");
         assist_num(mb_total_available_mib_x()); assist_say(" MiB usable.\n");
         assist_say("kernel heap: ");
         assist_num(usedkb); assist_say(" KB used, ");
@@ -2013,7 +2058,14 @@ static void assist_run(void) {
 static void assist_draw(void) {
     fb_rect_x(cx, cy, cw, ch, AC_TERM_BG);
     af_draw(cx, cy, "Astrion Assistant", settings_accent(), AF_SB16);
-    af_draw(cx, cy + 24, "offline - try:  write hi to notes.txt  /  read notes.txt  /  what's running  /  open snake  /  help",
+    /* The first two are word-for-word the ones the Terminal's first-boot text
+     * tells you to try. They did not used to match: the Terminal sent you here
+     * for "how much memory / list my files / what version" and this line then
+     * offered five entirely different things, so following the instruction
+     * landed you somewhere that had never heard of it. The third keeps one
+     * example of the assistant DOING rather than answering, which is the part
+     * people do not expect. */
+    af_draw(cx, cy + 24, "offline - try:  how much memory  /  list my files  /  write hi to notes.txt  /  help",
             AC_MUTED, AF_REG13);
     assist_prompt_line();
     assist_render_output();      /* redraw the last answer from its buffer */

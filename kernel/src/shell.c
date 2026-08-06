@@ -1902,19 +1902,35 @@ void shell_install(void) {
     console_set_color(COL_WHITE);
     console_puts("No Linux underneath. This is the whole thing.\n\n");
 
-    console_puts("New here? Click ");
-    console_set_color(COL_OK);
+    /* Order, not length, was the problem with the version this replaces. The
+     * call to action was line 4 of 9 with a three-line paragraph sitting
+     * between it and the fallback, so the one instruction that matters had a
+     * wall on both sides. It now goes: what this is -> what to click ->
+     * exactly what to type -> why that is worth doing -> the way out.
+     *
+     * The "it learns" claim also moved BELOW the examples on purpose. It is a
+     * promise about something the reader has not experienced yet, so in front
+     * of the examples it is a wall; behind them it is a reason to keep going. */
+    console_puts("There's an AI built in. It runs on this machine, offline.\n");
+    console_puts("Click ");
+    console_set_color(COL_PROMPT);
     console_puts("Assistant");
     console_set_color(COL_WHITE);
-    console_puts(" in the dock and try:\n");
+    console_puts(" in the dock and ask it:\n");
     console_puts("    how much memory       list my files       what version\n\n");
 
-    console_puts("It runs offline and it learns from you: if it doesn't\n");
-    console_puts("understand something, say it another way and it remembers\n");
-    console_puts("that both mean the same thing - even after a reboot.\n\n");
+    console_puts("It learns, too: say something it misses another way and it\n");
+    console_puts("remembers both meant the same thing - even after a reboot.\n\n");
 
-    console_puts("Or stay here. Type ");
-    console_set_color(COL_OK);
+    /* Teal, not green. Green is what the shell says when a command SUCCEEDED,
+     * and it was doing double duty here as "this word is a thing you can act
+     * on" — which put the headline, the app name and the command in one
+     * colour and let the eye group all three as the same kind of thing. Teal
+     * is already Astrion's actionable ink (the prompt caret, the Assistant's
+     * ">", directory names in Files), so the two words you can actually click
+     * or type now share it and nothing else on this screen does. */
+    console_puts("Or stay here and type ");
+    console_set_color(COL_PROMPT);
     console_puts("help");
     console_set_color(COL_WHITE);
     console_puts(" for the shell commands.\n\n");
