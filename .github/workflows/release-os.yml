@@ -1,0 +1,135 @@
+name: Release Astrion OS (bootable ISO)
+
+# Publishes the from-scratch kernel as a downloadable astrion.iso.
+#
+# This is the artifact docs/try-astrion.md tells people to download, and until
+# now it did not exist anywhere a stranger could reach: build-kernel.yml uploads
+# it as a workflow ARTIFACT, which requires a GitHub account and expires. A
+# tester should be able to click one link.
+#
+# THE RELEASE IS GATED ON THE UI SUITE. Nine tests boot the real kernel in QEMU
+# and drive it — dock, shell, Assistant, editor saves, reboot persistence,
+# learned phrasings. If any of them fails, nothing is published. Shipping a
+# broken ISO to the handful of people willing to try an unknown OS costs more
+# than shipping late; most of them will never try a second time.
+#
+#   Manual:  Actions -> this workflow -> Run workflow -> type a version
+#   By tag:  git tag os-v0.2-mvp && git push origin os-v0.2-mvp
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version label, e.g. 0.2-mvp'
+        required: true
+        type: string
+      prerelease:
+        description: 'Mark as a pre-release'
+        required: false
+        default: true
+        type: boolean
+  push:
+    tags:
+      - 'os-v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build + emulation tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            build-essential binutils xorriso mtools \
+            qemu-system-x86 grub-pc-bin grub-common python3 python3-numpy
+
+      - name: Work out the version
+        id: ver
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            V="${{ github.event.inputs.version }}"
+          else
+            # refs/tags/os-v0.2-mvp -> 0.2-mvp
+            V="${GITHUB_REF#refs/tags/os-v}"
+          fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "tag=os-v$V"  >> "$GITHUB_OUTPUT"
+          echo "Releasing Astrion OS $V"
+
+      - name: Host tests + header gates
+        run: cd kernel && make test
+
+      - name: Build the multiboot2 kernel
+        run: cd kernel && make kernel-mb2
+
+      # The gate. `make ui-test` builds the ISO and runs all nine tests against
+      # it, so a failure here stops the release before anything is published.
+      - name: UI suite (gates the release)
+        run: cd kernel && make ui-test
+
+      - name: Package the ISO
+        id: pkg
+        run: |
+          cd kernel
+          # ui-test already built this from the tested kernel — reuse that exact
+          # file rather than rebuilding, so the bytes released are the bytes
+          # that passed.
+          cp build/astrion-ui.iso astrion.iso
+          sha256sum astrion.iso > astrion.iso.sha256
+          ls -lh astrion.iso
+          cat astrion.iso.sha256
+
+      - name: Publish the release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          name: Astrion OS ${{ steps.ver.outputs.version }}
+          prerelease: ${{ github.event.inputs.prerelease != 'false' }}
+          files: |
+            kernel/astrion.iso
+            kernel/astrion.iso.sha256
+          body: |
+            An operating system written from scratch in C. No Linux underneath.
+
+            **[How to run it](https://github.com/${{ github.repository }}/blob/main/docs/try-astrion.md)**
+            — takes about five minutes in VirtualBox, QEMU or UTM. You do not
+            need a spare computer.
+
+            Download `astrion.iso` below.
+
+            ### What works
+            Desktop with draggable windows · Terminal (~45 commands) · text
+            editor that saves to a real filesystem · file browser · calculator ·
+            system monitor · settings · Snake · an offline Assistant that
+            **learns how you phrase things** and remembers it across reboots.
+
+            ### What doesn't, yet
+            - Has never been run on real hardware — emulator only.
+            - No networking of any kind.
+            - Cannot be installed to a hard drive.
+            - The Assistant runs the machine; it is not a chatbot.
+
+            ### Every build is tested
+            Nine automated tests boot this exact ISO in QEMU and drive it with a
+            real mouse and keyboard, checking real pixels and real text. This
+            release does not exist unless all nine passed.
+
+            Found a bug? [Open an issue](https://github.com/${{ github.repository }}/issues)
+            — say what you did, what happened, and which emulator you used.
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-ui-evidence
+          path: |
+            kernel/build/uitest/*.ppm
+            kernel/build/uitest/*.log
+          retention-days: 30
