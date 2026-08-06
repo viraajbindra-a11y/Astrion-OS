@@ -42,9 +42,13 @@ void        learn_init(void);
 const char *learn_lookup(const char *prompt);
 
 /* Record that `worked` is what `failed` was trying to say, and persist it.
- * Ignores empty strings, over-long ones, and pairs that are equal after
- * normalising — a prompt cannot teach you anything about itself. */
-void        learn_record(const char *failed, const char *worked);
+ * Refuses empty strings, over-long ones, and pairs equal after normalising —
+ * a prompt cannot teach you anything about itself.
+ *
+ * RETURNS 1 only if something was really stored. The caller announces the
+ * lesson to the user, and announcing a refused one is a lie the next failed
+ * prompt immediately exposes. */
+int         learn_record(const char *failed, const char *worked);
 
 int         learn_count(void);              /* how many pairs are known */
 

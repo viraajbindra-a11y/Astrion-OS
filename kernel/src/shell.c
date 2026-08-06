@@ -35,6 +35,7 @@
 #include "wm.h"
 #include "kbd.h"
 #include "clipboard.h"
+#include "learn.h"
 #include "elf.h"
 #include "usermem.h"
 #include "power.h"
@@ -149,6 +150,7 @@ static void cmd_monitor(int argc, char **argv);
 static void cmd_calc(int argc, char **argv);
 static void cmd_settings(int argc, char **argv);
 static void cmd_clip(int argc, char **argv);
+static void cmd_learned(int argc, char **argv);
 static void cmd_pmm(int argc, char **argv);
 static void cmd_vmtest(int argc, char **argv);
 static void cmd_vmswitch(int argc, char **argv);
@@ -187,6 +189,7 @@ static const struct cmd CMDS[] = {
     { "mkdir",   "mkdir <dir> - create a directory", cmd_mkdir },
     { "sync",    "write all files to disk",          cmd_sync },
     { "clip",    "print the clipboard contents",     cmd_clip },
+    { "learned", "what the Assistant learned from you (learned forget = wipe)", cmd_learned },
     { "pmm",     "physical RAM: frame allocator stats + self-test", cmd_pmm },
     { "vmtest",  "per-process address space: build + walk self-test", cmd_vmtest },
     { "vmswitch","scheduler-driven CR3 switch into a vmspace + back", cmd_vmswitch },
@@ -1304,6 +1307,41 @@ static void cmd_sync(int argc, char **argv) {
 
 /* Print the current clipboard - makes a copy verifiable without a second app
  * (copy a line in the editor, then `clip` here to see it). */
+/* The Assistant's lesson book, and the only way to erase it.
+ *
+ * learn_forget_all() shipped with ZERO callers, so there was no undo at all.
+ * Deleting /learned.txt by hand looked like it worked and did not: the table
+ * lives in RAM, still answered from, and the next lesson wrote the whole thing
+ * back to disk — deleted pair included. The user could not get rid of something
+ * the machine had decided about them, which is the one thing this feature must
+ * never do. */
+static void cmd_learned(int argc, char **argv) {
+    if (argc >= 2 && streq(argv[1], "forget")) {
+        int n = learn_count();
+        learn_forget_all();
+        console_puts("forgot ");
+        console_put_u32((uint32_t)n);
+        console_puts(" learned phrasing(s). /learned.txt is gone.\n");
+        return;
+    }
+    int n = learn_count();
+    if (!n) {
+        console_puts("nothing learned yet.\n"
+                     "The Assistant learns when a prompt it doesn't understand\n"
+                     "is followed by one it does.\n");
+        return;
+    }
+    console_puts("the Assistant has learned:\n");
+    for (int i = 0; i < n; i++) {
+        console_puts("  \"");
+        console_puts(learn_failed_at(i));
+        console_puts("\"  ->  \"");
+        console_puts(learn_worked_at(i));
+        console_puts("\"\n");
+    }
+    console_puts("'learned forget' erases all of it.\n");
+}
+
 static void cmd_clip(int argc, char **argv) {
     (void)argc; (void)argv;
     uint32_t n = clipboard_len();

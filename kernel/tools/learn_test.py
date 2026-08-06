@@ -120,10 +120,51 @@ def main():
     check("control: blank disk forgets — so it really was learned",
           windows[0][1], FAILED)
 
-    for n in (1, 2, 3):
-        for f in scan_faults(os.path.join(out, f"learn-{tag}-{n}.log")):
+    # ── boot 4: a lesson must never shadow a real answer ──
+    #
+    # rex found this and it is the worst thing the feature did. A lesson is
+    # recorded when a prompt FAILS, and the justification for consulting the
+    # book first was that nothing which already works could ever be in it. True
+    # when written, and irrelevant: the machine changes underneath it. Teach a
+    # lesson from "read thing" while thing.txt does not exist, then CREATE
+    # thing.txt, and the Assistant confidently answered with the lesson instead
+    # of the file — a wrong answer, delivered with a cheerful note explaining
+    # that you had taught it.
+    #
+    # The fix is ordering, not a better comment: try what the prompt means
+    # first, and only fall back to a lesson when nothing built in matched.
+    print(f"[{tag}] boot 4 — a lesson must not shadow a real answer")
+    fresh_disk(disk)
+    windows = session(iso, disk, os.path.join(out, f"learn-{tag}-4.log"),
+                      ["read thing",                     # fails: no thing.txt
+                       KNOWN,                            # works -> teaches the pair
+                       "write shadowcheck to thing.txt", # now it DOES exist
+                       "read thing"],                    # must read the FILE
+                      f"{tag}4")
+    check("the lesson is taught while the file is missing", windows[1][1], PROOF)
+    w = windows[3][1]
+    if b"shadowcheck" in w and b"you taught me" not in w:
+        print(f"[{tag}] [PASS] real answer wins once the file exists")
+    else:
+        bad += 1
+        print(f"[{tag}] [FAIL] the lesson shadowed a real answer")
+        print(f"         got: {w.decode(errors='replace').strip()[:170]!r}")
+
+    for n in (1, 2, 3, 4):
+        log = os.path.join(out, f"learn-{tag}-{n}.log")
+        for f in scan_faults(log):
             print(f"[{tag}] FAULT boot{n} {f}")
             bad += 1
+        # A dropped serial byte means the window this test just read had a hole
+        # in it, so every check above was scored against an incomplete log. rex
+        # forced one with 300 files and a listing; ordinary use is far under the
+        # 4096-byte ring, but a silent hole would make a pass or a fail equally
+        # meaningless and nothing was looking for it.
+        with open(log, "rb") as fh:
+            if b"[serial: dropped" in fh.read():
+                print(f"[{tag}] INVALID boot{n}: serial ring dropped bytes — the "
+                      f"log has a hole and no verdict from it can be trusted")
+                bad += 1
 
     print(f"[{tag}] VERDICT: "
           f"{'CLEAN — it learns from you and remembers' if not bad else f'{bad} FAILURE(S)'}")

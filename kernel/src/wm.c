@@ -696,7 +696,13 @@ static char     as_prompt[128];
 /* The last prompt that FAILED. If the very next one succeeds, the pair is a
  * lesson worth keeping. Cleared the moment it is used or a lookup hits, so a
  * failure can only ever teach the prompt that came directly after it. */
-static char     as_learn_pending[LEARN_TEXT];
+/* Sized to as_prompt, NOT to LEARN_TEXT. It was LEARN_TEXT (96) against a
+ * 128-char as_prompt, so a 110-char prompt was copied in as its 95-char prefix,
+ * stored that way, and then compared against the FULL string at lookup — it
+ * could never match, and it burned a table slot permanently. learn_record
+ * refuses anything too long outright now, which is a visible no rather than a
+ * silent maiming. */
+static char     as_learn_pending[sizeof(as_prompt)];
 static int      as_plen;
 static uint32_t as_ox, as_oy;      /* streaming output cursor */
 /* Everything the assistant has emitted for the current answer. Kept so the
@@ -798,6 +804,13 @@ static struct am_ident ident_of(const char *name) {
 
 static void assist_reset(void) {
     as_plen = 0; as_prompt[0] = 0; as_olen = 0; assist_disarm();
+    /* The half-finished lesson goes too. This function already drops the
+     * prompt, the armed action and the "it" slot precisely because a closed
+     * window must not carry state into the next one — and the pending failure
+     * was the one thing left behind. rex: fail "wumpus hunt", press Esc, reopen,
+     * ask "uptime", and it announced it had learned that wumpus hunt meant
+     * uptime. Two unrelated sessions, welded together by a leftover. */
+    as_learn_pending[0] = 0;
     /* The slot expires with the window. Reopening the Assistant is a new
      * conversation, and "it" must not reach back into the last one. */
     assist_forget_file();
@@ -1968,6 +1981,45 @@ static void assist_run(void) {
      * It says what it did. A machine that silently answers a different question
      * than the one you asked is unsettling even when it is right, and "learned
      * from you" is only a feature if you can see it happen. */
+    /* THE BUILT-IN MEANING WINS, ALWAYS. This used to consult the lesson book
+     * first, and the justification was a comment: learn_record only ever stores
+     * a phrasing that genuinely failed, so nothing that already works can be in
+     * there to be shadowed. That reasoning holds at RECORD time and says
+     * nothing about LOOKUP time, and the gap between them is the whole bug —
+     * the machine changes underneath it.
+     *
+     * rex's repro: "read thing" fails because thing.txt does not exist, so the
+     * next working prompt teaches it. Then you CREATE thing.txt. Now "read
+     * thing" is a real request with a real answer, and the Assistant confidently
+     * showed a file listing instead, "(you taught me that this means...)" and
+     * all. Same shape with "open gadget": the Editor simply never opened.
+     *
+     * So the order is the fix, not a stronger comment. Try what the prompt
+     * actually means; only if the machine has no answer at all does a lesson
+     * get a turn. A lesson whose failed side later starts working just stops
+     * firing, which is exactly right. */
+    if (try_intent(as_prompt)) {         /* did a real action, offline */
+        /* The previous prompt failed and this one worked. That sequence is a
+         * free lesson and Astrion used to throw it away: ask the same way
+         * tomorrow, fail the same way, forever. Take it. */
+        if (as_learn_pending[0]) {
+            /* Announce only what was actually STORED. learn_record refuses
+             * pairs that do not fit or teach nothing, and this printed
+             * "(learned: ...)" regardless — so the Assistant claimed a lesson
+             * that was never on disk, and the same prompt failed again a moment
+             * later. Saying you remembered something and then not remembering
+             * it is worse for trust than not offering to remember at all. */
+            if (learn_record(as_learn_pending, as_prompt)) {
+                assist_say("\n(learned: \"");
+                assist_say(as_learn_pending);
+                assist_say("\" means this too)\n");
+            }
+            as_learn_pending[0] = 0;
+        }
+        return;
+    }
+
+    /* Nothing built in matched. NOW a lesson may speak. */
     const char *taught = learn_lookup(as_prompt);
     if (taught && try_intent(taught)) {
         /* Said AFTER, not before: try_intent starts its answer with
@@ -1977,20 +2029,6 @@ static void assist_run(void) {
         assist_say(taught);
         assist_say("\")\n");
         as_learn_pending[0] = 0;
-        return;
-    }
-
-    if (try_intent(as_prompt)) {         /* did a real action, offline */
-        /* The previous prompt failed and this one worked. That sequence is a
-         * free lesson and Astrion used to throw it away: ask the same way
-         * tomorrow, fail the same way, forever. Take it. */
-        if (as_learn_pending[0]) {
-            learn_record(as_learn_pending, as_prompt);
-            assist_say("\n(learned: \"");
-            assist_say(as_learn_pending);
-            assist_say("\" means this too)\n");
-            as_learn_pending[0] = 0;
-        }
         return;
     }
 

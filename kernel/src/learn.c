@@ -25,7 +25,6 @@ struct pair {
 
 static struct pair tab[LEARN_MAX];
 static int         n_pairs;
-static int         next_slot;      /* round-robin eviction once full */
 
 /* ─── small string helpers (freestanding: no libc here) ─── */
 
@@ -84,7 +83,7 @@ static void save(void) {
 void learn_init(void) {
     static uint8_t buf[LEARN_MAX * (LEARN_TEXT * 2 + 2) + 1];
     uint32_t got = 0;
-    n_pairs = next_slot = 0;
+    n_pairs = 0;
     /* fs_read returns the BYTE COUNT on success and -1 on failure, so the test
      * is "< 0", not "!= 0". Written the wrong way first, and every boot
      * silently loaded nothing: 33 != 0, so a perfectly good file was discarded
@@ -117,7 +116,6 @@ void learn_init(void) {
             n_pairs++;
         }
     }
-    next_slot = n_pairs % LEARN_MAX;
 }
 
 /* ─── the two operations the Assistant uses ─── */
@@ -129,9 +127,14 @@ const char *learn_lookup(const char *prompt) {
     return 0;
 }
 
-void learn_record(const char *failed, const char *worked) {
-    if (!usable(failed) || !usable(worked)) return;
-    if (same_norm(failed, worked)) return;     /* teaches nothing */
+int learn_record(const char *failed, const char *worked) {
+    /* Returns whether anything was actually stored, because the caller prints
+     * "(learned: ...)" and used to print it unconditionally — claiming a lesson
+     * that had been refused, so the very same prompt failed again seconds
+     * later. A machine that says it remembered and then did not is worse than
+     * one that never offered. */
+    if (!usable(failed) || !usable(worked)) return 0;
+    if (same_norm(failed, worked)) return 0;     /* teaches nothing */
 
     /* Already known? Update the answer rather than adding a duplicate: the most
      * recent correction is the one the user meant. */
@@ -139,20 +142,36 @@ void learn_record(const char *failed, const char *worked) {
         if (same_norm(tab[i].failed, failed)) {
             scopy(tab[i].worked, worked, LEARN_TEXT);
             save();
-            return;
+            return 1;
         }
     }
 
-    /* Never let a learned phrasing shadow one that already works on its own.
-     * If `failed` ever starts matching a real intent — say a later build adds
-     * that wording — the table would keep rewriting it to something else
-     * forever, and the built-in behaviour could never come back. The caller
-     * only records after a genuine failure, so this is belt and braces. */
-    int slot = (n_pairs < LEARN_MAX) ? n_pairs++ : next_slot;
-    next_slot = (next_slot + 1) % LEARN_MAX;
+    /* The table is kept OLDEST-FIRST and appended to, so "drop the oldest"
+     * is always index 0 — no matter whether the entries arrived this session or
+     * were read off the disk at boot.
+     *
+     * It used to be a round-robin cursor, and that cursor could not survive a
+     * reboot. learn_init set next_slot = n_pairs % LEARN_MAX, which is 0 on a
+     * full table — but after the table has wrapped, slot 0 holds the NEWEST
+     * pair. So the first lesson after every boot deleted the most recent thing
+     * you had taught it and kept the second-oldest. rex caught it: teach 33
+     * pairs, power cycle, teach one more, and the pair from just before the
+     * reboot is the one that vanishes.
+     *
+     * A 31-entry shift is nothing next to the disk write that follows it, and
+     * ordering that is true on disk as well as in RAM is worth far more than
+     * the cursor saved. */
+    int slot;
+    if (n_pairs < LEARN_MAX) {
+        slot = n_pairs++;
+    } else {
+        for (int i = 1; i < LEARN_MAX; i++) tab[i - 1] = tab[i];
+        slot = LEARN_MAX - 1;
+    }
     scopy(tab[slot].failed, failed, LEARN_TEXT);
     scopy(tab[slot].worked, worked, LEARN_TEXT);
     save();
+    return 1;
 }
 
 int learn_count(void) { return n_pairs; }
@@ -166,7 +185,7 @@ const char *learn_worked_at(int i) {
 }
 
 void learn_forget_all(void) {
-    n_pairs = next_slot = 0;
+    n_pairs = 0;
     fs_unlink(LEARN_PATH);
     fs_sync();
 }
