@@ -109,6 +109,35 @@ def main():
         x0, y0, x1, y1 = rect
         print(f"[{tag}] changed-region rect: x {x0}..{x1}  y {y0}..{y1}")
 
+        # Pick the direction with room, and never ask for more travel than
+        # exists. DRAG_DX was a hardcoded -180 chosen when app windows opened
+        # near screen centre; when they moved to the Terminal's left edge there
+        # were only ~148px to the left, the WM clamped at the screen edge, and
+        # the return drag could not put the window back. The round trip then
+        # reported 6.2% "residue" that was really just the window sitting 34px
+        # from where it started — a real-looking failure with no bug behind it.
+        # Fourth false failure from this test, same root cause every time:
+        # measuring against an assumption about geometry instead of the geometry.
+        room_l, room_r = x0, w - x1
+        if room_r > room_l:
+            dx = min(abs(DRAG_DX), room_r - 20)
+        else:
+            dx = -min(abs(DRAG_DX), room_l - 20)
+        # Snap to a whole number of drag steps, TRUNCATING toward zero.
+        #
+        # drag() sends 20 relative moves of `dx // 20`. Python's // floors toward
+        # negative infinity, so an out-and-back of +111 sends 20*(111//20) = +100
+        # out and 20*(-111//20) = -120 back: the window lands 20px left of where
+        # it started and the round trip reports residue that is pure arithmetic.
+        # The original -180 hid this for months only because 180 divides by 20.
+        # int(x/20)*20 truncates instead, so |out| == |back| for either sign.
+        dx = int(dx / 20) * 20
+        if abs(dx) < 40:
+            print(f"[{tag}] INCONCLUSIVE: only {room_l}px left / {room_r}px right "
+                  f"of the window — nowhere to drag it without hitting an edge")
+            q.cmd("quit"); return 2
+        print(f"[{tag}] room: {room_l}px left, {room_r}px right -> dragging {dx:+d}")
+
         # The bbox top is ~16px ABOVE the window's own top edge: the window
         # casts a soft shadow, and opening Files also unfocuses Terminal and
         # recolours its title bar. Two heuristics were tried and both missed —
@@ -133,11 +162,11 @@ def main():
             time.sleep(0.3)
             q.btn(False); time.sleep(1.5)
 
-        drag(gx, gy, DRAG_DX)                      # out...
+        drag(gx, gy, dx)                           # out...
         home_and_move(q, 40, 400)
         time.sleep(1.2)
         q.cmd("screendump", filename=p_move)       # kept for eyeballing
-        drag(gx + DRAG_DX, gy, -DRAG_DX)           # ...and straight back
+        drag(gx + dx, gy, -dx)                     # ...and straight back
         home_and_move(q, 40, 400)
         time.sleep(1.5)
         q.cmd("screendump", filename=p_back)

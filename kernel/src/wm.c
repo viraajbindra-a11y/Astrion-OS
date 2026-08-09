@@ -3032,9 +3032,31 @@ static void open_common(enum app_kind app) {
              * composed around it. */
             desktop_terminal_frame(&w->x, &w->y, &w->w, &w->h);
         } else {
-            /* cascade so a second window doesn't land exactly on the first */
-            w->x = (SW - w->w) / 2 + (uint32_t)(s * 26);
-            w->y = WM_TOP + 4 + (uint32_t)(s * 22);
+            /* Cascade from the TERMINAL's left edge, not from screen centre.
+             *
+             * Centring a narrower window over a wider one and then nudging it
+             * right left a ~117px vertical sliver of the Terminal showing down
+             * the left of every app. That sliver is TEXT, clipped mid-glyph:
+             * "As / No / Ne / It / un / th / Or / as". It does not read as two
+             * windows, it reads as corrupted memory, and it was in every
+             * screenshot anyone would take of any app. valentina caught it.
+             *
+             * Anchoring to the Terminal means an app at least as wide as the
+             * Terminal covers it completely, and the deliberately-narrow ones
+             * (Calculator, Settings, Monitor) sit flush at the left edge with
+             * their overhang on the RIGHT, where it is one clean vertical band
+             * of terminal background rather than a column of half-letters.
+             *
+             * Vertical step only, and small: two windows still cannot land
+             * exactly on each other, which is all the cascade was ever for. */
+            uint32_t tx, ty, tw, th;
+            desktop_terminal_frame(&tx, &ty, &tw, &th);
+            w->x = tx;
+            if (w->w > SW - tx) w->x = (SW > w->w) ? (SW - w->w) / 2 : 0;
+            w->y = ty + (uint32_t)(s * 18);
+            /* Never let the cascade push a window under the dock. */
+            if (w->y + w->h + WM_DOCK > SH)
+                w->y = (SH > w->h + WM_DOCK) ? SH - w->h - WM_DOCK : WM_TOP;
         }
         win_set_saverect(w);                          /* include shadow */
         /* The savebuf must hold the whole shadow-inclusive rect: save_rect
