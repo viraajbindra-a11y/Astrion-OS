@@ -8,15 +8,33 @@ machine that the first meant the second — permanently.
 
 Five steps, and the last two are the ones that make it mean anything:
 
-  1. fresh disk. "gimme my files" must FAIL. (If it already worked, the whole
-     run proves nothing — it would be the built-in matcher, not learning.)
-  2. "show me the files" WORKS.
-  3. "gimme my files" now WORKS. It learned.
-  4. full power cycle, SAME disk. "gimme my files" still works — so the lesson
-     is on the disk, not in RAM.
-  5. full power cycle, BLANK disk. "gimme my files" FAILS again. Without this
-     step, a kernel that simply understood the phrase all along would sail
-     through every check above.
+  1. fresh disk. UNKNOWN must FAIL. (If it already worked, the whole run
+     proves nothing — it would be the built-in matcher, not learning.)
+  2. KNOWN works.
+  3. UNKNOWN now works. It learned.
+  4. full power cycle, SAME disk. UNKNOWN still works — so the lesson is on
+     the disk, not in RAM.
+  5. full power cycle, BLANK disk. UNKNOWN FAILS again. Without this step, a
+     kernel that simply understood the phrase all along would sail through
+     every check above.
+
+CHOOSING UNKNOWN — this test broke once already
+-----------------------------------------------
+UNKNOWN was "gimme my files" until 2026-08-09, when a round of coverage work
+taught the built-in matcher that exact phrase. Steps 1 and 5 are CONTROLS, and
+controls fail loudly when the thing they are controlling for stops being true:
+both reported FAIL, correctly, because the premise "this phrasing is unknown"
+had quietly stopped holding. Nothing about the learning feature had changed.
+
+That is the failure working as designed, and it will happen again to any
+UNKNOWN that is a reasonable English way to ask for something — because
+reasonable English phrasings are exactly what the coverage work keeps adding.
+
+So UNKNOWN is now deliberately NOT reasonable English. It is one person's
+private shorthand, which is the actual case this feature exists to serve: not
+"a phrasing we forgot", but "the way YOU happen to say it". A matcher that
+ever learns "filez plz" as a built-in has lost the plot, so this one should
+stay unknown for good.
 
     python3 learn_test.py <iso> <tag> [outdir]
 """
@@ -28,7 +46,12 @@ from dock_test import DOCK_Y, DOCK, home_and_move, scan_faults
 
 ASSIST_X = dict(DOCK)["assistant"]
 
-UNKNOWN = "gimme my files"          # verified to miss every intent
+# Verified to miss every intent — checked with
+#   printf 'filez plz\n' | ./build/intent_probe   ->   none
+# and deliberately chosen as private shorthand, not as English. See the note
+# in the docstring: the previous UNKNOWN was ordinary English and the coverage
+# work eventually taught it, which turned both controls red.
+UNKNOWN = "filez plz"
 KNOWN = "show me the files"         # verified to hit the file-listing intent
 PROOF = b"readme.txt"               # only the real listing contains this
 FAILED = b"didn't understand"

@@ -213,6 +213,46 @@ static inline enum am_named am_named_file(const char *p, char *out, int cap)
     return n == 0 ? AM_NAMED_NONE : (n == 1 ? AM_NAMED_ONE : AM_NAMED_MANY);
 }
 
+/* How many file-shaped tokens the sentence holds, when the caller wants the
+ * COUNT and not the name. Carries its own buffer on purpose: am_file_tokens
+ * counts nothing at all when cap is 0 (its length test is `b - a < cap`), so
+ * the tempting am_file_tokens(p, 0, 0, 0) silently answers "none" for every
+ * sentence ever written. */
+static inline int am_count_files(const char *p)
+{
+    char t[80];
+    return am_file_tokens(p, 0, t, (int)sizeof t);
+}
+
+/* Is the whole prompt nothing but one of these words?
+ *
+ * For verbs that are unambiguous ALONE and ambiguous in company. Bare "close"
+ * can only mean the window — there is no other object in the sentence to
+ * close — while "close notes.txt" names a file and "shut down the machine"
+ * names the machine. Matching the whole prompt is what separates them, and it
+ * cannot misfire on a longer sentence by construction. */
+static inline int am_is_just(const char *p, const char *alts)
+{
+    int a = 0;
+    while (p[a] == ' ' || p[a] == '\t') a++;
+    int b = a;
+    while (p[b]) b++;
+    while (b > a && (p[b-1] == ' ' || p[b-1] == '\t' || am_trimch(p[b-1]))) b--;
+
+    for (const char *s = alts; ; ) {
+        const char *e = s;
+        while (*e && *e != '|') e++;
+        int n = (int)(e - s);
+        if (n == b - a) {
+            int k = 0;
+            while (k < n && am_lc(p[a + k]) == am_lc(s[k])) k++;
+            if (k == n) return 1;
+        }
+        if (!*e) return 0;
+        s = e + 1;
+    }
+}
+
 /* ─── the intent table, in priority order ───────────────────────────────
  *
  * Two passes, because the two halves are genuinely different animals:
@@ -270,7 +310,19 @@ static inline enum am_intent am_classify(const char *p)
          am_has(p, "introduce")     || am_has(p, "your name")    ||
          am_has(p, "yourself")      || am_has(p, "about astrion")||
          am_has(p, "is astrion")    || am_has(p, "what os")      ||
-         am_has(p, "which os")      || am_has(p, "what kind of computer")) &&
+         am_has(p, "which os")      || am_has(p, "what kind of computer") ||
+         /* "who am i talking to" and "what should i call you" are the two
+          * commonest openers a stranger types, and both used to get the
+          * honest shrug. Both are anchored on "you", so neither can be
+          * reached by a sentence about a file — "call notes.txt todo.txt"
+          * has the verb and not the pronoun. */
+         am_has(p, "talking to")    || am_has(p, "call you")   ||
+         /* "are you chatgpt" and "are you an ai" are the first thing a
+          * stranger types, and both got the honest shrug. The anchor is broad
+          * on purpose — every "are you X" is a question about what this is,
+          * and identity is a safe thing to answer with. The two guards below
+          * still take back "are you running" and "what are you doing". */
+         am_has(p, "are you")) &&
         !am_word_any(p, "running|doing"))
         return AM_IDENTITY;
 
@@ -280,23 +332,62 @@ static inline enum am_intent am_classify(const char *p)
     if ((am_word_any(p, "help|commands|command|capabilities|options") ||
          am_has(p, "what can you")   || am_has(p, "what can i ask") ||
          am_has(p, "what can i say") || am_has(p, "what do you do") ||
-         am_has(p, "what else can")) &&
+         am_has(p, "what else can")  ||
+         /* "show me what YOU CAN do" — same question, different word order,
+          * and the READ arm was claiming it because it starts with "show".
+          * "how do i use this" is the other one a first-time user types. */
+         am_has(p, "what you can")   || am_has(p, "how do i use") ||
+         am_has(p, "how to use")     || am_has(p, "what do i do") ||
+         (am_has(p, "how does") && am_word(p, "work"))            ||
+         /* "im stuck" is a person asking for help. "is anything stuck" is a
+          * question about the scheduler, and TASKS answers it — which is why
+          * this is the two exact phrasings and not the bare word "stuck". */
+         am_has(p, "im stuck")       || am_has(p, "i'm stuck")) &&
         !am_word_any(p, "delete|remove") && !am_has(p, ".txt"))
         return AM_HELP;
 
     /* Close the window. "quit"/"exit" are unambiguous on their own; "close"
      * and "dismiss" need to be pointed at something window-shaped, so that
-     * "close notes.txt" is not a window command. */
+     * "close notes.txt" is not a window command.
+     *
+     * The bare word got its own arm because the guard above was refusing the
+     * single commonest way to say it. Typing just `close` was answered with
+     * "I didn't understand that one" — a sentence with one word in it, and
+     * nothing else in it to close. am_is_just matches the WHOLE prompt, so it
+     * cannot leak into "close notes.txt" the way relaxing the guard would.
+     *
+     * "shut" joins the pointed arm minus down/off: "shut this" is the window,
+     * "shut this down" is the machine, and there is no power intent here — so
+     * claiming it would mean confidently closing a window when the user asked
+     * to turn the computer off. Falling through to the menu is the honest
+     * answer until a power intent exists. */
     if (am_word_any(p, "quit|exit") ||
-        (am_word_any(p, "close|dismiss|hide") &&
-         am_word_any(p, "window|windows|assistant|chat|this|it|yourself")))
+        am_is_just(p, "close|shut|dismiss") ||
+        /* Ways of leaving that never use the word "close". Whole phrases, not
+         * keywords, because "mind", "away" and "out" on their own belong to
+         * far too many other sentences. */
+        am_has(p, "never mind") || am_has(p, "go away") ||
+        am_has(p, "get out of here") ||
+        (am_word_any(p, "close|dismiss|hide|shut") &&
+         am_word_any(p, "window|windows|assistant|chat|this|it|yourself") &&
+         !am_word_any(p, "down|off")))
         return AM_CLOSE;
 
     /* Change a setting. Needs BOTH a change verb and the name of a settings
      * group, which is what keeps a bare colour word out of it — "write blue
      * to notes.txt" has no change verb and never reaches here. */
-    if (am_word_any(p, "set|change|switch|use|turn|make it") &&
-        am_word_any(p, "accent|colour|color|wallpaper|background|theme|clock"))
+    if (((am_word_any(p, "set|change|switch|use|turn|make|want") &&
+          am_word_any(p, "accent|colour|color|wallpaper|background|theme|clock")) ||
+         /* "make it purple" — a change verb and a VALUE, with the group left
+          * unsaid because it is obvious to a person. am_setting_group maps the
+          * bare colour back to the accent. */
+         ((am_has(p, "make it") || am_has(p, "turn it")) &&
+          am_word_any(p, "blue|purple|teal|green|orange|pink")) ||
+         /* "12 hour clock" — a value and a group and no verb at all. Above
+          * DATE, which owns the word "clock" and was answering it with the
+          * time. The digits are what keep the question "what time is it" out. */
+         (am_word_any(p, "12|24") && am_word_any(p, "hour|hours|clock"))) &&
+        !am_has(p, ".txt"))
         return AM_SET_CHANGE;
 
     /* Report the current settings. The !open guard matters: "open the
@@ -305,7 +396,8 @@ static inline enum am_intent am_classify(const char *p)
     if ((am_word_any(p, "settings|preferences") ||
          (am_word_any(p, "what|whats|which|show|list|current") &&
           am_word_any(p, "accent|wallpaper|theme"))) &&
-        !am_word_any(p, "open|launch"))
+        !am_word_any(p, "open|launch") &&
+        !am_has(p, "bring up") && !am_has(p, "fire up") && !am_has(p, "pull up"))
         return AM_SET_SHOW;
 
     /* Memory. Above DISK so "am i running out of memory" is a memory answer,
@@ -323,7 +415,7 @@ static inline enum am_intent am_classify(const char *p)
     /* CPU. Above TASKS because "processor" and "process" are neighbours; the
      * word rules already separate them, and the order is the second belt. */
     if (am_word_any(p, "cpu|processor|processors|chip|core|cores") ||
-        am_has(p, "what am i running on"))
+        am_has(p, "what am i running on") || am_has(p, "how fast"))
         return AM_CPU;
 
     /* Uptime. ABOVE TASKS, BOOT and DATE — all three own a word that a
@@ -339,8 +431,12 @@ static inline enum am_intent am_classify(const char *p)
     /* The scheduler table. NOT for "open the task manager" — that is a launch
      * request and belongs to am_action's open handler. */
     if ((am_word_any(p, "running|process|processes|task|tasks|job|jobs|"
-                        "scheduler|threads|ps") ||
-         am_has(p, "what are you doing")) &&
+                        "scheduler|threads|ps|stuck|frozen|hung") ||
+         am_has(p, "what are you doing") ||
+         /* "what's going on" is how people ask this out loud. Safe here and
+          * not higher: MEMORY, DISK and CPU all run above, so "what's going
+          * on with the disk" is still a disk answer. */
+         am_has(p, "going on")) &&
         !am_word_any(p, "open|launch"))
         return AM_TASKS;
 
@@ -349,7 +445,7 @@ static inline enum am_intent am_classify(const char *p)
      * — it belongs to DELETE, and this branch runs first, so having it in
      * both would turn "erase notes.txt" into a screen wipe. The .txt guard is
      * the same idea for "wipe notes.txt". */
-    if (am_word_any(p, "clear|wipe") &&
+    if (am_word_any(p, "clear|wipe|clean") &&
         !am_word_any(p, "file|files|history") && !am_has(p, ".txt"))
         return AM_CLEAR;
 
@@ -363,7 +459,7 @@ static inline enum am_intent am_classify(const char *p)
     if (am_word_any(p, "apps|applications") ||
         (am_word_any(p, "what|whats|which|list|show") &&
          am_word_any(p, "programs|software")) ||
-        am_has(p, "what can i open"))
+        am_has(p, "what can i open") || am_has(p, "what can i run"))
         return AM_APPS;
 
     if (am_word_any(p, "boot|booted|booting|bootloader|startup|grub") ||
@@ -380,9 +476,21 @@ static inline enum am_intent am_classify(const char *p)
         return AM_FILES_COUNT;
 
     if (am_word_any(p, "ls|dir") ||
-        (am_word_any(p, "list|show|see|what|whats|which|how") &&
+        (am_word_any(p, "list|show|see|what|whats|which|how|gimme|have|got") &&
          am_word_any(p, "file|files|folder|folders|directory|directories|"
-                        "documents")))
+                        "documents")) ||
+        /* "what's on here", "what have I got saved", "list everything" — the
+         * way you ask when you do not know the word "file" is the thing to
+         * say. All four of these landed on the honest shrug, and two of them
+         * were being claimed by the READ arm and answered with "no file
+         * called here.txt", which is worse than the shrug.
+         *
+         * The .txt guard is what keeps it honest in the other direction:
+         * "what is saved in notes.txt" names a file and must stay a read. */
+        (am_word_any(p, "list|show|see|what|whats|gimme") &&
+         (am_has(p, "on here") || am_has(p, "in here") ||
+          am_word_any(p, "saved|stored|everything|stuff")) &&
+         !am_has(p, ".txt")))
         return AM_FILES_LIST;
 
     return AM_NONE;
@@ -404,9 +512,51 @@ enum am_action {
     AM_ACT_OPEN,
 };
 
+/* Which app "open X" means. AM_OPEN_NONE means no app was named — the caller
+ * then tries the last word as a filename, so "open notes.txt" works too.
+ *
+ * Lives ABOVE am_action_of because am_action_of now consults it: whether a
+ * sentence names an app is the difference between a launch and a read, and
+ * that question has to be askable before the read arm gets its turn. */
+enum am_open {
+    AM_OPEN_NONE = 0,
+    AM_OPEN_EDITOR,
+    AM_OPEN_SNAKE,
+    AM_OPEN_FILES,
+    AM_OPEN_TERMINAL,
+    AM_OPEN_ASSIST,
+    AM_OPEN_MONITOR,
+    AM_OPEN_CALC,
+    AM_OPEN_SETTINGS,
+};
+
+static inline enum am_open am_open_target(const char *p)
+{
+    /* No "browser" alias anywhere in here: there is no browser, and pointing
+     * the word at Files would be the assistant inventing a capability. */
+    if (am_word_any(p, "editor|edit|notepad"))           return AM_OPEN_EDITOR;
+    if (am_word_any(p, "snake|game"))                    return AM_OPEN_SNAKE;
+    if (am_word_any(p, "files|file manager|finder"))     return AM_OPEN_FILES;
+    if (am_word_any(p, "terminal|shell|console|prompt")) return AM_OPEN_TERMINAL;
+    if (am_word_any(p, "assistant|chat"))                return AM_OPEN_ASSIST;
+    if (am_word_any(p, "monitor|task manager|activity")) return AM_OPEN_MONITOR;
+    if (am_word_any(p, "calculator|calc|maths|math"))    return AM_OPEN_CALC;
+    if (am_word_any(p, "settings|preferences"))          return AM_OPEN_SETTINGS;
+    return AM_OPEN_NONE;
+}
+
 static inline enum am_action am_action_of(const char *p)
 {
     if (am_word_any(p, "rename|move")) return AM_ACT_RENAME;
+
+    /* "change a.txt to b.txt" and "call a.txt b.txt instead" are renames in
+     * the words people actually use. Neither verb can be claimed on its own —
+     * "change the accent to green" is a setting and "what should i call you"
+     * is the identity question — so this arm demands TWO file-shaped tokens,
+     * which every rename has by definition and neither of those sentences has
+     * even one. The count does the guarding, not a keyword blocklist. */
+    if (am_word_any(p, "change|call") && am_count_files(p) == 2)
+        return AM_ACT_RENAME;
 
     /* Above WRITE: "save a copy of notes.txt to backup.txt" is a copy, and
      * treating it as a write would put the literal words "a copy of
@@ -416,17 +566,23 @@ static inline enum am_action am_action_of(const char *p)
     /* "add" as a WORD, so that the natural phrasing "add hi to notes.txt"
      * lands here. Safe now that it is word-matched: as a substring it fires
      * inside "address" and "added". */
-    if (am_word_any(p, "append|add|tack on")) return AM_ACT_APPEND;
+    if (am_word_any(p, "append|add|tack|onto")) return AM_ACT_APPEND;
 
     /* "put" is here as a WORD — as a substring it fires inside "output".
      * Deliberately NOT "log": it is a noun as often as a verb here ("show me
      * the log"), and claiming it turns a read into a failed write. */
-    if (am_word_any(p, "write|save|put|store")) return AM_ACT_WRITE;
+    if (am_word_any(p, "write|save|put|store|set|stick")) return AM_ACT_WRITE;
 
     /* The ".txt" arm is what makes bare "make notes.txt" work. The noun list
      * is what keeps "make up a name for my cat" out — it has the verb and
      * nothing file-shaped, so it falls through to the model, as it must. */
-    if (am_word_any(p, "make|create|new|touch|mkdir") &&
+    /* "need" is here and guarded, not in the verb list unguarded: DELETE sits
+     * BELOW this branch, so "i need to delete notes.txt" would have been
+     * claimed as a CREATE and the file the user asked to remove would have
+     * been made instead. The destructive words take it back. */
+    if ((am_word_any(p, "make|create|new|touch|mkdir") ||
+         (am_word(p, "need") &&
+          !am_word_any(p, "delete|remove|rm|erase|trash|unlink"))) &&
         (am_word_any(p, "file|files|folder|folders|directory|note|notes") ||
          am_has(p, ".txt")))
         return AM_ACT_CREATE;
@@ -451,11 +607,43 @@ static inline enum am_action am_action_of(const char *p)
      *
      * A miss here costs one clarifying reply. A false positive costs the
      * user's file, with no undo and no confirmation prompt. Not symmetric. */
-    if (am_word_any(p, "delete|remove|rm|erase|trash|unlink") &&
+    /* "wipe" and "bin" are safe as WORDS and would not be as substrings:
+     * "bin" fires inside "binary" and "combine", and the word rules are what
+     * stop it. "wipe notes.txt" reaches here at all only because AM_CLEAR
+     * above refuses anything holding a ".txt". */
+    if ((am_word_any(p, "delete|remove|rm|erase|trash|unlink|wipe|bin") ||
+         /* The everyday phrasings. Added INSIDE the existing guards, not
+          * beside them: they get the same noun-or-.txt requirement and the
+          * same negation veto as every other way of saying delete. A new way
+          * to ask for a destructive thing must not come with a new way to
+          * skip the checks. */
+         am_has(p, "get rid of") || am_has(p, "throw away") ||
+         am_has(p, "throw out")) &&
         (am_word_any(p, "file|files|folder|folders|directory|note|notes") ||
          am_has(p, ".txt")) &&
         !am_negated(p))
         return AM_ACT_DELETE;
+
+    /* ── naming an APP is what makes this a launch ──
+     *
+     * Above READ because READ's own "(show|display|see) and no 'file' in it"
+     * arm was claiming `show me the monitor`, and on a booted build that came
+     * back with the honest menu — it looked for a file called "monitor",
+     * found none, and gave up. The user asked for a window and got a shrug.
+     *
+     * Two things keep this from over-reaching. am_open_target has to actually
+     * recognise an app name, so an ordinary sentence never reaches the verb
+     * list at all; and a .txt anywhere takes it straight back out, so
+     * `show me notes.txt` is still a read even though "files" is a word the
+     * open target knows. Everything ambiguous the other way — `show me the
+     * files`, `show me the settings` — is claimed by am_classify long before
+     * this runs, which is why it can afford to be this permissive. */
+    if (am_open_target(p) != AM_OPEN_NONE && !am_has(p, ".txt") &&
+        (am_word_any(p, "open|launch|start|play|run|show|see|use|switch") ||
+         am_has(p, "bring up") || am_has(p, "fire up")  ||
+         am_has(p, "pull up")  || am_has(p, "go to")    || am_has(p, "let me") ||
+         am_has(p, "take me")  || am_has(p, "is there")))
+        return AM_ACT_OPEN;
 
     /* "read" as a WORD, or it fires inside "already", "bread", "spreadsheet".
      * "cat " keeps its trailing space rather than becoming a word: as a bare
@@ -465,7 +653,8 @@ static inline enum am_action am_action_of(const char *p)
         (am_word_any(p, "what|whats") && am_word(p, "in")))
         return AM_ACT_READ;
 
-    if (am_word_any(p, "open|launch|start|play|run|go to"))
+    if (am_word_any(p, "open|launch|start|play|run|go to") ||
+        am_has(p, "fire up") || am_has(p, "bring up") || am_has(p, "pull up"))
         return AM_ACT_OPEN;
 
     return AM_ACT_NONE;
@@ -965,35 +1154,6 @@ static inline enum am_submit am_submit_action(const char *line,
     return (line && line[0]) ? AM_SUBMIT_PROMPT : AM_SUBMIT_IGNORE;
 }
 
-/* Which app "open X" means. AM_OPEN_NONE means no app was named — the caller
- * then tries the last word as a filename, so "open notes.txt" works too. */
-enum am_open {
-    AM_OPEN_NONE = 0,
-    AM_OPEN_EDITOR,
-    AM_OPEN_SNAKE,
-    AM_OPEN_FILES,
-    AM_OPEN_TERMINAL,
-    AM_OPEN_ASSIST,
-    AM_OPEN_MONITOR,
-    AM_OPEN_CALC,
-    AM_OPEN_SETTINGS,
-};
-
-static inline enum am_open am_open_target(const char *p)
-{
-    /* No "browser" alias anywhere in here: there is no browser, and pointing
-     * the word at Files would be the assistant inventing a capability. */
-    if (am_word_any(p, "editor|edit|notepad"))           return AM_OPEN_EDITOR;
-    if (am_word_any(p, "snake|game"))                    return AM_OPEN_SNAKE;
-    if (am_word_any(p, "files|file manager|finder"))     return AM_OPEN_FILES;
-    if (am_word_any(p, "terminal|shell|console|prompt")) return AM_OPEN_TERMINAL;
-    if (am_word_any(p, "assistant|chat"))                return AM_OPEN_ASSIST;
-    if (am_word_any(p, "monitor|task manager|activity")) return AM_OPEN_MONITOR;
-    if (am_word_any(p, "calculator|calc|maths|math"))    return AM_OPEN_CALC;
-    if (am_word_any(p, "settings|preferences"))          return AM_OPEN_SETTINGS;
-    return AM_OPEN_NONE;
-}
-
 /* Which settings group a change request names, or -1. Mirrors the enum in
  * settings.h (SET_ACCENT / SET_WALL / SET_CLOCK) without including it — this
  * header stays kernel-free so the host test can reach it. */
@@ -1002,6 +1162,13 @@ static inline int am_setting_group(const char *p)
     if (am_word_any(p, "accent|colour|color"))                return 0; /* SET_ACCENT */
     if (am_word_any(p, "wallpaper|background|theme|desktop")) return 1; /* SET_WALL   */
     if (am_word_any(p, "clock|hour|hours"))                   return 2; /* SET_CLOCK  */
+    /* LAST: a bare accent VALUE, for "make it purple", where the group is
+     * obvious to a person and never said. Below the three named groups on
+     * purpose — "set the wallpaper to green" names its group explicitly, and
+     * putting this first would answer it with the accent list instead of the
+     * wallpaper list. None of the wallpaper names (Midnight, Slate, Ember,
+     * Forest, Ink) collide with these, so there is nothing else to weigh. */
+    if (am_word_any(p, "blue|purple|teal|green|orange|pink"))  return 0;
     return -1;
 }
 

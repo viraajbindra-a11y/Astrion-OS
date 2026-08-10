@@ -301,6 +301,19 @@ static void editor_save(void) {
  * or nags: the next keystroke repaints the page without it. Teal is Astrion's
  * soft yes (the folder glyph, the prompt caret) — a quieter affirmative than
  * the loud blue accent, which is the right register for reassurance. */
+/* Y of the Editor's footer rule. Three things have to stay above it — the
+ * text, the caret and the "copied" chip — so the arithmetic lives in one
+ * place instead of being repeated and drifting. Clamped rather than allowed
+ * to wrap: these are uint32_t, and cy + ch - lh - 8 underflows to a huge
+ * number in a very short window, which would put the rule off-screen and the
+ * text clip test permanently true. */
+static uint32_t ed_foot_y(void) {
+    uint32_t lh = (uint32_t)af_line_height(AF_REG13);
+    uint32_t fy = cy + ch;
+    if (fy < lh + 8 + cy) return cy;
+    return fy - lh - 8;
+}
+
 static void editor_draw_copied(void) {
     const char *msg = "copied";
     uint32_t tw = af_text_width(msg, AF_REG13);
@@ -310,7 +323,13 @@ static void editor_draw_copied(void) {
     uint32_t ph = pady + lh + pady;
     if (pw + margin > cw || ph + margin > ch) return;   /* tiny window: skip, never overhang */
     uint32_t bx = cx + cw - pw - margin;
-    uint32_t by = cy + ch - ph - margin;
+    /* Above the footer, not over it. This chip used to sit at the bottom of
+     * the content rect, which is exactly where the hint row now lives — the
+     * chip is a solid panel and would have covered the one line telling the
+     * user how to save. */
+    uint32_t foot = ed_foot_y();
+    if (foot < cy + ph + margin) return;               /* no room: skip the cue */
+    uint32_t by = foot - ph - margin;
     fb_rect_x(bx, by, pw, ph, AC_PANEL);                /* chip body   */
     fb_rect_x(bx, by, edge, ph, AC_TEAL);               /* accent edge */
     af_draw(bx + edge + padx, by + pady, msg, AC_TEAL, AF_REG13);
@@ -318,6 +337,31 @@ static void editor_draw_copied(void) {
 
 static void editor_draw(void) {
     fb_rect_x(cx, cy, cw, ch, AC_TERM_BG);
+
+    /* ─── the footer, and why an empty box was a bug and not just plain ───
+     *
+     * Every other app in this dock ends in a 1px rule with its keys under it.
+     * The Editor ended in nothing: an empty rectangle with a caret in it, no
+     * rule, no hint, no clue. A screenshot of it is indistinguishable from a
+     * window that failed to load.
+     *
+     * The part that made it worth fixing over anything cosmetic is that ESC
+     * SAVES. A person who cannot see that has to assume closing loses their
+     * typing, so the rational move is to never close the window — and the one
+     * feature the Editor exists for, writing a file that persists, is the one
+     * they never reach. Copy and paste were invisible for the same reason.
+     *
+     * Drawn FIRST so the text below is clipped to what is left, rather than
+     * drawn full-height and then painted over. */
+    const char *hint = "Ctrl+C copies a line   Ctrl+V pastes   Esc saves + closes";
+    uint32_t foot = ed_foot_y();
+    uint32_t fy   = foot + 8;
+    fb_rect_x(cx, foot, cw, 1, AC_BORDER);
+    uint32_t hw = af_text_width(hint, AF_REG13);
+    if (cw > hw) af_draw(cx + cw - hw, fy, hint, AC_MUTED, AF_REG13);
+
+    uint32_t bot = (foot > cy + 4) ? foot - 4 : cy;   /* text stops above the rule */
+
     uint32_t gx = cx, gy = cy, caret_x = cx, caret_y = cy;
     for (uint32_t i = 0; i <= ed_len; i++) {
         if (i < ed_len && ed_buf[i] != '\n' && gx + GW > cx + cw) { gx = cx; gy += LINE; }
@@ -325,12 +369,12 @@ static void editor_draw(void) {
         if (i == ed_len) break;
         char c = ed_buf[i];
         if (c == '\n') { gx = cx; gy += LINE; continue; }
-        if (gy + GH > cy + ch) break;
+        if (gy + GH > bot) break;
         char s[2] = { c, 0 };
         af_draw(gx, gy, s, AC_WHITE, AF_MONO);
         gx += GW;
     }
-    if (caret_y + GH <= cy + ch)
+    if (caret_y + GH <= bot)
         fb_rect_x(caret_x, caret_y, 2, GH, settings_accent());   /* text caret */
     if (ed_copied) editor_draw_copied();
 }
@@ -820,8 +864,38 @@ static void assist_prompt_line(void) {
     uint32_t py = cy + 60;
     fb_rect_x(cx, py, cw, GH + 2, AC_TERM_BG);
     af_draw(cx, py, ">", AC_TEAL, AF_MONO);
-    af_draw(cx + GW + 6, py, as_prompt, AC_WHITE, AF_MONO);
-    uint32_t caret = cx + GW + 6 + (uint32_t)as_plen * GW;
+
+    /* ─── the prompt is CLIPPED, and the clip is the bug fix ───
+     *
+     * This drew as_prompt whole, from cx + GW + 6, with nothing bounding it.
+     * as_prompt holds 128 characters and the window is not 128 characters
+     * wide, so a long question ran straight out of the right-hand edge and
+     * painted glyphs onto the bare desktop.
+     *
+     * The part that made it more than ugly: the clear above is
+     * fb_rect_x(cx, py, cw, ...) — it erases INSIDE the window only. Anything
+     * that escaped was never erased by anything, so it sat on the wallpaper
+     * through every later prompt, every repaint, and every window that did not
+     * happen to cover it. rex found it by typing a 120-character question.
+     *
+     * Fixed as a text field should behave rather than by truncating: work out
+     * how many whole glyphs fit, and when the line outgrows that, scroll it so
+     * the CARET stays visible. Truncating the tail would have stopped the
+     * overflow and left the person typing blind past column N, which is a
+     * different bug with the same screenshot. */
+    uint32_t x0    = cx + GW + 6;
+    uint32_t avail = (cx + cw > x0) ? (cx + cw - x0) : 0;
+    uint32_t cols  = avail / GW;              /* whole glyphs that fit */
+    if (cols == 0) return;                    /* absurdly narrow: draw nothing */
+
+    /* Show the last `cols` columns, counting the caret as one of them, so the
+     * caret can never sit past the right edge either — it was computed from
+     * the full length and ran off with the text. */
+    uint32_t plen  = (uint32_t)(as_plen < 0 ? 0 : as_plen);
+    uint32_t first = (plen + 1 > cols) ? plen + 1 - cols : 0;
+
+    af_draw(x0, py, as_prompt + first, AC_WHITE, AF_MONO);
+    uint32_t caret = x0 + (plen - first) * GW;
     fb_rect_x(caret, py, 2, GH, settings_accent());
 }
 
@@ -1703,8 +1777,9 @@ static int try_intent(const char *p) {
     case AM_ACT_WRITE: {
         int sl; const char *sep = find_to(p, &sl);
         if (!sep) break;
-        char file[64]; const char *fp = sep + sl;
-        while (*fp == ' ') fp++;
+        const char *rhs = sep + sl;
+        while (*rhs == ' ') rhs++;
+        char file[64]; const char *fp = rhs;
         int fk = 0; while (*fp && *fp != ' ' && fk < 63) file[fk++] = *fp++;
         while (fk > 0 && (file[fk-1]=='.'||file[fk-1]=='!'||file[fk-1]=='?'||file[fk-1]==',')) fk--;
         file[fk] = 0;
@@ -1716,6 +1791,36 @@ static int try_intent(const char *p) {
         char text[128]; int tk = 0;
         for (const char *q = tp; q < sep && tk < 127; q++) text[tk++] = *q;
         text[tk] = 0;
+
+        /* ── "set notes.txt to hello" — the operands the other way round ──
+         *
+         * English has two idioms and this extractor only knew one. "write Y
+         * to X" puts the destination on the right; "set X to Y" puts it on
+         * the LEFT, and that is the ordinary way to say assignment. Routing
+         * already sent this here correctly — it is a WRITE — and it still
+         * came back "I didn't understand that one" on a booted kernel,
+         * because file was read as "hello" and failed the shape gate.
+         *
+         * intent_probe.c could not see this. It answers WHICH ACTION a
+         * sentence is and stops; the failure is a layer past that, in the
+         * extractor. It took typing the sentence into a running Astrion.
+         *
+         * Keyed on the VERB, not on which side looks file-shaped. Shape
+         * alone cannot tell "set notes.txt to hello" from "write notes.txt
+         * to the console" — the file is on the left in both — and guessing
+         * wrong there replaces a file's contents with the wrong bytes. The
+         * verb is unambiguous, so the verb decides. */
+        if (!looks_like_file && am_word(p, "set")) {
+            char lfile[64];
+            if (am_file_tokens(text, 0, lfile, sizeof lfile) == 1 && lfile[0]) {
+                scopy(file, lfile, sizeof(file));
+                tk = 0;
+                for (const char *q = rhs; *q && tk < 127; q++) text[tk++] = *q;
+                while (tk > 0 && text[tk-1] == ' ') tk--;
+                text[tk] = 0;
+                looks_like_file = 1;
+            }
+        }
         if (!file[0] || !text[0] || !looks_like_file) break;
         ensure_txt(file, sizeof(file));
         fs_node *wn = fs_find(file);
@@ -2783,6 +2888,15 @@ static void set_draw_chip(int g, int i, int selected, int focused_row) {
         if (top == bot) fb_rect_x(rx, ry, rw, rh, top);
         else for (uint32_t r = 0; r < rh; r++)
                  fb_rect_x(rx, ry + r, rw, 1, set_blend(top, bot, (int)r, (int)rh));
+        /* The same 1px border the labelled chips below already get, and for a
+         * sharper reason. Every wallpaper in the list is DARK — that is what
+         * makes it a wallpaper for a desktop full of white text — and they
+         * were being painted straight onto AC_TERM_BG, which is also dark.
+         * Four of the five swatches sat within a few luminance points of the
+         * panel behind them and read as an empty row with one selected thing
+         * floating in it. The border does not describe the colour; it says
+         * "there is a swatch here", which is the part that was missing. */
+        draw_border(rx, ry, rw, rh, AC_BORDER);
     } else {
         fb_rect_x(rx, ry, rw, rh, selected ? AC_PANEL : AC_TERM_BG);
         draw_border(rx, ry, rw, rh, AC_BORDER);

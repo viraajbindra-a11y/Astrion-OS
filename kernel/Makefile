@@ -490,6 +490,16 @@ if ('console_puts(' in l or 'assist_say(' in l) and any(ord(c)>126 for c in l)];
 [print('  FAIL %s:%d: %s'%b) for b in bad]; \
 print('  ok  all console output is ASCII' if not bad else ''); \
 sys.exit(1 if bad else 0)"
+	# How much of the way people ACTUALLY ask does the Assistant understand?
+	# The corpus was 82.3% the first time it was measured, and nothing in the
+	# build enforced that, so nothing stopped it sliding back. The floor is
+	# deliberately below today's number: it catches a regression without going
+	# red the moment someone adds a phrasing that has not been taught yet,
+	# which is exactly what the corpus is meant to be full of. Raise it when a
+	# round of work lands; never lower it to make a build pass.
+	@echo "--- Assistant intent coverage"
+	@$(CC) -std=c11 -Iinclude tools/intent_probe.c -o $(BUILD_DIR)/intent_probe
+	@$(BUILD_DIR)/intent_probe --expect tools/intent_corpus.tsv --min 95
 	@echo "host tests: all passed"
 
 # The UI suite: boots the real ISO in QEMU, drives real mouse and keyboard over

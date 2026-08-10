@@ -112,11 +112,22 @@ static void chomp(char *s) {
 
 int main(int argc, char **argv) {
     int expect_mode = (argc > 1 && strcmp(argv[1], "--expect") == 0);
+    /* --min PCT turns the measurement into a GATE. Without it this tool
+     * always exits 0 (see the note at the bottom of main), which is right for
+     * a human reading the misses and wrong for CI: a number nothing enforces
+     * is a number that rots. The floor sits BELOW today's coverage on purpose
+     * — it catches a real regression without going red every time someone
+     * adds a phrasing the matcher has not learned yet, which is exactly what
+     * the corpus is supposed to be full of. */
+    double floor_pct = -1.0;
+    for (int i = 1; i + 1 < argc; i++)
+        if (strcmp(argv[i], "--min") == 0) floor_pct = atof(argv[i + 1]);
+
     FILE *in = stdin;
-    if (expect_mode && argc > 2) {
+    if (expect_mode && argc > 2 && argv[2][0] != '-') {
         in = fopen(argv[2], "r");
         if (!in) { fprintf(stderr, "cannot open %s\n", argv[2]); return 2; }
-    } else if (!expect_mode && argc > 1) {
+    } else if (!expect_mode && argc > 1 && argv[1][0] != '-') {
         in = fopen(argv[1], "r");
         if (!in) { fprintf(stderr, "cannot open %s\n", argv[1]); return 2; }
     }
@@ -160,15 +171,22 @@ int main(int argc, char **argv) {
     }
 
     if (expect_mode) {
+        double pct = total ? 100.0 * hit / total : 0.0;
         printf("\n%d phrasings: %d understood, %d missed, %d to check\n",
                total, hit, miss, wrong);
-        if (total)
-            printf("coverage %.1f%%\n", 100.0 * hit / total);
-        /* Exit 0 either way. A CHECK line is a candidate for a human to boot
-         * and confirm, not a verdict — failing the build on it would be this
-         * tool asserting something it cannot actually see. MISS lines are real
-         * but they are a coverage backlog, not a regression, and a permanently
-         * red gate is one nobody reads. */
+        if (total) printf("coverage %.1f%%\n", pct);
+        /* Without --min, exit 0 either way. A CHECK line is a candidate for a
+         * human to boot and confirm, not a verdict — failing the build on it
+         * would be this tool asserting something it cannot actually see. MISS
+         * lines are real but they are a coverage backlog, not a regression,
+         * and a permanently red gate is one nobody reads. */
+        if (floor_pct >= 0.0 && pct < floor_pct) {
+            printf("FAIL: coverage %.1f%% is below the floor of %.1f%%\n",
+                   pct, floor_pct);
+            return 1;
+        }
+        if (floor_pct >= 0.0)
+            printf("ok  coverage %.1f%% >= floor %.1f%%\n", pct, floor_pct);
         return 0;
     }
     printf("\n%d phrasings routed\n", total);

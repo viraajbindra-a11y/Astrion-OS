@@ -138,7 +138,6 @@ use a teal accent	settings.change
 # ── read a file ──
 read notes.txt	file.read
 show me notes.txt	file.read
-open notes.txt	file.read
 whats in notes.txt	file.read
 cat notes.txt	file.read
 print notes.txt	file.read
@@ -183,6 +182,17 @@ duplicate notes.txt as backup.txt	file.copy
 make a copy of notes.txt called backup.txt	file.copy
 
 # ── open an app ──
+# "open notes.txt" lives here and not under file.read, which is where it was
+# first written. The matcher routes it to app.open, wm.c finds no app by that
+# name, and it opens the FILE in the Editor — which is what a person asking to
+# "open" a file wants, better than printing it into the chat.
+#
+# This is the ONE line whose expectation moved instead of the code, so it is
+# the one that needed the most proof. "the code is right and the corpus is
+# wrong" is how a suite becomes a rubber stamp. It was not argued, it was
+# booted: tools/intent_live_test.py types `open readme.txt` into a running
+# Astrion and requires the Editor window to appear with no reply text.
+open notes.txt	app.open
 open the editor	app.open
 open the calculator	app.open
 launch the editor	app.open
@@ -206,3 +216,76 @@ close	close
 close this	close
 close this window	close
 shut this	close
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ROUND 2 — added 2026-08-09, after round 1 went from 82.3% to 100%.
+#
+# A corpus the matcher scores 100% on measures NOTHING. That is the rule this
+# file opens with, and hitting 100% is the moment it stops being a measurement
+# and becomes a rubber stamp. So round 1 stays (it is the regression net) and
+# these are the new frontier: phrasings written WITHOUT looking at what the
+# matcher handles, aimed at the questions a stranger asks in the first two
+# minutes and at the words nobody thought to put in a keyword list.
+#
+# Expect this section to fail. That is its job. The number it produces is the
+# honest coverage number, and the misses are the next round of work.
+# ═══════════════════════════════════════════════════════════════════════════
+
+# ── the questions a stranger asks first ──
+are you chatgpt	identity
+are you an ai	identity
+who are you exactly	identity
+im stuck	help
+what do i do now	help
+how does any of this work	help
+
+# ── machine state, said casually ──
+am i running out of memory	memory
+is memory ok	memory
+am i out of space	disk
+will my files survive a reboot	disk
+how fast is this	cpu
+what are you doing	tasks
+is anything stuck	tasks
+how long has it been	uptime
+
+# ── files, without the word "file" ──
+do i have any files	files.list
+show me my stuff	files.list
+whats saved on this thing	files.list
+how many files are on here	files.count
+i need a file called ideas.txt	file.create
+bin notes.txt	file.delete
+wipe notes.txt	file.delete
+stick hello in notes.txt	file.write
+tack bye onto notes.txt	file.append
+
+# ── launching, said casually ──
+take me to the terminal	app.open
+is there a calculator	app.open
+lets play a game	app.open
+# The two below are the only lines in this file the matcher still gets wrong,
+# and both are LEFT wrong on purpose. Written down rather than deleted, because
+# a corpus that quietly drops what it cannot do is a corpus that reads 100%.
+#
+#   "i want to write something" routes to file.write, and wm.c finds no " to "
+#   in it and falls through to the honest menu. Making it open the Editor would
+#   mean claiming a sentence with no app name and no filename in it; the near
+#   miss is "open the editor with something in it", and getting that wrong
+#   writes a file the user never named.
+#
+#   "gaming time" routes to date, because DATE owns the word "time" and runs
+#   long before anything about apps. Fixing it means weakening the branch that
+#   answers "what time is it" — a common question — to catch a rare one.
+i want to write something	app.open
+gaming time	app.open
+
+# ── settings, without naming the group ──
+make it purple	settings.change
+12 hour clock	settings.change
+i want a dark background	settings.change
+
+# ── going away ──
+never mind	close
+go away	close
+get out of here	close

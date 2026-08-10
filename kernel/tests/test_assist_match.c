@@ -1381,6 +1381,164 @@ int main(void)
     dym("assumptions.txt", "assumption.txt", 1, "long names tolerate an edit");
     dym("",          "notes.txt", 0, "empty input suggests nothing");
 
+    /* ═══ 4k. THE 19 THE PROBE FOUND. ═══
+     *
+     * tools/intent_probe.c ran 147 realistic phrasings through this exact
+     * matcher and measured 82.3% — 19 sentences a real person could type that
+     * Astrion answered with "I didn't understand that one", and 7 more it
+     * routed somewhere confidently wrong. That was the first honest number
+     * this feature has ever had, and every row below is one of those 26.
+     *
+     * They are here and not only in the corpus because the corpus reports a
+     * PERCENTAGE and a percentage can go up while a specific sentence quietly
+     * breaks. These rows name the sentence.
+     *
+     * Each group carries its NEGATIVE — the sentence that contains the same
+     * new keyword and must still land somewhere else. Those are the rows that
+     * matter: every one of them is a way the fix could have over-reached, and
+     * three of them (change/call as renames, "shut down", "what is saved in
+     * notes.txt") shaped how the fix was written. */
+
+    /* Identity: both anchored on "you", so no file sentence can reach them. */
+    cls("who am i talking to",         AM_IDENTITY, "the commonest opener");
+    cls("what should i call you",      AM_IDENTITY, "and the second commonest");
+
+    /* Help: same question as "what can you do", different word order. */
+    cls("show me what you can do",     AM_HELP, "was claimed by the READ arm");
+    cls("how do i use this",           AM_HELP, "what a first-time user types");
+
+    /* Close: the bare word had no arm at all. One word, nothing else in the
+     * sentence to close, and it was answered with a shrug. */
+    cls("close",                       AM_CLOSE, "bare, whole-prompt match");
+    cls("shut this",                   AM_CLOSE, "pointed at the window");
+    cls("close notes.txt",             AM_NONE,
+        "NEGATIVE: still names a file, so still not a window command");
+    cls("shut this down",              AM_NONE,
+        "NEGATIVE: the machine, not the window - and there is no power intent, "
+        "so the honest menu is the right answer until there is one");
+
+    /* Settings: "make" was missing from the verb list entirely. */
+    cls("make the accent purple",      AM_SET_CHANGE, "bare 'make'");
+    cls("bring up the settings",       AM_NONE,
+        "NEGATIVE: a launch, not a report - belongs to the action chain");
+
+    cls("whats going on",              AM_TASKS, "how people ask out loud");
+    cls("whats going on with the disk", AM_DISK,
+        "NEGATIVE: DISK runs above TASKS, so the noun still wins");
+
+    cls("clean this up",               AM_CLEAR, "'clean' joins clear/wipe");
+    cls("what can i run",              AM_APPS,  "was routed to app.open");
+
+    /* Files: the "I don't know the word 'file'" family. */
+    cls("gimme my files",              AM_FILES_LIST, "gimme");
+    cls("whats on here",               AM_FILES_LIST, "no file noun at all");
+    cls("whats in here",               AM_FILES_LIST, "was read as here.txt");
+    cls("what have i got saved",       AM_FILES_LIST, "saved");
+    cls("show me whats saved",         AM_FILES_LIST, "saved, other order");
+    cls("list everything",             AM_FILES_LIST, "everything");
+    act("what is saved in notes.txt",  AM_ACT_READ,
+        "NEGATIVE: names a file, so the .txt guard hands it back to READ");
+
+    /* Actions. */
+    act("set notes.txt to hello",      AM_ACT_WRITE,  "'set' as a write verb");
+    act("get rid of notes.txt",        AM_ACT_DELETE, "everyday delete");
+    act("throw away notes.txt",        AM_ACT_DELETE, "the other everyday one");
+    act("do not get rid of notes.txt", AM_ACT_NONE,
+        "NEGATIVE: a new way to ask must not be a new way to skip the veto");
+    act("get rid of your assumptions", AM_ACT_NONE,
+        "NEGATIVE: no noun and no .txt - the same guard the bare verb has");
+
+    act("change notes.txt to todo.txt",       AM_ACT_RENAME, "two file tokens");
+    act("call notes.txt todo.txt instead",    AM_ACT_RENAME, "and 'call'");
+    cls("change the accent to green",         AM_SET_CHANGE,
+        "NEGATIVE: 'change' with ZERO file tokens is a setting");
+
+    /* Launches that read like reads. */
+    act("show me the monitor",         AM_ACT_OPEN, "an app name outranks READ");
+    act("fire up snake",               AM_ACT_OPEN, "fire up");
+    act("i want to use the editor",    AM_ACT_OPEN, "'use' plus an app name");
+    act("bring up the settings",       AM_ACT_OPEN, "bring up");
+    act("show me notes.txt",           AM_ACT_READ,
+        "NEGATIVE: 'files' is an app name to am_open_target, but a .txt in the "
+        "sentence takes it straight back out");
+
+    /* ═══ 4l. ROUND 2, and the keywords it put at risk. ═══
+     *
+     * Round 1 took the corpus to 100%, which meant it had stopped measuring
+     * anything. Round 2 added 34 phrasings written without looking at the
+     * matcher; 24 of them failed, and these are the fixes.
+     *
+     * The NEGATIVE rows here matter more than in 4k, because round 2 added
+     * genuinely broad keywords — "are you", "want", "need", "bin", "wipe",
+     * "stuck", "have", "got" — and each one had a specific way to go wrong.
+     * Every negative below is one of those ways, run before it was believed. */
+
+    cls("are you chatgpt",             AM_IDENTITY, "the question everyone asks");
+    cls("are you an ai",               AM_IDENTITY, "and its sibling");
+    cls("are you running anything",    AM_TASKS,
+        "NEGATIVE: the 'running' guard still takes it back");
+    cls("what are you doing",          AM_TASKS,
+        "NEGATIVE: 'doing' too - both guards predate this and still hold");
+
+    cls("im stuck",                    AM_HELP,  "a person asking for help");
+    cls("is anything stuck",           AM_TASKS,
+        "NEGATIVE: the same word about the SCHEDULER. This is why 'stuck' is "
+        "two exact phrasings in HELP and a bare word in TASKS, not the reverse");
+    cls("what do i do now",            AM_HELP,  "what now");
+    cls("how does any of this work",   AM_HELP,  "how does + work");
+
+    cls("how fast is this",            AM_CPU,   "speed is a cpu question");
+
+    cls("never mind",                  AM_CLOSE, "leaving without the word close");
+    cls("go away",                     AM_CLOSE, "same");
+
+    cls("make it purple",              AM_SET_CHANGE, "a value with no group named");
+    cls("12 hour clock",               AM_SET_CHANGE, "value + group, no verb at all");
+    cls("what time is it",             AM_DATE,
+        "NEGATIVE: DATE owns 'clock' and 'time'. The DIGITS are the whole "
+        "difference, and without them this stays the clock");
+    cls("i want a dark background",    AM_SET_CHANGE, "'want' as a change verb");
+    act("i want to use the editor",    AM_ACT_OPEN,
+        "NEGATIVE: 'want' with no settings group is still a launch");
+    act("append 12 to notes.txt",      AM_ACT_APPEND,
+        "NEGATIVE: a 12 and a .txt - the file guard beats the clock arm");
+
+    /* am_setting_group: the bare colour arm must sit BELOW the named groups. */
+    if (am_setting_group("set the wallpaper to green") != 1) {
+        printf("  FAIL am_setting_group(\"set the wallpaper to green\") is not "
+               "the WALLPAPER group — the bare-colour arm is above the named "
+               "ones and is answering with the accent list\n");
+        failures++;
+    }
+    if (am_setting_group("make it purple") != 0) {
+        printf("  FAIL am_setting_group(\"make it purple\") is not the ACCENT "
+               "group\n");
+        failures++;
+    }
+
+    cls("do i have any files",         AM_FILES_LIST, "have");
+    cls("show me my stuff",            AM_FILES_LIST, "stuff");
+    cls("how many files are on here",  AM_FILES_COUNT,
+        "NEGATIVE: 'on here' is in the list arm, but COUNT runs first");
+
+    act("i need a file called ideas.txt", AM_ACT_CREATE, "'need' as a make verb");
+    act("i need to delete notes.txt",     AM_ACT_DELETE,
+        "NEGATIVE: CREATE sits above DELETE, so an unguarded 'need' would have "
+        "MADE the file the user asked to remove");
+    act("bin notes.txt",               AM_ACT_DELETE, "bin");
+    act("wipe notes.txt",              AM_ACT_DELETE,
+        "AM_CLEAR owns 'wipe' and runs first - its .txt guard is what lets "
+        "this through");
+    cls("wipe the screen",             AM_CLEAR,
+        "NEGATIVE: the same verb with no file is still the screen");
+    act("combine the files",           AM_ACT_NONE,
+        "NEGATIVE: 'bin' inside 'combine'. As a substring this DELETED things");
+    act("stick hello in notes.txt",    AM_ACT_WRITE,  "stick");
+    act("tack bye onto notes.txt",     AM_ACT_APPEND, "tack/onto");
+
+    act("take me to the terminal",     AM_ACT_OPEN, "take me");
+    act("is there a calculator",       AM_ACT_OPEN, "is there");
+
     /* ═══ 5. Which app "open X" names. ═══ */
     opn("open the editor",             AM_OPEN_EDITOR,   "editor");
     opn("open snake",                  AM_OPEN_SNAKE,    "snake");
