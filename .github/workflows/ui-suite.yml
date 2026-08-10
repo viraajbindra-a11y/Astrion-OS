@@ -1,7 +1,7 @@
 name: Astrion UI Suite
 
 # Boots the real kernel in QEMU and drives it — mouse, keyboard, screenshots,
-# serial — then checks real pixels and real text. Nine tests, each with a
+# serial — then checks real pixels and real text. Twelve tests, each with a
 # control that fails when the fix is removed.
 #
 # Separate from build-kernel.yml on purpose. That one proves the kernel COMPILES
@@ -10,9 +10,36 @@ name: Astrion UI Suite
 # over Snake, the doubled serial echo, the learn table never loading from disk —
 # was in a build that compiled perfectly.
 #
-# Runs on every kernel change. It takes ~4 minutes locally, and the tests wait
-# for the kernel's own boot marker rather than sleeping a fixed number of
-# seconds, so a slow runner without KVM makes it slower but never flaky.
+# Runs on every kernel change. The tests wait for the kernel's own boot marker
+# rather than sleeping a fixed number of seconds, so a slow runner without KVM
+# makes this slower but never flaky.
+#
+# HOW LONG IT TAKES — and why this says a RANGE and not a number.
+#
+# This header used to say "~4 minutes locally" and the timeout below was 40.
+# Two runs of the suite on the same machine, same ISO size, same
+# QEMU invocation, measured:
+#
+#     39.3 min   run 1 — taken while the dev machine was also compiling
+#     6.9 min    run 2 — taken while it was mostly idle
+#
+# A 5.7x spread. QEMU here runs under TCG (pure software emulation, no KVM on
+# macOS by default), which is entirely CPU-bound, so it loses badly to anything
+# else wanting cores — and run 1 shared the machine with repeated full kernel
+# rebuilds. That is the likeliest explanation and it is a hypothesis, not a
+# measurement, which is why both numbers are written down instead of the
+# convenient one.
+#
+# CI gets a runner to itself, so the uncontended number is the one to plan
+# around — but it has no KVM either, and a shared-tenancy runner is not an idle
+# laptop. 120 minutes is generous on purpose: a timeout costs nothing when the
+# job finishes in seven minutes, and costs a false "the kernel is broken" when
+# it is set too close to a number that moves by 5.7x.
+#
+# The budget moves; the test does not. intent_live_test isolates every check in
+# its own boot BECAUSE sharing one boot let a fullscreen Snake, a changed accent
+# and a pending "learn" leak between checks — and that version reported 4/4 PASS
+# on a run where one prompt never reached the guest at all.
 
 # This file is in its own paths list deliberately. It was not, and the first fix
 # to it (a missing numpy) silently ran nothing: the trigger was kernel/** only,
@@ -34,7 +61,9 @@ on:
 jobs:
   ui-suite:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    # See the range in the header: 6.9 min idle, 39.3 min while the machine was
+    # busy. 120 is headroom, not an estimate.
+    timeout-minutes: 120
 
     steps:
       - uses: actions/checkout@v4

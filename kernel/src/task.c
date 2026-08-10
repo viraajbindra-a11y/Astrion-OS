@@ -30,7 +30,22 @@
 #include "vmspace.h"   /* per-process address space owned by a ring-3 task (M4) */
 
 /* context_switch.S */
-extern void context_switch(uint64_t *save_rsp_here, uint64_t load_rsp);
+extern void context_switch(uint64_t *save_rsp_here, uint64_t load_rsp,
+                           void *save_fx, void *load_fx);
+extern void fpu_snapshot(void *area512);
+
+/* A known-good FXSAVE image, taken once from the CPU's own state at
+ * tasks_init — after enable_sse() and before anything has done arithmetic.
+ * Every task's float state starts as a copy of this.
+ *
+ * NOT a zeroed buffer, which is the obvious choice and is actively wrong:
+ * FXRSTOR of all zeros loads MXCSR = 0, and MXCSR = 0 UNMASKS every SSE
+ * exception. The reset default is 0x1F80, all masked. With them unmasked the
+ * first inexact or denormal result inside the model raises #XM — so seeding
+ * with "empty" would fault the Assistant on ordinary arithmetic, and it would
+ * do it only on the second task to touch a float, which is exactly the case
+ * nothing currently exercises. */
+static uint8_t fx_template[512] __attribute__((aligned(16)));
 
 /* Serial panic hook (kernel_mb2.c) - used if a task smashes its stack. */
 extern void serial_puts_x(const char *s);
@@ -57,10 +72,37 @@ struct task {
     uint32_t        upool_frames;
     uint64_t        switches;
     char            name[TASK_NAME_MAX + 1];
+    /* x87 + XMM + MXCSR, saved and restored by context_switch.S. FXSAVE
+     * requires 16-byte alignment or it #GPs; the attribute also raises the
+     * whole struct's alignment to 16, and array elements are aligned to the
+     * struct's alignment, so every tasks[i].fx is aligned by construction
+     * rather than by luck. See the long note in context_switch.S for why this
+     * is saved eagerly and why the alternative is a silent wrong answer from
+     * the Assistant. */
+    uint8_t         fx[512] __attribute__((aligned(16)));
 };
 
 static struct task tasks[TASK_MAX];
 static int current_tid;
+
+/* FXSAVE and FXRSTOR #GP on a misaligned operand, and the alignment of
+ * tasks[i].fx is currently a chain of three separate facts: the member is
+ * aligned(16), that raises the whole struct's alignment to 16, and array
+ * elements are spaced by sizeof(struct task) which is therefore a multiple of
+ * 16. Every one of those is true today and none of them is written down
+ * anywhere a person editing this struct would look.
+ *
+ * A #GP inside context_switch is not a debuggable failure — it fires with the
+ * scheduler half-way through a switch, on whichever stack it had reached — so
+ * the check belongs at compile time, where reordering a field or dropping the
+ * attribute stops the build instead of the machine. */
+_Static_assert(_Alignof(struct task) % 16 == 0,
+               "struct task must be 16-aligned or FXSAVE #GPs on tasks[i].fx");
+_Static_assert(sizeof(struct task) % 16 == 0,
+               "sizeof(struct task) must be a multiple of 16 so every array "
+               "element's fx area stays aligned");
+_Static_assert(__builtin_offsetof(struct task, fx) % 16 == 0,
+               "the fx area's offset within struct task must be 16-aligned");
 
 /* The kernel's CR3 (phys of the boot PML4 p4_table), captured once at
  * tasks_init from the boot context. Every task defaults its cr3 to this, so a
@@ -81,7 +123,14 @@ void tasks_init(void) {
      * inherits, and the baseline schedule() compares against. */
     __asm__ volatile("mov %%cr3, %0" : "=r"(kernel_cr3));
 
-    for (int i = 0; i < TASK_MAX; i++) tasks[i].state = TASK_UNUSED;
+    /* Seed every slot's float state before anything can switch. context_switch
+     * FXRSTORs the incoming task unconditionally, so a slot holding garbage is
+     * a #GP or a nonsense MXCSR on its very first slice. */
+    fpu_snapshot(fx_template);
+    for (int i = 0; i < TASK_MAX; i++) {
+        tasks[i].state = TASK_UNUSED;
+        for (int b = 0; b < 512; b++) tasks[i].fx[b] = fx_template[b];
+    }
     /* Adopt the caller (boot stack) as task 0. Its rsp gets filled in
      * by the first context_switch away from it. */
     tasks[0].state = TASK_RUNNING;
@@ -222,6 +271,13 @@ static int spawn_locked(const char *name, task_fn fn, void *arg,
     t->switches = 0;
     copy_name(t->name, name);
 
+    /* A fresh task starts from the clean float state, not from whatever the
+     * last task in this slot left behind. Slots are reused, and inheriting a
+     * dead task's XMM would be a small, quiet channel between two unrelated
+     * programs — the sort of thing that is harmless right up until one of them
+     * is a ring-3 user program. */
+    for (int b = 0; b < 512; b++) t->fx[b] = fx_template[b];
+
     /* Stack-overflow canary at the LOW end of the stack (the end a
      * deep call chain grows toward). task_yield checks it; a clobbered
      * canary means the task blew its 16 KiB and we halt it loudly
@@ -349,7 +405,7 @@ static void schedule(void) {
      * so it stays reachable across the CR3 change. Interrupts are off, so no tick
      * can re-enter us mid-switch. */
     if (to->cr3 != from->cr3) load_cr3(to->cr3);
-    context_switch(&from->rsp, to->rsp);
+    context_switch(&from->rsp, to->rsp, from->fx, to->fx);
     /* When something switches back to us, execution resumes here. */
 }
 

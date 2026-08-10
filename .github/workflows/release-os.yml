@@ -38,7 +38,13 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    # The UI suite gates this job, and its wall-clock is not a stable number:
+    # two runs of the same suite on the same machine came in at 6.9 and
+    # 39.3 minutes depending on what else was using the CPU (QEMU runs under
+    # TCG here, so it is entirely CPU-bound). 45 would have been inside that
+    # spread — and a timeout here kills a RELEASE mid-suite, the one run where
+    # it costs the most. Kept in step with ui-suite.yml; move both together.
+    timeout-minutes: 120
 
     steps:
       - uses: actions/checkout@v4
@@ -69,8 +75,9 @@ jobs:
       - name: Build the multiboot2 kernel
         run: cd kernel && make kernel-mb2
 
-      # The gate. `make ui-test` builds the ISO and runs all nine tests against
-      # it, so a failure here stops the release before anything is published.
+      # The gate. `make ui-test` builds the ISO and runs every UI test
+      # against it, so a failure here stops the release before anything is
+      # published.
       - name: UI suite (gates the release)
         run: cd kernel && make ui-test
 

@@ -877,9 +877,21 @@ static void clock_task(void *arg) {
 /* Called from boot/multiboot2.S */
 /* Enable the SSE FPU so the Assistant's GPT can use hardware float. The rest
  * of the kernel is built -mno-sse and never touches XMM; only the GPT (which
- * runs on task 0) does. Because no other task uses XMM, its registers survive
- * preemption without a context-switch save. Must run before any float code.
- * (Clear CR0.EM, set CR0.MP, set CR4.OSFXSR + CR4.OSXMMEXCPT.) */
+ * runs on task 0) does. Must run before any float code.
+ * (Clear CR0.EM, set CR0.MP, set CR4.OSFXSR + CR4.OSXMMEXCPT.)
+ *
+ * This comment used to end with "Because no other task uses XMM, its registers
+ * survive preemption without a context-switch save." That was true, and it was
+ * a promise about the future that nothing enforced — one Makefile line or one
+ * second model away from silently wrong arithmetic inside the Assistant.
+ * context_switch.S now FXSAVEs on every switch, `fputest` in the shell proves
+ * it, and the proof was run against a build with the save removed to confirm
+ * the test can fail (2999 of 3000 rounds corrupted). The property is now held
+ * by the code instead of by whoever reads this comment.
+ *
+ * Ordering still matters and is still load-bearing: FXSAVE raises #UD when
+ * CR0.EM is set, so this must run before tasks_init. It does — this is the
+ * second call in kernel_mb2_main. */
 static void enable_sse(void) {
     uint64_t cr0, cr4;
     __asm__ volatile("mov %%cr0, %0" : "=r"(cr0));

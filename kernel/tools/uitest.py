@@ -25,6 +25,14 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 TESTS = [
     ("term_test.py",        ["ui"], "shell commands answer correctly over serial"),
     ("assist_test.py",      ["ui"], "the Assistant answers correctly and admits ignorance"),
+    # Slowest thing in the suite — six boots, roughly five minutes, because
+    # every window-open check gets its own kernel. Earned it: sharing one boot
+    # let a fullscreen Snake, a changed accent and a pending "learn" leak
+    # between checks, and the phase reported 4/4 PASS on a run where one of the
+    # four prompts never reached the guest at all.
+    ("intent_live_test.py", ["ui"], "the 26 phrasings the probe flagged work on a real boot"),
+    ("fpu_test.py",         ["ui"], "float state survives a task switch"),
+    ("clip_test.py",        ["ui"], "a long prompt stays inside its window"),
     ("editor_test.py",      ["ui"], "editing and saving really reaches the disk"),
     ("reboot_test.py",      ["ui"], "files survive a full power cycle"),
     ("learn_test.py",       ["ui"], "the Assistant learns your phrasing and remembers it"),

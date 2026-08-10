@@ -155,6 +155,7 @@ static void cmd_pmm(int argc, char **argv);
 static void cmd_vmtest(int argc, char **argv);
 static void cmd_vmswitch(int argc, char **argv);
 static void cmd_isotest(int argc, char **argv);
+static void cmd_fputest(int argc, char **argv);
 
 static const struct cmd CMDS[] = {
     { "files",   "open the Files browser window",    cmd_files },
@@ -194,6 +195,7 @@ static const struct cmd CMDS[] = {
     { "vmtest",  "per-process address space: build + walk self-test", cmd_vmtest },
     { "vmswitch","scheduler-driven CR3 switch into a vmspace + back", cmd_vmswitch },
     { "isotest", "prove two per-process spaces isolate the same VA", cmd_isotest },
+    { "fputest", "prove float state survives a task switch",         cmd_fputest },
     { "disk",    "show ATA disk info",               cmd_disk },
     { "run",     "run a script (one cmd per line)",  cmd_run },
     { "exec",    "exec <file.elf> - load + run an ELF program", cmd_exec },
@@ -1272,6 +1274,118 @@ static void cmd_isotest(int argc, char **argv) {
     else    { console_set_color(0xF87171u); console_puts("self-test: FAIL"); }
     console_set_color(COL_WHITE);
     console_puts(" (two spaces, same VA -> distinct frames, no cross-visibility, no leak)\n");
+}
+
+/* ─── fputest: does float state actually survive being preempted? ───
+ *
+ * Until 2026-08-09 it did not, and nothing in this repo could have told you.
+ * context_switch.S saved the six callee-saved general registers and nothing
+ * else — no x87, no XMM — and the kernel got away with it on one written-down
+ * assumption: "no other task uses XMM." One file (src/gpt.c) is built with
+ * SSE, it runs the Assistant's model, and it was the only float user.
+ *
+ * The bug that assumption is holding off does not crash. Two tasks doing
+ * arithmetic get each other's numbers, silently, and the visible symptom is
+ * the Assistant occasionally saying something wrong. There is no fault, no log
+ * line, and no way to tell it from the model just being small.
+ *
+ * So this stamps a distinct 64-bit pattern into XMM0 and XMM15 from each of
+ * two tasks, yields several thousand times, and counts how often a task comes
+ * back to find someone else's bits in its own registers. XMM0 and XMM15 are
+ * the two ends of the file, so a save that covers only part of it still shows.
+ *
+ * Run it against a kernel with the fxsave/fxrstor pair removed and it reports
+ * thousands of mismatches — that control is what makes a PASS here mean
+ * anything, and it was run before this comment was written. */
+#define FPU_ROUNDS 3000u
+
+struct fpu_probe {
+    uint64_t          tag;
+    volatile uint32_t iters;
+    volatile uint32_t bad;
+    volatile int      done;
+};
+
+/* Inline asm, not float C: this file is built -mno-sse -mgeneral-regs-only,
+ * which stops the COMPILER emitting XMM. It does not stop the assembler, and
+ * naming the registers by hand is the point — the test has to touch the exact
+ * state the context switch is responsible for, not whatever the compiler
+ * would have chosen. */
+static uint64_t xmm0_get(void)  { uint64_t v; __asm__ volatile("movq %%xmm0, %0"  : "=r"(v)); return v; }
+static void     xmm0_set(uint64_t v) { __asm__ volatile("movq %0, %%xmm0"  :: "r"(v)); }
+static uint64_t xmm15_get(void) { uint64_t v; __asm__ volatile("movq %%xmm15, %0" : "=r"(v)); return v; }
+static void     xmm15_set(uint64_t v){ __asm__ volatile("movq %0, %%xmm15" :: "r"(v)); }
+
+static void fpu_probe_task(void *arg) {
+    struct fpu_probe *s = (struct fpu_probe *)arg;
+    xmm0_set(s->tag);
+    xmm15_set(~s->tag);
+    for (uint32_t i = 0; i < FPU_ROUNDS; i++) {
+        if (xmm0_get() != s->tag || xmm15_get() != ~s->tag) {
+            s->bad++;
+            xmm0_set(s->tag);           /* restamp, so one clobber is one count */
+            xmm15_set(~s->tag);
+        }
+        s->iters++;
+        task_yield();
+    }
+    s->done = 1;
+}
+
+static struct fpu_probe fpu_a, fpu_b;
+
+static void cmd_fputest(int argc, char **argv) {
+    (void)argc; (void)argv;
+
+    fpu_a.tag = 0xA1A1A1A1A1A1A1A1ULL; fpu_a.iters = 0; fpu_a.bad = 0; fpu_a.done = 0;
+    fpu_b.tag = 0xB2B2B2B2B2B2B2B2ULL; fpu_b.iters = 0; fpu_b.bad = 0; fpu_b.done = 0;
+
+    int ta = task_spawn("fpu-a", fpu_probe_task, &fpu_a);
+    int tb = task_spawn("fpu-b", fpu_probe_task, &fpu_b);
+    if (ta < 0 || tb < 0) {
+        console_set_color(0xF87171u);
+        console_puts("fputest: no free task slots\n");
+        console_set_color(COL_WHITE);
+        return;
+    }
+
+    console_puts("fputest: 2 tasks x ");
+    console_put_u64(FPU_ROUNDS);
+    console_puts(" rounds, stamping xmm0 + xmm15\n");
+
+    /* Yield until both finish. Bounded so a wedged task cannot hang the
+     * shell forever — an inconclusive run says so rather than never
+     * returning. */
+    for (uint32_t spins = 0; spins < FPU_ROUNDS * 40u; spins++) {
+        if (fpu_a.done && fpu_b.done) break;
+        task_yield();
+    }
+    if (!fpu_a.done || !fpu_b.done) {
+        console_set_color(0xF87171u);
+        console_puts("fputest: INCONCLUSIVE - a probe task never finished\n");
+        console_set_color(COL_WHITE);
+        return;
+    }
+
+    console_puts("  fpu-a  ");
+    console_put_u64(fpu_a.iters); console_puts(" iters, ");
+    console_put_u64(fpu_a.bad);   console_puts(" mismatches\n");
+    console_puts("  fpu-b  ");
+    console_put_u64(fpu_b.iters); console_puts(" iters, ");
+    console_put_u64(fpu_b.bad);   console_puts(" mismatches\n");
+
+    uint32_t bad = fpu_a.bad + fpu_b.bad;
+    if (bad == 0) {
+        console_set_color(COL_OK);
+        console_puts("fputest: PASS");
+        console_set_color(COL_WHITE);
+        console_puts(" - xmm survives preemption\n");
+    } else {
+        console_set_color(0xF87171u);
+        console_puts("fputest: FAIL");
+        console_set_color(COL_WHITE);
+        console_puts(" - float state is NOT saved across task switches\n");
+    }
 }
 
 static void cmd_sync(int argc, char **argv) {
