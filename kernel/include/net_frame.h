@@ -301,4 +301,78 @@ static inline uint16_t nf_udp_sport(const uint8_t *u) { return nf_get16(u + 0); 
 static inline uint16_t nf_udp_dport(const uint8_t *u) { return nf_get16(u + 2); }
 static inline uint16_t nf_udp_len(const uint8_t *u)   { return nf_get16(u + 4); }
 
+/* ─── ICMP echo (RFC 792) ───
+ *
+ * type[1] code[1] checksum[2] id[2] seq[2], then payload.
+ *
+ * Unlike UDP's, this checksum is NOT optional and covers the header AND the
+ * payload. A host that receives an echo request with a bad checksum drops it
+ * silently, so getting this wrong looks exactly like the network being down.
+ */
+#define ICMP_HDR_LEN       8
+#define ICMP_ECHO_REPLY    0
+#define ICMP_ECHO_REQUEST  8
+
+static inline int nf_icmp_echo_build(uint8_t *p, uint16_t id, uint16_t seq,
+                                     const uint8_t *payload, int plen)
+{
+    p[0] = ICMP_ECHO_REQUEST;
+    p[1] = 0;
+    nf_put16(p + 2, 0);                  /* zero WHILE computing */
+    nf_put16(p + 4, id);
+    nf_put16(p + 6, seq);
+    for (int i = 0; i < plen; i++) p[ICMP_HDR_LEN + i] = payload[i];
+    nf_put16(p + 2, nf_checksum(p, ICMP_HDR_LEN + plen));
+    return ICMP_HDR_LEN + plen;
+}
+
+/* Is this frame an ICMP echo REPLY to the request we sent?
+ *
+ * The id and seq are ours and both are checked. Without them any ping reply
+ * crossing the wire — including one meant for another process on another
+ * machine, since the card is promiscuous — would be counted as ours, and the
+ * round-trip time reported would be measuring somebody else's packet.
+ */
+static inline int nf_icmp_is_reply(const uint8_t *frame, int len,
+                                   uint32_t from_ip, uint32_t our_ip,
+                                   uint16_t id, uint16_t seq)
+{
+    if (len < ETH_HDR_LEN + IP_HDR_LEN + ICMP_HDR_LEN) return 0;
+    if (nf_eth_type(frame) != ETH_P_IPV4) return 0;
+
+    const uint8_t *ip = frame + ETH_HDR_LEN;
+    int avail = len - ETH_HDR_LEN;
+    if (!nf_ipv4_ok(ip, avail))            return 0;
+    if (nf_ip_proto(ip) != IP_PROTO_ICMP)  return 0;
+    if (nf_ip_src(ip) != from_ip)          return 0;   /* the host we pinged */
+    if (nf_ip_dst(ip) != our_ip)           return 0;   /* ...answering us    */
+
+    int hl = nf_ip_hdr_len(ip);
+    int ilen = nf_ip_total_len(ip) - hl;
+    if (ilen < ICMP_HDR_LEN || hl + ilen > avail) return 0;
+
+    const uint8_t *ic = ip + hl;
+    if (ic[0] != ICMP_ECHO_REPLY)          return 0;
+    if (nf_get16(ic + 4) != id)            return 0;
+    if (nf_get16(ic + 6) != seq)           return 0;
+    /* The reply's own checksum. A host that corrupted it is not a host whose
+     * round-trip time means anything. */
+    return nf_checksum_ok(ic, ilen);
+}
+
+/* Which MAC to send to for a given destination.
+ *
+ * On the same subnet, the destination answers ARP itself. Off it, the packet
+ * goes to the ROUTER's MAC while keeping the destination's IP — that split is
+ * the whole of IP routing at this level, and getting it backwards produces a
+ * packet addressed to a machine that has never heard of the destination.
+ *
+ * Returns the IP to ARP for, which is the destination or the router. */
+static inline uint32_t nf_next_hop(uint32_t dst, uint32_t our_ip,
+                                   uint32_t mask, uint32_t router)
+{
+    if (mask && ((dst & mask) == (our_ip & mask))) return dst;
+    return router ? router : dst;
+}
+
 #endif /* ASTRION_NET_FRAME_H */

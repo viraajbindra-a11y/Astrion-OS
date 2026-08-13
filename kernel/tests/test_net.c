@@ -484,6 +484,90 @@ int main(void)
         #undef MAKE_OFFER
     }
 
+    /* ═══ 13. ICMP echo, and the routing decision in front of it. ═══ */
+    {
+        uint8_t ic[64];
+        static const uint8_t pay[8] = { 'a','s','t','r','i','o','n','!' };
+        int n = nf_icmp_echo_build(ic, 0xABCD, 7, pay, 8);
+        eq_int(n, 16, "8 bytes of ICMP header plus 8 of payload");
+        eq_int(ic[0], 8, "type 8 = echo request");
+        eq_int(ic[1], 0, "code 0");
+        eq_int(nf_get16(ic + 4), 0xABCD, "our id");
+        eq_int(nf_get16(ic + 6), 7, "our sequence number");
+        bytes_are(ic + 8, pay, 8, "the payload comes back verbatim");
+        /* Unlike UDP's, this checksum is mandatory and covers the PAYLOAD too.
+         * A host receiving a bad one drops it silently, which looks exactly
+         * like the network being down. */
+        eq_int(nf_checksum_ok(ic, 16), 1, "and it checksums over header + payload");
+
+        /* Build a reply the way a host would: same id and seq, type 0. */
+        uint8_t f[128];
+        const uint32_t US = nf_ip(10,0,2,15), THEM = nf_ip(10,0,2,2);
+        #define MAKE_PONG()                                                    \
+            do {                                                               \
+                for (int i = 0; i < 128; i++) f[i] = 0;                        \
+                nf_eth_build(f, OUR_MAC, GW_MAC, ETH_P_IPV4);                  \
+                uint8_t *i_ = f + 14 + 20;                                     \
+                i_[0] = ICMP_ECHO_REPLY; i_[1] = 0;                            \
+                nf_put16(i_ + 2, 0);                                           \
+                nf_put16(i_ + 4, 0xABCD); nf_put16(i_ + 6, 7);                 \
+                for (int k = 0; k < 8; k++) i_[8 + k] = pay[k];                \
+                nf_put16(i_ + 2, nf_checksum(i_, 16));                         \
+                nf_ipv4_build(f + 14, THEM, US, IP_PROTO_ICMP, 16, 0);         \
+            } while (0)
+        const int PLEN = 14 + 20 + 16;
+
+        MAKE_PONG();
+        accepts(nf_icmp_is_reply(f, PLEN, THEM, US, 0xABCD, 7), 1,
+                "the echo reply to the request we sent");
+
+        MAKE_PONG();
+        nf_put16(f + 14 + 20 + 4, 0x1111);
+        accepts(nf_icmp_is_reply(f, PLEN, THEM, US, 0xABCD, 7), 0,
+                "REJECT: a valid ping reply with somebody else's id");
+
+        MAKE_PONG();
+        nf_put16(f + 14 + 20 + 6, 99);
+        accepts(nf_icmp_is_reply(f, PLEN, THEM, US, 0xABCD, 7), 0,
+                "REJECT: the right id but an older sequence number");
+
+        MAKE_PONG();
+        f[14 + 20] = ICMP_ECHO_REQUEST;
+        accepts(nf_icmp_is_reply(f, PLEN, THEM, US, 0xABCD, 7), 0,
+                "REJECT: type 8 - that is somebody pinging US");
+
+        MAKE_PONG();
+        accepts(nf_icmp_is_reply(f, PLEN, nf_ip(10,0,2,99), US, 0xABCD, 7), 0,
+                "REJECT: a reply from a host we did not ping");
+
+        MAKE_PONG();
+        f[14 + 20 + 9] ^= 0xFF;      /* corrupt the payload, not the checksum */
+        accepts(nf_icmp_is_reply(f, PLEN, THEM, US, 0xABCD, 7), 0,
+                "REJECT: the ICMP checksum does not cover what arrived");
+        #undef MAKE_PONG
+
+        /* ── the routing decision ──
+         * On-subnet goes straight to the host; off-subnet goes to the router
+         * while KEEPING the destination IP. Backwards produces a packet
+         * addressed to a machine that has never heard of the destination. */
+        const uint32_t MASK = nf_ip(255,255,255,0), GW = nf_ip(10,0,2,2);
+        eq_int((long)nf_next_hop(nf_ip(10,0,2,99), US, MASK, GW),
+               (long)nf_ip(10,0,2,99), "same subnet: ARP the host itself");
+        eq_int((long)nf_next_hop(nf_ip(8,8,8,8), US, MASK, GW),
+               (long)GW, "different subnet: ARP the router");
+        eq_int((long)nf_next_hop(nf_ip(8,8,8,8), US, MASK, 0),
+               (long)nf_ip(8,8,8,8),
+               "no router known: try the host directly rather than refuse");
+        eq_int((long)nf_next_hop(nf_ip(10,0,2,99), US, 0, GW),
+               (long)GW, "no mask known: everything looks off-subnet");
+        /* A /16 must treat 10.0.99.1 as local where a /24 does not — proof
+         * the mask is really applied and not assumed to be 255.255.255.0. */
+        eq_int((long)nf_next_hop(nf_ip(10,0,99,1), US, nf_ip(255,255,0,0), GW),
+               (long)nf_ip(10,0,99,1), "a /16 makes 10.0.99.1 local");
+        eq_int((long)nf_next_hop(nf_ip(10,0,99,1), US, MASK, GW),
+               (long)GW, "...and a /24 does not");
+    }
+
     printf("\nfailures  %d\n", failures);
     printf("%s\n", failures ? "FAIL" : "PASS");
     return failures ? 1 : 0;

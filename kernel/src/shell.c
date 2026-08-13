@@ -1700,6 +1700,103 @@ static void do_dhcp(void) {
     if (g_my_dns)    { console_puts("  dns     "); put_ip(g_my_dns);    console_putchar('\n'); }
 }
 
+/* Resolve one IP to a MAC, waiting for the reply. Shared by ping and anything
+ * later that has to address a frame. Bounded: an address nobody is using is a
+ * normal thing to ask about, and the answer is silence. */
+static int arp_for(uint32_t ip, uint8_t *mac_out) {
+    uint8_t frame[64], rx[2048];
+    int n = nf_arp_build(frame, e1000_mac(), g_my_ip, ip);
+    if (!e1000_send(frame, (uint16_t)n)) return 0;
+    for (int tries = 0; tries < 300000; tries++) {
+        int r = e1000_recv(rx, (int)sizeof rx);
+        if (r > 0 && nf_arp_is_reply_for(rx, r, ip, e1000_mac(), mac_out))
+            return 1;
+    }
+    return 0;
+}
+
+/* ping — the thing everybody checks first when they think the network is
+ * broken, and the first end-to-end proof that IP works in both directions.
+ *
+ * Two steps, and the first is the one people forget: a frame needs a
+ * DESTINATION MAC, and IP addresses do not contain one. So resolve the next
+ * hop — the host itself if it is on our subnet, the router if it is not —
+ * and only then build the packet. The destination IP stays the host's either
+ * way; only the Ethernet address changes. */
+static void do_ping(uint32_t target) {
+    if (!g_my_ip) {
+        console_set_color(COL_MUTED);
+        console_puts("no address yet. say 'net dhcp' first.\n");
+        console_set_color(COL_WHITE);
+        return;
+    }
+
+    uint32_t hop = nf_next_hop(target, g_my_ip, g_my_mask, g_my_router);
+    uint8_t hop_mac[6];
+    if (!arp_for(hop, hop_mac)) {
+        console_set_color(COL_MUTED);
+        console_puts("cannot reach "); put_ip(hop);
+        console_puts(" - nothing answered ARP for it.\n");
+        console_set_color(COL_WHITE);
+        return;
+    }
+    if (hop != target) {
+        console_puts("  (via router "); put_ip(hop); console_puts(")\n");
+    }
+
+    static const uint8_t payload[16] = {
+        'a','s','t','r','i','o','n','-','k','e','r','n','e','l','-','v'
+    };
+    lcg_state = lcg_state * 6364136223846793005ULL + 1442695040888963407ULL;
+    uint16_t id = (uint16_t)(lcg_state >> 40);
+
+    console_puts("pinging "); put_ip(target); console_puts("...\n");
+
+    int got = 0;
+    for (uint16_t seq = 1; seq <= 3; seq++) {
+        uint8_t frame[128], rx[2048];
+        nf_eth_build(frame, hop_mac, e1000_mac(), ETH_P_IPV4);
+        int ilen = nf_icmp_echo_build(frame + ETH_HDR_LEN + IP_HDR_LEN,
+                                      id, seq, payload, (int)sizeof payload);
+        nf_ipv4_build(frame + ETH_HDR_LEN, g_my_ip, target, IP_PROTO_ICMP,
+                      (uint16_t)ilen, seq);
+        int flen = ETH_HDR_LEN + IP_HDR_LEN + ilen;
+
+        uint64_t t0 = pit_ticks();
+        if (!e1000_send(frame, (uint16_t)flen)) continue;
+
+        int ok = 0;
+        for (int tries = 0; tries < 300000 && !ok; tries++) {
+            int r = e1000_recv(rx, (int)sizeof rx);
+            if (r > 0 && nf_icmp_is_reply(rx, r, target, g_my_ip, id, seq))
+                ok = 1;
+        }
+        console_puts("  seq "); console_put_u32(seq);
+        if (ok) {
+            got++;
+            console_puts(": reply in ");
+            /* The PIT ticks at ~1 kHz, so this is milliseconds and the
+             * resolution is one of them. Anything on a local wire answers
+             * inside a single tick, which reads as 0 ms — correct, and worth
+             * knowing before somebody reports it as a bug. */
+            console_put_u64(pit_ticks() - t0);
+            console_puts(" ms\n");
+        } else {
+            console_puts(": no reply\n");
+        }
+    }
+
+    if (got) {
+        console_set_color(COL_OK);
+        console_put_u32((uint32_t)got); console_puts(" of 3 came back. ");
+        put_ip(target); console_puts(" is reachable.\n");
+    } else {
+        console_set_color(COL_MUTED);
+        console_puts("nothing came back. that host is not answering.\n");
+    }
+    console_set_color(COL_WHITE);
+}
+
 static void cmd_net(int argc, char **argv) {
     if (!e1000_present()) {
         console_set_color(COL_MUTED);
@@ -1725,15 +1822,24 @@ static void cmd_net(int argc, char **argv) {
         console_puts("   dropped: "); console_put_u32(e1000_rx_dropped());
         console_putchar('\n');
         console_set_color(COL_MUTED);
-        console_puts("  try: net dhcp   /   net arp 10.0.2.2\n");
+        console_puts("  try: net dhcp   then   net ping 10.0.2.2\n");
         console_set_color(COL_WHITE);
         return;
     }
 
     if (streq(argv[1], "dhcp")) { do_dhcp(); return; }
+    if (streq(argv[1], "ping")) {
+        uint32_t t = (argc >= 3) ? parse_ipv4(argv[2]) : g_my_router;
+        if (!t) {
+            console_puts("usage: net ping <a.b.c.d>\n");
+            return;
+        }
+        do_ping(t);
+        return;
+    }
 
     if (!streq(argv[1], "arp")) {
-        console_puts("usage: net | net arp <a.b.c.d> | net dhcp\n");
+        console_puts("usage: net | net dhcp | net ping <ip> | net arp <ip>\n");
         return;
     }
 

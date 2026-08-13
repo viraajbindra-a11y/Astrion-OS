@@ -91,6 +91,24 @@ def dhcp(frame):
     return (t, ".".join(str(b) for b in d[16:20]), opts)
 
 
+def icmp(frame):
+    """(type, id, seq, src_ip, dst_ip) for an ICMP frame, else None."""
+    if len(frame) < 42 or struct.unpack(">H", frame[12:14])[0] != 0x0800:
+        return None
+    ip = frame[14:]
+    if ip[9] != 1:
+        return None
+    hl = (ip[0] & 0x0F) * 4
+    ic = ip[hl:]
+    if len(ic) < 8:
+        return None
+    return (ic[0],
+            struct.unpack(">H", ic[4:6])[0],
+            struct.unpack(">H", ic[6:8])[0],
+            ".".join(str(b) for b in ip[12:16]),
+            ".".join(str(b) for b in ip[16:20]))
+
+
 def arp(frame):
     """(op, sender_mac, sender_ip, target_mac, target_ip) or None."""
     if len(frame) < 42 or struct.unpack(">H", frame[12:14])[0] != 0x0806:
@@ -126,6 +144,8 @@ def boot_and_probe(iso, tag, out):
         time.sleep(3.0)
         q.type_text("net dhcp\n")
         time.sleep(5.0)
+        q.type_text(f"net ping {GATEWAY}\n")
+        time.sleep(7.0)
         end = os.path.getsize(serial)
         q.cmd("quit")
     finally:
@@ -265,6 +285,29 @@ def main():
         # address being asked for goes in option 50. Servers ignore a REQUEST
         # that confuses the two.
         check(req[1] == "0.0.0.0", "REQUEST leaves yiaddr/ciaddr at 0.0.0.0")
+
+    # ── ping: end-to-end IP, both directions ──
+    pm = re.search(r"(\d+) of 3 came back", shell)
+    check(bool(pm) and pm.group(1) == "3", "all three pings came back")
+
+    pings = [x for x in (icmp(f) for f in frames) if x]
+    reqs = [p for p in pings if p[0] == 8]
+    reps = [p for p in pings if p[0] == 0]
+    print(f"[{tag}] ICMP on the wire: {len(reqs)} request(s), {len(reps)} reply(s)")
+    check(len(reqs) == 3, "three echo requests really left the machine")
+    check(len(reps) == 3, "three echo replies really came back")
+    if reqs and got_ip:
+        check(all(r[3] == got_ip for r in reqs),
+              "every request is sourced from the DHCP-leased address")
+        check(all(r[4] == GATEWAY for r in reqs), "and addressed to the host we pinged")
+        # One id for the run, sequence numbers counting up. A driver that
+        # resent the same buffer would show three identical frames here, and
+        # the shell would still say "3 of 3" — this is what tells them apart.
+        check(len({r[1] for r in reqs}) == 1, "all three share one ICMP id")
+        check(sorted(r[2] for r in reqs) == [1, 2, 3],
+              "and their sequence numbers are 1, 2, 3 - not the same frame thrice")
+        check(sorted(r[2] for r in reps) == [1, 2, 3],
+              "the replies answer each sequence number exactly once")
 
     # ── the negative control ──
     check("NET: no usable ethernet card" in nonic,
