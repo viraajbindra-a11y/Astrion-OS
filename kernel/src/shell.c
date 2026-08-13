@@ -31,6 +31,7 @@
 #include "heap.h"
 #include "fs.h"
 #include "ata.h"
+#include "pci.h"
 #include "task.h"
 #include "wm.h"
 #include "kbd.h"
@@ -156,6 +157,7 @@ static void cmd_vmtest(int argc, char **argv);
 static void cmd_vmswitch(int argc, char **argv);
 static void cmd_isotest(int argc, char **argv);
 static void cmd_fputest(int argc, char **argv);
+static void cmd_pci(int argc, char **argv);
 
 static const struct cmd CMDS[] = {
     { "files",   "open the Files browser window",    cmd_files },
@@ -197,6 +199,7 @@ static const struct cmd CMDS[] = {
     { "isotest", "prove two per-process spaces isolate the same VA", cmd_isotest },
     { "fputest", "prove float state survives a task switch",         cmd_fputest },
     { "disk",    "show ATA disk info",               cmd_disk },
+    { "pci",     "list the hardware on the PCI bus",  cmd_pci },
     { "run",     "run a script (one cmd per line)",  cmd_run },
     { "exec",    "exec <file.elf> - load + run an ELF program", cmd_exec },
     { "ps",      "list scheduler tasks",             cmd_ps },
@@ -1493,6 +1496,50 @@ static void cmd_disk(int argc, char **argv) {
     console_puts(" (");
     console_put_u32((ata_total_sectors() * 512) / (1024 * 1024));
     console_puts(" MiB)\n");
+}
+
+/* Every card in the machine, by the name the machine gives itself.
+ *
+ * Astrion has always known what CPU it is on and how much RAM it has. It has
+ * never been able to say what is PLUGGED IN. That gap is why this is a user
+ * command and not only a boot-log line: when someone boots Astrion on their
+ * own laptop and something does not work, the first useful question is "what
+ * hardware is that", and until now the honest answer was that we could not
+ * see. The last line says plainly that a card being present is not the same
+ * as a card being usable — an ethernet controller with no driver behind it is
+ * exactly as much network as no ethernet controller at all, and a list that
+ * let someone believe otherwise would be worse than no list. */
+static void cmd_pci(int argc, char **argv) {
+    (void)argc; (void)argv;
+    int n = pci_count();
+    console_set_color(COL_OK);
+    console_puts("PCI bus:\n");
+    console_set_color(COL_WHITE);
+    if (n == 0) {
+        console_set_color(COL_MUTED);
+        console_puts("  nothing responded - the scan has not run\n");
+        console_set_color(COL_WHITE);
+        return;
+    }
+    for (int i = 0; i < n; i++) {
+        const struct pci_dev *d = pci_at(i);
+        console_puts("  ");
+        console_put_u32(d->bus);  console_putchar(':');
+        console_put_u32(d->slot); console_putchar('.');
+        console_put_u32(d->fn);
+        console_puts("  ");
+        console_put_hex16(d->vendor); console_putchar(':');
+        console_put_hex16(d->device);
+        console_puts("  ");
+        console_puts(pci_class_name(d->class_, d->subclass));
+        console_putchar('\n');
+    }
+    console_set_color(COL_MUTED);
+    if (pci_find_class(0x02, 0x00))
+        console_puts("  ethernet is present - no driver yet, so no network\n");
+    else
+        console_puts("  no ethernet controller on this machine\n");
+    console_set_color(COL_WHITE);
 }
 
 /* ─── Scheduler commands ─────────────────────────────────── */

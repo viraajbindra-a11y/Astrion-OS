@@ -40,6 +40,7 @@
 #include "fs.h"
 #include "learn.h"
 #include "ata.h"
+#include "pci.h"
 #include "task.h"
 
 /* ─── COM1 UART ───
@@ -61,6 +62,18 @@ static void serial_put_hex64(uint64_t v) {
     for (int i = 15; i >= 0; i--) {
         serial_putc(hex[(v >> (i * 4)) & 0xF]);
     }
+}
+
+/* Hex, `digits` wide. serial_put_hex64 always prints 16 of them, which is the
+ * right call for a page-table entry and unreadable for a 16-bit PCI vendor id —
+ * "0x0000000000008086" buries the four digits that mean anything under twelve
+ * that never do. A boot log is something a person reads on a machine that
+ * would not start, so the width is part of whether it works. */
+static void serial_put_hexw(uint64_t v, int digits) {
+    static const char hex[] = "0123456789abcdef";
+    serial_puts("0x");
+    for (int i = digits - 1; i >= 0; i--)
+        serial_putc(hex[(v >> (i * 4)) & 0xF]);
 }
 
 static void serial_put_u32(uint32_t v) {
@@ -1050,6 +1063,36 @@ void kernel_mb2_main(uint32_t magic, uint64_t info_ptr) {
     serial_puts("\nMODEL: loading the brain...\n");
     extern void model_rt_init(void);
     model_rt_init();
+
+    /* Walk PCI once, here, and let everything downstream just ask. Nothing
+     * depends on it yet — the network card this exists to find gets its driver
+     * next — but the scan is where "what hardware is this actually" stops
+     * being a guess, and having it in the boot log from the first day means
+     * the answer is on record for every machine anyone ever boots this on.
+     * That record is worth more than the feature that needs it. */
+    serial_puts("PCI: scanning...\n");
+    {
+        int n = pci_scan();
+        serial_puts("PCI: ");
+        serial_put_u32((uint32_t)n);
+        serial_puts(" device(s)\n");
+        for (int i = 0; i < n; i++) {
+            const struct pci_dev *d = pci_at(i);
+            serial_puts("PCI:   ");
+            serial_put_hexw(d->vendor, 4); serial_putc(':');
+            serial_put_hexw(d->device, 4); serial_puts("  ");
+            serial_puts(pci_class_name(d->class_, d->subclass));
+            serial_puts("\n");
+        }
+        const struct pci_dev *nic = pci_find_class(0x02, 0x00);
+        if (nic) {
+            serial_puts("PCI: ethernet controller at BAR0 ");
+            serial_put_hexw(pci_bar(nic, 0), 8);
+            serial_puts("\n");
+        } else {
+            serial_puts("PCI: no ethernet controller\n");
+        }
+    }
 
     /* ATA before FS - FS uses ata_present() at init to decide whether
      * to seed defaults or load from disk. */
