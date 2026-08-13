@@ -41,6 +41,7 @@
 #include "learn.h"
 #include "ata.h"
 #include "pci.h"
+#include "e1000.h"
 #include "task.h"
 
 /* ─── COM1 UART ───
@@ -64,14 +65,19 @@ static void serial_put_hex64(uint64_t v) {
     }
 }
 
-/* Hex, `digits` wide. serial_put_hex64 always prints 16 of them, which is the
- * right call for a page-table entry and unreadable for a 16-bit PCI vendor id —
+/* Hex, `digits` wide, and NO "0x" — the caller adds one where the convention
+ * calls for it.
+ *
+ * serial_put_hex64 always prints sixteen digits with a prefix, which is right
+ * for a page-table entry and wrong for everything here:
  * "0x0000000000008086" buries the four digits that mean anything under twelve
- * that never do. A boot log is something a person reads on a machine that
- * would not start, so the width is part of whether it works. */
+ * that never do, and a MAC address rendered through it comes out as
+ * "0x52:0x54:0x00:..." — six prefixes nobody writes, on the one value a person
+ * is most likely to be comparing character by character against what their
+ * router is showing them. A boot log is read on a machine that would not
+ * start; the formatting is part of whether it works. */
 static void serial_put_hexw(uint64_t v, int digits) {
     static const char hex[] = "0123456789abcdef";
-    serial_puts("0x");
     for (int i = digits - 1; i >= 0; i--)
         serial_putc(hex[(v >> (i * 4)) & 0xF]);
 }
@@ -1086,12 +1092,37 @@ void kernel_mb2_main(uint32_t magic, uint64_t info_ptr) {
         }
         const struct pci_dev *nic = pci_find_class(0x02, 0x00);
         if (nic) {
-            serial_puts("PCI: ethernet controller at BAR0 ");
+            serial_puts("PCI: ethernet controller at BAR0 0x");
             serial_put_hexw(pci_bar(nic, 0), 8);
             serial_puts("\n");
         } else {
             serial_puts("PCI: no ethernet controller\n");
         }
+    }
+
+    /* Bring the card up. Must follow pmm_init — the descriptor rings and every
+     * packet buffer are physical frames, and there is no allocator before it. */
+    if (e1000_init()) {
+        const uint8_t *m = e1000_mac();
+        serial_puts("NET: e1000 up, mac ");
+        for (int i = 0; i < 6; i++) {
+            if (i) serial_putc(':');
+            serial_put_hexw(m[i], 2);
+        }
+        /* Link state is reported separately from card state on purpose. A card
+         * that initialised perfectly with nothing plugged into it is the
+         * commonest real-hardware situation there is, and folding it into "no
+         * card" would send someone hunting for a driver bug instead of a
+         * cable. */
+        serial_puts(e1000_link_up() ? ", link up" : ", link DOWN");
+        /* On record, not assumed. Both answers work — firmware usually marks
+         * the PCI hole uncacheable through the MTRRs — but only one of them is
+         * a decision this kernel made, and on a machine where the network
+         * misbehaves that distinction is the first thing worth knowing. */
+        serial_puts(e1000_mmio_uncached() ? ", regs uncached by us\n"
+                                          : ", regs left to firmware\n");
+    } else {
+        serial_puts("NET: no usable ethernet card\n");
     }
 
     /* ATA before FS - FS uses ata_present() at init to decide whether

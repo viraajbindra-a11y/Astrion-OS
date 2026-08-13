@@ -32,6 +32,8 @@
 #include "fs.h"
 #include "ata.h"
 #include "pci.h"
+#include "e1000.h"
+#include "net_frame.h"
 #include "task.h"
 #include "wm.h"
 #include "kbd.h"
@@ -158,6 +160,7 @@ static void cmd_vmswitch(int argc, char **argv);
 static void cmd_isotest(int argc, char **argv);
 static void cmd_fputest(int argc, char **argv);
 static void cmd_pci(int argc, char **argv);
+static void cmd_net(int argc, char **argv);
 
 static const struct cmd CMDS[] = {
     { "files",   "open the Files browser window",    cmd_files },
@@ -200,6 +203,7 @@ static const struct cmd CMDS[] = {
     { "fputest", "prove float state survives a task switch",         cmd_fputest },
     { "disk",    "show ATA disk info",               cmd_disk },
     { "pci",     "list the hardware on the PCI bus",  cmd_pci },
+    { "net",     "network card status (net arp <ip> to probe)", cmd_net },
     { "run",     "run a script (one cmd per line)",  cmd_run },
     { "exec",    "exec <file.elf> - load + run an ELF program", cmd_exec },
     { "ps",      "list scheduler tasks",             cmd_ps },
@@ -1539,6 +1543,136 @@ static void cmd_pci(int argc, char **argv) {
         console_puts("  ethernet is present - no driver yet, so no network\n");
     else
         console_puts("  no ethernet controller on this machine\n");
+    console_set_color(COL_WHITE);
+}
+
+/* ─── net ───────────────────────────────────────────────────
+ *
+ * Status, and the first packet Astrion ever puts on a wire.
+ *
+ * `net` alone reports the card. `net arp <a.b.c.d>` broadcasts an ARP request
+ * for that address and waits for the answer — which is the smallest complete
+ * proof that networking works at all: it exercises transmit, receive, the
+ * descriptor rings in both directions, and the frame layout, and it either
+ * comes back with a MAC address or it does not. There is nothing to
+ * misinterpret.
+ *
+ * Default target is 10.0.2.2 because that is the gateway QEMU's user-mode
+ * network always presents, so `net arp` with no argument does the useful thing
+ * on the machine anyone testing this is most likely to be on. */
+
+/* "10.0.2.2" -> 0x0A000202, or 0 if it is not four numbers in range. Returns
+ * 0 for failure AND for 0.0.0.0, which is fine: 0.0.0.0 is not a host you can
+ * ARP for, so both answers mean the same thing to the only caller. */
+static uint32_t parse_ipv4(const char *s) {
+    uint32_t out = 0;
+    for (int part = 0; part < 4; part++) {
+        if (*s < '0' || *s > '9') return 0;
+        uint32_t v = 0;
+        int digits = 0;
+        while (*s >= '0' && *s <= '9') {
+            v = v * 10 + (uint32_t)(*s - '0');
+            s++;
+            if (++digits > 3 || v > 255) return 0;
+        }
+        out = (out << 8) | v;
+        if (part < 3) { if (*s != '.') return 0; s++; }
+    }
+    return *s ? 0 : out;
+}
+
+static void put_mac(const uint8_t *m) {
+    for (int i = 0; i < 6; i++) {
+        if (i) console_putchar(':');
+        console_put_hex8(m[i]);
+    }
+}
+
+static void put_ip(uint32_t ip) {
+    for (int i = 3; i >= 0; i--) {
+        console_put_u32((ip >> (i * 8)) & 0xFF);
+        if (i) console_putchar('.');
+    }
+}
+
+static void cmd_net(int argc, char **argv) {
+    if (!e1000_present()) {
+        console_set_color(COL_MUTED);
+        console_puts("no ethernet card this kernel can drive.\n");
+        console_puts("(boot QEMU with -device e1000 to try the network)\n");
+        console_set_color(COL_WHITE);
+        return;
+    }
+
+    if (argc < 2) {
+        console_set_color(COL_OK);
+        console_puts("network:\n");
+        console_set_color(COL_WHITE);
+        console_puts("  card:  Intel e1000\n");
+        console_puts("  mac:   "); put_mac(e1000_mac()); console_putchar('\n');
+        console_puts("  link:  ");
+        console_puts(e1000_link_up() ? "up\n" : "down (nothing plugged in)\n");
+        console_puts("  sent:  "); console_put_u32(e1000_tx_count());
+        console_puts("   received: "); console_put_u32(e1000_rx_count());
+        console_puts("   dropped: "); console_put_u32(e1000_rx_dropped());
+        console_putchar('\n');
+        console_set_color(COL_MUTED);
+        console_puts("  try: net arp 10.0.2.2\n");
+        console_set_color(COL_WHITE);
+        return;
+    }
+
+    if (!streq(argv[1], "arp")) {
+        console_puts("usage: net | net arp <a.b.c.d>\n");
+        return;
+    }
+
+    uint32_t target = (argc >= 3) ? parse_ipv4(argv[2]) : nf_ip(10, 0, 2, 2);
+    if (!target) {
+        console_puts("that is not an address I can read. try: net arp 10.0.2.2\n");
+        return;
+    }
+
+    /* We have no IP of our own yet — DHCP is the next piece of work — so the
+     * request goes out from 0.0.0.0. That is legal and it is exactly what a
+     * machine does before it has been given an address; RFC 5227 calls it an
+     * ARP probe. A host that replies to it is reachable, which is the whole
+     * question being asked. */
+    uint8_t frame[64];
+    int len = nf_arp_build(frame, e1000_mac(), 0, target);
+
+    console_puts("asking who has ");
+    put_ip(target);
+    console_puts(" ...\n");
+
+    if (!e1000_send(frame, (uint16_t)len)) {
+        console_set_color(COL_MUTED);
+        console_puts("the card never confirmed the send.\n");
+        console_set_color(COL_WHITE);
+        return;
+    }
+
+    /* Poll for the answer. Bounded, because the honest outcome of asking a
+     * network a question is often silence — an address nobody is using gets
+     * no reply, and that is information, not a failure of this code. */
+    uint8_t rx[2048];
+    uint8_t mac[6];
+    for (int tries = 0; tries < 20000; tries++) {
+        int n = e1000_recv(rx, (int)sizeof rx);
+        if (n > 0 && nf_arp_is_reply_for(rx, n, target, e1000_mac(), mac)) {
+            console_set_color(COL_OK);
+            put_ip(target);
+            console_puts(" is at ");
+            put_mac(mac);
+            console_putchar('\n');
+            console_set_color(COL_WHITE);
+            return;
+        }
+    }
+
+    console_set_color(COL_MUTED);
+    console_puts("no answer. nothing on this network is using that address\n");
+    console_puts("(or the link is down).\n");
     console_set_color(COL_WHITE);
 }
 

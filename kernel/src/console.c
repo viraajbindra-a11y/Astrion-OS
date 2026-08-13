@@ -676,6 +676,17 @@ void console_put_hex64(uint64_t v) {
     irq_restore(f);
 }
 
+/* Two digits, no "0x". A MAC address is written as six of these joined by
+ * colons, and every other width turns 52:54:00:12:34:56 into something a
+ * person cannot compare against what their router is showing them. */
+void console_put_hex8(uint8_t v) {
+    static const char hex[] = "0123456789abcdef";
+    uint64_t f = irq_save();
+    putchar_nolock(hex[(v >> 4) & 0xF]);
+    putchar_nolock(hex[v & 0xF]);
+    irq_restore(f);
+}
+
 /* Four digits, no "0x". For 16-bit identifiers that are conventionally written
  * bare and in pairs — a PCI vendor:device is "8086:100e", and rendering it
  * through put_hex64 gives "0x0000000000008086:0x000000000000100e", which is

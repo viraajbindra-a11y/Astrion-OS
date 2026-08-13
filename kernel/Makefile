@@ -263,6 +263,8 @@ kernel-mb2: src/hello_elf.h src/rogue_elf.h src/iodemo_elf.h \
 	$(CC) $(MB2_CFLAGS) -c src/learn.c -o $(BUILD_DIR)/learn.o
 	$(CC) $(MB2_CFLAGS) -c src/ata.c -o $(BUILD_DIR)/ata.o
 	$(CC) $(MB2_CFLAGS) -c src/pci.c -o $(BUILD_DIR)/pci.o
+	$(CC) $(MB2_CFLAGS) -c src/mmio.c -o $(BUILD_DIR)/mmio.o
+	$(CC) $(MB2_CFLAGS) -c src/e1000.c -o $(BUILD_DIR)/e1000.o
 	$(CC) $(MB2_CFLAGS) -c src/context_switch.S -o $(BUILD_DIR)/context_switch.o
 	$(CC) $(MB2_CFLAGS) -c src/task.c -o $(BUILD_DIR)/task.o
 	$(CC) $(MB2_CFLAGS) -c src/elf.c -o $(BUILD_DIR)/elf.o
@@ -303,6 +305,8 @@ kernel-mb2: src/hello_elf.h src/rogue_elf.h src/iodemo_elf.h \
 	    $(BUILD_DIR)/learn.o \
 	    $(BUILD_DIR)/ata.o \
 	    $(BUILD_DIR)/pci.o \
+	    $(BUILD_DIR)/mmio.o \
+	    $(BUILD_DIR)/e1000.o \
 	    $(BUILD_DIR)/context_switch.o \
 	    $(BUILD_DIR)/task.o \
 	    $(BUILD_DIR)/elf.o \

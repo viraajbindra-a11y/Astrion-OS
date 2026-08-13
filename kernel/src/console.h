@@ -93,6 +93,7 @@ void     console_put_u32(uint32_t v);
 void     console_put_u64(uint64_t v);
 void     console_put_hex64(uint64_t v);
 void     console_put_hex16(uint16_t v);
+void     console_put_hex8(uint8_t v);
 void     console_set_color(uint32_t color);
 uint32_t console_color(void);
 /* Clears the grid and repaints. Call from task 0 with interrupts ON: the
