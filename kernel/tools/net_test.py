@@ -17,11 +17,16 @@ printf passes that. The gate is that the capture contains:
   * an ARP REQUEST whose source MAC is the one the driver reported, sent to
     broadcast, asking about the address we asked about;
   * an ARP REPLY back, from the address we asked about;
-  * and the MAC in that reply is the MAC the shell printed.
+  * and the MAC in that reply is the MAC the shell printed;
+  * then the DHCP exchange, in order — DISCOVER, OFFER, REQUEST, ACK — with
+    the REQUEST carrying option 50 (the address being accepted) and option 54
+    (which server offered it);
+  * and the address in the ACK is the address the shell printed.
 
-The last one is the join. It ties what the kernel said to what physically
-crossed the wire, and no amount of hardcoding inside the guest can satisfy it —
-the reply's sender MAC is chosen by QEMU, not by us.
+Those last-line-of-each-group checks are the JOIN. They tie what the kernel
+said to what physically crossed the wire, and no amount of hardcoding inside
+the guest can satisfy them — the gateway's MAC and the leased address are both
+chosen by QEMU, outside the guest, and written to a file the guest never sees.
 
 The negative control is a second boot with `-nic none`: same ISO, no card, and
 the kernel has to say so rather than printing a plausible MAC anyway.
@@ -58,6 +63,34 @@ def read_pcap(path):
     return out
 
 
+def dhcp(frame):
+    """(msg_type, yiaddr, options{code: bytes}) for a DHCP frame, else None."""
+    if len(frame) < 42 or struct.unpack(">H", frame[12:14])[0] != 0x0800:
+        return None
+    ip = frame[14:]
+    if ip[9] != 17:                                   # not UDP
+        return None
+    hl = (ip[0] & 0x0F) * 4
+    udp = ip[hl:]
+    if struct.unpack(">H", udp[2:4])[0] not in (67, 68):
+        return None
+    d = udp[8:]
+    if len(d) < 240 or struct.unpack(">I", d[236:240])[0] != 0x63825363:
+        return None
+    opts, i = {}, 240
+    while i < len(d) and d[i] != 255:
+        if d[i] == 0:
+            i += 1
+            continue
+        if i + 1 >= len(d):
+            break
+        n = d[i + 1]
+        opts[d[i]] = d[i + 2:i + 2 + n]
+        i += 2 + n
+    t = opts.get(53, b"\x00")[0]
+    return (t, ".".join(str(b) for b in d[16:20]), opts)
+
+
 def arp(frame):
     """(op, sender_mac, sender_ip, target_mac, target_ip) or None."""
     if len(frame) < 42 or struct.unpack(">H", frame[12:14])[0] != 0x0806:
@@ -91,6 +124,8 @@ def boot_and_probe(iso, tag, out):
         start = os.path.getsize(serial)
         q.type_text(f"net arp {GATEWAY}\n")
         time.sleep(3.0)
+        q.type_text("net dhcp\n")
+        time.sleep(5.0)
         end = os.path.getsize(serial)
         q.cmd("quit")
     finally:
@@ -189,6 +224,47 @@ def main():
     if rep and said_mac:
         check(rep[1] == said_mac,
               f"what the shell printed IS what came back on the wire ({said_mac})")
+
+    # ── DHCP: the four-way exchange, checked on the wire ──
+    #
+    # Same principle as the ARP join. The shell says "this machine is X"; the
+    # capture says what address the server actually handed out. Only a kernel
+    # that really ran the exchange makes those two the same string.
+    dm = re.search(r"this machine is (\d+\.\d+\.\d+\.\d+)", shell)
+    check(bool(dm), "`net dhcp` came back with an address")
+    got_ip = dm.group(1) if dm else None
+
+    seen = [dhcp(f) for f in frames]
+    seen = [x for x in seen if x]
+    types = [t for t, _, _ in seen]
+    print(f"[{tag}] DHCP messages on the wire: "
+          f"{[{1:'DISCOVER',2:'OFFER',3:'REQUEST',5:'ACK'}.get(t, t) for t in types]}")
+    check(types == [1, 2, 3, 5],
+          "the exchange is DISCOVER, OFFER, REQUEST, ACK - in that order")
+
+    ack = next((x for x in seen if x[0] == 5), None)
+    check(bool(ack), "the server ACKed")
+    # THE JOIN, again. The address in the ACK is chosen by QEMU's DHCP server,
+    # outside the guest, and written to a file the guest cannot read.
+    if ack and got_ip:
+        check(ack[1] == got_ip,
+              f"the address the kernel claims IS the one the server gave ({got_ip})")
+
+    req = next((x for x in seen if x[0] == 3), None)
+    check(bool(req), "a REQUEST was sent")
+    if req and got_ip:
+        _, _, opts = req
+        # Without option 50 and option 54 a server cannot tell which of its
+        # offers is being accepted, and answers with silence - which is
+        # indistinguishable from there being no DHCP server at all.
+        o50 = ".".join(str(b) for b in opts.get(50, b""))
+        o54 = ".".join(str(b) for b in opts.get(54, b""))
+        check(o50 == got_ip, f"REQUEST option 50 names the address ({o50})")
+        check(o54 == GATEWAY, f"REQUEST option 54 names the server ({o54})")
+        # ciaddr means "the address I am ALREADY using" and must stay 0 - the
+        # address being asked for goes in option 50. Servers ignore a REQUEST
+        # that confuses the two.
+        check(req[1] == "0.0.0.0", "REQUEST leaves yiaddr/ciaddr at 0.0.0.0")
 
     # ── the negative control ──
     check("NET: no usable ethernet card" in nonic,

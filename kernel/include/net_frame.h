@@ -184,4 +184,121 @@ static inline uint32_t nf_ip(uint8_t a, uint8_t b, uint8_t c, uint8_t d)
            ((uint32_t)c << 8)  |  (uint32_t)d;
 }
 
+/* ─── the internet checksum (RFC 1071) ───
+ *
+ * One's-complement sum of 16-bit big-endian words, complemented. Three things
+ * about it are load-bearing and all three are easy to get wrong:
+ *
+ *   The CARRY WRAPS AROUND. A plain 16-bit sum that drops the carry produces a
+ *   checksum that is right for most packets and wrong for the ones where the
+ *   sum happens to overflow — which is the worst possible failure distribution,
+ *   because it works in testing and drops one packet in a few hundred later.
+ *   Accumulating in 32 bits and folding is what makes that impossible.
+ *
+ *   An ODD length needs the last byte treated as the HIGH half of a word, not
+ *   the low half. Getting that backwards is invisible on even-length headers,
+ *   which is every IPv4 header without options — so it survives every test
+ *   anyone bothers to write and then corrupts the first odd-length payload.
+ *
+ *   The FIELD ITSELF must be zero while computing. Every caller here zeroes it
+ *   first, and the check function relies on the opposite property: summing a
+ *   header WITH a correct checksum in place gives 0xFFFF, which folds to 0.
+ */
+static inline uint16_t nf_checksum(const uint8_t *p, int len)
+{
+    uint32_t sum = 0;
+    int i = 0;
+    for (; i + 1 < len; i += 2)
+        sum += ((uint32_t)p[i] << 8) | p[i + 1];
+    if (i < len)
+        sum += (uint32_t)p[i] << 8;          /* odd tail: HIGH half */
+    while (sum >> 16)
+        sum = (sum & 0xFFFFu) + (sum >> 16); /* fold the carry back in */
+    return (uint16_t)(~sum & 0xFFFFu);
+}
+
+/* Does this header already carry a correct checksum? */
+static inline int nf_checksum_ok(const uint8_t *p, int len)
+{
+    uint32_t sum = 0;
+    int i = 0;
+    for (; i + 1 < len; i += 2)
+        sum += ((uint32_t)p[i] << 8) | p[i + 1];
+    if (i < len)
+        sum += (uint32_t)p[i] << 8;
+    while (sum >> 16)
+        sum = (sum & 0xFFFFu) + (sum >> 16);
+    return sum == 0xFFFFu;
+}
+
+/* ─── IPv4 ───
+ * Twenty bytes, no options. Writes the header and returns its length; the
+ * caller has already placed `payload_len` bytes after it.
+ *
+ * The checksum covers the HEADER ONLY — not the payload — which is why it can
+ * be computed here, before the caller has finished anything else. */
+#define IP_HDR_LEN      20
+#define IP_PROTO_ICMP   1
+#define IP_PROTO_UDP    17
+#define IP_PROTO_TCP    6
+
+static inline int nf_ipv4_build(uint8_t *p, uint32_t src, uint32_t dst,
+                                uint8_t proto, uint16_t payload_len,
+                                uint16_t ident)
+{
+    p[0] = 0x45;                                   /* IPv4, 5 dwords of header */
+    p[1] = 0;                                      /* no DSCP, no ECN          */
+    nf_put16(p + 2, (uint16_t)(IP_HDR_LEN + payload_len));
+    nf_put16(p + 4, ident);
+    nf_put16(p + 6, 0);                            /* no fragmenting here      */
+    p[8] = 64;                                     /* TTL                      */
+    p[9] = proto;
+    nf_put16(p + 10, 0);                           /* zero WHILE computing     */
+    nf_put32(p + 12, src);
+    nf_put32(p + 16, dst);
+    nf_put16(p + 10, nf_checksum(p, IP_HDR_LEN));
+    return IP_HDR_LEN;
+}
+
+static inline int      nf_ip_hdr_len(const uint8_t *ip) { return (ip[0] & 0x0F) * 4; }
+static inline uint8_t  nf_ip_proto(const uint8_t *ip)   { return ip[9]; }
+static inline uint32_t nf_ip_src(const uint8_t *ip)     { return nf_get32(ip + 12); }
+static inline uint32_t nf_ip_dst(const uint8_t *ip)     { return nf_get32(ip + 16); }
+static inline uint16_t nf_ip_total_len(const uint8_t *ip) { return nf_get16(ip + 2); }
+
+/* Is this a well-formed IPv4 header we are willing to look inside?
+ * Version, header length, the header's own checksum, and that the header
+ * actually fits in the bytes we were handed. Everything downstream indexes
+ * off this header, so a caller that skips it reads past the frame. */
+static inline int nf_ipv4_ok(const uint8_t *ip, int avail)
+{
+    if (avail < IP_HDR_LEN)            return 0;
+    if ((ip[0] >> 4) != 4)             return 0;
+    int hl = nf_ip_hdr_len(ip);
+    if (hl < IP_HDR_LEN || hl > avail) return 0;
+    if (nf_ip_total_len(ip) > avail)   return 0;
+    return nf_checksum_ok(ip, hl);
+}
+
+/* ─── UDP ───
+ * Eight bytes. The checksum is left ZERO, which over IPv4 is legal and means
+ * "not computed" — RFC 768 makes it optional, and every DHCP server accepts
+ * it. It is NOT optional over IPv6, so this is a place that will need real
+ * work the day Astrion speaks IPv6; saying so here beats discovering it. */
+#define UDP_HDR_LEN 8
+
+static inline int nf_udp_build(uint8_t *p, uint16_t sport, uint16_t dport,
+                               uint16_t payload_len)
+{
+    nf_put16(p + 0, sport);
+    nf_put16(p + 2, dport);
+    nf_put16(p + 4, (uint16_t)(UDP_HDR_LEN + payload_len));
+    nf_put16(p + 6, 0);
+    return UDP_HDR_LEN;
+}
+
+static inline uint16_t nf_udp_sport(const uint8_t *u) { return nf_get16(u + 0); }
+static inline uint16_t nf_udp_dport(const uint8_t *u) { return nf_get16(u + 2); }
+static inline uint16_t nf_udp_len(const uint8_t *u)   { return nf_get16(u + 4); }
+
 #endif /* ASTRION_NET_FRAME_H */

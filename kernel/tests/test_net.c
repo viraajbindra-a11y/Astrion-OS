@@ -22,6 +22,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "net_frame.h"
+#include "net_dhcp.h"
 
 static int failures;
 
@@ -241,6 +242,246 @@ int main(void)
         eq_int((long)nf_ip(10,0,2,15),     0x0A00020FL, "10.0.2.15");
         eq_int((long)nf_ip(255,255,255,0), 0xFFFFFF00L, "a mask with the top bit set");
         eq_int((long)nf_ip(0,0,0,0),       0L,          "the unspecified address");
+    }
+
+    /* ═══ 8. The internet checksum (RFC 1071). ═══
+     *
+     * The vector is a PUBLISHED IPv4 header with a published checksum, not
+     * something this code produced. Three rows below it are the three ways
+     * this function goes wrong, and each one is written so that the naive
+     * implementation gives a different answer. */
+    {
+        /* The worked example from the IPv4 header-checksum literature.
+         * Checksum field zeroed; the answer is 0xb861. */
+        static const uint8_t hdr[20] = {
+            0x45,0x00, 0x00,0x73, 0x00,0x00, 0x40,0x00,
+            0x40,0x11, 0x00,0x00,                       /* checksum: zeroed */
+            0xc0,0xa8,0x00,0x01,                        /* 192.168.0.1      */
+            0xc0,0xa8,0x00,0xc7,                        /* 192.168.0.199    */
+        };
+        eq_int(nf_checksum(hdr, 20), 0xb861, "the published IPv4 header vector");
+
+        /* Same header with the right checksum in place must verify. */
+        uint8_t ok[20]; memcpy(ok, hdr, 20);
+        ok[10] = 0xb8; ok[11] = 0x61;
+        eq_int(nf_checksum_ok(ok, 20), 1, "a correct checksum verifies");
+        ok[19] ^= 0x01;
+        eq_int(nf_checksum_ok(ok, 20), 0, "one flipped bit does not");
+
+        /* THE CARRY. A 16-bit accumulator that drops the overflow gives
+         * 0x0001 here instead of 0x0000 — right for most packets, wrong for
+         * the ones that happen to overflow, which is the worst possible way
+         * to be wrong because it passes testing and drops packets later. */
+        static const uint8_t carry[4] = { 0xFF,0xFF, 0xFF,0xFF };
+        eq_int(nf_checksum(carry, 4), 0x0000,
+               "the carry wraps around (a 16-bit sum would say 0x0001)");
+
+        /* THE ODD TAIL. The last byte is the HIGH half of the final word.
+         * Treating it as the low half gives 0xed75 — invisible on every
+         * even-length header, which is every IPv4 header without options. */
+        static const uint8_t odd[3] = { 0x12, 0x34, 0x56 };
+        eq_int(nf_checksum(odd, 3), 0x97cb,
+               "an odd tail is the HIGH half (the low half would say 0xed75)");
+
+        eq_int(nf_checksum(hdr, 0), 0xFFFF, "an empty range sums to nothing");
+    }
+
+    /* ═══ 9. IPv4 and UDP headers. ═══ */
+    {
+        uint8_t p[128] = {0};
+        int n = nf_ipv4_build(p, nf_ip(10,0,2,15), nf_ip(10,0,2,2),
+                              IP_PROTO_UDP, 100, 0x1234);
+        eq_int(n, 20, "an IPv4 header with no options is 20 bytes");
+        eq_int(p[0], 0x45, "version 4, header length 5 dwords");
+        eq_int(nf_get16(p + 2), 120, "total length is header PLUS payload");
+        eq_int(p[8], 64, "TTL");
+        eq_int(p[9], IP_PROTO_UDP, "protocol");
+        eq_int((long)nf_ip_src(p), (long)nf_ip(10,0,2,15), "source");
+        eq_int((long)nf_ip_dst(p), (long)nf_ip(10,0,2,2), "destination");
+        eq_int(nf_checksum_ok(p, 20), 1, "and it checksums itself correctly");
+        eq_int(nf_ipv4_ok(p, 120), 1, "so the validator accepts it");
+
+        /* THE READ-PAST-THE-END GUARD, and the row that caught this test being
+         * written wrong. The header says 120 bytes; hand the validator only the
+         * 20 that are really there and it must refuse. A parser that trusts
+         * total_len without this reads 100 bytes past the frame it was given. */
+        eq_int(nf_ipv4_ok(p, 20), 0,
+               "REJECT: the header claims more bytes than actually arrived");
+
+        /* Rejections. Each breaks one thing about an otherwise valid header. */
+        uint8_t b[128];
+        memcpy(b, p, 128); b[0] = 0x65;
+        eq_int(nf_ipv4_ok(b, 120), 0, "REJECT: version 6 in an IPv4 slot");
+        memcpy(b, p, 128); b[0] = 0x43;
+        eq_int(nf_ipv4_ok(b, 120), 0, "REJECT: header shorter than 20 bytes");
+        memcpy(b, p, 128); b[12] ^= 0xFF;
+        eq_int(nf_ipv4_ok(b, 120), 0, "REJECT: a corrupted header fails checksum");
+        eq_int(nf_ipv4_ok(p, 19), 0, "REJECT: fewer bytes than a header needs");
+
+        uint8_t u[16] = {0};
+        eq_int(nf_udp_build(u, 68, 67, 300), 8, "a UDP header is 8 bytes");
+        eq_int(nf_udp_sport(u), 68, "source port");
+        eq_int(nf_udp_dport(u), 67, "destination port");
+        eq_int(nf_udp_len(u), 308, "length is header PLUS payload");
+        eq_int(nf_get16(u + 6), 0, "checksum left 0 - legal over IPv4");
+    }
+
+    /* ═══ 10. DHCP DISCOVER, field by field against RFC 2131. ═══ */
+    {
+        uint8_t f[512];
+        int n = nf_dhcp_build(f, OUR_MAC, 0xDEADBEEF, DHCP_DISCOVER, 0, 0);
+        eq_int(n, 14 + 20 + 8 + 300, "eth + ip + udp + a 300-byte BOOTP body");
+
+        static const uint8_t bcast[6] = { 0xff,0xff,0xff,0xff,0xff,0xff };
+        bytes_are(f, bcast, 6, "goes to the Ethernet broadcast address");
+        bytes_are(f + 6, OUR_MAC, 6, "from our card");
+        eq_int(nf_eth_type(f), ETH_P_IPV4, "ethertype IPv4");
+
+        const uint8_t *ip = f + 14;
+        eq_int((long)nf_ip_src(ip), 0L, "source IP is 0.0.0.0 - we have none yet");
+        eq_int((long)nf_ip_dst(ip), 0xFFFFFFFFL, "to the IP broadcast address");
+        eq_int(nf_checksum_ok(ip, 20), 1, "the IP header checksums");
+
+        const uint8_t *udp = ip + 20;
+        eq_int(nf_udp_sport(udp), 68, "from the DHCP client port");
+        eq_int(nf_udp_dport(udp), 67, "to the DHCP server port");
+
+        const uint8_t *d = udp + 8;
+        eq_int(d[0], 1, "op = BOOTREQUEST");
+        eq_int(d[1], 1, "htype = Ethernet");
+        eq_int(d[2], 6, "hlen = 6");
+        eq_int((long)nf_get32(d + 4), 0xDEADBEEFL, "the transaction id we chose");
+        eq_int(nf_get16(d + 10), 0x8000,
+               "the BROADCAST flag - without it the reply is unicast to an "
+               "address we do not have and cannot receive on");
+        eq_int((long)nf_get32(d + 12), 0L,
+               "ciaddr is 0: it means the address we ALREADY have, not the one we want");
+        bytes_are(d + 28, OUR_MAC, 6, "chaddr is our MAC - how the server finds us");
+        eq_int((long)nf_get32(d + 236), 0x63825363L, "the DHCP magic cookie");
+        eq_int(d[240], 53, "first option is the message type");
+        eq_int(d[241], 1,  "  ...one byte long");
+        eq_int(d[242], DHCP_DISCOVER, "  ...and it is a DISCOVER");
+    }
+
+    /* ═══ 11. DHCP REQUEST carries the two options that make it answerable. ═══
+     *
+     * A REQUEST without option 50 and option 54 is met with silence: the
+     * server cannot tell which of its offers is being accepted, and silence
+     * from a DHCP server is indistinguishable from no DHCP server at all. */
+    {
+        uint8_t f[512];
+        nf_dhcp_build(f, OUR_MAC, 0x11223344, DHCP_REQUEST,
+                      nf_ip(10,0,2,15), nf_ip(10,0,2,2));
+        const uint8_t *d = f + 14 + 20 + 8;
+        eq_int(d[242], DHCP_REQUEST, "message type is REQUEST");
+        eq_int(d[243], 50, "option 50: the address being accepted");
+        eq_int(d[244], 4,  "  ...four bytes");
+        eq_int((long)nf_get32(d + 245), (long)nf_ip(10,0,2,15), "  ...10.0.2.15");
+        eq_int(d[249], 54, "option 54: which server offered it");
+        eq_int((long)nf_get32(d + 251), (long)nf_ip(10,0,2,2), "  ...10.0.2.2");
+        eq_int((long)nf_get32(d + 12), 0L,
+               "ciaddr STILL 0 - the requested address goes in option 50, "
+               "never in ciaddr, and putting it there gets no reply");
+    }
+
+    /* ═══ 12. Reading an OFFER, and refusing everybody else's. ═══ */
+    {
+        /* Build a reply the way a server would, so each rejection row can
+         * break exactly one field of something known good. */
+        uint8_t f[512];
+        const uint32_t XID = 0xCAFEF00D;
+
+        #define MAKE_OFFER()                                                   \
+            do {                                                               \
+                for (int i = 0; i < 512; i++) f[i] = 0;                        \
+                nf_eth_build(f, OUR_MAC, GW_MAC, ETH_P_IPV4);                  \
+                uint8_t *d_ = f + 14 + 20 + 8;                                 \
+                d_[0] = 2; d_[1] = 1; d_[2] = 6;                               \
+                nf_put32(d_ + 4, XID);                                         \
+                nf_put32(d_ + 16, nf_ip(10,0,2,15));                           \
+                nf_copy(d_ + 28, OUR_MAC, 6);                                  \
+                nf_put32(d_ + 236, 0x63825363u);                               \
+                d_[240] = 53; d_[241] = 1; d_[242] = DHCP_OFFER;               \
+                d_[243] = 54; d_[244] = 4; nf_put32(d_ + 245, nf_ip(10,0,2,2));\
+                d_[249] =  3; d_[250] = 4; nf_put32(d_ + 251, nf_ip(10,0,2,2));\
+                d_[255] =  6; d_[256] = 4; nf_put32(d_ + 257, nf_ip(10,0,2,3));\
+                d_[261] = 255;                                                 \
+                nf_udp_build(f + 14 + 20, 67, 68, 300);                        \
+                nf_ipv4_build(f + 14, nf_ip(10,0,2,2), 0xFFFFFFFFu,            \
+                              IP_PROTO_UDP, 8 + 300, 0);                       \
+            } while (0)
+
+        struct nf_dhcp_reply r;
+        const int FLEN = 14 + 20 + 8 + 300;
+
+        MAKE_OFFER();
+        accepts(nf_dhcp_parse(f, FLEN, XID, OUR_MAC, &r), 1, "a real OFFER");
+        eq_int(r.type, DHCP_OFFER, "  ...is read as an OFFER");
+        eq_int((long)r.your_ip,   (long)nf_ip(10,0,2,15), "  ...offering 10.0.2.15");
+        eq_int((long)r.server_ip, (long)nf_ip(10,0,2,2),  "  ...from server 10.0.2.2");
+        eq_int((long)r.router,    (long)nf_ip(10,0,2,2),  "  ...router 10.0.2.2");
+        eq_int((long)r.dns,       (long)nf_ip(10,0,2,3),  "  ...dns 10.0.2.3");
+
+        /* THE ONE THAT CAUSES ADDRESS COLLISIONS. Every DHCP message on the
+         * segment is broadcast and the card is promiscuous, so another
+         * machine's OFFER arrives here looking perfectly valid. Taking it
+         * means taking an address promised to somebody else. */
+        MAKE_OFFER();
+        nf_put32(f + 14 + 20 + 8 + 4, XID ^ 0xFFFFFFFFu);
+        accepts(nf_dhcp_parse(f, FLEN, XID, OUR_MAC, &r), 0,
+                "REJECT: a valid OFFER from somebody else's conversation");
+
+        MAKE_OFFER();
+        f[14 + 20 + 8 + 28] ^= 0xFF;
+        accepts(nf_dhcp_parse(f, FLEN, XID, OUR_MAC, &r), 0,
+                "REJECT: our xid, but addressed to a different card");
+
+        MAKE_OFFER();
+        f[14 + 20 + 8] = 1;
+        accepts(nf_dhcp_parse(f, FLEN, XID, OUR_MAC, &r), 0,
+                "REJECT: op is BOOTREQUEST - that is a client talking, not a server");
+
+        MAKE_OFFER();
+        f[14 + 12] ^= 0xFF;
+        accepts(nf_dhcp_parse(f, FLEN, XID, OUR_MAC, &r), 0,
+                "REJECT: the IP header does not checksum");
+
+        MAKE_OFFER();
+        nf_put16(f + 14 + 20 + 2, 9999);
+        accepts(nf_dhcp_parse(f, FLEN, XID, OUR_MAC, &r), 0,
+                "REJECT: UDP to a port that is not the DHCP client port");
+
+        MAKE_OFFER();
+        nf_put32(f + 14 + 20 + 8 + 236, 0);
+        accepts(nf_dhcp_parse(f, FLEN, XID, OUR_MAC, &r), 0,
+                "REJECT: no DHCP magic cookie");
+
+        MAKE_OFFER();
+        f[14 + 20 + 8 + 240] = 3;   /* router option where the type should be */
+        f[14 + 20 + 8 + 243] = 255;
+        accepts(nf_dhcp_parse(f, FLEN, XID, OUR_MAC, &r), 0,
+                "REJECT: no message-type option - not a DHCP message we can act on");
+
+        /* An option length that runs off the end of the packet. This is how a
+         * malformed reply reads kernel memory: there is no framing to stop the
+         * walk except the loop's own arithmetic. */
+        MAKE_OFFER();
+        f[14 + 20 + 8 + 244] = 250;
+        accepts(nf_dhcp_parse(f, FLEN, XID, OUR_MAC, &r), 0,
+                "REJECT: an option whose length runs past the end of the packet");
+
+        /* Truncated below the fixed part. */
+        MAKE_OFFER();
+        accepts(nf_dhcp_parse(f, 60, XID, OUR_MAC, &r), 0,
+                "REJECT: too short to hold a DHCP message at all");
+
+        /* A UDP length claiming more than arrived — same read-past-the-end
+         * shape, one layer up. */
+        MAKE_OFFER();
+        nf_put16(f + 14 + 20 + 4, 60000);
+        accepts(nf_dhcp_parse(f, FLEN, XID, OUR_MAC, &r), 0,
+                "REJECT: UDP length longer than the bytes actually received");
+        #undef MAKE_OFFER
     }
 
     printf("\nfailures  %d\n", failures);

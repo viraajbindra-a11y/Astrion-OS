@@ -34,6 +34,7 @@
 #include "pci.h"
 #include "e1000.h"
 #include "net_frame.h"
+#include "net_dhcp.h"
 #include "task.h"
 #include "wm.h"
 #include "kbd.h"
@@ -520,7 +521,14 @@ static uint32_t rand_in_range(uint32_t lo, uint32_t hi) {
     /* Knuth LCG. */
     lcg_state = lcg_state * 6364136223846793005ULL + 1442695040888963407ULL;
     uint32_t r = (uint32_t)(lcg_state >> 33);
-    return lo + (r % (hi - lo + 1));
+    /* span is 0 when the caller asks for the WHOLE 32-bit range: hi - lo + 1
+     * is 0xFFFFFFFF + 1, which wraps to zero, and `r % 0` divides by zero and
+     * takes the kernel with it. The only caller today passes (1, 100), which
+     * is why this has never fired — and is exactly why it would not have been
+     * noticed by the first person to want a full-width random number. */
+    uint32_t span = hi - lo + 1;
+    if (!span) return r;
+    return lo + (r % span);
 }
 
 static int parse_u32(const char *s, uint32_t *out) {
@@ -1595,6 +1603,103 @@ static void put_ip(uint32_t ip) {
     }
 }
 
+/* Where DHCP put us. Zero until `net dhcp` succeeds; everything that needs a
+ * source address reads it from here rather than assuming one. */
+static uint32_t g_my_ip, g_my_router, g_my_dns, g_my_mask;
+
+uint32_t net_my_ip(void) { return g_my_ip; }
+
+/* Wait for a frame the given predicate accepts, discarding everything else.
+ *
+ * Discarding is the whole job. On any real network most of what arrives is
+ * other people's traffic, and a receive loop that gives up on the first
+ * non-matching frame gives up immediately and reports the network as dead. */
+static int await_reply(uint8_t *rx, int cap, uint32_t xid,
+                       struct nf_dhcp_reply *r, uint8_t want_type) {
+    for (int tries = 0; tries < 400000; tries++) {
+        int n = e1000_recv(rx, cap);
+        if (n <= 0) continue;
+        if (nf_dhcp_parse(rx, n, xid, e1000_mac(), r) && r->type == want_type)
+            return 1;
+    }
+    return 0;
+}
+
+/* The four-way exchange: DISCOVER -> OFFER -> REQUEST -> ACK.
+ *
+ * The REQUEST is broadcast, not sent to the server that offered, and that is
+ * required rather than lazy: on a network with two DHCP servers both made an
+ * offer, and the broadcast is how the one that lost learns to release the
+ * address it was holding for us. Unicasting it strands an address on every
+ * server that did not win. */
+static void do_dhcp(void) {
+    /* The transaction id has to differ between our own runs — a late reply to
+     * the previous attempt must not be mistaken for this one — and be unlikely
+     * to collide with another machine's exchange in flight. Reuse the shell's
+     * LCG, seeded from the tick counter, and take a whole word off the top. */
+    lcg_state ^= pit_ticks() * 0x9E3779B97F4A7C15ULL;
+    lcg_state = lcg_state * 6364136223846793005ULL + 1442695040888963407ULL;
+    uint32_t xid = (uint32_t)(lcg_state >> 32);
+
+    uint8_t frame[512];
+    uint8_t rx[2048];
+    struct nf_dhcp_reply r;
+
+    console_puts("asking the network for an address...\n");
+
+    int n = nf_dhcp_build(frame, e1000_mac(), xid, DHCP_DISCOVER, 0, 0);
+    if (!e1000_send(frame, (uint16_t)n)) {
+        console_set_color(COL_MUTED);
+        console_puts("the card never confirmed the send.\n");
+        console_set_color(COL_WHITE);
+        return;
+    }
+
+    if (!await_reply(rx, (int)sizeof rx, xid, &r, DHCP_OFFER)) {
+        console_set_color(COL_MUTED);
+        console_puts("no DHCP server answered.\n");
+        console_puts("(nothing on this network hands out addresses)\n");
+        console_set_color(COL_WHITE);
+        return;
+    }
+
+    uint32_t offered = r.your_ip, server = r.server_ip;
+    console_puts("  offered "); put_ip(offered);
+    console_puts(" by ");       put_ip(server);
+    console_putchar('\n');
+
+    n = nf_dhcp_build(frame, e1000_mac(), xid, DHCP_REQUEST, offered, server);
+    if (!e1000_send(frame, (uint16_t)n)) {
+        console_set_color(COL_MUTED);
+        console_puts("could not send the request.\n");
+        console_set_color(COL_WHITE);
+        return;
+    }
+
+    if (!await_reply(rx, (int)sizeof rx, xid, &r, DHCP_ACK)) {
+        console_set_color(COL_MUTED);
+        console_puts("the server offered an address and never confirmed it.\n");
+        console_set_color(COL_WHITE);
+        return;
+    }
+
+    /* Only NOW is the address ours. Taking it at the OFFER would be the
+     * commonest DHCP bug there is: an offer is a reservation the server is
+     * free to withdraw, and using it before the ACK means two machines can be
+     * handed the same address. */
+    g_my_ip     = r.your_ip;
+    g_my_router = r.router;
+    g_my_dns    = r.dns;
+    g_my_mask   = r.subnet;
+
+    console_set_color(COL_OK);
+    console_puts("this machine is "); put_ip(g_my_ip); console_putchar('\n');
+    console_set_color(COL_WHITE);
+    if (g_my_mask)   { console_puts("  netmask "); put_ip(g_my_mask);   console_putchar('\n'); }
+    if (g_my_router) { console_puts("  router  "); put_ip(g_my_router); console_putchar('\n'); }
+    if (g_my_dns)    { console_puts("  dns     "); put_ip(g_my_dns);    console_putchar('\n'); }
+}
+
 static void cmd_net(int argc, char **argv) {
     if (!e1000_present()) {
         console_set_color(COL_MUTED);
@@ -1612,18 +1717,23 @@ static void cmd_net(int argc, char **argv) {
         console_puts("  mac:   "); put_mac(e1000_mac()); console_putchar('\n');
         console_puts("  link:  ");
         console_puts(e1000_link_up() ? "up\n" : "down (nothing plugged in)\n");
+        console_puts("  ip:    ");
+        if (g_my_ip) { put_ip(g_my_ip); console_putchar('\n'); }
+        else console_puts("none yet - say 'net dhcp'\n");
         console_puts("  sent:  "); console_put_u32(e1000_tx_count());
         console_puts("   received: "); console_put_u32(e1000_rx_count());
         console_puts("   dropped: "); console_put_u32(e1000_rx_dropped());
         console_putchar('\n');
         console_set_color(COL_MUTED);
-        console_puts("  try: net arp 10.0.2.2\n");
+        console_puts("  try: net dhcp   /   net arp 10.0.2.2\n");
         console_set_color(COL_WHITE);
         return;
     }
 
+    if (streq(argv[1], "dhcp")) { do_dhcp(); return; }
+
     if (!streq(argv[1], "arp")) {
-        console_puts("usage: net | net arp <a.b.c.d>\n");
+        console_puts("usage: net | net arp <a.b.c.d> | net dhcp\n");
         return;
     }
 
