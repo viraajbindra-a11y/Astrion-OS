@@ -23,6 +23,7 @@
 #include <string.h>
 #include "net_frame.h"
 #include "net_dhcp.h"
+#include "net_dns.h"
 
 static int failures;
 
@@ -566,6 +567,158 @@ int main(void)
                (long)nf_ip(10,0,99,1), "a /16 makes 10.0.99.1 local");
         eq_int((long)nf_next_hop(nf_ip(10,0,99,1), US, MASK, GW),
                (long)GW, "...and a /24 does not");
+    }
+
+    /* ═══ 14. DNS. The parser is the hard part; see net_dns.h. ═══ */
+    {
+        uint8_t p[512];
+
+        /* Name encoding, from RFC 1035 §3.1 — length-prefixed labels. */
+        int n = nf_dns_encode_name(p, "example.com");
+        eq_int(n, 13, "\\7example\\3com\\0 is 13 bytes");
+        static const uint8_t want[13] = {
+            7,'e','x','a','m','p','l','e', 3,'c','o','m', 0
+        };
+        bytes_are(p, want, 13, "each label carries its own length in front");
+
+        /* Four labels of one letter: (1 length + 1 char) * 4, plus the root
+         * terminator. Nine, not twelve — the dots do NOT survive encoding,
+         * they become the length bytes. */
+        eq_int(nf_dns_encode_name(p, "a.b.c.d"), 9, "four one-letter labels");
+        eq_int(nf_dns_encode_name(p, "example.com."), 13,
+               "a trailing dot is the root and is legal");
+        eq_int(nf_dns_encode_name(p, ""), 0, "REJECT: an empty name");
+        eq_int(nf_dns_encode_name(p, "a..b"), 0, "REJECT: an empty label");
+        eq_int(nf_dns_encode_name(p, ".example.com"), 0, "REJECT: a leading dot");
+        {
+            char big[80];
+            for (int i = 0; i < 64; i++) big[i] = 'a';
+            big[64] = 0;
+            eq_int(nf_dns_encode_name(p, big), 0, "REJECT: a label over 63 bytes");
+        }
+
+        /* The query, header and all. */
+        int qlen = nf_dns_query_build(p, 0x1234, "example.com");
+        eq_int(qlen, 12 + 13 + 4, "header + name + qtype + qclass");
+        eq_int(nf_get16(p + 0), 0x1234, "our id");
+        eq_int(nf_get16(p + 2), 0x0100,
+               "RD set - without it a resolver answers only from cache, which "
+               "reads exactly like the name not existing");
+        eq_int(nf_get16(p + 4), 1, "one question");
+        eq_int(nf_get16(p + 6), 0, "no answers in a query");
+        eq_int(nf_get16(p + 12 + 13), DNS_TYPE_A, "asking for an A record");
+        eq_int(nf_get16(p + 12 + 15), DNS_CLASS_IN, "in class IN");
+        eq_int(nf_dns_query_build(p, 1, "a..b"), 0, "a bad name builds nothing");
+
+        /* ── a response, built the way a real server writes one ──
+         * The answer's name is the two bytes C0 0C: a COMPRESSION POINTER back
+         * to offset 12, which is the question. Essentially every real answer
+         * looks like this, and a parser that reads 0xC0 as a label length of
+         * 192 walks into the middle of the record and reports the name as
+         * unresolvable from a perfectly good response. */
+        uint8_t r[512];
+        int rl;
+        #define MAKE_ANSWER()                                                  \
+            do {                                                               \
+                for (int i = 0; i < 512; i++) r[i] = 0;                        \
+                nf_put16(r + 0, 0x1234);                                       \
+                nf_put16(r + 2, 0x8180);   /* response, RD, RA, RCODE 0 */     \
+                nf_put16(r + 4, 1); nf_put16(r + 6, 1);                        \
+                int o_ = 12 + nf_dns_encode_name(r + 12, "example.com");       \
+                nf_put16(r + o_, DNS_TYPE_A);   o_ += 2;                       \
+                nf_put16(r + o_, DNS_CLASS_IN); o_ += 2;                       \
+                r[o_++] = 0xC0; r[o_++] = 0x0C;        /* <- the pointer */    \
+                nf_put16(r + o_, DNS_TYPE_A);   o_ += 2;                       \
+                nf_put16(r + o_, DNS_CLASS_IN); o_ += 2;                       \
+                nf_put32(r + o_, 300);          o_ += 4;                       \
+                nf_put16(r + o_, 4);            o_ += 2;                       \
+                nf_put32(r + o_, nf_ip(93,184,216,34)); o_ += 4;               \
+                rl = o_;                                                       \
+            } while (0)
+
+        uint32_t ip = 0;
+        MAKE_ANSWER();
+        accepts(nf_dns_parse_a(r, rl, 0x1234, &ip), 1,
+                "an ordinary answer, with the name compressed as a pointer");
+        eq_int((long)ip, (long)nf_ip(93,184,216,34), "  ...and the address in it");
+
+        MAKE_ANSWER();
+        accepts(nf_dns_parse_a(r, rl, 0x9999, &ip), 0,
+                "REJECT: somebody else's query id");
+
+        MAKE_ANSWER();
+        nf_put16(r + 2, 0x0100);
+        accepts(nf_dns_parse_a(r, rl, 0x1234, &ip), 0,
+                "REJECT: QR says query - that is somebody ASKING, not answering");
+
+        MAKE_ANSWER();
+        nf_put16(r + 2, 0x8183);
+        accepts(nf_dns_parse_a(r, rl, 0x1234, &ip), 0,
+                "REJECT: RCODE 3 - the server says no such name");
+
+        MAKE_ANSWER();
+        nf_put16(r + 6, 0);
+        accepts(nf_dns_parse_a(r, rl, 0x1234, &ip), 0,
+                "REJECT: zero answers");
+
+        MAKE_ANSWER();
+        accepts(nf_dns_parse_a(r, rl - 3, 0x1234, &ip), 0,
+                "REJECT: truncated inside the address itself");
+
+        /* rdlength claiming more than arrived — the read-past-the-end shape,
+         * one protocol up from where it was caught in DHCP. */
+        MAKE_ANSWER();
+        nf_put16(r + rl - 6, 4000);
+        accepts(nf_dns_parse_a(r, rl, 0x1234, &ip), 0,
+                "REJECT: rdlength runs past the end of the message");
+
+        /* ── THE POINTER LOOP ──
+         * \xC0\x0C at offset 12 is a name that points at itself. A parser that
+         * FOLLOWS pointers without a bound never returns, and the packet that
+         * does it can come from anyone who can reach the machine. This test
+         * hanging IS the failure — there is no assertion that catches it, only
+         * a suite that never finishes. */
+        MAKE_ANSWER();
+        r[12] = 0xC0; r[13] = 0x0C;
+        accepts(nf_dns_parse_a(r, rl, 0x1234, &ip), 0,
+                "REJECT: a name pointing at itself terminates instead of hanging");
+
+        /* ── A CNAME IN FRONT OF THE ADDRESS ──
+         * Ask for www.<anything> and the answer section holds the CNAME first
+         * and the A record after it. A parser that reads only the first answer
+         * hands back the bytes of a NAME where an address should be. */
+        {
+            for (int i = 0; i < 512; i++) r[i] = 0;
+            nf_put16(r + 0, 0x1234);
+            nf_put16(r + 2, 0x8180);
+            nf_put16(r + 4, 1);
+            nf_put16(r + 6, 2);                       /* TWO answers */
+            int o = 12 + nf_dns_encode_name(r + 12, "www.example.com");
+            nf_put16(r + o, DNS_TYPE_A);   o += 2;
+            nf_put16(r + o, DNS_CLASS_IN); o += 2;
+            /* answer 1: CNAME */
+            r[o++] = 0xC0; r[o++] = 0x0C;
+            nf_put16(r + o, DNS_TYPE_CNAME); o += 2;
+            nf_put16(r + o, DNS_CLASS_IN);   o += 2;
+            nf_put32(r + o, 300);            o += 4;
+            int cn = nf_dns_encode_name(r + o + 2, "example.com");
+            nf_put16(r + o, (uint16_t)cn);   o += 2;
+            o += cn;
+            /* answer 2: the address */
+            r[o++] = 0xC0; r[o++] = 0x0C;
+            nf_put16(r + o, DNS_TYPE_A);   o += 2;
+            nf_put16(r + o, DNS_CLASS_IN); o += 2;
+            nf_put32(r + o, 300);          o += 4;
+            nf_put16(r + o, 4);            o += 2;
+            nf_put32(r + o, nf_ip(1,2,3,4)); o += 4;
+
+            ip = 0;
+            accepts(nf_dns_parse_a(r, o, 0x1234, &ip), 1,
+                    "a CNAME in front of the address is walked past");
+            eq_int((long)ip, (long)nf_ip(1,2,3,4),
+                   "  ...and the ADDRESS comes back, not the CNAME's bytes");
+        }
+        #undef MAKE_ANSWER
     }
 
     printf("\nfailures  %d\n", failures);

@@ -35,6 +35,7 @@
 #include "e1000.h"
 #include "net_frame.h"
 #include "net_dhcp.h"
+#include "net_dns.h"
 #include "task.h"
 #include "wm.h"
 #include "kbd.h"
@@ -1609,6 +1610,28 @@ static uint32_t g_my_ip, g_my_router, g_my_dns, g_my_mask;
 
 uint32_t net_my_ip(void) { return g_my_ip; }
 
+/* ─── how long to wait for an answer ───
+ *
+ * REAL MILLISECONDS, from the clock. Every receive loop in this file first
+ * spun a fixed number of ITERATIONS, which is not a timeout at all: the same
+ * count waits LONGER on a slow machine and gives up SOONER on a fast one,
+ * which is backwards, and the actual budget depends on how much work the loop
+ * body happens to do.
+ *
+ * That cost a real bug, and it took DNS to expose it. ARP, DHCP and ping are
+ * all answered by the virtual gateway itself and come back in microseconds, so
+ * any budget at all looked fine. DNS is the first thing that LEAVES the
+ * machine — the resolver forwards to the host's real one — and a 600,000-
+ * iteration budget expired in a few milliseconds while the answer was still
+ * crossing the internet. The query went out, a perfectly good response came
+ * back, and Astrion had already stopped listening.
+ *
+ * The numbers differ because the distances do. */
+#define NET_MS_ARP    1000      /* the machine next to us            */
+#define NET_MS_DHCP   3000      /* a server on this network          */
+#define NET_MS_PING   1000      /* one echo, per sequence number     */
+#define NET_MS_DNS    5000      /* out to a real resolver, and back  */
+
 /* Wait for a frame the given predicate accepts, discarding everything else.
  *
  * Discarding is the whole job. On any real network most of what arrives is
@@ -1616,7 +1639,8 @@ uint32_t net_my_ip(void) { return g_my_ip; }
  * non-matching frame gives up immediately and reports the network as dead. */
 static int await_reply(uint8_t *rx, int cap, uint32_t xid,
                        struct nf_dhcp_reply *r, uint8_t want_type) {
-    for (int tries = 0; tries < 400000; tries++) {
+    uint64_t deadline = pit_elapsed_ms() + NET_MS_DHCP;
+    while (pit_elapsed_ms() < deadline) {
         int n = e1000_recv(rx, cap);
         if (n <= 0) continue;
         if (nf_dhcp_parse(rx, n, xid, e1000_mac(), r) && r->type == want_type)
@@ -1707,7 +1731,8 @@ static int arp_for(uint32_t ip, uint8_t *mac_out) {
     uint8_t frame[64], rx[2048];
     int n = nf_arp_build(frame, e1000_mac(), g_my_ip, ip);
     if (!e1000_send(frame, (uint16_t)n)) return 0;
-    for (int tries = 0; tries < 300000; tries++) {
+    uint64_t deadline = pit_elapsed_ms() + NET_MS_ARP;
+    while (pit_elapsed_ms() < deadline) {
         int r = e1000_recv(rx, (int)sizeof rx);
         if (r > 0 && nf_arp_is_reply_for(rx, r, ip, e1000_mac(), mac_out))
             return 1;
@@ -1762,11 +1787,12 @@ static void do_ping(uint32_t target) {
                       (uint16_t)ilen, seq);
         int flen = ETH_HDR_LEN + IP_HDR_LEN + ilen;
 
-        uint64_t t0 = pit_ticks();
+        uint64_t t0 = pit_elapsed_ms();
         if (!e1000_send(frame, (uint16_t)flen)) continue;
 
         int ok = 0;
-        for (int tries = 0; tries < 300000 && !ok; tries++) {
+        uint64_t deadline = t0 + NET_MS_PING;
+        while (!ok && pit_elapsed_ms() < deadline) {
             int r = e1000_recv(rx, (int)sizeof rx);
             if (r > 0 && nf_icmp_is_reply(rx, r, target, g_my_ip, id, seq))
                 ok = 1;
@@ -1775,11 +1801,13 @@ static void do_ping(uint32_t target) {
         if (ok) {
             got++;
             console_puts(": reply in ");
-            /* The PIT ticks at ~1 kHz, so this is milliseconds and the
-             * resolution is one of them. Anything on a local wire answers
-             * inside a single tick, which reads as 0 ms — correct, and worth
-             * knowing before somebody reports it as a bug. */
-            console_put_u64(pit_ticks() - t0);
+            /* Real milliseconds, but the PIT is installed at 100 Hz so the
+             * resolution is TEN of them. Anything on a local wire answers
+             * inside one tick and reads as 0 ms — true, and worth saying
+             * before somebody reports it as a bug. (An earlier version of
+             * this comment claimed the PIT ran at 1 kHz. It does not:
+             * kernel_mb2.c calls pit_install(100).) */
+            console_put_u64(pit_elapsed_ms() - t0);
             console_puts(" ms\n");
         } else {
             console_puts(": no reply\n");
@@ -1794,6 +1822,83 @@ static void do_ping(uint32_t target) {
         console_set_color(COL_MUTED);
         console_puts("nothing came back. that host is not answering.\n");
     }
+    console_set_color(COL_WHITE);
+}
+
+/* dns — turn a name into an address.
+ *
+ * The last thing between Astrion and a browser that can be pointed at a name
+ * instead of a number. Structurally it is the same shape as ping: resolve the
+ * next hop, build the packet, wait for a matching answer. The difference is
+ * that the answer needs real parsing, and that lives in net_dns.h where it can
+ * be tested — including the compression-pointer loop, which is a hang rather
+ * than a wrong answer and is not something to discover on a booted machine. */
+static void do_dns(const char *name) {
+    if (!g_my_ip || !g_my_dns) {
+        console_set_color(COL_MUTED);
+        console_puts("no address or no resolver yet. say 'net dhcp' first.\n");
+        console_set_color(COL_WHITE);
+        return;
+    }
+
+    uint32_t hop = nf_next_hop(g_my_dns, g_my_ip, g_my_mask, g_my_router);
+    uint8_t hop_mac[6];
+    if (!arp_for(hop, hop_mac)) {
+        console_set_color(COL_MUTED);
+        console_puts("cannot reach the resolver at "); put_ip(g_my_dns);
+        console_puts(".\n");
+        console_set_color(COL_WHITE);
+        return;
+    }
+
+    lcg_state = lcg_state * 6364136223846793005ULL + 1442695040888963407ULL;
+    uint16_t id = (uint16_t)(lcg_state >> 40);
+    /* An ephemeral source port, kept above 1024 so it cannot collide with a
+     * well-known service if this machine ever listens on one. */
+    uint16_t sport = (uint16_t)(0xC000u | ((lcg_state >> 24) & 0x0FFFu));
+
+    uint8_t frame[640];
+    int qlen = nf_dns_query_build(frame + ETH_HDR_LEN + IP_HDR_LEN + UDP_HDR_LEN,
+                                  id, name);
+    if (!qlen) {
+        console_puts("that is not a name I can look up.\n");
+        return;
+    }
+    nf_eth_build(frame, hop_mac, e1000_mac(), ETH_P_IPV4);
+    nf_udp_build(frame + ETH_HDR_LEN + IP_HDR_LEN, sport, DNS_PORT,
+                 (uint16_t)qlen);
+    nf_ipv4_build(frame + ETH_HDR_LEN, g_my_ip, g_my_dns, IP_PROTO_UDP,
+                  (uint16_t)(UDP_HDR_LEN + qlen), id);
+    int flen = ETH_HDR_LEN + IP_HDR_LEN + UDP_HDR_LEN + qlen;
+
+    console_puts("looking up "); console_puts(name); console_puts(" ...\n");
+    if (!e1000_send(frame, (uint16_t)flen)) {
+        console_set_color(COL_MUTED);
+        console_puts("the card never confirmed the send.\n");
+        console_set_color(COL_WHITE);
+        return;
+    }
+
+    uint8_t rx[2048];
+    uint64_t deadline = pit_elapsed_ms() + NET_MS_DNS;
+    while (pit_elapsed_ms() < deadline) {
+        int n = e1000_recv(rx, (int)sizeof rx);
+        if (n <= 0) continue;
+        int plen = 0;
+        const uint8_t *msg = nf_udp_payload(rx, n, sport, g_my_ip, g_my_dns,
+                                            &plen);
+        if (!msg) continue;
+        uint32_t ip = 0;
+        if (!nf_dns_parse_a(msg, plen, id, &ip)) continue;
+        console_set_color(COL_OK);
+        console_puts(name); console_puts(" is "); put_ip(ip);
+        console_putchar('\n');
+        console_set_color(COL_WHITE);
+        return;
+    }
+
+    console_set_color(COL_MUTED);
+    console_puts("no answer for that name.\n");
     console_set_color(COL_WHITE);
 }
 
@@ -1822,12 +1927,17 @@ static void cmd_net(int argc, char **argv) {
         console_puts("   dropped: "); console_put_u32(e1000_rx_dropped());
         console_putchar('\n');
         console_set_color(COL_MUTED);
-        console_puts("  try: net dhcp   then   net ping 10.0.2.2\n");
+        console_puts("  try: net dhcp   then   net ping 10.0.2.2   or   net dns example.com\n");
         console_set_color(COL_WHITE);
         return;
     }
 
     if (streq(argv[1], "dhcp")) { do_dhcp(); return; }
+    if (streq(argv[1], "dns")) {
+        if (argc < 3) { console_puts("usage: net dns <name>\n"); return; }
+        do_dns(argv[2]);
+        return;
+    }
     if (streq(argv[1], "ping")) {
         uint32_t t = (argc >= 3) ? parse_ipv4(argv[2]) : g_my_router;
         if (!t) {
@@ -1839,7 +1949,7 @@ static void cmd_net(int argc, char **argv) {
     }
 
     if (!streq(argv[1], "arp")) {
-        console_puts("usage: net | net dhcp | net ping <ip> | net arp <ip>\n");
+        console_puts("usage: net | net dhcp | net ping <ip> | net dns <name> | net arp <ip>\n");
         return;
     }
 
@@ -1873,7 +1983,8 @@ static void cmd_net(int argc, char **argv) {
      * no reply, and that is information, not a failure of this code. */
     uint8_t rx[2048];
     uint8_t mac[6];
-    for (int tries = 0; tries < 20000; tries++) {
+    uint64_t deadline = pit_elapsed_ms() + NET_MS_ARP;
+    while (pit_elapsed_ms() < deadline) {
         int n = e1000_recv(rx, (int)sizeof rx);
         if (n > 0 && nf_arp_is_reply_for(rx, n, target, e1000_mac(), mac)) {
             console_set_color(COL_OK);

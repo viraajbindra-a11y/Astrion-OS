@@ -301,6 +301,40 @@ static inline uint16_t nf_udp_sport(const uint8_t *u) { return nf_get16(u + 0); 
 static inline uint16_t nf_udp_dport(const uint8_t *u) { return nf_get16(u + 2); }
 static inline uint16_t nf_udp_len(const uint8_t *u)   { return nf_get16(u + 4); }
 
+/* Point at the UDP payload of a datagram sent to us on `port` by `from_ip`,
+ * or 0. *plen receives the payload length.
+ *
+ * Every bound is checked here so callers do not each re-derive them: the IP
+ * header validates, the protocol is UDP, the addresses are the pair we expect,
+ * and — the one that matters — the UDP length field is inside the bytes that
+ * actually arrived. That field is written by whoever sent the packet, and a
+ * caller who trusts it reads past the end of the frame. */
+static inline const uint8_t *nf_udp_payload(const uint8_t *frame, int len,
+                                            uint16_t port, uint32_t our_ip,
+                                            uint32_t from_ip, int *plen)
+{
+    if (len < ETH_HDR_LEN + IP_HDR_LEN + UDP_HDR_LEN) return 0;
+    if (nf_eth_type(frame) != ETH_P_IPV4) return 0;
+
+    const uint8_t *ip = frame + ETH_HDR_LEN;
+    int avail = len - ETH_HDR_LEN;
+    if (!nf_ipv4_ok(ip, avail))           return 0;
+    if (nf_ip_proto(ip) != IP_PROTO_UDP)  return 0;
+    if (nf_ip_src(ip) != from_ip)         return 0;
+    if (nf_ip_dst(ip) != our_ip)          return 0;
+
+    int hl = nf_ip_hdr_len(ip);
+    if (avail - hl < UDP_HDR_LEN)         return 0;
+    const uint8_t *udp = ip + hl;
+    if (nf_udp_dport(udp) != port)        return 0;
+
+    int ulen = nf_udp_len(udp);
+    if (ulen < UDP_HDR_LEN || hl + ulen > avail) return 0;
+
+    *plen = ulen - UDP_HDR_LEN;
+    return udp + UDP_HDR_LEN;
+}
+
 /* ─── ICMP echo (RFC 792) ───
  *
  * type[1] code[1] checksum[2] id[2] seq[2], then payload.

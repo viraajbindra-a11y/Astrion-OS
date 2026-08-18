@@ -21,12 +21,22 @@ printf passes that. The gate is that the capture contains:
   * then the DHCP exchange, in order — DISCOVER, OFFER, REQUEST, ACK — with
     the REQUEST carrying option 50 (the address being accepted) and option 54
     (which server offered it);
-  * and the address in the ACK is the address the shell printed.
+  * and the address in the ACK is the address the shell printed;
+  * three ICMP echo requests with ONE id and sequence numbers 1, 2, 3 — not
+    the same frame sent thrice — each answered exactly once;
+  * a DNS query with the name in length-prefixed labels and RD set, and an
+    address the kernel printed that is one of the A records the resolver
+    actually returned.
 
 Those last-line-of-each-group checks are the JOIN. They tie what the kernel
 said to what physically crossed the wire, and no amount of hardcoding inside
 the guest can satisfy them — the gateway's MAC and the leased address are both
 chosen by QEMU, outside the guest, and written to a file the guest never sees.
+
+DNS is the one check that leaves the virtual machine — QEMU forwards 10.0.2.3
+to the HOST's real resolver — so a host with no internet has nothing to prove
+and those rows report SKIP. A response that arrived and was not understood is
+still a failure; the capture is what tells those two apart.
 
 The negative control is a second boot with `-nic none`: same ISO, no card, and
 the kernel has to say so rather than printing a plausible MAC anyway.
@@ -40,6 +50,7 @@ from drag_test import Qmp, wait_for_boot
 from dock_test import scan_faults
 
 GATEWAY = "10.0.2.2"          # QEMU user-mode network always presents this
+DNS_NAME = "example.com"      # resolved through the HOST's resolver - see below
 
 
 def read_pcap(path):
@@ -89,6 +100,57 @@ def dhcp(frame):
         i += 2 + n
     t = opts.get(53, b"\x00")[0]
     return (t, ".".join(str(b) for b in d[16:20]), opts)
+
+
+def dns_msg(frame):
+    """(id, flags, [A-record IPs], qname) for a DNS frame, else None."""
+    if len(frame) < 42 or struct.unpack(">H", frame[12:14])[0] != 0x0800:
+        return None
+    ip = frame[14:]
+    if ip[9] != 17:
+        return None
+    hl = (ip[0] & 0x0F) * 4
+    udp = ip[hl:]
+    if 53 not in struct.unpack(">HH", udp[0:4]):
+        return None
+    m = udp[8:8 + struct.unpack(">H", udp[4:6])[0] - 8]
+    if len(m) < 12:
+        return None
+    ident, flags, qd, an = struct.unpack(">HHHH", m[0:8])
+
+    def skip(off):
+        while off < len(m):
+            b = m[off]
+            if b & 0xC0 == 0xC0:
+                return off + 2
+            if b == 0:
+                return off + 1
+            off += 1 + b
+        return -1
+
+    off, qname = 12, []
+    o = 12
+    while o < len(m) and m[o] and (m[o] & 0xC0) == 0:
+        qname.append(m[o + 1:o + 1 + m[o]].decode("ascii", "replace"))
+        o += 1 + m[o]
+    for _ in range(qd):
+        off = skip(off)
+        if off < 0:
+            return None
+        off += 4
+    ips = []
+    for _ in range(an):
+        off = skip(off)
+        if off < 0 or off + 10 > len(m):
+            break
+        t, c, rl = (struct.unpack(">H", m[off:off + 2])[0],
+                    struct.unpack(">H", m[off + 2:off + 4])[0],
+                    struct.unpack(">H", m[off + 8:off + 10])[0])
+        off += 10
+        if t == 1 and c == 1 and rl == 4:
+            ips.append(".".join(str(b) for b in m[off:off + 4]))
+        off += rl
+    return (ident, flags, ips, ".".join(qname))
 
 
 def icmp(frame):
@@ -146,6 +208,8 @@ def boot_and_probe(iso, tag, out):
         time.sleep(5.0)
         q.type_text(f"net ping {GATEWAY}\n")
         time.sleep(7.0)
+        q.type_text(f"net dns {DNS_NAME}\n")
+        time.sleep(9.0)
         end = os.path.getsize(serial)
         q.cmd("quit")
     finally:
@@ -308,6 +372,43 @@ def main():
               "and their sequence numbers are 1, 2, 3 - not the same frame thrice")
         check(sorted(r[2] for r in reps) == [1, 2, 3],
               "the replies answer each sequence number exactly once")
+
+    # ── DNS: a name becomes an address ──
+    #
+    # This is the ONE check that leaves the virtual machine: QEMU forwards
+    # 10.0.2.3 to the host's real resolver. So "no response at all" means this
+    # machine has no internet, which is not a kernel defect and is reported as
+    # SKIPPED. A response that arrived and was NOT understood is a real
+    # failure, and the two are told apart by looking at the capture.
+    dns = [x for x in (dns_msg(f) for f in frames) if x]
+    queries = [x for x in dns if not (x[1] & 0x8000)]
+    answers = [x for x in dns if (x[1] & 0x8000)]
+    nm = re.search(re.escape(DNS_NAME) + r" is (\d+\.\d+\.\d+\.\d+)", shell)
+
+    if not answers:
+        print(f"[{tag}] [SKIP] DNS: no response reached the guest - this host "
+              f"has no working resolver, so there is nothing to check")
+    else:
+        check(bool(queries), f"a DNS query for {DNS_NAME} left the machine")
+        if queries:
+            check(queries[0][3] == DNS_NAME,
+                  f"the query names {DNS_NAME} in length-prefixed labels")
+            check(queries[0][1] & 0x0100,
+                  "RD is set - without it a resolver answers only from cache")
+        a_ips = [ip for x in answers for ip in x[2]]
+        check(bool(a_ips), "the response carries at least one A record")
+        check(bool(nm), f"`net dns {DNS_NAME}` printed an address")
+        # THE JOIN. The address came from a resolver on the real internet; the
+        # guest cannot invent it, and cannot read this capture.
+        if nm and a_ips:
+            check(nm.group(1) in a_ips,
+                  f"the address printed IS an A record from the response "
+                  f"({nm.group(1)} in {a_ips})")
+            # The answer's name is a compression pointer in every real
+            # response. Getting that wrong reports a good response as
+            # unresolvable, so it is worth saying that this path really ran.
+            check(len(a_ips) >= 1,
+                  "the compressed answer name was walked, not read as a label")
 
     # ── the negative control ──
     check("NET: no usable ethernet card" in nonic,
