@@ -175,6 +175,81 @@ app.post('/api/ai/ollama-pull', async (req, res) => {
   }
 });
 
+// ─── Ollama: create a local model from a Modelfile ───
+//
+// The picker downloads a base model through /api/ai/ollama-pull, which is a
+// registry fetch. This is the other half: it turns that base into a model the
+// machine genuinely calls `ember`, so `ollama list` and `ollama run ember` in
+// a terminal behave the same way Astrion does.
+//
+// WHY THIS ENDPOINT HAS TO EXIST SEPARATELY. `ollama pull ember` cannot work.
+// Pull fetches from the public registry and `ember` is not published there —
+// it only exists once someone runs `create` against a Modelfile on the local
+// machine. Storing `ember` as the picker's model id would therefore fail on
+// the very first screen a new user ever sees, and the error would be a 404
+// from a registry, which tells them nothing.
+//
+// SO THIS IS DELIBERATELY OPTIONAL. Ember's identity is carried by the system
+// prompt in js/kernel/ember-identity.js, which is injected on every request
+// and cannot fail to install. This endpoint only improves the naming. A
+// failure here must leave the user with a working assistant, so the client is
+// expected to fall back to the plain base tag and say nothing.
+app.post('/api/ai/ollama-create', async (req, res) => {
+  const { url, model, modelfile } = req.body || {};
+  if (!model || typeof model !== 'string') {
+    return res.status(400).json({ error: 'model name required' });
+  }
+  if (!modelfile || typeof modelfile !== 'string') {
+    return res.status(400).json({ error: 'modelfile required' });
+  }
+  // A Modelfile is executable configuration for the local Ollama daemon, and
+  // this endpoint hands it whatever arrives in the body. FROM is the only
+  // directive that names something to run, so it is the one worth pinning:
+  // refuse anything whose base is not a plain registry tag. Without this, a
+  // page that can reach this server can point Ollama at an arbitrary source.
+  const from = /^\s*FROM\s+(\S+)/im.exec(modelfile);
+  if (!from) {
+    return res.status(400).json({ error: 'modelfile must start with a FROM line' });
+  }
+  if (!/^[a-z0-9._-]+(:[a-z0-9._-]+)?$/i.test(from[1])) {
+    return res.status(400).json({
+      error: 'FROM must be a plain model tag, not a path or a URL: ' + from[1],
+    });
+  }
+
+  const ollamaUrl = url || 'http://localhost:11434';
+  try {
+    const upstream = await fetch(`${ollamaUrl}/api/create`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: model, modelfile, stream: true }),
+      // Creating from an already-pulled base is fast — it writes a manifest,
+      // it does not move weights. Five minutes is generous; the 30-minute cap
+      // the pull uses would just be a longer hang on a broken daemon.
+      signal: AbortSignal.timeout(5 * 60 * 1000),
+    });
+    if (!upstream.ok || !upstream.body) {
+      return res.status(upstream.status || 502).json({
+        error: 'Ollama create rejected: ' + upstream.statusText,
+      });
+    }
+    res.setHeader('content-type', 'application/x-ndjson');
+    const reader = upstream.body.getReader();
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      res.write(value);
+    }
+    res.end();
+  } catch (error) {
+    if (!res.headersSent) {
+      res.status(502).json({ error: 'Could not reach Ollama at ' + ollamaUrl + ': ' + error.message });
+    } else {
+      res.end();
+    }
+  }
+});
+
 // ─── Ollama service: enable + start ───
 // Slim ISOs install Ollama but don't auto-enable the systemd unit
 // (Sprint A, 2026-05-02). The first-boot wizard hits this endpoint

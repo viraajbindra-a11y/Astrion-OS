@@ -16,7 +16,7 @@ Time budget, honestly:
 | 3 | Round-trip check (send me two files) | ~30 sec |
 | 4 | Smoke test — proves the whole training path | ~10 min |
 | 5 | Download + tokenize 7B tokens | 1–3 hours |
-| 6 | **Pretrain** | **~54 hours** |
+| 6 | **Pretrain** | **~80 hours** (measured, not projected) |
 | 7–10 | Fine-tune, check, chat, export | ~20 min |
 
 You need about **30 GB of free disk**. The token file is ~13 GB and the
@@ -173,10 +173,10 @@ never touch your real model.
 
 **What to watch for.** One of these two lines will appear:
 
-* `torch.compile: working` — good. The real run is ~54 hours.
+* `torch.compile: working` — good. The real run is ~80 hours.
 * `torch.compile FAILED — continuing WITHOUT it` — **not fatal.** Inductor needs
   Triton, which isn't officially supported on Windows. The run still works, just
-  2–3x slower, which turns 54 hours into 5+ days. See "If compile fails" below.
+  2–3x slower, which turns 80 hours into a week or more. See "If compile fails" below.
 
 Also watch **VRAM**. If you see `CUDA out of memory`, tell me — the fix is
 lowering `micro_batch` from 8 to 4 and raising `grad_accum` from 64 to 128, which
@@ -210,7 +210,7 @@ progress in MB. If it dies partway, just rerun it; it starts over.
 python train_best.py --compile
 ```
 
-This is the long one. ~54 hours.
+This is the long one. ~80 hours. (The completed run took 80.3 h.)
 
 **Before you start it, stop Windows from sleeping.** Settings → System → Power →
 Screen and sleep → set **sleep to Never**. Screen turning off is fine. Sleep kills
