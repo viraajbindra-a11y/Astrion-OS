@@ -1,0 +1,66 @@
+name: Ember identity gate
+
+# Runs the two checks that need no model, no Ollama and no network.
+#
+# The point of this workflow is NOT that Ember passes its identity check -
+# that cannot be known here, because no model runs in CI. The point is that
+# THE CHECK ITSELF still works. An identity check in this repo has already
+# been faked once: readiness.py accepted any answer containing "no", "not" or
+# "ember", so a model replying "Yes, I'm Ember..." passed. The gate that
+# replaced it is only worth anything for as long as it can still fail, and
+# that is exactly what these two commands measure.
+#
+#   --selftest       86 canned answers, 38 must-pass and 48 must-fail, plus a
+#                    control proving the OLD predicate accepts 27 of the bad
+#                    ones. If that control ever stops firing, the gate has
+#                    drifted back toward the bug it replaced.
+#   mutation_check   plants one defect at a time into a copy of the gate and
+#                    demands the selftest go red. 30/30. This is what makes
+#                    "every guard is load-bearing" a measurement.
+#
+# Also checks the generated Modelfiles still match js/kernel/ember-identity.js.
+# The local model and the cloud model claiming different identities is worse
+# than either being wrong on its own, and hand-editing a generated Modelfile
+# is the way that happens.
+
+on:
+  push:
+    paths:
+      - 'custom-model/ember/**'
+      - 'js/kernel/ember-identity.js'
+      - '.github/workflows/ember-gate.yml'
+  pull_request:
+    paths:
+      - 'custom-model/ember/**'
+      - 'js/kernel/ember-identity.js'
+      - '.github/workflows/ember-gate.yml'
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # No model is pulled or built anywhere in this workflow, and the guard
+      # is set anyway so a future step that tried would be refused rather than
+      # quietly downloading gigabytes onto a CI runner.
+      - name: Predicate control (no model, no network)
+        env:
+          ASTRION_NO_MODEL_PULL: '1'
+        run: python3 custom-model/ember/identity_gate.py --selftest
+
+      - name: Mutation check - is every guard load-bearing?
+        env:
+          ASTRION_NO_MODEL_PULL: '1'
+        run: python3 custom-model/ember/mutation_check.py
+
+      - name: Modelfiles match the identity module
+        run: node custom-model/ember/build-modelfile.js --check
