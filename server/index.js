@@ -138,7 +138,39 @@ app.post('/api/update/check', async (req, res) => {
 // ─── Ollama: pull a model on the local Ollama server ───
 // Streams JSON status lines from Ollama back to the client. The client
 // reads incrementally and shows progress in Settings > AI > Ollama.
+// ─── the "not on this machine" switch ───
+//
+// Set ASTRION_NO_MODEL_PULL=1 and this server refuses to download or build a
+// model, no matter what asks it to.
+//
+// This exists because of a real incident, on 2026-08-29, during development of
+// the Ember picker. The wizard was walked end-to-end on a laptop whose owner
+// had said plainly that no AI models were to be put on it. Clicking through
+// the picker started a 1.4 GB pull, and it was 1.36 GB in before anyone
+// noticed - a screenshot showing "3%" was already stale by the time it
+// rendered.
+//
+// The lesson is where the guard has to live. A flag in the wizard would have
+// stopped the wizard and nothing else; the pull is an HTTP endpoint and
+// anything that can reach this server can start one. So the refusal belongs
+// on the server, next to the fetch that does the downloading, where no caller
+// can route around it.
+//
+// It is OFF by default, because a real user on their own machine is supposed
+// to be able to download their assistant. .claude/launch.json turns it ON for
+// the dev server, so the development laptop is safe by default and the
+// product is unchanged.
+function modelPullBlocked(res) {
+  if (!process.env.ASTRION_NO_MODEL_PULL) return false;
+  res.status(403).json({
+    error: 'This machine is configured not to download or build AI models ' +
+           '(ASTRION_NO_MODEL_PULL is set). Nothing was downloaded.',
+  });
+  return true;
+}
+
 app.post('/api/ai/ollama-pull', async (req, res) => {
+  if (modelPullBlocked(res)) return;
   const { url, model } = req.body || {};
   if (!model || typeof model !== 'string') {
     return res.status(400).json({ error: 'model name required' });
@@ -195,6 +227,7 @@ app.post('/api/ai/ollama-pull', async (req, res) => {
 // failure here must leave the user with a working assistant, so the client is
 // expected to fall back to the plain base tag and say nothing.
 app.post('/api/ai/ollama-create', async (req, res) => {
+  if (modelPullBlocked(res)) return;
   const { url, model, modelfile } = req.body || {};
   if (!model || typeof model !== 'string') {
     return res.status(400).json({ error: 'model name required' });
