@@ -16,6 +16,7 @@ import { shouldEscalate, capCategory as getCapCategory } from './calibration-tra
 import { processManager } from './process-manager.js';
 import { listCapabilities } from './capability-api.js';
 import { listSkills } from './skill-registry.js';
+import { getEmberSystemPrompt, emberIdentityReminder } from './ember-identity.js';
 
 const AI_PROVIDER_KEY = 'nova-ai-provider';   // 'ollama' | 'anthropic' | 'mock'
 const AI_OLLAMA_URL_KEY = 'nova-ai-ollama-url';
@@ -209,7 +210,13 @@ class AIService {
    * concurrent call can clobber the value between your await and your read.
    */
   async askWithMeta(prompt, options = {}) {
-    const systemContext = this._buildSystemContext();
+    // 2026-08-29 — the system prompt is now built per-leg rather than
+    // once up front. In 'auto' mode this method can try Ollama and then
+    // fall through to Anthropic, and those two legs need DIFFERENT
+    // privacy sentences (local: "nothing leaves your machine"; cloud:
+    // "this turn does"). Building it once meant whichever leg answered
+    // second inherited the other one's claim, and on the cloud leg that
+    // is a lie to the user about where their conversation went.
     const skip = !!options.skipHistory;
     const messages = [
       ...(skip ? [] : this.conversationHistory.slice(-12)),
@@ -230,7 +237,7 @@ class AIService {
     const emitMeta = (meta) => { eventBus.emit('ai:response', { ...meta, query: prompt.slice(0, 100) }); return meta; };
 
     if ((provider === 'auto' && !skipS1) || provider === 'ollama') {
-      const reply = await this._tryOllama(systemContext, messages, options);
+      const reply = await this._tryOllama(this._buildSystemContext('local'), messages, options);
       if (reply) {
         if (!skip) this._addToHistory(prompt, reply);
         const meta = emitMeta({ brain: 's1', confidence: 0.85, provider: 'ollama',
@@ -258,7 +265,7 @@ class AIService {
         return { reply, meta };
       }
 
-      const result = await this._tryAnthropicWithUsage(systemContext, messages, options);
+      const result = await this._tryAnthropicWithUsage(this._buildSystemContext('cloud'), messages, options);
       if (result?.reply) {
         if (!skip) this._addToHistory(prompt, result.reply);
         recordS2Call({
@@ -307,7 +314,11 @@ class AIService {
    */
   async askStream(prompt, options = {}, onChunk, onThinking) {
     const provider = this.getProvider();
-    const sysCtx = this._buildSystemContext();
+    // Streaming is the Ollama path only (see the branch below), so this
+    // leg is always local. The Anthropic fallback at the bottom of this
+    // method goes through askWithMeta, which builds its own 'cloud'
+    // context -- this string never reaches the cloud.
+    const sysCtx = this._buildSystemContext('local');
     const skip = !!options.skipHistory;
     const messages = [
       ...(skip ? [] : this.conversationHistory.slice(-12)),
@@ -412,10 +423,49 @@ class AIService {
 
       if (res.ok) {
         const data = await res.json();
-        return data.reply || data.message?.content || null;
+        const raw = data.reply || data.message?.content || null;
+        return raw ? (this._stripReasoningBlock(raw) || null) : null;
       }
     } catch {}
     return null;
+  }
+
+  /**
+   * Strip a leading <think>...</think> block from a non-streaming reply.
+   *
+   * 2026-08-29 — qwen3 (Ember's base) is a hybrid reasoning model and
+   * thinking mode is its DEFAULT. A current Ollama splits that into
+   * `message.thinking`, which askStream already routes away from the
+   * chat transcript. But this one-shot path reads `message.content`,
+   * and on an older Ollama daemon, or any build whose template does not
+   * split the channel, the raw <think> tags land inline and the chat
+   * panel paints the model's reasoning as if it were the answer.
+   *
+   * There is no Modelfile parameter that turns thinking off, so this is
+   * the layer that can fix it. Not a bug specific to Ember either --
+   * deepseek-r1 does the same thing.
+   *
+   * Anchored at the START of the string on purpose. A global replace
+   * would eat a legitimate mid-answer mention -- "in HTML, <think> is
+   * not a real tag" is a sentence a user can absolutely ask about, and
+   * silently deleting the rest of that reply is a worse bug than the
+   * one being fixed.
+   */
+  _stripReasoningBlock(text) {
+    const m = /^\s*<(think|thinking)>/i.exec(text);
+    if (!m) return text;
+    const open = m[0].length;
+    const close = text.toLowerCase().indexOf(`</${m[1].toLowerCase()}>`, open);
+    if (close < 0) {
+      // Unterminated: generation hit num_predict mid-reasoning, so there
+      // is no answer after the block. Return the reasoning without the
+      // tag rather than nothing -- an empty reply here makes ask() fall
+      // through to the mock responder, which tells the user they are in
+      // offline mode. They are not, and that lie is worse than showing
+      // them a half-finished thought.
+      return text.slice(open).trim();
+    }
+    return text.slice(close + m[1].length + 3).trim();
   }
 
   async _tryAnthropic(system, messages, options) {
@@ -474,8 +524,25 @@ class AIService {
     localStorage.removeItem(AI_HISTORY_KEY);
   }
 
-  _buildSystemContext() {
-    let ctx = `You are Astrion, the built-in AI assistant for Astrion OS — an AI-native desktop operating system. You are helpful, concise, and knowledgeable. Keep responses short unless asked for detail.\n`;
+  /**
+   * Assemble the system prompt. Identity, then toolset tutorial, then
+   * feedback history, then live UI context.
+   *
+   * 2026-08-29 — the identity paragraph used to be a string literal
+   * right here. It now comes from js/kernel/ember-identity.js, because
+   * the SAME text has to reach two places that share no code: this
+   * request path and the Ollama Modelfile that builds the `ember`
+   * model. A local model and a cloud model introducing themselves
+   * differently is the bug; one module is the fix.
+   *
+   * @param {'local'|'cloud'} [runtime='local'] which transport is about
+   *   to answer. This is not cosmetic: it selects whether Ember tells
+   *   the user "nothing leaves this machine". Saying that on the
+   *   Anthropic path would be a straight lie, so the caller has to be
+   *   honest about which leg it is building for.
+   */
+  _buildSystemContext(runtime = 'local') {
+    let ctx = getEmberSystemPrompt({ runtime }) + '\n';
 
     // 2026-05-04 — "tutorial for the AI" so the model is well-versed in
     // what Astrion can actually do. Built lazily from the live app /
@@ -496,6 +563,14 @@ class AIService {
     if (this.context.activeFile) ctx += `\nActive file: ${this.context.activeFile}`;
     if (this.context.selectedText) ctx += `\nSelected text: ${this.context.selectedText}`;
     if (this.context.terminalOutput) ctx += `\nTerminal output: ${this.context.terminalOutput}`;
+
+    // Identity restated last. Everything between the opening paragraph
+    // and here is ~2 KB of tool listings and graded-reply history; a
+    // 1.7B model that reads all of that and then gets asked "who are
+    // you" answers from pretraining ("I am Qwen, made by Alibaba") far
+    // more often than it should. Twenty tokens of recency is the
+    // cheapest fix that exists.
+    ctx += '\n\n' + emberIdentityReminder();
 
     return ctx;
   }

@@ -5,6 +5,11 @@ import { windowManager } from '../kernel/window-manager.js';
 import { eventBus } from '../kernel/event-bus.js';
 import { getTodaySummary, getDailyCap, setDailyCap, resetBudget } from '../kernel/budget-manager.js';
 import { getAllAccuracy, getEscalatedCategories } from '../kernel/calibration-tracker.js';
+// The one table that says which model each Ember tier is built on. Imported
+// rather than re-typed: Settings and the first-boot picker disagreeing about
+// the default model is a bug a user only finds by opening both screens, and
+// this file already carried a stale qwen2.5:7b from before the qwen3 move.
+import { EMBER_BUILDS } from '../shell/wizard-ai-brain.js';
 import { escapeError, escapeHtml } from '../lib/safe-html.js';
 // 2026-05-09 round 2 — usage-aware sidebar ordering (#18). Sections
 // you actually use float to the top; never-opened ones sink.
@@ -414,7 +419,7 @@ function initSettings(container) {
   function renderAI() {
     const currentProvider = localStorage.getItem('nova-ai-provider') || 'auto';
     const ollamaUrl = localStorage.getItem('nova-ai-ollama-url') || 'http://localhost:11434';
-    const ollamaModel = localStorage.getItem('nova-ai-ollama-model') || 'qwen2.5:7b';
+    const ollamaModel = localStorage.getItem('nova-ai-ollama-model') || EMBER_BUILDS.standard.model;
 
     main.innerHTML = `
       <div class="settings-section-title">AI Assistant</div>
@@ -446,7 +451,7 @@ function initSettings(container) {
         <div class="settings-row">
           <div>
             <div class="settings-row-label">Model</div>
-            <div class="settings-row-desc">e.g. qwen2.5:7b, qwen2.5:1.5b, llama3.2, phi3 — pull via <code>ollama pull MODEL</code></div>
+            <div class="settings-row-desc">Ember runs on <code>${EMBER_BUILDS.standard.model}</code> by default. A registry tag is fetched with <code>ollama pull MODEL</code>; a locally built one such as <code>ember</code> already exists on this machine and is not pulled.</div>
           </div>
           <input type="text" id="ai-ollama-model" list="ai-model-suggestions" class="settings-select" value="${ollamaModel}" style="width:180px; font-family:var(--mono,monospace); font-size:12px;">
           <datalist id="ai-model-suggestions"></datalist>

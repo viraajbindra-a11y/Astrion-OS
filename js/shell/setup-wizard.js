@@ -9,6 +9,7 @@ import {
   fetchMemory,
   renderBrainPicker,
   streamPull,
+  createEmberModel,
   commitBrainChoice,
   canAdvance as canAdvanceAiBrain,
 } from './wizard-ai-brain.js';
@@ -353,9 +354,9 @@ export function showSetupWizard() {
                 <div style="display:flex;align-items:center;gap:10px;font-size:14px;color:rgba(255,255,255,0.6);">
                   <span style="color:var(--accent);">&#x2713;</span> ${(() => {
                     const opt = BRAIN_OPTIONS.find(o => o.id === aiBrainState.brain);
-                    if (!opt || opt.id === 'none') return 'AI assistant standing by';
-                    if (opt.id === 'remote') return 'AI brain connected: remote Ollama';
-                    return `AI brain ready: ${opt.name} (${opt.model})`;
+                    if (!opt || opt.id === 'none') return 'Assistant standing by &mdash; add Ember in Settings';
+                    if (opt.id === 'remote') return 'Ember is running on your other computer';
+                    return `${opt.name} is ready`;
                   })()}
                 </div>
               </div>
@@ -387,6 +388,16 @@ export function showSetupWizard() {
         // tiny / standard / big: pull in place, then advance on success.
         aiBrainPullAbort = new AbortController();
         const ok = await streamPull(aiBrainState, () => { if (step === 4) render(); }, aiBrainPullAbort.signal);
+        // Brand the pulled base as `ember` so the terminal agrees with
+        // the OS. Deliberately not guarded by its own error UI: the
+        // assistant's identity comes from the system prompt, not from
+        // this, so a failure here is invisible on purpose. The abort
+        // controller is still live so Cancel keeps working.
+        if (ok) {
+          aiBrainState.pullStatus = 'Naming your brain Ember...';
+          if (step === 4) render();
+          await createEmberModel(aiBrainState, () => { if (step === 4) render(); }, aiBrainPullAbort?.signal);
+        }
         aiBrainPullAbort = null;
         if (ok && step === 4) {
           await new Promise(r => setTimeout(r, 500));
