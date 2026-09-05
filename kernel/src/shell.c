@@ -38,6 +38,7 @@
 #include "net_dns.h"
 #include "task.h"
 #include "wm.h"
+#include "desktop.h"    /* desktop_set_exclusive - the `snake` command owns the screen */
 #include "kbd.h"
 #include "clipboard.h"
 #include "learn.h"
@@ -626,7 +627,15 @@ static void cmd_paint(int argc, char **argv) {
 
 static void cmd_snake(int argc, char **argv) {
     (void)argc; (void)argv;
+    /* Claim the screen, exactly as wm.c's run_snake() does when you click the
+     * dock tile. This path was missing it: the clock task repaints the top bar
+     * every 250ms whoever owns the pixels, and snake_play() blocks task 0 for
+     * its whole run, so nothing repairs the damage. Typing `snake` got the
+     * black band across the score that clicking the icon was already immune
+     * to - one bug, two doors, and only one of them was shut. */
+    desktop_set_exclusive(1);
     int score = snake_play();
+    desktop_set_exclusive(0);
     /* Game took over the whole screen; put the desktop AND every window back. */
     console_clear();
     wm_repaint();
