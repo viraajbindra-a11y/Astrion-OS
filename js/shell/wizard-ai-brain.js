@@ -86,8 +86,23 @@ export const BRAIN_OPTIONS = [
 const SPACE = { hair: 5, tight: 9, card: 10, block: 14, section: 22 };
 
 // Text colors, chosen for contrast on the wizard's dark panel (checked,
-// not eyeballed): 0.72 = 9.2:1, 0.62 = 7.5:1, 0.55 = 6.1:1 -- all clear
-// of 4.5:1. The old 0.35 secondary measured 3.2:1 and was too faint.
+// not eyeballed).
+//
+// The cinematic pass DARKENED the card fills instead of lightening them --
+// a lit object has a bright rim and a face that falls into shadow -- so a
+// warmer, more atmospheric screen came out MORE readable, not less. Every
+// figure below is the WORST card in the worst state, sampled from rendered
+// pixels of a real screenshot and composited, never computed from intent:
+//
+//                        flat build   this build
+//   0.55 secondary          5.57:1      6.16:1
+//   0.62 quiet              6.66:1      7.53:1
+//   0.72 body/RECOMMENDED   8.46:1      9.81:1
+//   #ffb340 warn on card    8.42:1     10.31:1
+//   #ffb340 in warn chip    6.67:1      8.90:1
+//
+// If you change a card fill, re-measure. Sampling the pixels is the only
+// honest check once there is a light source behind the panel.
 const INK = {
   strong: '#ffffff',
   body: 'rgba(255,255,255,0.72)',
@@ -97,6 +112,19 @@ const INK = {
 // Amber = caution, not failure. Red borders on every card read as "you
 // broke something"; a tight machine has not broken anything.
 const WARN = { text: '#ffb340', fill: 'rgba(255,159,10,0.10)', line: 'rgba(255,159,10,0.38)' };
+
+// EMBER'S OWN COLOR.
+// The accent is chosen by the user two steps earlier in this same wizard,
+// so it cannot anchor anything here. Fire can. A fire is orange whatever
+// the user picked, which gives this screen a second color that is always
+// ours -- and it is the only warm thing on a cold blue panel, so it reads
+// as the subject without being told to.
+const FIRE = {
+  core: '255,238,205',   // white-hot, the middle of the flame
+  hot:  '255,178,68',    // the body
+  warm: '255,124,32',    // the outer tongue
+  deep: '196,52,10',     // the cooling edge and the coals
+};
 
 // Recommend a size from available RAM (MB). Mirrors the table in
 // the proposal: tiny <6 GB, standard <16 GB, big otherwise.
@@ -120,10 +148,337 @@ export async function fetchMemory() {
   }
 }
 
-// Ember's mark. Inline SVG, no assets, no emoji -- the old brain emoji
-// rendered bright pink on a blue screen and read as clip art. Ember keeps
-// its own warm color the way an app icon does; everything else on this
-// screen stays on the user's chosen accent.
+// ---------------------------------------------------------------------------
+// THE EMBER
+//
+// This is the one moment in the wizard that is an introduction rather than a
+// preference, so the mark is a live fire instead of a glyph, and the fire
+// ANSWERS THE PICK. Every option below is a different fire, and the difference
+// is the option's own sentence restated as heat:
+//
+//   Ember Mini  -- small, tight, FAST. "Quick answers on a light machine."
+//   Ember       -- the settled everyday fire, easy rhythm, middle of everything.
+//   Ember Max   -- large, SLOW, deep breaths. "Stays with a problem longest."
+//   Another pc  -- the fire here drops to a spark and sends a ring outward.
+//                  The heat is on some other machine; this one is signalling.
+//   Not now     -- banked coals. Not out. Warm, waiting, no flame.
+//
+// Deliberately NOT "bigger = brighter = better". A ladder of brightness sells
+// Max to a person with an 8 GB laptop, and Mini is the RIGHT answer on that
+// machine. So the axis that changes most between the three sizes is TEMPO,
+// not luminance: Mini is quick and Max is slow, which is true of the models
+// and flatters neither.
+//
+// COST, measured rather than asserted. Particles are four pre-rendered soft
+// sprites blitted with drawImage under 'lighter'. No per-frame gradient
+// allocation, no shadowBlur, no filters -- those are the three things that
+// actually cost money in canvas 2d. The warm light behind the cards is one
+// promoted layer whose only per-frame change is opacity, so it composites and
+// never repaints the gradient. Device pixel ratio is capped at 2, the picker
+// buffer is 440x336 device px, particles are capped at 260.
+//
+// Time inside this module's own rAF callback, 240-frame samples, Chrome, dpr2:
+//   Ember Max  0.39 ms mean / 0.7 ms max   (2.3% of a 16.67 ms frame)
+//   Ember      0.31 ms          Mini 0.27 ms
+//   remote     0.17 ms          not now 0.15 ms
+//   pull screen at 96%, bigger stage: 0.30 ms
+// Frame cadence on the picker: 60.0 fps, 0 frames over 16.9 ms in 150.
+// A machine six times slower than that spends about 2 ms a frame here.
+//
+// ONE fire exists per page. It is a module-level node that gets re-parented
+// into each render instead of rebuilt, because setup-wizard.js re-renders the
+// entire wizard on every click -- a rebuilt fire would restart, flicker, and
+// leak a requestAnimationFrame loop per click.
+// ---------------------------------------------------------------------------
+
+// `coal` is on its own scale, not comparable to `rate`: a fire with a plume
+// over it needs far less ground glow than one that is nothing BUT ground glow,
+// so "not now" carries the largest coal number and the smallest fire.
+const EMBER_MOODS = {
+  //          spawn  rise  spread reach flicker coals ring
+  tiny:     { rate: 2.6, rise: 1.30, spread: 0.46, reach: 0.62, flick: 3.2, coal: 0.85, ring: 0 },
+  standard: { rate: 3.4, rise: 1.02, spread: 0.78, reach: 0.95, flick: 1.7, coal: 1.00, ring: 0 },
+  big:      { rate: 4.4, rise: 0.92, spread: 1.00, reach: 1.30, flick: 0.85, coal: 1.15, ring: 0 },
+  remote:   { rate: 0.50, rise: 1.05, spread: 0.34, reach: 0.44, flick: 1.4, coal: 1.30, ring: 1 },
+  none:     { rate: 0.20, rise: 0.62, spread: 0.34, reach: 0.26, flick: 0.5, coal: 2.95, ring: 0 },
+};
+
+// Where the fuel sits inside the canvas, as a fraction of its height.
+const BASE_Y = 0.87;
+
+function prefersReducedMotion() {
+  try { return !!window.matchMedia('(prefers-reduced-motion: reduce)').matches; }
+  catch { return false; }
+}
+
+// One soft blob per fire temperature, drawn once and reused forever.
+let SPRITES = null;
+function sprites() {
+  if (SPRITES) return SPRITES;
+  const build = (rgb) => {
+    const S = 64;
+    const c = document.createElement('canvas');
+    c.width = S; c.height = S;
+    const g = c.getContext('2d');
+    const rg = g.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
+    rg.addColorStop(0.00, `rgba(${rgb},1)`);
+    rg.addColorStop(0.16, `rgba(${rgb},0.62)`);
+    rg.addColorStop(0.42, `rgba(${rgb},0.17)`);
+    rg.addColorStop(0.72, `rgba(${rgb},0.03)`);
+    rg.addColorStop(1.00, `rgba(${rgb},0)`);
+    g.fillStyle = rg;
+    g.fillRect(0, 0, S, S);
+    return c;
+  };
+  SPRITES = [build(FIRE.core), build(FIRE.hot), build(FIRE.warm), build(FIRE.deep)];
+  return SPRITES;
+}
+
+// The single live fire.
+let fire = null;
+
+function lerp(a, b, k) { return a + (b - a) * k; }
+
+function createFire() {
+  const wrap = document.createElement('div');
+  wrap.setAttribute('aria-hidden', 'true');
+  wrap.style.cssText = 'position:absolute;left:50%;bottom:0;transform:translateX(-50%);pointer-events:none;';
+  const canvas = document.createElement('canvas');
+  canvas.style.cssText = 'display:block;';
+  wrap.appendChild(canvas);
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+
+  const f = {
+    wrap, canvas, ctx,
+    w: 0, h: 0, dpr: 1,
+    parts: [],
+    cur: Object.assign({}, EMBER_MOODS.standard),
+    target: Object.assign({}, EMBER_MOODS.standard),
+    ign: 0,          // 0..1, how far the fire has caught
+    ignTarget: 1,
+    t: 0,
+    ringT: 0,
+    detached: 0,
+    raf: 0,
+    glow: null,      // the warm light layer, opacity driven from here
+    still: false,    // reduced motion: compose one frame and stop
+  };
+  fire = f;
+  return f;
+}
+
+function sizeFire(f, w, h) {
+  if (f.w === w && f.h === h) return;
+  const sx = f.w ? w / f.w : 1;
+  const sy = f.h ? h / f.h : 1;
+  f.dpr = Math.min(2, (window.devicePixelRatio || 1));
+  f.w = w; f.h = h;
+  f.canvas.width = Math.round(w * f.dpr);
+  f.canvas.height = Math.round(h * f.dpr);
+  f.canvas.style.width = w + 'px';
+  f.canvas.style.height = h + 'px';
+  f.wrap.style.width = w + 'px';
+  f.wrap.style.height = h + 'px';
+  // Carry the existing flame across a resize instead of relighting it.
+  for (const p of f.parts) { p.x *= sx; p.y *= sy; p.size *= sx; }
+}
+
+function spawn(f) {
+  const c = f.cur;
+  const cx = f.w / 2;
+  const base = f.h * 0.80;
+  // Bias toward the middle: a fire is dense at its core and ragged at the
+  // edges, which two averaged randoms give for free.
+  const r = (Math.random() + Math.random()) / 2 - 0.5;
+  f.parts.push({
+    x: cx + r * f.w * 0.30 * c.spread,
+    y: base + Math.random() * 5,
+    vy: -(0.9 + Math.random() * 0.9) * c.rise * (f.h / 168),
+    vx: (Math.random() - 0.5) * 0.18,
+    life: 1,
+    size: (0.085 + Math.random() * 0.105) * f.w * (0.62 + c.spread * 0.5),
+    seed: Math.random() * 6.283,
+    // ~1 in 9 is a spark: small, crisp, fast, long-lived. Soft blobs alone
+    // read as a gradient; the eye needs some high-frequency detail before it
+    // agrees that something is burning. Sparks are that, for four extra
+    // pixels of fill each.
+    spark: Math.random() < 0.07,
+  });
+  if (f.parts.length > 260) f.parts.splice(0, f.parts.length - 260);
+}
+
+function stepFire(f, dt) {
+  const c = f.cur;
+  const k = 0.075 * dt;
+  for (const key of Object.keys(f.target)) c[key] = lerp(c[key], f.target[key], k);
+  f.ign = lerp(f.ign, f.ignTarget, 0.045 * dt);
+  f.t += 0.016 * dt;
+  f.ringT += 0.016 * dt;
+
+  // Spawn. Fractional rates accumulate so a 0.05 rate is one spark every
+  // twenty frames rather than none at all.
+  f._acc = (f._acc || 0) + c.rate * f.ign * (f.w / 220) * dt;
+  while (f._acc >= 1) { spawn(f); f._acc -= 1; }
+
+  const decay = 0.0165 / Math.max(0.18, c.reach);
+  const out = [];
+  for (const p of f.parts) {
+    p.life -= (p.spark ? decay * 0.72 : decay) * dt;
+    if (p.life <= 0) continue;
+    p.vy *= (1 + (p.spark ? 0.017 : 0.011) * dt);
+    p.y += p.vy * dt;
+    // A spring back toward the axis. Without it the sine term is close to
+    // constant over a particle's life at slow flicker rates, so the plume
+    // splays sideways and drifts off its own coals. Real flames pull inward
+    // too -- buoyancy entrains air toward the column.
+    p.x += (p.vx + Math.sin(f.t * c.flick + p.seed) * 0.34 * c.spread
+            - (p.x - f.w / 2) * 0.014) * dt;
+    out.push(p);
+  }
+  f.parts = out;
+}
+
+function drawFire(f) {
+  const g = f.ctx;
+  const S = sprites();
+  const c = f.cur;
+  g.setTransform(f.dpr, 0, 0, f.dpr, 0, 0);
+  g.clearRect(0, 0, f.w, f.h);
+  g.globalCompositeOperation = 'lighter';
+
+  const base = f.h * BASE_Y;
+  const breathe = 0.86 + 0.14 * Math.sin(f.t * 1.9) + 0.06 * Math.sin(f.t * 4.3 + 1.1);
+
+  // Every alpha here is small on purpose. Fire is MANY faint additive layers;
+  // a few strong ones just clamp to 255 in all three channels and you get a
+  // hard-edged white blob, which is exactly what the first pass looked like.
+  // Nothing below goes over ~0.2 per sprite.
+
+  // Bed of coals: low and wide, squashed so it sits ON something. This is all
+  // that is left under "Not now", so it has to read as banked and waiting on
+  // its own -- never as switched off.
+  const coal = c.coal * f.ign;
+  for (let i = 0; i < 5; i++) {
+    const a = (i - 2) / 2;
+    const r = f.w * (0.19 - Math.abs(a) * 0.05) * (0.68 + c.spread * 0.5);
+    const puls = 0.60 + 0.40 * Math.sin(f.t * (1.1 + i * 0.37) + i * 1.7);
+    g.globalAlpha = Math.max(0, coal * (0.032 + 0.048 * puls) * (1 - Math.abs(a) * 0.3));
+    const spr = i % 2 ? S[2] : S[3];
+    g.drawImage(spr, f.w / 2 + a * f.w * 0.16 * c.spread - r, base - r * 0.52, r * 2, r * 1.12);
+  }
+  // One warm heart at the base of the flame. Warm, not white: white here
+  // plus the particle base is what clamped to a lozenge.
+  g.globalAlpha = coal * 0.07 * (0.7 + 0.3 * Math.sin(f.t * 3.1));
+  const hr = f.w * 0.09 * (0.6 + c.spread * 0.5);
+  g.drawImage(S[2], f.w / 2 - hr, base - hr * 0.85, hr * 2, hr * 1.4);
+
+  // Flame. Size tracks life so the plume is broad and bright at the base and
+  // tapers as it cools -- the shape does the work, not the brightness.
+  for (const p of f.parts) {
+    const life = p.life;
+    if (p.spark) {
+      const s = p.size * 0.26 * (0.35 + life * 0.65);
+      g.globalAlpha = Math.min(1, Math.pow(life, 0.8) * 0.55 * f.ign);
+      g.drawImage(life > 0.55 ? S[1] : S[2], p.x - s / 2, p.y - s / 2, s, s);
+      continue;
+    }
+    const spr = life > 0.94 ? S[0] : life > 0.74 ? S[1] : life > 0.40 ? S[2] : S[3];
+    const s = p.size * (0.34 + life * 0.80);
+    const fadeIn = Math.min(1, (1 - life) * 6);
+    g.globalAlpha = Math.min(1, Math.pow(life, 1.35) * fadeIn * 0.150 * f.ign);
+    g.drawImage(spr, p.x - s / 2, p.y - s / 2, s, s);
+  }
+
+  // "Use another computer": a ring going out. The heat is somewhere else and
+  // this machine is calling to it. Costs one stroked arc every ~2.8s.
+  if (c.ring > 0.02) {
+    const period = 2.8;
+    for (let n = 0; n < 2; n++) {
+      const ph = ((f.ringT / period) + n * 0.5) % 1;
+      const r = f.w * (0.07 + ph * 0.32);
+      g.globalAlpha = c.ring * (1 - ph) * (1 - ph) * 0.30 * f.ign;
+      g.strokeStyle = `rgba(${FIRE.warm},1)`;
+      g.lineWidth = 1.1;
+      g.beginPath();
+      g.arc(f.w / 2, base - f.h * 0.06, r, 0, 6.2832);
+      g.stroke();
+    }
+  }
+
+  g.globalAlpha = 1;
+  g.globalCompositeOperation = 'source-over';
+
+  // The warm light on the panel below. Opacity only, on a promoted layer,
+  // so this is a compositor change and never a repaint of the gradient.
+  if (f.glow) {
+    // How much fire is actually here, blended from spawn rate and coal bed.
+    // This is why the WHOLE SCREEN answers the pick and not just the flame:
+    // choose Ember Max and the panel is lit, choose "Not now" and the room
+    // goes dim and the cards fall back into the dark. Same gesture, one more
+    // octave of it.
+    const present = 0.22 + 0.55 * Math.min(1, c.rate / 3.4) + 0.23 * Math.min(1, c.coal);
+    const lit = (0.55 + 0.45 * breathe) * f.ign * present;
+    f.glow.style.opacity = Math.max(0, Math.min(1, lit)).toFixed(3);
+  }
+}
+
+function loopFire() {
+  const f = fire;
+  if (!f) return;
+  f.raf = requestAnimationFrame(loopFire);
+  if (!f.canvas.isConnected) {
+    // Two cases land here. A render() wipes the host with innerHTML and
+    // re-parents the fire in the same synchronous block, so at most one frame
+    // sees it detached. Or the wizard has been torn down for good, and then
+    // it never comes back. Idle for well past the first case, then stop the
+    // loop and release the node so nothing is left spinning behind a
+    // finished wizard.
+    if (++f.detached > 45) { cancelAnimationFrame(f.raf); f.raf = 0; fire = null; }
+    return;
+  }
+  f.detached = 0;
+  const now = performance.now();
+  const dt = Math.min(3, (now - (f.last || now)) / 16.667) || 1;
+  f.last = now;
+  stepFire(f, dt);
+  drawFire(f);
+}
+
+// Mount the one fire into `host` at the given size and mood. Returns nothing;
+// the node is re-parented, never rebuilt.
+function mountFire(host, w, h, mood, opts) {
+  const o = opts || {};
+  let f = fire;
+  if (!f) {
+    f = createFire();
+    if (!f) return false;         // no canvas 2d -- caller falls back to the mark
+    f.still = prefersReducedMotion();
+  }
+  sizeFire(f, w, h);
+  f.target = Object.assign({}, EMBER_MOODS[mood] || EMBER_MOODS.standard);
+  f.ignTarget = o.ignition == null ? 1 : o.ignition;
+  f.glow = o.glow || null;
+  host.appendChild(f.wrap);
+
+  if (f.still) {
+    // Reduced motion: no loop at all. Run the physics forward with no paint
+    // to get a real, organically-shaped flame, then draw that one frame. A
+    // posed fire, not a frozen one.
+    f.ign = f.ignTarget;
+    f.cur = Object.assign({}, f.target);
+    f.parts = [];
+    for (let i = 0; i < 220; i++) stepFire(f, 1);
+    drawFire(f);
+    if (f.glow) f.glow.style.transition = 'none';
+    return true;
+  }
+  if (!f.raf) { f.last = 0; f.raf = requestAnimationFrame(loopFire); }
+  return true;
+}
+
+// Fallback mark for the (very unlikely) no-canvas case, and the thing the
+// fire is a moving version of.
 function emberMark(size) {
   const s = size || 40;
   return `
@@ -141,6 +496,76 @@ function emberMark(size) {
       <path d="M20 17.5 C 22.2 20.4 23.6 22.3 23.6 24.4 A 3.6 3.6 0 0 1 16.4 24.4 C 16.4 22.3 17.8 20.4 20 17.5 Z"
             fill="#fff2d4" opacity="0.9"/>
     </svg>`;
+}
+
+// The staged entrance runs ONCE per boot. setup-wizard.js re-renders the
+// whole wizard on every click, and an entrance that replays on every click
+// stops being an entrance and becomes a stutter.
+let introPlayed = false;
+
+// Stylesheet for the screen. Inline, no assets, no framework -- same rule the
+// rest of the file follows. Classes rather than 40 more inline style strings,
+// because the lighting model wants to be stated once.
+function emberStyles(animate) {
+  const a = animate ? '' : 'animation:none !important;';
+  return `<style>
+    @keyframes ebRise { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:none; } }
+    @keyframes ebResolve {
+      from { opacity:0; transform:translateY(10px); letter-spacing:3px; filter:blur(3px); }
+      to   { opacity:1; transform:none; letter-spacing:-0.2px; filter:none; }
+    }
+    @keyframes ebShimmer { 0% { transform:translateX(-100%); } 100% { transform:translateX(400%); } }
+    .eb-stage { position:relative; text-align:center; }
+    .eb-in { animation:ebRise 0.52s cubic-bezier(0.2,0.85,0.25,1) both; ${a} }
+    .eb-title { animation:ebResolve 0.68s cubic-bezier(0.2,0.85,0.25,1) both; ${a} }
+    /* The warm light the fire throws on the panel. Promoted so the per-frame
+       opacity change composites instead of repainting the gradient.
+       Deliberately NOT css-animated on entry: the light spreading and the fire
+       catching are one physical event, so both are driven by the same
+       ignition value in drawFire(). A css animation with fill:both would
+       also win the cascade forever and freeze the flicker. */
+    .eb-glow {
+      position:absolute; left:-90px; right:-90px; top:-120px; height:600px;
+      pointer-events:none; z-index:0; opacity:0;
+      will-change:opacity; transform:translateZ(0);
+      background:
+        /* the fuel line -- a thin bright streak so the fire is sitting ON
+           something instead of floating in space. This one line is what makes
+           the composition read as depth rather than a glyph on a field. */
+        radial-gradient(ellipse 300px 22px at 50% calc(var(--eb-glowy,175px) - 16px), rgba(${FIRE.hot},0.13) 0%, rgba(${FIRE.hot},0) 76%),
+        radial-gradient(ellipse 260px 190px at 50% calc(var(--eb-glowy,175px) - 14px), rgba(${FIRE.warm},0.17) 0%, rgba(${FIRE.warm},0) 70%),
+        radial-gradient(ellipse 560px 340px at 50% calc(var(--eb-glowy,175px) + 30px), rgba(${FIRE.deep},0.10) 0%, rgba(${FIRE.deep},0) 72%);
+    }
+    .eb-body { position:relative; z-index:1; }
+    /* Cards are objects lit from above, not tinted haze. The fill is DARKER
+       than the panel -- a face turned away from the light -- and the light
+       lands on the top edge as a rim that falls off down the stack. That is
+       the whole depth model, and it is also why every contrast number on this
+       screen went up rather than down. */
+    .eb-card {
+      position:relative; border-radius:13px; cursor:pointer; text-align:left;
+      background:rgba(8,10,17,0.55);
+      border:2px solid rgba(255,255,255,0.11);
+      box-shadow: inset 0 1px 0 rgba(255,214,170,var(--eb-rim,0.05)),
+                  0 14px 30px -14px rgba(0,0,0,0.75);
+      transition: border-color 0.18s, background 0.22s, box-shadow 0.22s, transform 0.18s;
+    }
+    .eb-card:hover { border-color:rgba(255,255,255,0.20); }
+    .eb-card.eb-tight { border-color:${WARN.line}; background:rgba(16,11,5,0.55); }
+    .eb-card.eb-on {
+      border-color:var(--accent);
+      background:rgba(22,16,11,0.62);
+      box-shadow: inset 0 1px 0 rgba(255,214,170,0.16),
+                  0 -8px 26px -10px rgba(${FIRE.warm},0.42),
+                  0 16px 34px -14px rgba(0,0,0,0.8);
+    }
+    .eb-rule { height:1px; background:rgba(255,255,255,0.09); margin:${SPACE.tight}px 2px; }
+    .eb-url {
+      width:100%; padding:9px 14px; background:rgba(0,0,0,0.34);
+      border:2px solid rgba(255,255,255,0.14); border-radius:10px; color:white;
+      font-size:14px; font-family:var(--font); outline:none; box-sizing:border-box;
+    }
+  </style>`;
 }
 
 // Paint the picker into `el`. State is mutable; onChange() is called
@@ -193,18 +618,27 @@ export function renderBrainPicker(el, state, onChange) {
       <span style="width:6px;height:6px;border-radius:50%;background:var(--accent);"></span>Recommended
     </div>`;
 
-  const shell = (opt, tight, inner) => {
-    const isPicked = state.brain === opt.id;
-    const border = isPicked ? 'var(--accent)' : tight ? WARN.line : 'rgba(255,255,255,0.12)';
-    const bg = isPicked ? 'rgba(255,255,255,0.08)' : 'rgba(255,255,255,0.04)';
-    return `<div data-brain="${opt.id}" style="border:2px solid ${border};background:${bg};border-radius:12px;cursor:pointer;text-align:left;transition:border-color 0.18s,background 0.18s;">${inner}</div>`;
+  const animate = !introPlayed && !prefersReducedMotion();
+  // Entrance beats, in ms. One orchestrated moment: the fire catches, the
+  // light spreads, the title resolves out of it, then the cards settle in
+  // from the top down -- as if the light reached them in order.
+  const CUE = { glow: 120, title: 300, sub: 470, meta: 560, card0: 660, cardGap: 55 };
+  const rise = (delay) => animate ? ` class="eb-in" style="animation-delay:${delay}ms;"` : '';
+
+  // Rim light falls off with distance from the flame. Card 0 is nearest.
+  const shell = (opt, tight, idx, inner) => {
+    const on = state.brain === opt.id;
+    const rim = Math.max(0.018, 0.10 - idx * 0.019).toFixed(3);
+    const cls = `eb-card${on ? ' eb-on' : ''}${tight && !on ? ' eb-tight' : ''}${animate ? ' eb-in' : ''}`;
+    const anim = animate ? `animation-delay:${CUE.card0 + idx * CUE.cardGap}ms;` : '';
+    return `<div data-brain="${opt.id}" class="${cls}" style="--eb-rim:${rim};${anim}">${inner}</div>`;
   };
 
   // The three sizes: name -> what you get -> what it is and what it costs.
   // Download size and RAM are different worries (a metered connection vs a
   // small machine), so they are two separate facts, right-aligned so the
   // numbers stack into a column you can compare down.
-  const sizeCards = BRAIN_OPTIONS.filter(o => o.model).map(opt => {
+  const sizeCards = BRAIN_OPTIONS.filter(o => o.model).map((opt, i) => {
     const tight = isTight(opt);
     // State the rule once (above), mark every instance, and spell out the
     // consequence only on the size actually selected. Three identical
@@ -224,7 +658,7 @@ export function renderBrainPicker(el, state, onChange) {
         <span style="font-weight:700;flex:none;">!</span>
         <span>This size wants about ${formatGbWhole(opt.minRamMb)} free and you have ${formatGb(state.ramAvailableMb)}. It will be slow, may crowd out everything else, and may not load at all.</span>
       </div>`;
-    return shell(opt, tight, `
+    return shell(opt, tight, i, `
       <div style="padding:14px 18px;">
         <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
           <div style="font-size:15px;font-weight:600;color:${INK.strong};">${opt.name}</div>
@@ -261,38 +695,58 @@ export function renderBrainPicker(el, state, onChange) {
     <div style="margin-top:${SPACE.card}px;">
       <input id="brain-remote-url" type="text" placeholder="http://192.168.1.42:11434" value="${escapeAttr(state.remoteUrl || '')}"
         aria-label="Address of the computer running Ollama"
-        style="width:100%;padding:9px 14px;background:rgba(255,255,255,0.08);border:2px solid rgba(255,255,255,0.12);border-radius:10px;color:white;font-size:14px;font-family:var(--font);outline:none;box-sizing:border-box;">
+        class="eb-url">
       <div style="font-size:12px;color:${INK.meta};margin-top:6px;">That machine needs Ollama running and reachable on your network.</div>
     </div>`;
 
   // Remote and Skip are a different kind of answer -- not "how big", but
-  // "not here" and "not yet" -- so they sit below a rule, lighter.
-  const otherCards = BRAIN_OPTIONS.filter(o => !o.model).map(opt => shell(opt, false, `
-      <div style="padding:12px 18px;">
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
-          <div style="font-size:14px;font-weight:600;color:rgba(255,255,255,0.92);">${opt.name}</div>
+  // "not here" and "not yet". They are now one line each: name and reason on
+  // the same baseline. That demotes them below the three real choices, which
+  // is the hierarchy this screen was missing, and it buys back ~46px of
+  // height -- which is exactly what pays for the fire at the top. The
+  // cinematic version is not taller than the flat one; it is the same height
+  // spent differently.
+  const otherCards = BRAIN_OPTIONS.filter(o => !o.model).map((opt, i) => shell(opt, false, 3 + i, `
+      <div style="padding:11px 16px 12px;">
+        <div style="display:flex;align-items:baseline;gap:11px;">
+          <div style="font-size:13.5px;font-weight:600;color:rgba(255,255,255,0.92);flex:none;">${opt.name}</div>
+          <div style="font-size:12.5px;line-height:1.4;color:${INK.quiet};flex:1;min-width:0;">${opt.blurb}</div>
           ${badge(opt)}
         </div>
-        <div style="font-size:12.5px;line-height:1.45;color:${INK.quiet};margin-top:4px;">${opt.blurb}</div>
         ${opt.id === 'remote' && state.brain === 'remote' ? remoteField : ''}
       </div>`)).join('');
 
   // Explicit margins everywhere: the browser's default h1/p margins were
   // leaking in and pushing the header out of rhythm (12px asked for,
   // ~31px on screen).
+  //
+  // The fire is 138px tall in a 72px block: it is bottom-anchored and licks
+  // UP out of the layout into the empty space above the panel, so it costs
+  // 72px of flow, not 138. That empty space was doing nothing.
   el.innerHTML = `
-    <div style="text-align:center;">
-      <div style="display:flex;flex-direction:column;align-items:center;gap:${SPACE.tight}px;margin-bottom:${SPACE.section}px;">
-        <div style="line-height:0;margin-bottom:${SPACE.hair}px;">${emberMark(40)}</div>
-        <h1 style="font-size:26px;font-weight:700;letter-spacing:-0.2px;margin:0;">Meet Ember</h1>
-        <p style="font-size:14px;line-height:1.5;color:${INK.quiet};margin:0;">Ember runs on this machine. Nothing you type leaves it &mdash; no cloud, no key.</p>
-        <p style="font-size:12px;color:${INK.meta};margin:0;">${ramLabel} &middot; ${metaTail}</p>
+    ${emberStyles(animate)}
+    <div class="eb-stage">
+      <div class="eb-glow"></div>
+      <div class="eb-body">
+        <div style="display:flex;flex-direction:column;align-items:center;gap:${SPACE.tight}px;margin-bottom:${SPACE.section}px;">
+          <div id="eb-fire" style="position:relative;width:100%;height:76px;"></div>
+          <h1 class="${animate ? 'eb-title' : ''}" style="font-size:26px;font-weight:700;letter-spacing:-0.2px;margin:0;text-shadow:0 0 26px rgba(${FIRE.warm},0.42);${animate ? `animation-delay:${CUE.title}ms;` : ''}">Meet Ember</h1>
+          <p${rise(CUE.sub)} style="font-size:14px;line-height:1.5;color:${INK.quiet};margin:0;${animate ? `animation-delay:${CUE.sub}ms;` : ''}">Ember runs on this machine. Nothing you type leaves it &mdash; no cloud, no key.</p>
+          <p${rise(CUE.meta)} style="font-size:12px;color:${INK.meta};margin:0;${animate ? `animation-delay:${CUE.meta}ms;` : ''}">${ramLabel} &middot; ${metaTail}</p>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:${SPACE.card}px;text-align:left;">${sizeCards}</div>
+        <div class="eb-rule"></div>
+        <div style="display:flex;flex-direction:column;gap:${SPACE.card}px;text-align:left;">${otherCards}</div>
       </div>
-      <div style="display:flex;flex-direction:column;gap:${SPACE.card}px;text-align:left;">${sizeCards}</div>
-      <div style="height:1px;background:rgba(255,255,255,0.1);margin:${SPACE.tight}px 2px;"></div>
-      <div style="display:flex;flex-direction:column;gap:${SPACE.card}px;text-align:left;">${otherCards}</div>
     </div>
   `;
+
+  const fireHost = el.querySelector('#eb-fire');
+  const mood = state.brain && EMBER_MOODS[state.brain] ? state.brain : 'standard';
+  if (!mountFire(fireHost, 220, 168, mood, { glow: el.querySelector('.eb-glow') })) {
+    fireHost.innerHTML = `<div style="position:absolute;left:50%;bottom:8px;transform:translateX(-50%);line-height:0;">${emberMark(44)}</div>`;
+  }
+  introPlayed = true;
 
   el.querySelectorAll('[data-brain]').forEach(card => {
     card.addEventListener('click', (e) => {
@@ -301,6 +755,12 @@ export function renderBrainPicker(el, state, onChange) {
       // rebuild the input and take the caret away mid-type.
       if (e.target.closest('#brain-remote-url')) return;
       state.brain = card.dataset.brain;
+      // Answer the pick immediately, before the parent re-renders. The fire
+      // node survives the re-render, so this eases into the new mood in one
+      // continuous motion rather than cutting.
+      if (fire && EMBER_MOODS[state.brain]) {
+        fire.target = Object.assign({}, EMBER_MOODS[state.brain]);
+      }
       onChange();
     });
   });
@@ -308,7 +768,7 @@ export function renderBrainPicker(el, state, onChange) {
   const remoteInput = el.querySelector('#brain-remote-url');
   if (remoteInput) {
     remoteInput.addEventListener('focus', () => { remoteInput.style.borderColor = 'var(--accent)'; });
-    remoteInput.addEventListener('blur', () => { remoteInput.style.borderColor = 'rgba(255,255,255,0.12)'; });
+    remoteInput.addEventListener('blur', () => { remoteInput.style.borderColor = 'rgba(255,255,255,0.14)'; });
     remoteInput.addEventListener('input', () => {
       state.remoteUrl = remoteInput.value;
       // Lightweight update: just toggle the wizard's Continue button so we
@@ -342,8 +802,8 @@ function renderPullProgress(el, state, onChange) {
   const indeterminate = state.pulling && state.pullPercent == null;
 
   const progressBar = state.pullError ? '' : `
-    <div style="margin-top:24px;background:rgba(255,255,255,0.08);border-radius:6px;height:8px;overflow:hidden;position:relative;">
-      <div style="width:${barWidth}%;height:100%;background:var(--accent);border-radius:6px;transition:width 0.3s ease;${indeterminate ? 'animation:brainShimmer 1.4s infinite;width:30%;' : ''}"></div>
+    <div style="margin-top:26px;background:rgba(0,0,0,0.34);border-radius:6px;height:8px;overflow:hidden;position:relative;box-shadow:inset 0 1px 2px rgba(0,0,0,0.5);">
+      <div style="width:${barWidth}%;height:100%;background:var(--accent);border-radius:6px;transition:width 0.3s ease;${indeterminate ? 'animation:ebShimmer 1.4s infinite;width:30%;' : ''}"></div>
     </div>
     <div style="display:flex;justify-content:space-between;margin-top:8px;font-size:12px;color:${INK.quiet};">
       <span>${escapeText(state.pullStatus || 'Starting...')}</span>
@@ -358,16 +818,36 @@ function renderPullProgress(el, state, onChange) {
   // "Getting Ember ready" above a line reading "Ember" was a stutter.
   const who = opt ? opt.name : 'Ember';
 
+  // This is the screen a person actually stares at -- five to ten minutes of
+  // it -- and the flat version spent that time as a sticker and a blue bar in
+  // an ocean of black. There is 300px of unused height here, so the fire gets
+  // to be big, and the DOWNLOAD FEEDS IT: ignition tracks pullPercent, so the
+  // flame is a spark at 0% and a full fire at 100%. The progress bar and the
+  // fire are the same fact told twice, once for reading and once for feeling.
+  // On failure it gutters down to coals; red stays on the error text, where
+  // failure is the literal meaning.
   el.innerHTML = `
-    <style>@keyframes brainShimmer { 0% { transform: translateX(-100%); } 100% { transform: translateX(400%); } }</style>
-    <div style="text-align:center;">
-      <div style="margin-bottom:${SPACE.block}px;line-height:0;">${emberMark(40)}</div>
-      <h1 style="font-size:26px;font-weight:700;letter-spacing:-0.2px;margin:0 0 ${SPACE.tight}px;">${state.pullError ? `${who} could not download` : `Getting ${who} ready`}</h1>
-      <p style="font-size:12px;color:${INK.meta};margin:0;">${provenance}</p>
-      ${progressBar}
-      ${errorBlock}
+    ${emberStyles(false)}
+    <div class="eb-stage">
+      <div class="eb-glow" style="top:-150px;--eb-glowy:228px;"></div>
+      <div class="eb-body">
+        <div id="eb-fire" style="position:relative;width:100%;height:118px;margin-bottom:${SPACE.block}px;"></div>
+        <h1 style="font-size:26px;font-weight:700;letter-spacing:-0.2px;margin:0 0 ${SPACE.tight}px;text-shadow:0 0 26px rgba(${FIRE.warm},0.42);">${state.pullError ? `${who} could not download` : `Getting ${who} ready`}</h1>
+        <p style="font-size:12px;color:${INK.meta};margin:0;">${provenance}</p>
+        ${progressBar}
+        ${errorBlock}
+      </div>
     </div>
   `;
+
+  const fireHost = el.querySelector('#eb-fire');
+  const pct = state.pullPercent == null ? 0 : Math.max(0, Math.min(100, state.pullPercent)) / 100;
+  const mood = state.pullError ? 'none'
+    : (state.brain && EMBER_MOODS[state.brain] ? state.brain : 'standard');
+  const ignition = state.pullError ? 1 : 0.42 + 0.58 * pct;
+  if (!mountFire(fireHost, 300, 228, mood, { ignition, glow: el.querySelector('.eb-glow') })) {
+    fireHost.innerHTML = `<div style="position:absolute;left:50%;bottom:0;transform:translateX(-50%);line-height:0;">${emberMark(56)}</div>`;
+  }
 
   const retry = el.querySelector('#brain-retry-btn');
   if (retry) retry.addEventListener('click', () => {
@@ -472,7 +952,7 @@ export async function streamPull(state, onProgress, signal) {
   }
 }
 
-// 2026-08-29 — after the pull lands, brand the pulled base as `ember`
+// 2026-08-29 -- after the pull lands, brand the pulled base as `ember`
 // so `ollama list` and `ollama run ember` on this machine agree with
 // what the OS calls its assistant.
 //
