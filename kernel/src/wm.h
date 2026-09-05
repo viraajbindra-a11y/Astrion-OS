@@ -42,6 +42,18 @@ void wm_repaint(void);
 int  wm_handle_key(char c);         /* 1 if a focused app consumed the key */
 int  wm_active(void);               /* 1 if an app window is open */
 
+/* Name of the focused (topmost) window, or 0 when nothing is open. The top bar
+ * shows this next to the Astrion mark.
+ *
+ * A PULL, not a push, and that is the whole design: focus changes only ever
+ * through open / close / raise, and every one of those already ends in
+ * repaint_all() -> draw_topbar(), which reads this while it paints. There is
+ * therefore no cached copy of the title anywhere, and so no way for the bar to
+ * be showing the name of a window that is no longer on top. A
+ * desktop_set_focus_title() would have been that cache. The pointer is only
+ * valid for the duration of the call — the Editor's title is a live buffer. */
+const char *wm_focused_title(void);
+
 /* Programmatic launch (dock icon index: 0=Terminal 1=Files 2=Editor
  * 3=Snake 4=Assistant 5=Monitor 6=Calculator 7=Settings) and a direct editor
  * open. Used by the dock and by the shell's `files` / `edit` / `assistant` /

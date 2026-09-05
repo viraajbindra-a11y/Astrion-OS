@@ -34,9 +34,22 @@ static void power_reboot(void) { }
 /* The harness has no PS/2 mouse, so nothing is ever cached over the pixels. */
 static void mouse_invalidate_rect(int x, int y, int w, int h)
                                  { (void)x; (void)y; (void)w; (void)h; }
+/* The top bar reports heap pressure and link state, so it reads the two
+ * subsystems that can answer those honestly. Stubbed for the harness the same
+ * way the power calls are — it paints screens, it has no heap and no NIC, and
+ * a status line is not what it is there to look at. */
+static uint64_t heap_total(void) { return 0; }
+static uint64_t heap_used(void)  { return 0; }
+static int e1000_present(void)   { return 0; }
+static int e1000_link_up(void)   { return 0; }
+/* No window manager either, so nothing has focus. */
+static const char *wm_focused_title(void) { return 0; }
 #else
 #include "power.h"
 #include "mouse.h"
+#include "heap.h"     /* heap_used / heap_total — the bar's memory reading */
+#include "e1000.h"    /* e1000_present / e1000_link_up — the bar's link light */
+#include "wm.h"       /* wm_focused_title — what the bar says you are in */
 #define CPU_HALT() __asm__ volatile("cli; hlt")
 #endif
 
@@ -54,7 +67,8 @@ static void mouse_invalidate_rect(int x, int y, int w, int h)
  * TITLE_H matches wm.c's TITLE_H deliberately. The Terminal's title bar was 34
  * and every other window's was 30, so two windows side by side wore visibly
  * different chrome. Astrion has one kind of window. */
-#define TOPBAR_H    44u
+/* TOPBAR_H comes from desktop.h now — shared with snake.c, which paints a bar
+ * of its own at exactly this height. See the note at its definition. */
 #define DOCK_H      86u
 #define DESK_GAP    40u
 /* Window chrome comes from desktop.h now — shared with wm.c, which manages the
@@ -64,10 +78,10 @@ static void mouse_invalidate_rect(int x, int y, int w, int h)
 #define ICON_SZ     52u
 #define ICON_GAP    34u
 
-/* Corner radii. Windows are gently rounded; dock tiles are rounded hard enough
- * to read as objects rather than swatches (~23% of the tile, the proportion a
+/* Corner radii. Windows are gently rounded (WIN_R, in desktop.h now — Snake's
+ * play field wears the same corner); dock tiles are rounded hard enough to read
+ * as objects rather than swatches (~23% of the tile, the proportion a
  * squircle-ish app tile wants). */
-#define WIN_R        8u
 #define TILE_R      12u
 
 /* Peak darkening under a floating surface, out of 256. 150 ≈ 59% — deep enough
@@ -81,6 +95,24 @@ static void mouse_invalidate_rect(int x, int y, int w, int h)
 #define PWR_MARGIN  14u    /* button's gap to the screen's right edge */
 #define CLOCK_PAD   68u    /* clock's right margin: clears the button */
 #define CLOCK_MAXW  200u   /* fixed clear band — see desktop_draw_clock */
+
+/* Gap on either side of the bar's hairline dividers. One number so the divider
+ * before the focused app's name is spaced exactly like the one before the
+ * power button. */
+#define BAR_SEP      14u
+
+/* ─── The live status block ───
+ *
+ * Sits immediately left of the clock's band and never touches it: its right
+ * edge is the clock band's left edge minus STATUS_GAP, and it is right-aligned
+ * inward from there. STATUS_MAXW is a FIXED clear band for the same reason the
+ * clock's is — a string that gets NARROWER (heap 100% -> 9%, "No link" ->
+ * "Link") starts its clear too far right to cover the wider one already there
+ * and leaves the head of the old string behind. The widest string this can
+ * build is "Heap 100%    No link", about 130px in AF_REG13, so 240 is not
+ * close to tight. */
+#define STATUS_GAP   18u
+#define STATUS_MAXW 240u
 
 /* Geometry computed at init. */
 static uint32_t SW, SH;
@@ -351,13 +383,152 @@ static void draw_dial_glyph(int cx, int cy, int r, int t, uint32_t color) {
  * (which are still the defaults it hands back on a fresh boot). One read per
  * repaint, not per row — the wallpaper must be one gradient even if a setting
  * changed halfway down the screen. */
-static void draw_wallpaper(void) {
+/* The ramp is over ABSOLUTE y against the full screen height, not over the
+ * band — that is what makes a band redraw pixel-identical to the rows the full
+ * wallpaper would have put there. A band that ramped across itself would be a
+ * whole second gradient sitting inside the first one. */
+void desktop_wallpaper_band(uint32_t y0, uint32_t h) {
+    if (!SH || !SW) return;
+    if (y0 >= SH) return;
+    if (h > SH - y0) h = SH - y0;        /* wrap-safe: never y0 + h > SH */
     uint32_t top = settings_wall_top(), bot = settings_wall_bot();
-    for (uint32_t y = 0; y < SH; y++)
+    for (uint32_t y = y0; y < y0 + h; y++)
         fb_rect_x(0, y, SW, 1, lerp_color(top, bot, (int)y, (int)SH));
 }
 
-static void draw_topbar(void) {
+static void draw_wallpaper(void) { desktop_wallpaper_band(0, SH); }
+
+/* ─── The status block: heap pressure and link state ───
+ *
+ * Two rules govern what is allowed up here.
+ *
+ * EVERYTHING IS REAL. heap_used()/heap_total() are the allocator's own
+ * numbers, the same ones the System Monitor breaks down in KB. The link words
+ * come from e1000_link_up(), which reads STATUS.LU off the card. Nothing is
+ * padded out with a number we cannot source: on a machine with no NIC the
+ * network half simply is not drawn, because an indicator for hardware you do
+ * not have is decoration.
+ *
+ * IT IS CHROME, NOT A DASHBOARD. So it is one muted line at the small size,
+ * and the clock stays the only white thing on the right — the bar has one
+ * thing you look AT and everything else is there when you go looking. It also
+ * deliberately does NOT carry uptime or a task count: the Monitor's header
+ * claims those two as the things only it knows, and a bar that repeats them
+ * takes away the Monitor's reason to be opened.
+ */
+static char g_status[48];      /* the status string currently ON SCREEN */
+
+static int str_same(const char *a, const char *b) {
+    while (*a && *a == *b) { a++; b++; }
+    return *a == *b;
+}
+
+/* Append s to out[] at k, never past cap-1. Returns the new length. */
+static int st_str(char *out, int k, int cap, const char *s) {
+    while (*s && k < cap - 1) out[k++] = *s++;
+    out[k] = 0;
+    return k;
+}
+
+/* Append v as decimal. u32 only: 32-bit division is a native instruction, and
+ * a 64-bit one would pull in a libgcc helper this kernel does not link. */
+static int st_num(char *out, int k, int cap, uint32_t v) {
+    char t[12];
+    int n = 0;
+    do { t[n++] = (char)('0' + (v % 10u)); v /= 10u; } while (v && n < (int)sizeof(t));
+    while (n > 0 && k < cap - 1) out[k++] = t[--n];
+    out[k] = 0;
+    return k;
+}
+
+static void status_build(char *out, int cap) {
+    int k = 0;
+    out[0] = 0;
+
+    /* Percent of the kernel heap in use. "Heap", not "Mem": this is the 32 MiB
+     * allocator, not the machine's RAM, and a bar that said "Mem 4%" on a
+     * 512 MiB box would be a lie by label.
+     *
+     * Measured in KiB, in 32 bits, on purpose. The obvious form is
+     * used * 100 / total on the raw u64 byte counts, and that emits a call to
+     * libgcc's __divdi3 on a path that runs four times a second; the shift to
+     * KiB makes both operands fit a u32 and the divide a single instruction.
+     * The product cannot wrap: it would take a 41 GiB heap to push
+     * KiB * 100 past 2^32, and this one is 32 MiB. */
+    uint32_t tk = (uint32_t)(heap_total() >> 10);
+    uint32_t uk = (uint32_t)(heap_used()  >> 10);
+    if (tk) {
+        k = st_str(out, k, cap, "Heap ");
+        k = st_num(out, k, cap, uk * 100u / tk);
+        k = st_str(out, k, cap, "%");
+    }
+
+    /* Only when there is a card to ask. present-with-no-link is its own
+     * answer and gets said out loud — e1000.h is explicit that reporting a
+     * cable-less card as "no card" sends people hunting for a driver bug. */
+    if (e1000_present()) {
+        if (k) k = st_str(out, k, cap, "    ");
+        k = st_str(out, k, cap, e1000_link_up() ? "Link" : "No link");
+    }
+}
+
+/* Put `s` on the bar. Unconditional — the caller decides whether anything
+ * changed. Announce-before-you-paint, and the invalidate and the fill are the
+ * SAME rect, exactly as desktop_draw_clock does it and for the same reason:
+ * this can run on the clock TASK, where lifting the cursor outright would race
+ * task 0 mid-redraw. */
+static void status_paint(const char *s) {
+    uint32_t right = SW - CLOCK_PAD - CLOCK_MAXW - STATUS_GAP;
+    uint32_t bx    = right - STATUS_MAXW;
+    uint32_t w     = af_text_width(s, AF_REG13);
+    if (w > STATUS_MAXW) w = STATUS_MAXW;      /* clipped, never outside the band */
+
+    mouse_invalidate_rect((int)bx, 6, (int)STATUS_MAXW, (int)TOPBAR_H - 8);
+    fb_rect_x(bx, 6, STATUS_MAXW, TOPBAR_H - 8, AC_BAR);
+    /* Share the clock's baseline: it is drawn at y=12 in AF_SB16, and the two
+     * faces have different ascents, so the smaller one has to drop by the
+     * difference or the right-hand side of the bar sits on two lines. */
+    af_draw(right - w, 12 + (uint32_t)(af_ascent(AF_SB16) - af_ascent(AF_REG13)),
+            s, AC_MUTED, AF_REG13);
+    st_str(g_status, 0, (int)sizeof(g_status), s);
+}
+
+/* Force a repaint of the status, whatever the latch says. Called by
+ * draw_topbar() after it has cleared the latch. */
+static void status_repaint(void) {
+    /* Nowhere to put it: on an absurdly narrow mode the band would wrap under
+     * the two subtractions above. Wrap-safe form — never a + b > cap. */
+    if (SW <= CLOCK_PAD + CLOCK_MAXW + STATUS_GAP + STATUS_MAXW) return;
+    if (desktop_power_is_open() || desktop_is_exclusive()) return;
+    char s[sizeof(g_status)];
+    status_build(s, (int)sizeof(s));
+    status_paint(s);
+}
+
+void desktop_draw_status(void) {
+    if (!SW) return;
+    if (SW <= CLOCK_PAD + CLOCK_MAXW + STATUS_GAP + STATUS_MAXW) return;
+    /* The clock's two guards, for the clock's two reasons: a bright band would
+     * punch a lit hole through the power dialog's dim, and a full-screen app
+     * owns every pixel including this one and blocks task 0 so nothing would
+     * repair us. Dropping the second guard is what put a black box over
+     * Snake's score; snake_clock_test.py is the tripwire. */
+    if (desktop_power_is_open() || desktop_is_exclusive()) return;
+    char s[sizeof(g_status)];
+    status_build(s, (int)sizeof(s));
+    /* Nothing changed: touch NO pixels. Re-stamping identical pixels four
+     * times a second would lift the mouse cursor four times a second, and the
+     * pointer visibly flickers wherever you rest it on the bar. */
+    if (str_same(s, g_status)) return;
+    status_paint(s);
+}
+
+/* ─── The top bar's lead: mark, wordmark, and what you are in ───
+ *
+ * Shared with snake.c so a full-screen app can wear this OS's bar. See the
+ * declaration in desktop.h for why that sharing is not optional. */
+uint32_t desktop_draw_bar_lead(const char *label) {
+    if (!SW) return 0;
     fb_rect_x(0, 0, SW, TOPBAR_H, AC_BAR);
     /* Logo emblem: accent tile with a dark notch. Rounded at the same
      * proportion the dock tiles use, so the mark and the apps are visibly the
@@ -365,7 +536,39 @@ static void draw_topbar(void) {
     ac_fill_round(16, 12, 22, 22, 5, settings_accent());
     ac_fill_round(23, 19, 8, 8, 2, AC_BAR);
     af_draw(48, 12, "Astrion", AC_WHITE, AF_SB16);
-    af_draw(48 + af_text_width("Astrion", AF_SB16) + 8, 15, "v2.0", AC_MUTED, AF_REG13);
+    uint32_t x = 48 + af_text_width("Astrion", AF_SB16) + 8;
+    af_draw(x, 15, "v2.0", AC_MUTED, AF_REG13);
+    x += af_text_width("v2.0", AF_REG13);
+
+    /* The focused app's name, behind the SAME hairline divider the power
+     * button wears — one divider vocabulary, so "these are two different
+     * things" reads the same at both ends of the bar. Same face and weight as
+     * the wordmark on purpose: read left to right the bar says whose machine
+     * this is and then what you are typing into, which on a desktop with
+     * stacked windows is a real question the chrome should answer.
+     *
+     * Skipped entirely when there is nothing focused. A divider with nothing
+     * after it is a label that failed to load. */
+    if (label && label[0]) {
+        x += BAR_SEP;
+        fb_rect_x(x, 13, 1, 18, AC_BORDER);
+        x += 1 + BAR_SEP;
+        af_draw(x, 12, label, AC_WHITE, AF_SB16);
+        x += af_text_width(label, AF_SB16);
+    }
+    fb_rect_x(0, TOPBAR_H, SW, 1, AC_BORDER);   /* hairline under the bar */
+    return x;
+}
+
+static void draw_topbar(void) {
+    /* Clear the status latch BEFORE a single bar pixel moves. The latch says
+     * "this string is already on screen"; the fill below makes that false, and
+     * a latch left standing across a repaint is exactly the stale-cache bug
+     * this file keeps re-learning — the status would stay blank forever
+     * because the next tick would compare equal and decline to paint. */
+    g_status[0] = 0;
+
+    desktop_draw_bar_lead(wm_focused_title());
 
     /* Power button (far right), set off from the clock by a hairline divider —
      * a system control belongs in the chrome, not among the app icons. Muted by
@@ -375,7 +578,11 @@ static void draw_topbar(void) {
     fb_rect_x(pbx - 12, 13, 1, 18, AC_BORDER);
     draw_power_glyph((int)(pbx + PWR_BTN_W / 2), (int)(TOPBAR_H / 2), 8, 2, AC_MUTED);
 
-    fb_rect_x(0, TOPBAR_H, SW, 1, AC_BORDER);   /* hairline under the bar */
+    /* Paint the status here rather than leaving it to the clock task's next
+     * tick: up to 250ms of hole in the bar after every window open reads as a
+     * flicker. The cleared latch above is what guarantees this actually
+     * paints. */
+    status_repaint();
 }
 
 /* Dock icon table (distinct macOS-ish system colors). */

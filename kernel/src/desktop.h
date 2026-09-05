@@ -52,6 +52,21 @@
 #define WIN_DOT_X    19u
 #define WIN_DOT_R    5
 
+/* Corner radius of a window body. Here rather than private to desktop.c for
+ * the same reason as everything above it: snake.c paints a full-screen play
+ * field that is meant to read as one of this OS's lit surfaces, and a surface
+ * with a different corner is a surface from a different OS. One radius. */
+#define WIN_R         8u
+
+/* ─── The top bar's height ───
+ *
+ * Shared for one reason: a full-screen app (Snake) paints its OWN top bar so
+ * that fullscreen reads as a mode of Astrion rather than an escape from it,
+ * and if that bar were a different height the Astrion mark would visibly jump
+ * when you entered and left the game. Same lesson as WIN_TITLE_H above — two
+ * copies of a chrome metric is two metrics and they drift. */
+#define TOPBAR_H     44u
+
 /* How far outside its own rect a window's shadow reaches, on every side.
  *
  * wm.c saves the pixels beneath a window so it can drag it without repainting
@@ -146,6 +161,43 @@ void desktop_terminal_rect(uint32_t *x, uint32_t *y, uint32_t *w, uint32_t *h);
 
 /* Draw the clock string (e.g. "12:34:56") on the right of the top bar. */
 void desktop_draw_clock(const char *hhmmss);
+
+/* ─── Live status, middle-right of the top bar ───
+ *
+ * Repainted from the SAME background task as the clock, on the same 250ms
+ * beat and behind the same two guards (power dialog up, or a full-screen app
+ * owns the screen). It only touches pixels when the string it would draw has
+ * actually changed — a bar that re-stamps identical pixels four times a
+ * second lifts the mouse cursor four times a second, and the pointer flickers
+ * wherever you park it.
+ *
+ * That "has it changed" latch is a cache, so it is invalidated the only way a
+ * cache in this file is allowed to be: draw_topbar() clears it before it
+ * repaints the bar, so a repaint can never leave the status blank with the
+ * latch claiming it is already on screen. */
+void desktop_draw_status(void);
+
+/* ─── Shared top-bar lead: ground, mark, wordmark, and an optional label ───
+ *
+ * Paints the bar's background across the full width, the Astrion emblem, the
+ * "Astrion v2.0" wordmark, and — when `label` is non-null and non-empty — a
+ * hairline divider and that label after it. Returns the x one past everything
+ * it drew, and also lays down the hairline UNDER the bar.
+ *
+ * Two callers: desktop.c's own top bar (label = the focused window's name) and
+ * snake.c's full-screen bar (label = "Snake"). One implementation on purpose —
+ * a second hand-copied emblem is a mark that stops matching the moment either
+ * one is touched. */
+uint32_t desktop_draw_bar_lead(const char *label);
+
+/* Repaint rows [y, y+h) of the wallpaper gradient, using the same absolute-y
+ * ramp the full wallpaper uses so a band is pixel-identical to the full draw.
+ *
+ * Exists for full-screen apps: it puts the OS's real backdrop underneath them
+ * instead of a flat colour they invented, and it lets them erase a strip of
+ * their own text without having to know what the wallpaper looks like there
+ * (which changes with the user's Settings). */
+void desktop_wallpaper_band(uint32_t y, uint32_t h);
 
 /* Hit-test the dock; returns icon index (0=Terminal 1=Files 2=Editor
  * 3=Snake 4=Assistant 5=Monitor) under (x,y), or -1 if none. */

@@ -3011,6 +3011,14 @@ static const char *title_for(enum app_kind a) {
     }
 }
 
+/* What the top bar puts next to the Astrion mark. Same string the window's own
+ * title bar carries, from the same function, so the bar and the window can
+ * never disagree about what an app is called. 0 when the desktop is bare. */
+const char *wm_focused_title(void) {
+    struct window *f = focused();
+    return f ? title_for(f->app) : 0;
+}
+
 /* Every window, including the Terminal, goes through desktop.c's one frame
  * painter — rounded corners, a real decaying shadow, round dots. There is no
  * longer a second window look for the shell. */

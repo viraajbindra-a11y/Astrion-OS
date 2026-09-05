@@ -888,6 +888,12 @@ static void clock_task(void *arg) {
                 pit_format_clock(clkbuf);      /* no usable RTC -> uptime */
             }
             desktop_draw_clock(clkbuf);   /* top bar, right side */
+            /* The bar's live half rides the same 250ms beat rather than a
+             * timer of its own — one background painter touching the top bar,
+             * so there is exactly one place that has to hold off when a
+             * full-screen app owns the screen. It only writes pixels when the
+             * numbers actually changed; see desktop_draw_status. */
+            desktop_draw_status();
         }
         task_yield();
     }
