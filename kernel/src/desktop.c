@@ -398,6 +398,40 @@ void desktop_wallpaper_band(uint32_t y0, uint32_t h) {
 
 static void draw_wallpaper(void) { desktop_wallpaper_band(0, SH); }
 
+/* Copy `s` into out[], cut to fit `maxw` pixels in `face`, with "..." marking
+ * a cut. THREE ASCII DOTS, not an ellipsis character: a UTF-8 ellipsis is
+ * three bytes, af.c has no glyph for any of them, and putchar_nolock maps
+ * anything outside 32..126 to '?'. The ASCII gate in `make test` exists
+ * because of exactly that mistake.
+ *
+ * Per-character widths sum to the whole-string width because af_text_width
+ * just adds glyph advances and there is no kerning, so measuring one char at a
+ * time is exact rather than an estimate. */
+static void fit_text(char *out, int cap, const char *s, uint32_t maxw, int face) {
+    int n = 0;
+    out[0] = 0;
+    if (cap < 5) return;
+    if (af_text_width(s, face) <= maxw) {
+        while (s[n] && n < cap - 1) { out[n] = s[n]; n++; }
+        out[n] = 0;
+        return;
+    }
+    char one[2] = { 0, 0 };
+    uint32_t dots = af_text_width("...", face);
+    if (dots > maxw) return;              /* not even room to say "cut" */
+    uint32_t budget = maxw - dots, acc = 0;
+    while (s[n] && n < cap - 4) {
+        one[0] = s[n];
+        uint32_t cw = af_text_width(one, face);
+        if (cw > budget - acc) break;     /* wrap-safe: never acc + cw > budget */
+        acc += cw;
+        out[n] = s[n];
+        n++;
+    }
+    out[n++] = '.'; out[n++] = '.'; out[n++] = '.';
+    out[n] = 0;
+}
+
 /* ─── The status block: heap pressure and link state ───
  *
  * Two rules govern what is allowed up here.
@@ -480,8 +514,17 @@ static void status_build(char *out, int cap) {
 static void status_paint(const char *s) {
     uint32_t right = SW - CLOCK_PAD - CLOCK_MAXW - STATUS_GAP;
     uint32_t bx    = right - STATUS_MAXW;
-    uint32_t w     = af_text_width(s, AF_REG13);
-    if (w > STATUS_MAXW) w = STATUS_MAXW;      /* clipped, never outside the band */
+
+    /* Through fit_text, so the string CANNOT be wider than the band that
+     * erases it. A previous version clamped the drawing width instead, which
+     * only moved the start position - af_draw still painted the whole string,
+     * so an over-wide one would spill left of the band and sit there forever
+     * because nothing ever clears outside it. STATUS_MAXW is comfortably wider
+     * than anything status_build() can produce, so this never fires today; it
+     * is here so that stays true if someone adds a third reading. */
+    char fit[sizeof(g_status)];
+    fit_text(fit, (int)sizeof(fit), s, STATUS_MAXW, AF_REG13);
+    uint32_t w = af_text_width(fit, AF_REG13);
 
     mouse_invalidate_rect((int)bx, 6, (int)STATUS_MAXW, (int)TOPBAR_H - 8);
     fb_rect_x(bx, 6, STATUS_MAXW, TOPBAR_H - 8, AC_BAR);
@@ -489,7 +532,10 @@ static void status_paint(const char *s) {
      * faces have different ascents, so the smaller one has to drop by the
      * difference or the right-hand side of the bar sits on two lines. */
     af_draw(right - w, 12 + (uint32_t)(af_ascent(AF_SB16) - af_ascent(AF_REG13)),
-            s, AC_MUTED, AF_REG13);
+            fit, AC_MUTED, AF_REG13);
+    /* The latch records what was BUILT, not what was drawn: two different
+     * readings that happen to cut to the same string must still count as a
+     * change, or the second one never gets painted. */
     st_str(g_status, 0, (int)sizeof(g_status), s);
 }
 
@@ -521,40 +567,6 @@ void desktop_draw_status(void) {
      * pointer visibly flickers wherever you rest it on the bar. */
     if (str_same(s, g_status)) return;
     status_paint(s);
-}
-
-/* Copy `s` into out[], cut to fit `maxw` pixels in `face`, with "..." marking
- * a cut. THREE ASCII DOTS, not an ellipsis character: a UTF-8 ellipsis is
- * three bytes, af.c has no glyph for any of them, and putchar_nolock maps
- * anything outside 32..126 to '?'. The ASCII gate in `make test` exists
- * because of exactly that mistake.
- *
- * Per-character widths sum to the whole-string width because af_text_width
- * just adds glyph advances and there is no kerning, so measuring one char at a
- * time is exact rather than an estimate. */
-static void fit_text(char *out, int cap, const char *s, uint32_t maxw, int face) {
-    int n = 0;
-    out[0] = 0;
-    if (cap < 5) return;
-    if (af_text_width(s, face) <= maxw) {
-        while (s[n] && n < cap - 1) { out[n] = s[n]; n++; }
-        out[n] = 0;
-        return;
-    }
-    char one[2] = { 0, 0 };
-    uint32_t dots = af_text_width("...", face);
-    if (dots > maxw) return;              /* not even room to say "cut" */
-    uint32_t budget = maxw - dots, acc = 0;
-    while (s[n] && n < cap - 4) {
-        one[0] = s[n];
-        uint32_t cw = af_text_width(one, face);
-        if (cw > budget - acc) break;     /* wrap-safe: never acc + cw > budget */
-        acc += cw;
-        out[n] = s[n];
-        n++;
-    }
-    out[n++] = '.'; out[n++] = '.'; out[n++] = '.';
-    out[n] = 0;
 }
 
 /* ─── The top bar's lead: mark, wordmark, and what you are in ───
