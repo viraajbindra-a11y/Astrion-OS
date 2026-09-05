@@ -325,7 +325,10 @@ static void draw_full(void) {
     draw_footer(1);
 }
 
-static void start_game(void) {
+/* Lay the board out and paint it. Returns 0 when the video mode is too small
+ * to hold one, in which case NOTHING has been drawn and snake_play() returns
+ * without ever taking the screen. */
+static int start_game(void) {
     SW = fb_width_x();
     SH = fb_height_x();
 
@@ -344,8 +347,11 @@ static void start_game(void) {
     grid_rows = (int)(fieldh / CELL);
     if (grid_cols > 36) grid_cols = 36;
     if (grid_rows > 18) grid_rows = 18;
-    if (grid_cols < 8)  grid_cols = 8;    /* an unplayable board is still a board */
-    if (grid_rows < 6)  grid_rows = 6;
+    /* Clamp DOWN only. Clamping a too-small mode UP to a "playable" minimum
+     * puts the field off the bottom of the screen - fb_rect and blend_px both
+     * clip, so it is not a memory bug, but it is a board you cannot see all
+     * of, which is worse than being told no. The caller bails instead. */
+    if (grid_cols < 6 || grid_rows < 5) return 0;
 
     /* Centre the field-plus-footer as ONE block in the space below the bar, so
      * the margin above the field and below the hint are the same. Centring the
@@ -375,6 +381,7 @@ static void start_game(void) {
     place_food();
 
     draw_full();
+    return 1;
 }
 
 static int handle_key(char c) {
@@ -499,7 +506,7 @@ static void draw_game_over(void) {
  */
 int snake_play(void) {
     if (!fb_present_x()) return 0;
-    start_game();
+    if (!start_game()) return 0;
 
     uint64_t last_tick_ms = pit_elapsed_ms();
     uint64_t tick_period_ms = 150;

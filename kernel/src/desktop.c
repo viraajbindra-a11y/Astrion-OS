@@ -523,6 +523,40 @@ void desktop_draw_status(void) {
     status_paint(s);
 }
 
+/* Copy `s` into out[], cut to fit `maxw` pixels in `face`, with "..." marking
+ * a cut. THREE ASCII DOTS, not an ellipsis character: a UTF-8 ellipsis is
+ * three bytes, af.c has no glyph for any of them, and putchar_nolock maps
+ * anything outside 32..126 to '?'. The ASCII gate in `make test` exists
+ * because of exactly that mistake.
+ *
+ * Per-character widths sum to the whole-string width because af_text_width
+ * just adds glyph advances and there is no kerning, so measuring one char at a
+ * time is exact rather than an estimate. */
+static void fit_text(char *out, int cap, const char *s, uint32_t maxw, int face) {
+    int n = 0;
+    out[0] = 0;
+    if (cap < 5) return;
+    if (af_text_width(s, face) <= maxw) {
+        while (s[n] && n < cap - 1) { out[n] = s[n]; n++; }
+        out[n] = 0;
+        return;
+    }
+    char one[2] = { 0, 0 };
+    uint32_t dots = af_text_width("...", face);
+    if (dots > maxw) return;              /* not even room to say "cut" */
+    uint32_t budget = maxw - dots, acc = 0;
+    while (s[n] && n < cap - 4) {
+        one[0] = s[n];
+        uint32_t cw = af_text_width(one, face);
+        if (cw > budget - acc) break;     /* wrap-safe: never acc + cw > budget */
+        acc += cw;
+        out[n] = s[n];
+        n++;
+    }
+    out[n++] = '.'; out[n++] = '.'; out[n++] = '.';
+    out[n] = 0;
+}
+
 /* ─── The top bar's lead: mark, wordmark, and what you are in ───
  *
  * Shared with snake.c so a full-screen app can wear this OS's bar. See the
@@ -553,8 +587,22 @@ uint32_t desktop_draw_bar_lead(const char *label) {
         x += BAR_SEP;
         fb_rect_x(x, 13, 1, 18, AC_BORDER);
         x += 1 + BAR_SEP;
-        af_draw(x, 12, label, AC_WHITE, AF_SB16);
-        x += af_text_width(label, AF_SB16);
+        /* CUT so the label can never reach the status band. The Editor's title
+         * is "Editor: " plus a path, and FS_PATH_MAX is 255 - a long filename
+         * would otherwise run straight under the band that gets cleared and
+         * redrawn every 250ms, and the title would develop a rectangular hole
+         * in it a quarter of a second after it was painted. The bound is the
+         * status band's left edge, which is the tighter of the two right-hand
+         * neighbours this function has (Snake's score band starts further
+         * right, and its label is the literal "Snake" anyway). */
+        uint32_t wall = CLOCK_PAD + CLOCK_MAXW + STATUS_GAP + STATUS_MAXW + BAR_SEP;
+        char cut[96];
+        /* Wrap-safe both ways: never x + wall > SW, never SW - wall - x. */
+        if (SW > wall && x < SW - wall) {
+            fit_text(cut, (int)sizeof(cut), label, SW - wall - x, AF_SB16);
+            af_draw(x, 12, cut, AC_WHITE, AF_SB16);
+            x += af_text_width(cut, AF_SB16);
+        }
     }
     fb_rect_x(0, TOPBAR_H, SW, 1, AC_BORDER);   /* hairline under the bar */
     return x;
@@ -811,10 +859,26 @@ void desktop_draw_window_frame(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
 
     /* The focused window's title is WHITE. It used to be AC_MUTED even on the
      * Terminal, which made the name of the thing you were using one of the
-     * dimmest pieces of text on the screen. */
-    if (title)
-        af_draw_center(x + w / 2, y + TITLE_H / 2 - (uint32_t)af_line_height(AF_SB16) / 2,
-                       title, focused ? AC_WHITE : AC_MUTED, AF_SB16);
+     * dimmest pieces of text on the screen.
+     *
+     * And it is CUT to the room between the traffic lights and the far edge.
+     * It was drawn centred with no bound at all, so an Editor window on a long
+     * filename ("Editor: " + a path, and FS_PATH_MAX is 255) painted its title
+     * straight over its own close button and out past the window border onto
+     * the wallpaper. INSET clears the third dot plus a gap, and the same number
+     * is taken off both ends so the title stays centred instead of drifting
+     * right. Same fit_text, same three ASCII dots, as the top bar's label -
+     * one clipping treatment, because two would eventually be two. */
+    if (title) {
+        uint32_t inset = WIN_DOT_X + 36 + (uint32_t)WIN_DOT_R + 12;
+        char cut[96];
+        if (w > 2 * inset) {          /* wrap-safe: never w - 2*inset below it */
+            fit_text(cut, (int)sizeof(cut), title, w - 2 * inset, AF_SB16);
+            af_draw_center(x + w / 2,
+                           y + TITLE_H / 2 - (uint32_t)af_line_height(AF_SB16) / 2,
+                           cut, focused ? AC_WHITE : AC_MUTED, AF_SB16);
+        }
+    }
     ac_stroke_round(x, y, w, h, WIN_R, focused ? settings_accent() : AC_BORDER);
 }
 
@@ -1066,6 +1130,14 @@ static void power_draw_button(int i, int hover) {
 }
 
 void desktop_power_open(void) {
+    /* Raised FIRST, before a pixel is dimmed. It used to be set on the last
+     * line, which left the whole of power_dim() — a read-modify-write over
+     * every pixel on the screen — as a window in which the clock task still
+     * believed no dialog was up. A tick landing in there paints a fresh bright
+     * band into a backdrop that is being darkened around it, and the bar ends
+     * up lit while everything else is dim. Both top-bar painters test this
+     * flag, so moving one line shuts the race for both. */
+    pwr_open = 1;
     power_layout();
     power_dim();
     ac_shadow(pw_cx, pw_cy, pw_cw, pw_ch, 14, 26);              /* real shadow */
@@ -1075,7 +1147,6 @@ void desktop_power_open(void) {
     af_draw_center(pw_cx + pw_cw / 2, pw_cy + 66, "Your session will end.",
                    AC_MUTED, AF_REG13);
     for (int i = 0; i < PWR_NBTN; i++) power_draw_button(i, 0);
-    pwr_open = 1;
 }
 
 int  desktop_power_is_open(void) { return pwr_open; }
