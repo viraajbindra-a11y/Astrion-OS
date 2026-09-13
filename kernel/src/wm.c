@@ -378,6 +378,57 @@ static void editor_draw(void) {
     if (ed_copied) editor_draw_copied();
 }
 
+/* Where in the buffer is (mx, my)?
+ *
+ * The same walk editor_draw() paints with -- one pass, same wrap rule, same
+ * stop at the footer -- because a caret that lands anywhere except under the
+ * pointer is worse than no mouse at all. Returns the insertion point: the
+ * nearest gap between characters, so clicking the right half of a glyph puts
+ * the caret after it, which is what every text field does and what the eye
+ * expects when you click at the end of a word.
+ *
+ * Clicking below the last line lands at the end of the text, and clicking
+ * past the end of a line lands at that line's end -- both are what the
+ * pointer is pointing AT, since the space past a line is not in the buffer. */
+static uint32_t editor_index_at(int mx, int my) {
+    if (!ed_buf) return 0;
+    uint32_t foot = ed_foot_y();
+    uint32_t bot  = (foot > cy + 4) ? foot - 4 : cy;
+    uint32_t gx = cx, gy = cy;
+    uint32_t best = ed_len;                  /* nothing hit: the very end */
+    int      best_row = -1;
+    for (uint32_t i = 0; i <= ed_len; i++) {
+        if (i < ed_len && ed_buf[i] != '\n' && gx + GW > cx + cw) { gx = cx; gy += LINE; }
+        if (gy + GH > bot) break;            /* past what is drawn */
+        /* The row the pointer is on: remember the best gap on it. A click
+         * above the first drawn row lands at its start (best stays unset
+         * until a row matches, and row 0 is the first tested). */
+        if (my >= (int)gy && my < (int)(gy + LINE)) {
+            if (best_row < 0 || mx >= (int)(gx + GW / 2)) {
+                best = (mx >= (int)(gx + GW / 2) && i < ed_len && ed_buf[i] != '\n')
+                       ? i + 1 : i;
+                best_row = 1;
+            }
+        } else if (best_row > 0) {
+            break;                            /* we have left the clicked row */
+        } else if (my < (int)gy) {
+            return i;                         /* clicked above the text */
+        }
+        if (i == ed_len) break;
+        if (ed_buf[i] == '\n') { gx = cx; gy += LINE; continue; }
+        gx += GW;
+    }
+    return (best > ed_len) ? ed_len : best;
+}
+
+static void editor_click(int mx, int my) {
+    if (!ed_buf) return;
+    if (my >= (int)ed_foot_y()) return;       /* the hint row is not the page */
+    ed_copied = 0;                            /* any action clears the cue */
+    ed_cursor = editor_index_at(mx, my);
+    editor_draw();
+}
+
 static void editor_key(char c) {
     if (c == 27) { wm_close(); return; }   /* ESC: save + close */
     ed_copied = 0;   /* any action clears the cue... (copy re-raises it below) */
@@ -643,6 +694,37 @@ static void files_draw_scrollbar(uint32_t rtop, int vis, uint32_t rh) {
     fb_rect_x(bx, ty, SB_W, thumb, AC_MUTED);               /* thumb */
 }
 
+/* Row geometry, worked out once and used by BOTH the painter and the hit
+ * test. Two copies of a layout are two layouts, and the one the mouse
+ * believes would be the one nobody looks at. Returns the number of visible
+ * rows; *top is the first row's y, *rh the row pitch, *rw the row's width
+ * (narrower when the scrollbar is out). */
+static int files_rows(uint32_t *top, uint32_t *rh, uint32_t *rw) {
+    uint32_t h   = GH + 5;                         /* line height + 5px of air */
+    uint32_t t   = cy + 32;
+    uint32_t fy   = cy + ch - (uint32_t)af_line_height(AF_REG13);
+    uint32_t foot = fy - 8;                        /* the footer's rule */
+    int vis = (foot > t) ? (int)((foot - t) / h) : 0;
+    if (vis < 1) vis = 1;
+    if (top) *top = t;
+    if (rh)  *rh  = h;
+    if (rw)  *rw  = (fl_count > vis && cw > SB_LANE) ? cw - SB_LANE : cw;
+    return vis;
+}
+
+/* Which row is under (mx, my)? -1 for none -- the header, the footer, the
+ * scrollbar lane, or past the last entry. */
+static int files_row_at(int mx, int my) {
+    uint32_t top, rh, rw;
+    int vis = files_rows(&top, &rh, &rw);
+    if (mx < (int)cx || mx >= (int)(cx + rw)) return -1;
+    if (my < (int)top) return -1;
+    int k = (int)(((uint32_t)my - top) / rh);
+    if (k < 0 || k >= vis) return -1;
+    int i = fl_top + k;
+    return (i < fl_count) ? i : -1;
+}
+
 static void files_draw(void) {
     fb_rect_x(cx, cy, cw, ch, AC_TERM_BG);
 
@@ -663,17 +745,14 @@ static void files_draw(void) {
 
     /* The row derives from the font rather than a guess, so the rhythm
      * follows if the face ever changes: line height plus 5px of air, with
-     * the text centred in it instead of riding the bottom. */
-    uint32_t rh  = GH + 5;
-    uint32_t top = cy + 32;
-    int vis = (foot > top) ? (int)((foot - top) / rh) : 0;
-    if (vis < 1) vis = 1;
+     * the text centred in it instead of riding the bottom. files_rows() is
+     * the one place that arithmetic lives; the mouse hit test reads it too.
+     * More rows than fit -> a scrollbar, and the rows yield it a lane so a
+     * long name can't run under the thumb. */
+    uint32_t rh, top, rw;
+    int vis = files_rows(&top, &rh, &rw);
     files_ensure_visible(vis);
-
-    /* More rows than fit → a scrollbar, and the rows yield it a lane so a long
-     * name can't run under the thumb. A folder that fits is untouched. */
     int over = (fl_count > vis);
-    uint32_t rw = (over && cw > SB_LANE) ? (cw - SB_LANE) : cw;
 
     for (int k = 0; k < vis; k++) {
         int i = fl_top + k;
@@ -733,6 +812,19 @@ static void files_key(char c) {
         wm_open_editor(nm);
     }
 }
+
+/* A click selects; a click on the row that is ALREADY selected opens it.
+ * Deliberately not a double-click: there is no timer in this window and a
+ * timed gesture is one more thing that can be too slow for someone. Select-
+ * then-confirm is the same two steps arrowing down and pressing Enter takes,
+ * done with the pointer, and it can never open the wrong thing by accident. */
+static void files_click(int mx, int my) {
+    int i = files_row_at(mx, my);
+    if (i < 0) return;
+    if (i != fl_sel) { fl_sel = i; files_draw(); return; }
+    files_key('\n');                   /* the one open path, keyboard or mouse */
+}
+
 
 /* ─── Assistant: the on-device GPT chat window ─── */
 static char     as_prompt[128];
@@ -3663,9 +3755,11 @@ void wm_tick(void) {
                 dragging = 1; drag_ox = mx - (int)w->x; drag_oy = my - (int)w->y;
                 last_mx = mx; last_my = my;
             } else {
-                /* Everything below the title bar belongs to the app. Only the
-                 * two apps with things to press take it; the rest are read-only
-                 * or keyboard-driven and ignore a click on their page.
+                /* Everything below the title bar belongs to the app. The
+                 * Monitor and the Assistant have nothing on their page to
+                 * point at (live numbers; a prompt that already has the
+                 * keyboard), so they ignore it; everything with a row, a key
+                 * or a caret takes it.
                  *
                  * mouse_lift() first, for the same reason wm_handle_key does it:
                  * these handlers repaint part of the window, and a pointer
@@ -3676,8 +3770,10 @@ void wm_tick(void) {
                 mouse_lift();
                 set_content_rect(w);
                 switch (w->app) {
-                    case APP_CALC: calc_click(mx, my);     break;
-                    case APP_SET:  settings_click(mx, my); break;
+                    case APP_CALC:   calc_click(mx, my);     break;
+                    case APP_SET:    settings_click(mx, my); break;
+                    case APP_FILES:  files_click(mx, my);    break;
+                    case APP_EDITOR: editor_click(mx, my);   break;
                     default: break;
                 }
             }
