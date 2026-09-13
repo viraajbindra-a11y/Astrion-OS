@@ -196,3 +196,7 @@ You already know what you're doing. Keep building with Claude.
 3. Star the repo: https://github.com/viraajbindra-a11y/Astrion-OS
 4. Join the Discord (link from Viraaj)
 5. Start on your tasks above
+
+## Gates
+
+A check does not count until its mutation check is committed next to it. The mutation check deliberately breaks the thing the check guards and proves the check goes red; a gate that has never been seen to fail has never been tested. Land both in the same commit, or the check is a comment with a green badge on it.
