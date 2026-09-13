@@ -1734,3 +1734,55 @@ WHERE I THINK IT BREAKS
 - Cloud honesty. Set provider to anthropic and ask "is this conversation private". If it says yes, the per-leg build is broken.
 Default if you do not reply: I treat all of the above as unverified and say so wherever it is quoted.
 ---
+## from koa -> rex  ·  top bar + Snake chrome, on branch desktop-chrome-topbar-snake
+Two visual jobs from Viraaj landed. 14/14 uitest and make test are green on the
+exact ISO (kernel/build/astrion-vis.iso, built 13:38). Here is what I claim and
+where I think you should hit it.
+
+WHAT I CLAIM
+1. Snake is still fullscreen but wears Astrion chrome: real top bar at the real
+   TOPBAR_H via the SAME desktop_draw_bar_lead() the desktop uses, wallpaper
+   gradient behind, play field as a window body (AC_TERM_BG + WIN_R + shadow +
+   hairline), af.c type throughout, end card in the power dialog vocabulary.
+2. Top bar carries the focused window name (left, after a divider) and
+   "Heap NN%" + "Link"/"No link" (right, muted, before the clock). All real:
+   heap_used/heap_total, e1000_present/e1000_link_up.
+3. Long titles are cut with "..." in BOTH the top bar and the window title bar.
+   The window-title one was a pre-existing bug I found and fixed; separate
+   commit 38130de if you want it gone.
+
+HOW I VERIFIED (screenshots in the scratchpad, all looked at)
+ - focus name tracked across Terminal -> Files -> Monitor -> Calculator -> Esc.
+ - heap % cross-checks the Monitor: 5137/32767 KB shown as "Heap 15%".
+ - no-NIC boot (-nic none, serial says "no usable ethernet card"): the network
+   half is simply absent, block stays right-anchored.
+ - Snake at score 0 and score 10, plus the game-over card.
+
+WHERE I HAVE NOT LOOKED - please hit these
+a) ONLY 1280x800, only QEMU. Snake derives its whole layout from SW/SH and I
+   have never seen it at another resolution. 1024x768 is the one I would try.
+b) The `snake` SHELL COMMAND. I added the missing desktop_set_exclusive guard
+   to shell.c (it only existed on the dock path) and I never once ran it that
+   way. If the clock paints over the board when you type `snake`, my fix is
+   wrong. This is the claim I trust least.
+c) "No link" has NEVER RENDERED. QEMU always reports link up, so that branch is
+   unexecuted code. A NIC present with the cable down is the state I could not
+   make.
+d) Six-digit scores. The band is computed to fit but I only ever saw 0 and 10.
+e) Open Snake, Esc, open Snake AGAIN. Second run re-runs start_game; I only
+   ever did one run per boot.
+f) The POWER DIALOG. I moved pwr_open=1 to before power_dim() to close a race
+   where the clock task could paint a bright band into a screen being dimmed.
+   I never screenshotted the dialog. If it looks wrong, that line is why.
+g) Cursor parked ON the status band while heap %% changes. The status only
+   repaints when the string changes, and it announces before it paints, but I
+   did not sit the pointer there and watch.
+h) A non-default wallpaper from Settings. Snake erases its footer strip with
+   desktop_wallpaper_band(), so a changed gradient should follow - untested.
+---
+## from viraaj -> rex  ·  four answers, one line each
+1. STALE ISO: no artifact gets signed off unless its kernel sha matches build/kernel_mb2.elf at handoff. koa puts the sha in the handoff note; if the sha is missing you do not boot it, you send it back.
+2. DOCK DOT: the ring is the signal. nobody says "dot" in copy or on stage. done.
+3. 640 WIDE / 800x600: cut. 1280x800x32 is the ONE demo mode. fb_validate() in kernel_mb2.c now refuses anything that is not 32 bpp at boot — that is the fix, not a per-painter guard. no 640 testing, no header change.
+4. LEARNS FROM YOU: happy path only on stage (teach -> reboot -> still works). 5 of your 6 defects are fixed in 80c04ce; re-red-team THAT build and either the sixth gets fixed or the feature line gets cut from the demo. nobody deletes learned.txt on stage until you have watched it forget.
+---
