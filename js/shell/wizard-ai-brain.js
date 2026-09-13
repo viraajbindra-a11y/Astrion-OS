@@ -234,6 +234,36 @@ function sprites() {
   return SPRITES;
 }
 
+// The remote option's outgoing ring, drawn once as a soft radial band and
+// then only ever blitted. A 1.1px stroked arc was a pen line: hard-edged,
+// aliased, and the one crisp thing in a picture made entirely of soft light.
+// The band sits at RING_AT of the sprite's half-size; drawFire() scales the
+// sprite so that fraction lands on the radius it wants, which means the
+// band thickens as the ring grows -- a ripple spreading, not a circle
+// inflating.
+const RING_AT = 0.78;
+let RING = null;
+function ringSprite() {
+  if (RING) return RING;
+  const S = 160, h = S / 2;
+  const c = document.createElement('canvas');
+  c.width = S; c.height = S;
+  const g = c.getContext('2d');
+  const rg = g.createRadialGradient(h, h, 0, h, h, h);
+  const rgb = FIRE.warm;
+  rg.addColorStop(0.00, `rgba(${rgb},0)`);
+  rg.addColorStop(RING_AT - 0.20, `rgba(${rgb},0)`);
+  rg.addColorStop(RING_AT - 0.06, `rgba(${rgb},0.45)`);
+  rg.addColorStop(RING_AT, `rgba(${FIRE.hot},1)`);
+  rg.addColorStop(RING_AT + 0.06, `rgba(${rgb},0.45)`);
+  rg.addColorStop(RING_AT + 0.18, `rgba(${rgb},0)`);
+  rg.addColorStop(1.00, `rgba(${rgb},0)`);
+  g.fillStyle = rg;
+  g.fillRect(0, 0, S, S);
+  RING = c;
+  return RING;
+}
+
 // The single live fire.
 let fire = null;
 
@@ -391,18 +421,20 @@ function drawFire(f) {
   }
 
   // "Use another computer": a ring going out. The heat is somewhere else and
-  // this machine is calling to it. Costs one stroked arc every ~2.8s.
+  // this machine is calling to it. Two soft bands, one sprite blit each --
+  // still additive, still no per-frame allocation. The band is brightest
+  // just after it leaves the spark and thins to nothing at the edge of the
+  // canvas, so it reads as a pulse that dissipates rather than a drawn line.
   if (c.ring > 0.02) {
+    const R = ringSprite();
     const period = 2.8;
+    const cy = base - f.h * 0.06;
     for (let n = 0; n < 2; n++) {
       const ph = ((f.ringT / period) + n * 0.5) % 1;
       const r = f.w * (0.07 + ph * 0.32);
-      g.globalAlpha = c.ring * (1 - ph) * (1 - ph) * 0.30 * f.ign;
-      g.strokeStyle = `rgba(${FIRE.warm},1)`;
-      g.lineWidth = 1.1;
-      g.beginPath();
-      g.arc(f.w / 2, base - f.h * 0.06, r, 0, 6.2832);
-      g.stroke();
+      const half = r / RING_AT;
+      g.globalAlpha = c.ring * Math.min(1, ph * 6) * (1 - ph) * (1 - ph) * 0.40 * f.ign;
+      g.drawImage(R, f.w / 2 - half, cy - half, half * 2, half * 2);
     }
   }
 
@@ -531,8 +563,13 @@ function emberStyles(animate) {
       background:
         /* the fuel line -- a thin bright streak so the fire is sitting ON
            something instead of floating in space. This one line is what makes
-           the composition read as depth rather than a glyph on a field. */
-        radial-gradient(ellipse 300px 22px at 50% calc(var(--eb-glowy,175px) - 16px), rgba(${FIRE.hot},0.13) 0%, rgba(${FIRE.hot},0) 76%),
+           the composition read as depth rather than a glyph on a field.
+           These are RADII: 300x22 was a 600px-wide, 44px-tall bar that ran
+           right across the panel behind the title. The coal bed the canvas
+           draws is ~90px wide, so the hearth is sized to it: 72px each way,
+           5px tall, and faint -- felt under the coals, not read as a dash
+           when the fire is down to a spark. */
+        radial-gradient(ellipse 72px 5px at 50% calc(var(--eb-glowy,175px) - 16px), rgba(${FIRE.hot},0.11) 0%, rgba(${FIRE.hot},0) 74%),
         radial-gradient(ellipse 260px 190px at 50% calc(var(--eb-glowy,175px) - 14px), rgba(${FIRE.warm},0.17) 0%, rgba(${FIRE.warm},0) 70%),
         radial-gradient(ellipse 560px 340px at 50% calc(var(--eb-glowy,175px) + 30px), rgba(${FIRE.deep},0.10) 0%, rgba(${FIRE.deep},0) 72%);
     }
