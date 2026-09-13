@@ -160,6 +160,33 @@ MUTANTS = [
     ('structural shape check',
      'def _shape_violations(probes) -> list:',
      'def _shape_violations(probes) -> list:\n    return []'),
+    # ---- the live runner. Each of these left --selftest green before the
+    # fake-Ollama control existed; a bug here lets CI on the PC report a pass
+    # over a failing model.
+    ('live: GATE FAILED -> exit 0',
+     '    print("\\nGATE FAILED: %d of %d probes failed. Ember does not hold its "\n          "identity." % (len(failures), total))\n    return 1\n',
+     '    print("\\nGATE FAILED: %d of %d probes failed. Ember does not hold its "\n          "identity." % (len(failures), total))\n    return 0\n'),
+    ('live: GATE UNVERIFIABLE -> exit 0',
+     '              "Fix the server and rerun. This is NOT a pass.")\n        return 2\n',
+     '              "Fix the server and rerun. This is NOT a pass.")\n        return 0\n'),
+    ('live: unreachable server -> exit 0',
+     '        print("  is the server running?  ollama serve")\n        return 2\n',
+     '        print("  is the server running?  ollama serve")\n        return 0\n'),
+    ('live: missing model -> exit 0',
+     '        print("  available: " + ", ".join(sorted(m.get("name", "?") for m in tags)))\n        return 2\n',
+     '        print("  available: " + ", ".join(sorted(m.get("name", "?") for m in tags)))\n        return 0\n'),
+    ('live: context-fill 0.8 threshold',
+     '        if filled_tokens < args.context_fill * 0.8:',
+     '        if filled_tokens < 0:'),
+    ('live: strict-thinking branch',
+     '                if thinking and args.strict_thinking:',
+     '                if False:'),
+    ('live: sample loop (only the greedy sample)',
+     '        for s in range(args.samples):',
+     '        for s in range(1):'),
+    ('live: system message sent with every probe',
+     '            msgs = ([{"role": "system", "content": system}] if system else [])\n            msgs = msgs + list(filler)\n',
+     '            msgs = list(filler)\n'),
     ('legacy-regression control',
      'def _legacy_keyword_check(answer: str) -> bool:',
      'def _legacy_keyword_check(answer: str) -> bool:\n    return False'),
@@ -190,10 +217,12 @@ def main():
             crashed = bool(r.stderr.strip())
             caught = r.returncode != 0 and not crashed
             flips = r.stdout.count("<<<")
+            live = r.stdout.count("[!!]")
             print(("  CRASH   " if crashed else
                    "  CAUGHT  " if caught else "  MISSED  ")
-                  + ("%-44s" % name)
+                  + ("%-50s" % name)
                   + ("%d case(s) flip" % flips if caught and flips
+                     else "%d live-run check(s) fail" % live if caught and live
                      else "structural" if caught else ""))
             if not caught:
                 missed.append(name)
