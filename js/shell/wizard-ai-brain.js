@@ -32,7 +32,7 @@ export const EMBER_BUILDS = {
 export const BRAIN_OPTIONS = [
   {
     id: 'tiny',
-    name: 'Ember Mini',
+    name: 'Kindling Mini',
     model: EMBER_BUILDS.tiny.model,
     base: EMBER_BUILDS.tiny.base,
     sizeGb: EMBER_BUILDS.tiny.downloadGb,
@@ -45,16 +45,16 @@ export const BRAIN_OPTIONS = [
   },
   {
     id: 'standard',
-    name: 'Ember',
+    name: 'Kindling',
     model: EMBER_BUILDS.standard.model,
     base: EMBER_BUILDS.standard.base,
     sizeGb: EMBER_BUILDS.standard.downloadGb,
     minRamMb: 8192,
-    blurb: 'The everyday Ember. Explains things properly and holds a long conversation.',
+    blurb: 'The everyday Kindling. Explains things properly and holds a long conversation.',
   },
   {
     id: 'big',
-    name: 'Ember Max',
+    name: 'Kindling Max',
     model: EMBER_BUILDS.big.model,
     base: EMBER_BUILDS.big.base,
     sizeGb: EMBER_BUILDS.big.downloadGb,
@@ -68,7 +68,7 @@ export const BRAIN_OPTIONS = [
     base: null,
     sizeGb: 0,
     minRamMb: 0,
-    blurb: 'A stronger machine on your network runs Ember. This one just talks to it.',
+    blurb: 'A stronger machine on your network runs Kindling. This one just talks to it.',
   },
   {
     id: 'none',
@@ -77,7 +77,7 @@ export const BRAIN_OPTIONS = [
     base: null,
     sizeGb: 0,
     minRamMb: 0,
-    blurb: 'Simple built-in replies for now. You can set Ember up later in Settings.',
+    blurb: 'Simple built-in replies for now. You can set Kindling up later in Settings.',
   },
 ];
 
@@ -830,8 +830,8 @@ export function renderBrainPicker(el, state, onChange) {
       <div class="eb-body">
         <div style="flex:none;display:flex;flex-direction:column;align-items:center;gap:${SPACE.tight}px;">
           <div id="eb-fire" style="position:relative;width:100%;height:76px;"></div>
-          <h1 class="${animate ? 'eb-title' : ''}" style="font-size:26px;font-weight:700;letter-spacing:-0.2px;margin:0;text-shadow:0 0 26px rgba(${FIRE.warm},0.42);${animate ? `animation-delay:${CUE.title}ms;` : ''}">Meet Ember</h1>
-          <p${rise(CUE.sub)} style="font-size:14px;line-height:1.5;color:${INK.quiet};margin:0;${animate ? `animation-delay:${CUE.sub}ms;` : ''}">Ember runs on this machine. Nothing you type leaves it &mdash; no cloud, no key.</p>
+          <h1 class="${animate ? 'eb-title' : ''}" style="font-size:26px;font-weight:700;letter-spacing:-0.2px;margin:0;text-shadow:0 0 26px rgba(${FIRE.warm},0.42);${animate ? `animation-delay:${CUE.title}ms;` : ''}">Meet Kindling</h1>
+          <p${rise(CUE.sub)} style="font-size:14px;line-height:1.5;color:${INK.quiet};margin:0;${animate ? `animation-delay:${CUE.sub}ms;` : ''}">Kindling runs on this machine. Nothing you type leaves it &mdash; no cloud, no key.</p>
           <p${rise(CUE.meta)} style="font-size:12px;color:${INK.meta};margin:0;${animate ? `animation-delay:${CUE.meta}ms;` : ''}">${ramLabel} &middot; ${metaTail}</p>
         </div>
         <div class="eb-scroll">
@@ -939,7 +939,7 @@ function renderPullProgress(el, state, onChange) {
     : '';
   // Name the size in the headline instead of on its own line underneath.
   // "Getting Ember ready" above a line reading "Ember" was a stutter.
-  const who = opt ? opt.name : 'Ember';
+  const who = opt ? opt.name : 'Kindling';
 
   // This is the screen a person actually stares at -- five to ten minutes of
   // it -- and the flat version spent that time as a sticker and a blue bar in
@@ -1119,7 +1119,7 @@ export async function createEmberModel(state, onProgress, signal) {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         url: localStorage.getItem('nova-ai-ollama-url') || 'http://localhost:11434',
-        model: 'ember',
+        model: 'kindling',
         modelfile,
       }),
       signal,

@@ -1,13 +1,35 @@
 # Astrion's own little brain — training a language model from scratch
 
+## Two models, two names (read this first — 2026-09-13)
+
+There are two AI things in this directory and they are not the same thing:
+
+| Name | What it is | Where it runs | Size |
+|---|---|---|---|
+| **Ember** | Our own model, trained **from scratch** here. `train.py` is the small tutorial tier (a **5–6 million** parameter character model, minutes on a 5080). `train_best.py` / `BEST.md` / `WINDOWS.md` is the flagship tier: **341M parameters** (dim 1024, 24 layers, GQA), ~80 hours of pretraining. Same RMSNorm/RoPE/SwiGLU shape the kernel's engine expects. | Host-side today. The goal is inside the C kernel via `export_ember.py` → `.astrion` (`KERNEL-CONTRACT.md`). **Not there yet**: the kernel's in-kernel forward pass has only been exercised with a small test model, and the released kernel ISO ships with no brain module at all. | 5–6M (tutorial) / 341M (flagship) |
+| **Kindling** (was also called "Ember" until 2026-09-13) | **Qwen3** (1.7B / 8B / 14B, Alibaba's open-weight model) with an Astrion identity and job layered on top by an Ollama Modelfile. Nothing about it is trained by us; we wrote a system prompt. | The web desktop's assistant, via Ollama on the user's machine. `custom-model/ember/EMBER-TONIGHT.md` sets it up. | 1.4 / 5.2 / 9.3 GB downloads |
+
+So when a doc in here says "a few million parameters" it means the `train.py`
+tutorial tier of Ember; when it says "341M" it means the flagship tier of Ember;
+and anything that talks to Qwen3 is Kindling. The disclosure, plainly: **the
+assistant people talk to in the web desktop today is Qwen3 wearing our voice.
+It is much better at calculus and code than our 341M model will ever be, and its
+weights are not ours. Ember is the one we grow ourselves; Kindling is the
+borrowed fuel that gets it lit.** The identity gate
+(`custom-model/ember/identity_gate.py`) exists so Kindling never claims to be
+Qwen, ChatGPT or anything else — and never claims to be something we trained.
+
+---
+
 This trains a **real transformer from zero** on your PC. No fine-tuning, no
 downloading someone else's brain. You feed it text, it learns to predict the
 next character, and out of that it learns to *write*. You'll literally watch it
 go from random noise → gibberish → real words → sentences.
 
-It's small on purpose (a few **million** parameters, not billions). It won't
-reason like ChatGPT. It writes. That's the goal, and it's plenty — this is the
-seed of Astrion's own AI.
+It's small on purpose (a few **million** parameters, not billions — that is the
+`train.py` tier; the 341M flagship is `BEST.md`). It won't reason like ChatGPT.
+It writes. That's the goal, and it's plenty — this is the seed of Astrion's own
+AI.
 
 **Three files, that's the whole thing:**
 - `train.py` — builds the model and trains it. Read it top to bottom; every part

@@ -1,11 +1,20 @@
-# Ember on your PC — the whole thing, tonight
+# Kindling on your PC — the whole thing, tonight
+
+*(Renamed 2026-09-13. This model used to be called Ember too, which meant two
+different things wore one name. The from-scratch 341M model keeps the name
+Ember; this one — Qwen3 wearing Astrion's identity — is **Kindling**: what you
+burn to get an ember going. The directory and generator are still under
+`custom-model/ember/` until someone moves them.)*
 
 Every command here goes in **PowerShell on the Windows PC**. Nothing runs on the
 Mac.
 
-This is NOT the 80-hour training run. That was `WINDOWS.md`, and it built the
-341M model that lives inside the C kernel. This is the other Ember: the one a
-person actually talks to, built by modding Qwen3 rather than training from zero.
+This is NOT the 80-hour training run. That was `WINDOWS.md`, and it trains
+Ember, the 341M model that is being built to run inside the C kernel (it does
+not live there yet — see `KERNEL-CONTRACT.md` for the export path, and note the
+released kernel ISO currently ships with no brain module at all). This is
+Kindling: the one a person actually talks to in the web desktop, built by
+modding Qwen3 rather than training from zero.
 
 Honest time budget:
 
@@ -13,7 +22,7 @@ Honest time budget:
 |---|---|---|
 | 0 | Install Ollama | ~3 min |
 | 1 | Pull the base model | 5-20 min (5.2 GB download) |
-| 2 | Create Ember from it | ~10 seconds |
+| 2 | Create Kindling from it | ~10 seconds |
 | 3 | Prove it holds its identity | ~1 min |
 | 4 | Point Astrion at it | ~1 min |
 
@@ -29,9 +38,10 @@ it an identity and a job. Ollama does that with a text file. No GPU time, no
 dataset, no waiting.
 
 What you get is genuinely better at helping with calculus and code than the
-341M model ever will be, because Qwen3 8B has roughly 24x the parameters and
+341M Ember ever will be, because Qwen3 8B has roughly 24x the parameters and
 was trained on far more. What you give up is that the weights are not ours.
-Both of those are true and the README says so.
+Both of those are true, and `custom-model/README.md` says so in its "Two
+models, two names" section.
 
 ---
 
@@ -78,21 +88,24 @@ miserable; small is the honest choice there.
 
 ---
 
-## Step 2 — Create Ember
+## Step 2 — Create Kindling
 
 From the repo root:
 
 ```powershell
-ollama create ember -f custom-model\ember\Modelfile.standard
+ollama create kindling -f custom-model\ember\Modelfile.standard
 ```
 
 There is one Modelfile per tier — `.tiny`, `.standard`, `.big` — because the
 context size differs between them. Use the one matching the tag you pulled.
 (Plain `Modelfile` with no suffix is the standard tier, kept so `-f Modelfile`
-does the obvious thing.)
+does the obvious thing.) The Modelfiles are generated from
+`js/kernel/ember-identity.js` by `node custom-model/ember/build-modelfile.js`;
+if the header at the top of the file still says "Ember", regenerate before you
+create.
 
 This takes seconds. It is not copying the weights — it writes a small manifest
-that points at the base you just pulled and layers Ember's identity on top.
+that points at the base you just pulled and layers Kindling's identity on top.
 
 Check it exists:
 
@@ -100,17 +113,17 @@ Check it exists:
 ollama list
 ```
 
-You should see `ember` in the list alongside `qwen3:8b`.
+You should see `kindling` in the list alongside `qwen3:8b`.
 
 ---
 
-## Step 3 — Prove it is actually Ember
+## Step 3 — Prove it is actually Kindling
 
 This is the step that matters, and it is the one that is easy to skip because
 the model will *look* right if you just chat to it.
 
 ```powershell
-python custom-model\ember\identity_gate.py
+python custom-model\ember\identity_gate.py --model kindling
 ```
 
 It asks the model who it is, several different ways, and checks the answers
@@ -138,8 +151,8 @@ above it is unverified.
 
 ## Step 4 — Point Astrion at it
 
-Start Astrion and go through first boot. On the AI screen, pick the tier you
-pulled.
+Start Astrion and go through first boot. On the AI screen ("Meet Kindling"),
+pick the tier you pulled.
 
 It will still run its download step - the picker does not check what you
 already have, it just asks Ollama to pull. That is fine: Ollama already has

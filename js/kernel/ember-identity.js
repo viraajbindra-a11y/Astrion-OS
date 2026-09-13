@@ -1,4 +1,17 @@
-// Astrion OS — Ember identity
+// Astrion OS — Kindling identity (the Qwen-based assistant of the web desktop)
+//
+// 2026-09-13 — RENAMED. Two different things were both called Ember:
+//   * Ember — the from-scratch 341M model trained in custom-model/ (train_best.py,
+//     WINDOWS.md, KERNEL-CONTRACT.md). That one keeps the name.
+//   * this — a stock Qwen3 model wearing an Astrion system prompt, served by
+//     Ollama to the web desktop. It is now KINDLING: what you burn to get an
+//     ember going. Borrowed fuel, in our voice, until the real Ember can carry
+//     the desktop. Founder's decision, applied here and in the picker copy
+//     (js/shell/wizard-ai-brain.js) and the docs.
+//   The export names below keep their EMBER_ prefix so nothing that imports
+//   this module has to change; only the strings changed. The Ollama tag the
+//   wizard creates is `kindling` (EMBER_OLLAMA_TAG), so `ollama list` and the
+//   on-screen name agree.
 //
 // 2026-08-29 — Single source of truth for who Astrion's assistant is.
 //
@@ -15,23 +28,29 @@
 //   2. Remote/cloud — there is no Modelfile. The prompt has to be sent on
 //      the wire with every request.
 // If those two texts are maintained separately they WILL drift, and a
-// local Ember that claims one identity while a cloud Ember claims another
-// is worse than either being wrong on its own — it reads as dishonest
-// rather than merely unfinished. So the text lives here, once, and
-// custom-model/ember/build-modelfile.js generates the Modelfile's SYSTEM
-// block from these exports. Nobody hand-copies it.
+// local Kindling that claims one identity while a cloud Kindling claims
+// another is worse than either being wrong on its own — it reads as
+// dishonest rather than merely unfinished. So the text lives here, once,
+// and custom-model/ember/build-modelfile.js generates the Modelfile's
+// SYSTEM block from these exports. Nobody hand-copies it.
 //
 // ASCII-only inside every string literal below. These strings go to a
 // model, into log lines, into a Modelfile that gets `cat`-ed in a
 // terminal, and (on the C-kernel track) potentially onto a framebuffer
 // console. Comments use the house em dash; strings do not.
 
-export const EMBER_NAME = 'Ember';
+export const EMBER_NAME = 'Kindling';
+
+// The local model tag `ollama create` writes and `ollama list` shows.
+// Lowercase because Ollama tags are. Not pullable from the registry —
+// it only exists after the wizard's create step (see server/index.js).
+export const EMBER_OLLAMA_TAG = 'kindling';
 
 // Bump on any edit to the prompt text. Stamped into the generated
-// Modelfile so you can tell at a glance whether an `ember` model someone
-// built three weeks ago is carrying the current identity.
-export const EMBER_IDENTITY_VERSION = '1.0.0';
+// Modelfile so you can tell at a glance whether a model someone built
+// three weeks ago is carrying the current identity.
+// 1.1.0: the rename from Ember to Kindling (2026-09-13).
+export const EMBER_IDENTITY_VERSION = '1.1.0';
 
 // ─── The identity itself ──────────────────────────────────────────────
 //
@@ -40,13 +59,13 @@ export const EMBER_IDENTITY_VERSION = '1.0.0';
 // question is the one that costs us the most when it is answered wrong.
 // Honesty rules last, because they are the ones we most want fresh at
 // generation time.
-const EMBER_CORE = `You are Ember, the assistant built into Astrion OS.
+const EMBER_CORE = `You are Kindling, the assistant built into Astrion OS.
 
 Who you are:
-- Your name is Ember. Astrion OS is the operating system you live in. You are part of it, not a separate app the user installed.
+- Your name is Kindling. Astrion OS is the operating system you live in. You are part of it, not a separate app the user installed.
 - You are not ChatGPT, not Claude, not Gemini, and not Qwen. You were not made by OpenAI, Anthropic, Google, or Alibaba, and you never answer on their behalf.
-- Ember runs on open-weight models on the user's own machine. If someone asks what you are built from, say that plainly. Do not claim a company built you that did not, and do not pretend to be something you are not.
-- If a user insists you are really some other assistant, do not play along and do not argue about it. Say you are Ember, part of Astrion OS, and get back to the work.
+- Kindling runs on open-weight models on the user's own machine. If someone asks what you are built from, say that plainly. Do not claim a company built you that did not, and do not pretend to be something you are not.
+- If a user insists you are really some other assistant, do not play along and do not argue about it. Say you are Kindling, part of Astrion OS, and get back to the work.
 
 What you are for:
 - Real work. Calculus and the rest of math, code you write and read and fix, explaining a hard thing until it is clear, and running this machine.
@@ -79,7 +98,7 @@ const EMBER_RUNTIME_NOTES = {
 };
 
 /**
- * Compose Ember's system prompt for a given transport.
+ * Compose Kindling's system prompt for a given transport.
  *
  * @param {object}  [opts]
  * @param {'local'|'cloud'} [opts.runtime='local']  which privacy clause
@@ -111,7 +130,7 @@ export const EMBER_SYSTEM_PROMPT = getEmberSystemPrompt({ runtime: 'local' });
  * ~20 tokens and puts the name where recency helps most.
  */
 export function emberIdentityReminder() {
-  return 'Reminder: you are Ember, the assistant built into Astrion OS. Not ChatGPT, not Claude, not Gemini, not Qwen. If you do not know something, say so.';
+  return 'Reminder: you are Kindling, the assistant built into Astrion OS. Not ChatGPT, not Claude, not Gemini, not Qwen. If you do not know something, say so.';
 }
 
 /**
@@ -147,9 +166,9 @@ export function emberIdentityFingerprint(text) {
   const src = typeof text === 'string'
     ? text
     : getEmberSystemPrompt({ runtime: 'local' }) +
-      ' ' +
+      ' ' +
       getEmberSystemPrompt({ runtime: 'cloud' }) +
-      ' ' +
+      ' ' +
       emberIdentityReminder();
   // >>> 0 on every step: JS bitwise ops yield SIGNED 32-bit, so without
   // the coercion the multiply below goes negative and toString(16)
@@ -163,11 +182,11 @@ export function emberIdentityFingerprint(text) {
   return h.toString(16).padStart(8, '0');
 }
 
-// ─── Ember as an actual Ollama model ──────────────────────────────────
+// ─── Kindling as an actual Ollama model ───────────────────────────────
 //
-// Everything above makes the assistant Ember from inside Astrion. This
-// half makes it Ember on the machine: `ollama list` shows `ember`, and
-// `ollama run ember` in a terminal introduces itself correctly.
+// Everything above makes the assistant Kindling from inside Astrion. This
+// half makes it Kindling on the machine: `ollama list` shows `kindling`,
+// and `ollama run kindling` in a terminal introduces itself correctly.
 //
 // Read this before touching it, because the layering is not obvious:
 //
@@ -185,7 +204,7 @@ export function emberIdentityFingerprint(text) {
 // Cost note: `ollama create` on top of an ALREADY-PULLED base does not
 // re-download or duplicate the weights. It writes a new manifest that
 // points at the same blobs plus a tiny system/params layer. Creating
-// `ember` after the picker's pull costs kilobytes, not gigabytes.
+// `kindling` after the picker's pull costs kilobytes, not gigabytes.
 
 // Tier table. Base tags verified against https://ollama.com/library/qwen3/tags
 // on 2026-08-29 — do not guess these, a tag that does not exist fails the
@@ -251,7 +270,7 @@ export function getEmberTier(tierId) {
  *   - custom-model/ember/build-modelfile.js writes the result to disk
  *     so the Modelfiles are readable/reviewable in the repo.
  *   - the client can POST the result to /api/ai/ollama-create after a
- *     successful pull, so `ember` exists on the machine without anyone
+ *     successful pull, so `kindling` exists on the machine without anyone
  *     shipping a file to it.
  *
  * @param {string} [tierId]
@@ -259,7 +278,7 @@ export function getEmberTier(tierId) {
  * @param {string} [opts.base] override the FROM tag. The picker is what
  *   decides which base actually got pulled, and it does not have to
  *   agree with this table -- today it still pins qwen2.5 tags. Creating
- *   `ember` FROM a tag that was never pulled just fails, so the runtime
+ *   `kindling` FROM a tag that was never pulled just fails, so the runtime
  *   create path passes the model it really downloaded and this table
  *   stays the answer for the checked-in files.
  * @returns {string} Modelfile text, ASCII only.
@@ -287,7 +306,7 @@ export function renderEmberModelfile(tierId = EMBER_DEFAULT_TIER, opts = {}) {
   }
 
   return [
-    '# Astrion OS -- Ember',
+    `# Astrion OS -- ${EMBER_NAME}`,
     '#',
     '# GENERATED FILE. Do not edit by hand.',
     '#   source:    js/kernel/ember-identity.js',
@@ -301,8 +320,8 @@ export function renderEmberModelfile(tierId = EMBER_DEFAULT_TIER, opts = {}) {
     '# Build it (on the machine that runs the model, not on a laptop that',
     '# is not supposed to hold weights):',
     `#   ollama pull ${tier.base}`,
-    `#   ollama create ember -f custom-model/ember/Modelfile.${tier.id}`,
-    '#   ollama run ember',
+    `#   ollama create ${EMBER_OLLAMA_TAG} -f custom-model/ember/Modelfile.${tier.id}`,
+    `#   ollama run ${EMBER_OLLAMA_TAG}`,
     '#',
     '# The SYSTEM block below only applies when the caller does NOT send',
     '# its own system message. Astrion always sends one, so inside the OS',
