@@ -23,6 +23,13 @@ const wallpapers = [
   { id: 'forest',    name: 'Forest',    colors: "url('assets/wallpapers/forest.svg')" },
 ];
 
+// The frame. The nav bar is IN FLOW, below the content, so a tall step can
+// never slide underneath its own buttons; it either fits or it scrolls
+// (each step decides what scrolls -- see the Ember step). Before this the
+// nav was absolutely positioned at bottom:32px and the Ember step's last
+// card sat under Back/Continue on any 800px-tall screen.
+const FRAME = { top: 40, side: 40, navTop: 20, bottom: 32 };
+
 const accents = [
   { color: '#007aff', name: 'Blue' },
   { color: '#5856d6', name: 'Purple' },
@@ -99,9 +106,11 @@ export function showSetupWizard() {
         <div style="position:absolute;top:0;left:0;right:0;height:3px;background:rgba(255,255,255,0.1);z-index:2;">
           <div style="height:100%;width:${progress}%;background:var(--accent);transition:width 0.4s ease;border-radius:0 2px 2px 0;"></div>
         </div>
-        <div style="position:absolute;top:0;left:0;width:100%;height:100%;z-index:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px;box-sizing:border-box;">
-          <div id="setup-content" style="max-width:560px;width:100%;animation:scaleIn 0.35s cubic-bezier(0.16,1,0.3,1);"></div>
-          <div style="position:absolute;bottom:32px;left:0;right:0;display:flex;justify-content:center;align-items:center;gap:16px;${aiBrainBlocking ? 'visibility:hidden;' : ''}">
+        <div style="position:absolute;top:0;left:0;width:100%;height:100%;z-index:1;display:flex;flex-direction:column;align-items:center;padding:${FRAME.top}px ${FRAME.side}px 0;box-sizing:border-box;">
+          <div style="flex:1 1 auto;min-height:0;width:100%;max-width:560px;display:flex;flex-direction:column;justify-content:center;">
+            <div id="setup-content" style="min-height:0;display:flex;flex-direction:column;animation:scaleIn 0.35s cubic-bezier(0.16,1,0.3,1);"></div>
+          </div>
+          <div style="flex:none;display:flex;justify-content:center;align-items:center;gap:16px;padding:${FRAME.navTop}px 0 ${FRAME.bottom}px;${aiBrainBlocking ? 'visibility:hidden;' : ''}">
             ${step > 0 ? `<button id="setup-back" style="background:rgba(255,255,255,0.08);border:none;color:rgba(255,255,255,0.6);padding:10px 24px;border-radius:10px;font-size:14px;font-family:var(--font);cursor:pointer;">Back</button>` : ''}
             <div style="display:flex;gap:6px;">
               ${Array.from({length: totalSteps}, (_, i) => `<div style="width:${i === step ? '24px' : '8px'};height:8px;border-radius:4px;background:${i === step ? 'var(--accent)' : i < step ? 'rgba(255,255,255,0.4)' : 'rgba(255,255,255,0.15)'};transition:all 0.3s;"></div>`).join('')}

@@ -83,7 +83,11 @@ export const BRAIN_OPTIONS = [
 
 // One spacing scale for this screen, so nothing is a one-off guess.
 // 5 / 9 / 10 / 14 / 22 -- card interior, group gap, header rhythm.
-const SPACE = { hair: 5, tight: 9, card: 10, block: 14, section: 22 };
+// `bleed` is how far the scrolling card stack reaches past the cards on
+// each side, so a card's shadow and its lifted rim are not sliced off by
+// the scroll clip. 24px covers the widest shadow in the stack (30px blur
+// at -14px spread).
+const SPACE = { hair: 5, tight: 9, card: 10, block: 14, section: 22, bleed: 24 };
 
 // Text colors, chosen for contrast on the wizard's dark panel (checked,
 // not eyeballed).
@@ -530,6 +534,10 @@ function emberMark(size) {
     </svg>`;
 }
 
+// Where the card stack was scrolled to, carried across re-renders (see the
+// end of renderBrainPicker).
+let stackScroll = 0;
+
 // The staged entrance runs ONCE per boot. setup-wizard.js re-renders the
 // whole wizard on every click, and an entrance that replays on every click
 // stops being an entrance and becomes a stutter.
@@ -550,7 +558,7 @@ function emberStyles(animate) {
       to   { opacity:1; transform:none; letter-spacing:-0.2px; filter:none; }
     }
     @keyframes ebShimmer { 0% { transform:translateX(-100%); } 100% { transform:translateX(400%); } }
-    .eb-stage { position:relative; text-align:center; }
+    .eb-stage { position:relative; text-align:center; display:flex; flex-direction:column; min-height:0; }
     .eb-in { animation:ebRise 0.52s cubic-bezier(0.2,0.85,0.25,1) both; ${a} }
     .eb-title { animation:ebResolve 0.68s cubic-bezier(0.2,0.85,0.25,1) both; ${a} }
     /* The warm light the fire throws on the panel. Promoted so the per-frame
@@ -576,7 +584,31 @@ function emberStyles(animate) {
         radial-gradient(ellipse 260px 190px at 50% calc(var(--eb-glowy,175px) - 14px), rgba(${FIRE.warm},0.17) 0%, rgba(${FIRE.warm},0) 70%),
         radial-gradient(ellipse 560px 340px at 50% calc(var(--eb-glowy,175px) + 30px), rgba(${FIRE.deep},0.10) 0%, rgba(${FIRE.deep},0) 72%);
     }
-    .eb-body { position:relative; z-index:1; }
+    .eb-body { position:relative; z-index:1; display:flex; flex-direction:column; min-height:0; }
+    /* The card stack is the one part of this screen allowed to scroll. The
+       header and the fire never move; the nav bar (now in flow, see
+       setup-wizard.js) never gets covered. When the stack does overflow, the
+       clipped edge fades so the cut looks like a cut and not like the end. */
+    .eb-scroll {
+      flex:1 1 auto; min-height:0; overflow-y:auto; overscroll-behavior:contain;
+      margin:0 -${SPACE.bleed}px; padding:${SPACE.section}px ${SPACE.bleed}px 14px;
+      scroll-padding:24px 0 36px;
+      scrollbar-width:thin; scrollbar-color:rgba(255,255,255,0.16) transparent;
+    }
+    .eb-scroll::-webkit-scrollbar { width:6px; }
+    .eb-scroll::-webkit-scrollbar-thumb { background:rgba(255,255,255,0.14); border-radius:3px; }
+    .eb-scroll.eb-more-below {
+      -webkit-mask-image:linear-gradient(to bottom, #000 calc(100% - 36px), transparent);
+      mask-image:linear-gradient(to bottom, #000 calc(100% - 36px), transparent);
+    }
+    .eb-scroll.eb-more-above {
+      -webkit-mask-image:linear-gradient(to bottom, transparent, #000 24px);
+      mask-image:linear-gradient(to bottom, transparent, #000 24px);
+    }
+    .eb-scroll.eb-more-above.eb-more-below {
+      -webkit-mask-image:linear-gradient(to bottom, transparent, #000 24px, #000 calc(100% - 36px), transparent);
+      mask-image:linear-gradient(to bottom, transparent, #000 24px, #000 calc(100% - 36px), transparent);
+    }
     /* Cards are objects lit from above, not tinted haze. The fill is DARKER
        than the panel -- a face turned away from the light -- and the light
        lands on the top edge as a rim that falls off down the stack. That is
@@ -796,18 +828,41 @@ export function renderBrainPicker(el, state, onChange) {
     <div class="eb-stage">
       <div class="eb-glow"></div>
       <div class="eb-body">
-        <div style="display:flex;flex-direction:column;align-items:center;gap:${SPACE.tight}px;margin-bottom:${SPACE.section}px;">
+        <div style="flex:none;display:flex;flex-direction:column;align-items:center;gap:${SPACE.tight}px;">
           <div id="eb-fire" style="position:relative;width:100%;height:76px;"></div>
           <h1 class="${animate ? 'eb-title' : ''}" style="font-size:26px;font-weight:700;letter-spacing:-0.2px;margin:0;text-shadow:0 0 26px rgba(${FIRE.warm},0.42);${animate ? `animation-delay:${CUE.title}ms;` : ''}">Meet Ember</h1>
           <p${rise(CUE.sub)} style="font-size:14px;line-height:1.5;color:${INK.quiet};margin:0;${animate ? `animation-delay:${CUE.sub}ms;` : ''}">Ember runs on this machine. Nothing you type leaves it &mdash; no cloud, no key.</p>
           <p${rise(CUE.meta)} style="font-size:12px;color:${INK.meta};margin:0;${animate ? `animation-delay:${CUE.meta}ms;` : ''}">${ramLabel} &middot; ${metaTail}</p>
         </div>
-        <div style="display:flex;flex-direction:column;gap:${SPACE.card}px;text-align:left;">${sizeCards}</div>
-        <div class="eb-rule"></div>
-        <div style="display:flex;flex-direction:column;gap:${SPACE.card}px;text-align:left;">${otherCards}</div>
+        <div class="eb-scroll">
+          <div style="display:flex;flex-direction:column;gap:${SPACE.card}px;text-align:left;">${sizeCards}</div>
+          <div class="eb-rule"></div>
+          <div style="display:flex;flex-direction:column;gap:${SPACE.card}px;text-align:left;">${otherCards}</div>
+        </div>
       </div>
     </div>
   `;
+
+  // Keep the stack where the user left it across the wizard's full
+  // re-render, then make sure the picked card is actually on screen -- the
+  // Remote card grows an address field when chosen, and on a short display
+  // that field is the one thing that must not land under the fade.
+  const stack = el.querySelector('.eb-scroll');
+  if (stack) {
+    const edges = () => {
+      stack.classList.toggle('eb-more-above', stack.scrollTop > 2);
+      stack.classList.toggle('eb-more-below', stack.scrollTop + stack.clientHeight < stack.scrollHeight - 2);
+    };
+    stack.scrollTop = stackScroll;
+    stack.addEventListener('scroll', () => { stackScroll = stack.scrollTop; edges(); }, { passive: true });
+    edges();
+    const picked = stack.querySelector('.eb-card.eb-on');
+    if (picked && stack.scrollHeight > stack.clientHeight) {
+      picked.scrollIntoView({ block: 'nearest' });
+      stackScroll = stack.scrollTop;
+      edges();
+    }
+  }
 
   const fireHost = el.querySelector('#eb-fire');
   const mood = state.brain && EMBER_MOODS[state.brain] ? state.brain : 'standard';
