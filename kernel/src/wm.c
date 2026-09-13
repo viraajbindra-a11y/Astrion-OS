@@ -3234,6 +3234,13 @@ static void repaint_all(void) {
      * shell instead of the shell always being repainted underneath everything.
      * When the Terminal is closed, nothing paints it at all, and the console
      * keeps recording into its backing store until it reopens. */
+    /* Tell the dock what is open before who is focused: set_open_apps draws
+     * the dock, set_active_app draws it again with the ring, so the ring is
+     * the last thing down either way. */
+    uint32_t open_mask = 0;
+    for (int i = 0; i < WM_MAX; i++)
+        if (wins[i].open) open_mask |= 1u << icon_of(wins[i].app);
+    desktop_set_open_apps(open_mask);
     struct window *f = focused();
     desktop_set_active_app(f ? icon_of(f->app) : -1);
     for (int i = 0; i < zn; i++) {

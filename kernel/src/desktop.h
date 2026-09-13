@@ -212,6 +212,13 @@ int desktop_dock_hit(int x, int y);
 /* Highlight the given dock icon as the active app (-1 = none). */
 void desktop_set_active_app(int icon);
 
+/* Which apps have a window open, as a bitmask of dock icon indices. The dock
+ * draws an open app at full colour and a closed one dimmed, so the row says
+ * what is running before you read a single label -- and the focused one keeps
+ * the accent ring on top of that. Set it whenever a window opens or closes;
+ * the dock repaints itself. */
+void desktop_set_open_apps(uint32_t mask);
+
 /* ─── Power control ───
  * A power button sits at the far right of the top bar (system chrome, not the
  * app dock). Clicking it opens a calm, modal confirm dialog over a dimmed

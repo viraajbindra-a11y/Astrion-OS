@@ -119,6 +119,8 @@ static uint32_t SW, SH;
 static uint32_t win_x, win_y, win_w, win_h;         /* Terminal window outer */
 static uint32_t term_x, term_y, term_w, term_h;     /* console content inner */
 static int g_active_icon = -1;
+/* Bit i set = dock icon i has a window open. See desktop_set_open_apps(). */
+static uint32_t g_open_apps;
 
 /* ─── Small helpers ─── */
 
@@ -793,7 +795,7 @@ static void dock_layout(uint32_t *sx, uint32_t *gap) {
  * hierarchy — DIMMED unless the app is running. An idle launcher should be
  * quietly available, not competing with your terminal for attention. The one
  * app that IS running comes up to full colour and keeps the accent ring. */
-static void draw_tile(uint32_t ix, uint32_t iy, uint32_t base, int active) {
+static void draw_tile(uint32_t ix, uint32_t iy, uint32_t base, int open) {
     /* Lit from above: the top edge is a step toward white, the bottom a step
      * toward black, both shallow. 1/6 and 1/8 keep the hue and just give the
      * face some curvature — a strong gradient would read as a web button. */
@@ -804,7 +806,13 @@ static void draw_tile(uint32_t ix, uint32_t iy, uint32_t base, int active) {
      * where seven of eight apps are washed out reads as seven disabled apps,
      * and swapping an aesthetic problem for a semantic one is a bad trade. A
      * sixth takes the glare off the chroma without ever saying "unavailable". */
-    if (!active) {
+    /* OPEN, not focused. The dim was driven by which app had the keyboard,
+     * so switching windows re-lit one tile and put another out -- the dock
+     * answered "what am I typing into", which the accent ring and the top bar
+     * both already say. What it could not answer was "what is running", and
+     * that is the question a dock is for. Full colour means open; dimmed
+     * means closed. */
+    if (!open) {
         top = lerp_color(top, AC_BAR, 1, 6);
         bot = lerp_color(bot, AC_BAR, 1, 6);
     }
@@ -833,8 +841,9 @@ static void draw_dock(void) {
     uint32_t iy = DOCK_IY;
     for (uint32_t i = 0; i < NICON; i++) {
         uint32_t ix = sx + i * (ICON_SZ + gap);
-        int active = ((int)i == g_active_icon);
-        if (active) {
+        int focus = ((int)i == g_active_icon);
+        int open  = focus || (g_open_apps & (1u << i)) != 0;
+        if (focus) {
             /* Ring, then a 1px gap in the dock colour, then the tile. Without
              * the gap the ring merges into any tile close to the accent, and
              * Files is 0x0A84FF — exactly AC_ACCENT — so its active ring was
@@ -847,7 +856,7 @@ static void draw_dock(void) {
             ac_fill_round(ix - 1, iy - 1, ICON_SZ + 2, ICON_SZ + 2,
                           TILE_R + 1, AC_BAR);
         }
-        draw_tile(ix, iy, g_icons[i].color, active);
+        draw_tile(ix, iy, g_icons[i].color, open);
 
         /* The glyph is the icon, so it is sized like one. AF_SB16 in a 52px
          * tile was a 16px letter floating in the middle of a big square — a
@@ -865,13 +874,24 @@ static void draw_dock(void) {
             draw_dial_glyph((int)(ix + ICON_SZ / 2), (int)(iy + ICON_SZ / 2),
                             13, 2, ink);
         }
+        /* Three states, three weights: the focused app's label is white, an
+         * open one's is a step brighter than muted, a closed one's is muted.
+         * The label agrees with its tile instead of contradicting it. */
         af_draw_center(ix + ICON_SZ / 2, iy + ICON_SZ + DOCK_LBL_GAP,
-                       g_icons[i].label, active ? AC_WHITE : AC_MUTED, AF_REG13);
+                       g_icons[i].label,
+                       focus ? AC_WHITE : open ? lerp_color(AC_MUTED, AC_WHITE, 1, 2)
+                                               : AC_MUTED, AF_REG13);
     }
 }
 
 void desktop_set_active_app(int icon) {
     g_active_icon = icon;
+    draw_dock();
+}
+
+void desktop_set_open_apps(uint32_t mask) {
+    if (mask == g_open_apps) return;      /* no repaint when nothing changed */
+    g_open_apps = mask;
     draw_dock();
 }
 
