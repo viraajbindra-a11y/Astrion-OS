@@ -23,7 +23,7 @@
  * does not carry — the kernel ships int8, exactly as q8.h intends.
  *
  * ────────────────────────────────────────────────────────────────────────────
- * ON-DISK FORMAT  "AMW1"  (v1)  — THE SHARED CONTRACT with tools/mkweights.py.
+ * ON-DISK FORMAT  "AMW2"  (v2)  — THE SHARED CONTRACT with tools/mkweights.py.
  * Both files reference THIS block; if you change one, change the other, or the
  * round-trip gate (tests/test_model_load.c) fails as a logit mismatch.
  *
@@ -35,9 +35,9 @@
  * need none. Fixed-point weights are at Q8_SCALE_SHIFT (=20); rms_eps at
  * MODEL_EPS_SHIFT (=40). All of this mirrors model.h's structs exactly.
  *
- *   HEADER (80 bytes, at offset 0)
- *     u32 magic        0x31574D41  "AMW1"
- *     u32 version      1
+ *   HEADER (128 bytes, at offset 0)
+ *     u32 magic        0x32574D41  "AMW2"
+ *     u32 version      2
  *     u32 dim
  *     u32 n_layers
  *     u32 n_heads
@@ -53,6 +53,14 @@
  *     u64 file_len     (total bytes; must equal the recomputed layout size)
  *     u32 n_matrices   (must equal 7*n_layers + 1)
  *     u32 reserved2    (0)
+ *     u32 tok_kind     (tok.h TOK_KIND_*: 0 unspecified, 1 qwen2, 2 gpt2)
+ *     u32 eos_id       (the id that ends a reply; 0xFFFFFFFF for none)
+ *     char tpl_prefix[20]   chat template, ASCII, NUL-terminated in the field
+ *     char tpl_suffix[20]   ("User: " / "\nEmber:" for Ember; empty = none)
+ *
+ *   v1 ("AMW1", 80-byte header) had none of the last four; the kernel guessed
+ *   Qwen's tokenizer and EOS for every brain. v1 files are refused (bad magic):
+ *   regenerate them with mkweights.py, nothing else about the layout changed.
  *
  *   Then, in this fixed order, each section 8-aligned:
  *     EMBED        int64[vocab * dim]
@@ -89,9 +97,10 @@
 #include "model.h"
 #include "q8.h"
 
-#define AMW_MAGIC   0x31574D41u   /* "AMW1" */
-#define AMW_VERSION 1u
-#define AMW_HDR     80u           /* header size, a multiple of 8 */
+#define AMW_MAGIC   0x32574D41u   /* "AMW2" */
+#define AMW_VERSION 2u
+#define AMW_HDR     128u          /* header size, a multiple of 8 */
+#define AMW_TOK_KIND_MAX 2u       /* tok.h TOK_KIND_MAX; kept local like AMW_MAGIC in model_rt.c */
 
 /* Dimension caps. Two jobs: reject nonsense, and keep every product below well
  * within uint64 so the layout arithmetic cannot wrap (the take() cursor is
@@ -126,6 +135,25 @@ static uint64_t amw_rd64(const uint8_t *p) {
 static void amw_zero(void *p, uint64_t n) {
     volatile uint8_t *d = p;
     for (uint64_t i = 0; i < n; i++) d[i] = 0;
+}
+
+/* Copy one MODEL_TPL_LEN template field out of the header into `dst`. The
+ * field must hold a NUL within its bounds (so the string is bounded by the
+ * header, never by a walk past it) and only ASCII the console can show —
+ * printable 0x20..0x7E plus tab/LF/CR, which the templates actually use.
+ * Everything after the NUL is zeroed in dst. Returns 1 if valid, else 0. */
+static int amw_copy_tpl(char *dst, const uint8_t *src) {
+    uint32_t n = 0;
+    while (n < MODEL_TPL_LEN && src[n] != 0) {
+        uint8_t ch = src[n];
+        if (!((ch >= 0x20 && ch <= 0x7E) || ch == '\t' || ch == '\n' || ch == '\r'))
+            return 0;
+        n++;
+    }
+    if (n == MODEL_TPL_LEN) return 0;            /* no terminator inside the field */
+    for (uint32_t i = 0; i < MODEL_TPL_LEN; i++)
+        dst[i] = (i < n) ? (char)src[i] : 0;
+    return 1;
 }
 
 /* Forward cursor over the blob. Invariant: off <= len at all times, so
@@ -222,6 +250,10 @@ const char *model_load(const void *base, uint64_t len,
     uint64_t file_len   = amw_rd64(b + 64);
     uint32_t n_matrices = amw_rd32(b + 72);
     /* b + 76: reserved2 */
+    cfg.tok_kind = amw_rd32(b + 80);
+    cfg.eos_id   = amw_rd32(b + 84);
+    if (!amw_copy_tpl(cfg.tpl_prefix, b + 88))  return "bad template prefix";
+    if (!amw_copy_tpl(cfg.tpl_suffix, b + 108)) return "bad template suffix";
 
     /* Range-check every dimension BEFORE it is used in any size arithmetic. */
     if (cfg.dim == 0        || cfg.dim > AMW_MAX_DIM)          return "bad dim";
@@ -237,6 +269,7 @@ const char *model_load(const void *base, uint64_t len,
     if (cfg.qk_norm > 1u)                                     return "bad qk_norm";
     if (cfg.rope_theta < 1)                                   return "bad rope_theta";
     if (cfg.rms_eps_fp <= 0)                                  return "bad rms_eps";
+    if (cfg.tok_kind > AMW_TOK_KIND_MAX)                      return "bad tok_kind";
     if (cfg.n_layers > max_layers)                           return "too many layers for caller buffer";
     if ((uint64_t)n_matrices != (uint64_t)cfg.n_layers * 7u + 1u) return "matrix count mismatch";
 
@@ -295,6 +328,12 @@ const char *model_load(const void *base, uint64_t len,
     out->cfg.qk_norm    = cfg.qk_norm;
     out->cfg.rope_theta = cfg.rope_theta;
     out->cfg.rms_eps_fp = cfg.rms_eps_fp;
+    out->cfg.tok_kind   = cfg.tok_kind;
+    out->cfg.eos_id     = cfg.eos_id;
+    for (uint32_t i = 0; i < MODEL_TPL_LEN; i++) {
+        out->cfg.tpl_prefix[i] = cfg.tpl_prefix[i];
+        out->cfg.tpl_suffix[i] = cfg.tpl_suffix[i];
+    }
     out->embed    = embed;
     out->layers   = layers;
     out->final_ln = final_ln;

@@ -1156,7 +1156,7 @@ static void assist_report(enum am_intent w, const char *p) {
     case AM_IDENTITY:
         assist_begin_output();
         assist_say("I'm Astrion's assistant. I live inside a kernel written from\n");
-        assist_say("scratch in C - no Linux under me, no internet anywhere.\n");
+        assist_say("scratch in C - no Linux under me, no path to the network.\n");
         assist_say("I don't just chat: I run this machine for you. Ask me your\n");
         assist_say("memory, disk, cpu, uptime, what's running or your files -\n");
         assist_say("or tell me to make, write, append, copy, rename, read or\n");
@@ -2154,15 +2154,22 @@ static void assist_run(void) {
         }
         /* The one path that runs the neural engine: tokenize the prompt, greedy-
          * decode through model.c, detokenize, stream it out - all offline. The
-         * loaded brain is a tiny random test model, so the text is deliberately
-         * gibberish; the point is real tokens flowing through the in-kernel
-         * forward pass. */
+         * brain file says what it is: one with a chat template is a trained
+         * Ember that answers as itself; one without is the tiny random test
+         * brain, whose text is deliberately gibberish - the point there is real
+         * tokens flowing through the in-kernel forward pass. Say which, so the
+         * label is never wrong about what follows. */
         const struct model_config *mc = model_rt_config();
-        assist_say("on-device model, ");
+        int chat = mc->tpl_prefix[0] || mc->tpl_suffix[0];
+        assist_say(chat ? "Ember, on-device, " : "on-device model, ");
         assist_num(mc->dim);      assist_say("-dim / ");
         assist_num(mc->n_layers); assist_say("-layer, no internet involved.\n");
-        assist_say("it runs the real transformer inside the kernel - this brain\n");
-        assist_say("is random weights, so expect gibberish, not sense:\n\n");
+        if (chat) {
+            assist_say("the real transformer runs inside the kernel:\n\n");
+        } else {
+            assist_say("it runs the real transformer inside the kernel - this brain\n");
+            assist_say("is random weights, so expect gibberish, not sense:\n\n");
+        }
         model_rt_generate(as_prompt, 64, assist_emit);
         return;
     }

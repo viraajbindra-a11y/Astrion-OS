@@ -36,29 +36,28 @@
  * the #define in model_load.c (kept local: model.h does not export it); TOK_MAGIC
  * comes from tok.h. Identifying by magic, not filename, means the grub.cfg can
  * name the modules anything. */
-#define AMW_MAGIC   0x31574D41u   /* "AMW1" — the brain file            */
-#define AMW_HDR     80u           /* header size, matches model_load.c  */
+#define AMW_MAGIC   0x32574D41u   /* "AMW2" — the brain file            */
+#define AMW_HDR     128u          /* header size, matches model_load.c  */
 
 /* Defensive cap for the pre-load n_layers peek (model_load re-validates against
  * its own AMW_MAX_LAYERS too). Bounds the one allocation we size from an
  * unverified header field. */
 #define MODEL_RT_MAX_LAYERS   4096u
 
-/* Runtime caps. The prompt buffer upstream is 128 bytes, so 160 token slots
- * covers even the pathological one-token-per-byte fallback with margin. The new
- * token cap and decode buffer bound the generation loop's work and output. */
-#define MODEL_RT_MAX_PROMPT   160u
+/* Runtime caps. The prompt buffer upstream is 128 bytes and the chat template
+ * adds at most 2*MODEL_TPL_LEN more, so the wrapped text is under 176 bytes and
+ * 192 token slots cover even the pathological one-token-per-byte fallback with
+ * margin. The new token cap and decode buffer bound the generation loop's work
+ * and output. */
+#define MODEL_RT_MAX_TEXT     (128u + 2u * MODEL_TPL_LEN + 1u)
+#define MODEL_RT_MAX_PROMPT   192u
 #define MODEL_RT_MAX_NEW       64u
 #define MODEL_RT_DECODE_CAP   768u
 
-/* End-of-text. AMW1 does not (yet) carry an EOS id, so this is the well-known
- * Qwen <|endoftext|> id as a sensible default. It is deliberately ABOVE the tiny
- * test brain's vocab (48): model_argmax only ever returns an id in [0, vocab),
- * so on the test brain this check simply never fires and the loop stops on the
- * max_new / max_seq caps instead — which is exactly what we want for a proof
- * run (full-length output, not a one-token stub). On a real model whose vocab
- * includes this id, it ends generation. */
-#define MODEL_RT_EOS          151643u
+/* End-of-text comes from the brain file (AMW2 eos_id), not from a guess here:
+ * Ember stops on GPT-2's <|endoftext|> (50256), Qwen on 151643, and the tiny
+ * test brain names an id ABOVE its own vocab so the check never fires and a
+ * proof run gives full-length output rather than a one-token stub. */
 
 extern void serial_puts_x(const char *s);
 extern void serial_put_u64_x(uint64_t v);
@@ -81,16 +80,11 @@ static uint64_t             g_kv_frames; /* PMM frames backing EACH KV cache    
 static uint32_t g_ids[MODEL_RT_MAX_PROMPT];
 static uint32_t g_gen[MODEL_RT_MAX_NEW];
 static uint8_t  g_dec[MODEL_RT_DECODE_CAP];
+static char     g_text[MODEL_RT_MAX_TEXT];   /* prefix + prompt + suffix        */
 
 static uint32_t rt_rd32(const uint8_t *p) {
     return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
            ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
-}
-
-static uint32_t rt_strlen(const char *s) {
-    uint32_t n = 0;
-    while (s[n]) n++;
-    return n;
 }
 
 /* Free every heap buffer we own and null the pointers — the single cleanup path
@@ -193,7 +187,36 @@ static void rt_install_tok(const void *base, uint64_t len) {
         serial_puts_x("\n");
         return;
     }
-    serial_puts_x("MODEL: tokenizer installed (BPE, ATK1)\n");
+    serial_puts_x("MODEL: tokenizer installed (BPE, ATK1, kind=");
+    serial_put_u64_x(tok_kind());
+    serial_puts_x(")\n");
+}
+
+/* Apply the brain's tokenizer kind to the installed table. The brain says what
+ * split it was trained under; the table says (if it was built recently enough
+ * to say) what split its merges came from. A DIFFERENT answer means the ids
+ * the kernel would feed the model are ones it never saw — tokens in the wrong
+ * places — which reads as a broken model rather than an obviously missing one.
+ * So a mismatch disables generation, loudly, instead of running it. Returns 1
+ * if the pair is usable (or there is no tokenizer at all: raw-byte fallback). */
+static int rt_apply_tok_kind(uint32_t kind) {
+    if (!tok_ready()) return 1;
+    if (kind == TOK_KIND_UNSPEC) {
+        serial_puts_x("MODEL: brain names no tokenizer kind - using the table's own\n");
+        return 1;
+    }
+    if (tok_set_kind(kind) != 0) {
+        serial_puts_x("MODEL: tokenizer kind mismatch - brain wants ");
+        serial_put_u64_x(kind);
+        serial_puts_x(", table is ");
+        serial_put_u64_x(tok_kind());
+        serial_puts_x(" - generation disabled\n");
+        return 0;
+    }
+    serial_puts_x("MODEL: tokenizer kind ");
+    serial_put_u64_x(kind);
+    serial_puts_x(" (1=qwen2 2=gpt2) selected by the brain\n");
+    return 1;
 }
 
 void model_rt_init(void) {
@@ -216,7 +239,7 @@ void model_rt_init(void) {
     rt_install_tok(tok_base, tok_len);
 
     if (!model_base) {
-        serial_puts_x("MODEL: no brain module (AMW1) found — generation disabled\n");
+        serial_puts_x("MODEL: no brain module (AMW2) found — generation disabled\n");
         return;
     }
     if (model_len < AMW_HDR) {
@@ -247,6 +270,11 @@ void model_rt_init(void) {
         return;
     }
 
+    if (!rt_apply_tok_kind(g_w.cfg.tok_kind)) {
+        kfree(g_layers); g_layers = 0;
+        return;
+    }
+
     if (!rt_alloc_scratch(&g_w.cfg)) {
         serial_puts_x("MODEL: out of memory for forward-pass scratch — generation disabled\n");
         kfree(g_layers); g_layers = 0;      /* rt_alloc_scratch freed the rest   */
@@ -271,6 +299,11 @@ void model_rt_init(void) {
     serial_puts_x(" vocab=");                       serial_put_u64_x(c->vocab);
     serial_puts_x(" max_seq=");                     serial_put_u64_x(c->max_seq);
     serial_puts_x(" qk_norm=");                     serial_put_u64_x(c->qk_norm);
+    serial_puts_x("\n");
+    serial_puts_x("MODEL: talks as tok_kind=");     serial_put_u64_x(c->tok_kind);
+    serial_puts_x(" eos=");                         serial_put_u64_x(c->eos_id);
+    serial_puts_x(" template=");
+    serial_puts_x(c->tpl_prefix[0] || c->tpl_suffix[0] ? "yes" : "none");
     serial_puts_x("\n");
 }
 
@@ -301,15 +334,25 @@ int model_rt_generate(const char *prompt, uint32_t max_new, void (*emit)(char)) 
      * KV state between prompts (the test brain's cache is only max_seq deep). */
     g_st.pos = 0;
 
+    /* ── wrap in the chat template the brain was trained with ──
+     * "User: <prompt>\nEmber:" for Ember; empty prefix+suffix for a base model
+     * or the test brain, which leaves the prompt exactly as typed. Bounded:
+     * MODEL_RT_MAX_TEXT holds the longest possible wrap plus the NUL. */
+    uint32_t tl = 0;
+    for (const char *s = c->tpl_prefix; *s && tl < MODEL_RT_MAX_TEXT - 1u; s++) g_text[tl++] = *s;
+    for (const char *s = prompt;        *s && tl < MODEL_RT_MAX_TEXT - 1u; s++) g_text[tl++] = *s;
+    for (const char *s = c->tpl_suffix; *s && tl < MODEL_RT_MAX_TEXT - 1u; s++) g_text[tl++] = *s;
+    g_text[tl] = 0;
+
     /* ── tokenize ── */
     int n = 0;
     if (tok_ready()) {
-        n = tok_encode(prompt, rt_strlen(prompt), g_ids, MODEL_RT_MAX_PROMPT);
+        n = tok_encode(g_text, tl, g_ids, MODEL_RT_MAX_PROMPT);
         if (n < 0) n = 0;
     }
     if (n == 0) {
         /* No tokenizer, or the encoder produced nothing: one token per byte. */
-        for (const char *s = prompt; *s && n < (int)MODEL_RT_MAX_PROMPT; s++)
+        for (const char *s = g_text; *s && n < (int)MODEL_RT_MAX_PROMPT; s++)
             g_ids[n++] = (uint8_t)*s;
     }
     /* Reduce every id into [0, vocab) so it cannot index past the embedding
@@ -346,8 +389,8 @@ int model_rt_generate(const char *prompt, uint32_t max_new, void (*emit)(char)) 
             serial_put_u64_x(V);
             serial_puts_x("\n");
         }
+        if (next == c->eos_id) break;                   /* end of reply: not shown */
         g_gen[gcount++] = next;
-        if (next == MODEL_RT_EOS) break;
         model_forward(&g_w, &g_st, next, g_logits);     /* advance; new logits    */
     }
 
@@ -355,7 +398,13 @@ int model_rt_generate(const char *prompt, uint32_t max_new, void (*emit)(char)) 
     if (tok_ready()) {
         int m = tok_decode(g_gen, gcount, g_dec, MODEL_RT_DECODE_CAP);
         if (m < 0) m = 0;
-        for (int i = 0; i < m; i++) emit((char)g_dec[i]);
+        /* A chat-templated reply begins with the space that separates "Ember:"
+         * from its first word (the finetune encodes " " + reply); drop leading
+         * blanks so the answer starts at the margin. Bytes only, no reflow. */
+        int i0 = 0;
+        if (c->tpl_prefix[0] || c->tpl_suffix[0])
+            while (i0 < m && (g_dec[i0] == ' ' || g_dec[i0] == '\n')) i0++;
+        for (int i = i0; i < m; i++) emit((char)g_dec[i]);
         serial_puts_x("MODEL: generated ");
         serial_put_u64_x(gcount);
         serial_puts_x(" tokens, decoded ");

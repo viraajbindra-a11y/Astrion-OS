@@ -17,9 +17,14 @@
  *   3. CONTROLS — corrupt one byte and prove it is caught: a weight byte ->
  *      logits diverge; a length byte -> the loader rejects.
  *   4. MALFORMED — truncated / bad magic / bad version / a section past the end /
- *      a mismatched matrix self-header / a bad matrix count / an unaligned base:
- *      each returns a reason, zeroes *out, and reads nothing past an EXACT-size
- *      buffer (run under -fsanitize=address to prove the last clause).
+ *      a mismatched matrix self-header / a bad matrix count / an unaligned base /
+ *      a template with no terminator or a non-ASCII byte / an unknown tokenizer
+ *      kind: each returns a reason, zeroes *out, and reads nothing past an
+ *      EXACT-size buffer (run under -fsanitize=address to prove the last clause).
+ *   5. HOW THE BRAIN TALKS — the AMW2 header's tok_kind / eos_id / template
+ *      round-trip through the loader: the oracle default (qwen2, 151643, no
+ *      template) and an Ember-shaped override (gpt2, 50256, "User: "/"\nEmber:")
+ *      written by mkweights.py's flags come back field-for-field.
  *
  * Host program (full libc); it shells out to mkweights.py to produce the blob,
  * then #includes the freestanding engine + loader as one TU so it exercises the
@@ -43,6 +48,7 @@
 #define MK        "python3 tools/mkweights.py"
 #define BLOB_OFF  "build/_amw_test_off.bin"
 #define BLOB_ON   "build/_amw_test_on.bin"
+#define BLOB_TALK "build/_amw_test_talk.bin"    /* qk-on + Ember's talk fields */
 #define MAXL      64                /* caller layer storage; oracle uses 2 */
 
 static int failures;
@@ -185,6 +191,7 @@ int main(void)
 
     gen_blob("--oracle",    BLOB_OFF);
     gen_blob("--oracle-qk", BLOB_ON);
+    gen_blob("--oracle-qk --tok-kind gpt2 --eos 50256 --tpl-prefix 'User: ' --tpl-suffix '\\nEmber:'", BLOB_TALK);
     if (failures) { printf("\nfailures  %d\nFAILED (blob generation)\n", failures); return 1; }
 
     size_t off_len = 0, on_len = 0;
@@ -261,11 +268,39 @@ int main(void)
         want_reject("bad magic", t, off_len, "bad magic");
         free(t);
     }
-    /* bad version */
+    /* bad version (2 is current; 3 does not exist) */
     {
         uint8_t *t = malloc(off_len); memcpy(t, off, off_len);
-        put32(t, 4, 2);
+        put32(t, 4, 3);
         want_reject("bad version", t, off_len, "bad version");
+        free(t);
+    }
+    /* a v1 file: 80-byte header, magic "AMW1" — refused, not misread */
+    {
+        uint8_t *t = malloc(off_len); memcpy(t, off, off_len);
+        put32(t, 0, 0x31574D41u); put32(t, 4, 1);
+        want_reject("AMW1 (v1) file", t, off_len, "bad magic");
+        free(t);
+    }
+    /* an unknown tokenizer kind */
+    {
+        uint8_t *t = malloc(off_len); memcpy(t, off, off_len);
+        put32(t, 80, 7);
+        want_reject("unknown tok_kind", t, off_len, "bad tok_kind");
+        free(t);
+    }
+    /* a template prefix with no NUL inside its 20-byte field */
+    {
+        uint8_t *t = malloc(off_len); memcpy(t, off, off_len);
+        memset(t + 88, 'U', 20);
+        want_reject("template without terminator", t, off_len, "bad template prefix");
+        free(t);
+    }
+    /* a template suffix carrying a byte the console cannot show */
+    {
+        uint8_t *t = malloc(off_len); memcpy(t, off, off_len);
+        t[108] = 0xE2; t[109] = 0x80; t[110] = 0x94; t[111] = 0;   /* UTF-8 em dash */
+        want_reject("template with non-ASCII", t, off_len, "bad template suffix");
         free(t);
     }
     /* a dimension inflated so a section runs past the (full-size) buffer */
@@ -301,6 +336,46 @@ int main(void)
         if (ue == NULL || strcmp(ue, "unaligned base") != 0) {
             printf("  FAIL unaligned base not rejected (got \"%s\")\n", ue ? ue : "NULL"); failures++;
         } else printf("reject     %-30s -> \"%s\"\n", "unaligned base", ue);
+    }
+
+    /* ── 5. how the brain talks: header fields round-trip ── */
+    {
+        struct model_weights w; struct model_layer layers[MAXL];
+        const char *te = model_load(off, off_len, &w, layers, MAXL);
+        if (te) { printf("  FAIL talk(oracle): rejected: %s\n", te); failures++; }
+        else if (w.cfg.tok_kind != 1u || w.cfg.eos_id != 151643u ||
+                 w.cfg.tpl_prefix[0] != 0 || w.cfg.tpl_suffix[0] != 0) {
+            printf("  FAIL talk(oracle): tok_kind %u eos %u prefix \"%s\" suffix \"%s\"\n",
+                   w.cfg.tok_kind, w.cfg.eos_id, w.cfg.tpl_prefix, w.cfg.tpl_suffix);
+            failures++;
+        } else printf("talk       oracle default: tok_kind 1 (qwen2)  eos 151643  no template\n");
+
+        size_t talk_len = 0;
+        uint8_t *talk = read_file(BLOB_TALK, &talk_len);
+        if (!talk) { printf("  FAIL talk: could not read %s\n", BLOB_TALK); failures++; }
+        else {
+            te = model_load(talk, talk_len, &w, layers, MAXL);
+            if (te) { printf("  FAIL talk(ember): rejected: %s\n", te); failures++; }
+            else if (w.cfg.tok_kind != 2u || w.cfg.eos_id != 50256u ||
+                     strcmp(w.cfg.tpl_prefix, "User: ") != 0 ||
+                     strcmp(w.cfg.tpl_suffix, "\nEmber:") != 0) {
+                printf("  FAIL talk(ember): tok_kind %u eos %u prefix \"%s\" suffix \"%s\"\n",
+                       w.cfg.tok_kind, w.cfg.eos_id, w.cfg.tpl_prefix, w.cfg.tpl_suffix);
+                failures++;
+            } else {
+                /* and the weights behind that header still run correctly */
+                double tmd; int tbad;
+                const char *re = load_and_run(talk, talk_len, 1, RF_QK_LOGITS, &tmd, &tbad);
+                if (re) { printf("  FAIL talk(ember): load_and_run: %s\n", re); failures++; }
+                else {
+                    want_below("talk(ember) round-trip logits vs oracle", tmd, TOL_Q8);
+                    if (tbad) { printf("  FAIL talk(ember) argmax diverged at %d position(s)\n", tbad); failures++; }
+                    else printf("talk       ember override: tok_kind 2 (gpt2)  eos 50256  "
+                                "\"User: \" + msg + \"\\nEmber:\"  (weights still run)\n");
+                }
+            }
+            free(talk);
+        }
     }
 
     free(off); free(on);

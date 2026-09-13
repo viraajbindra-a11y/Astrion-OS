@@ -514,8 +514,10 @@ $(BUILD_DIR)/test_model_load: src/model.c src/model_load.c tools/ref_forward_fix
 
 # test_tok.c #includes the engine source and the generated Qwen reference
 # fixture; name them so an edit to tok.c or a regenerated fixture rebuilds the
-# gate instead of re-running a stale binary.
+# gate instead of re-running a stale binary. test_tok_gpt2.c is the same gate
+# for the GPT-2 split (Ember's tokenizer) against its tiktoken fixture.
 $(BUILD_DIR)/test_tok: src/tok.c tools/tok_ref_fixture.h
+$(BUILD_DIR)/test_tok_gpt2: src/tok.c tools/tok_gpt2_fixture.h
 
 test: $(HOST_TESTS) $(SAN_TESTS)
 	@[ -n "$(HOST_TEST_SRCS)" ] || { echo "FAIL: no tests found in tests/ - refusing to report a pass"; exit 1; }
@@ -524,6 +526,19 @@ test: $(HOST_TESTS) $(SAN_TESTS)
 	@$(MAKE) --no-print-directory test-san
 	@echo "--- tools/mb2check.py --selftest"
 	@python3 tools/mb2check.py --selftest
+	# The GPT-2 tokenizer gate above ran hermetically against its committed
+	# fixture. When tiktoken is installed on this host (pip install tiktoken —
+	# a tokenizer library, not a model), also build the FULL 50257-token table
+	# exactly as a shipped Ember ISO would and match tok.c over it against the
+	# literal tiktoken ids (tier 2). Skipped, and said so, when it is not.
+	@echo "--- tokenizer gpt2 tier 2: full table from tiktoken"
+	@if python3 -c "import tiktoken" 2>/dev/null; then \
+	    python3 tools/mktok.py --gpt2 $(BUILD_DIR)/gpt2.atk >/dev/null && \
+	    TOK_GPT2_BIN=$(BUILD_DIR)/gpt2.atk $(BUILD_DIR)/test_tok_gpt2 | grep -E 'TIER 2|FAIL' ; \
+	    TOK_GPT2_BIN=$(BUILD_DIR)/gpt2.atk $(BUILD_DIR)/test_tok_gpt2 >/dev/null || exit 1; \
+	else \
+	    echo "  skip  tiktoken not installed on this host (pip install tiktoken); tier 1 fixture gated above"; \
+	fi
 	# Nothing the console prints may contain non-ASCII. putchar_nolock maps
 	# anything outside 32..126 to '?', and a UTF-8 em dash is THREE bytes — so
 	# one "—" in the boot banner rendered as "???" on screen. Source that looks

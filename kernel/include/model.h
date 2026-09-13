@@ -49,6 +49,16 @@
  * (real = fixed / 2^Q8_SCALE_SHIFT) so a fixed-point activation feeds straight
  * into q8_quantize with no rescale. */
 
+/* How the brain expects to be TALKED TO — carried in the AMW2 header because it
+ * is a property of the training run, not of the kernel: which tokenizer split
+ * the model was trained under, which id ends a reply, and the chat template
+ * (Ember's finetune wraps every turn as "User: <msg>\nEmber:" and stops at
+ * <|endoftext|>; see custom-model/emberfmt.py). Without this the kernel was
+ * guessing Qwen's answers for all three, and a GPT-2-trained Ember would have
+ * been fed ids it never saw. Strings are ASCII, NUL-terminated inside the
+ * field (validated at load), and may be empty (no template). */
+#define MODEL_TPL_LEN 20u
+
 struct model_config {
     uint32_t dim;          /* model / residual width                          */
     uint32_t n_layers;     /* transformer blocks                              */
@@ -62,6 +72,13 @@ struct model_config {
                            /* Qwen3); 0 = off (Qwen2). See the note in model.c */
     int64_t  rope_theta;   /* integer RoPE base (Qwen2: 10000, Qwen3: 1e6)    */
     int64_t  rms_eps_fp;   /* RMS epsilon, fixed-point at MODEL_EPS_SHIFT      */
+
+    uint32_t tok_kind;     /* TOK_KIND_* the model was trained with (tok.h);   */
+                           /* 0 = unspecified                                 */
+    uint32_t eos_id;       /* id that ends a reply; may lie outside vocab, in */
+                           /* which case it simply never fires                */
+    char     tpl_prefix[MODEL_TPL_LEN]; /* text before the user's message      */
+    char     tpl_suffix[MODEL_TPL_LEN]; /* text after it; the model continues  */
 };
 
 /* q8_dot requires the contraction length be a multiple of Q8_GROUP, so every
@@ -186,7 +203,7 @@ uint32_t model_argmax(const int64_t *logits, uint32_t vocab);
 /* ── weight-file loader (the "brain file"; on-disk format in src/model_load.c) ──
  *
  * Parse `len` bytes of a converted weight blob (tools/mkweights.py output, magic
- * "AMW1") into `out`, reading the model's whole shape from the file's header
+ * "AMW2") into `out`, reading the model's whole shape from the file's header
  * rather than any #define — the one hook that makes swapping Qwen for a custom
  * Astrion model a file-swap (tasks/ai-is-the-product/TWO-TRACKS.md). Zero-copy,
  * like tok_parse: every weight pointer (embed, ln, M->q, M->qg, …) points STRAIGHT

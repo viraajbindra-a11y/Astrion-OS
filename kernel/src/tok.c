@@ -1,8 +1,10 @@
 /*
- * Astrion v2.0 — byte-level BPE tokenizer (Qwen2.5), kernel side.
+ * Astrion v2.0 — byte-level BPE tokenizer (Qwen2.5 / GPT-2), kernel side.
  *
- * The flat table is built on the host by tools/mktok.py from the real Qwen2.5
- * vocab.json + merges.txt and handed to the kernel as a multiboot2 module.
+ * The flat table is built on the host by tools/mktok.py — from a Qwen2.5
+ * vocab.json + merges.txt, or from tiktoken's gpt2 encoding, which is the
+ * tokenizer Ember is trained with — and handed to the kernel as a multiboot2
+ * module.
  * tok_parse() MAPS and VALIDATES those bytes — it is an untrusted parser, same
  * discipline as elf.c/fs.c: every offset is bounded wrap-safely (`a > cap - b`,
  * never `a + b > cap`, lesson #200/#202) BEFORE any read, the header magic and
@@ -12,15 +14,17 @@
  * crashing.
  *
  * ENCODE is byte-level BPE. An ASCII pretokenizer (a hand port of Qwen2's Split
- * regex, restricted to ASCII — pretok_len below) splits the text; then within
- * each segment every byte starts as a base token and the highest-priority
- * adjacent merge is applied until none remains. Merge lookup is a binary search
+ * regex — pretok_len_qwen — or of GPT-2's — pretok_len_gpt2 — restricted to
+ * ASCII; the table's KIND picks one) splits the text; then within each segment
+ * every byte starts as a base token and the highest-priority adjacent merge is
+ * applied until none remains. Merge lookup is a binary search
  * over the key-sorted merge table (~18 probes over 151k merges), no allocator.
  *
  * ASCII ONLY, on purpose: kbd.c is a 128-entry US table and the serial path
  * allow-lists 0x20..0x7E, so non-ASCII cannot be entered. Over ASCII input the
- * result is bit-identical to the HuggingFace reference (gated in
- * tests/test_tok.c against the real Qwen table + the `tokenizers` library).
+ * result is bit-identical to the references (gated in tests/test_tok.c against
+ * the real Qwen table + the `tokenizers` library, and in tests/test_tok_gpt2.c
+ * against tiktoken's gpt2).
  * Bytes >= 0x80 are handled as "other" (non-letter/digit/space) — self-
  * consistent and safe, but NOT the Unicode reference; that divergence is stated
  * in the test.
@@ -74,7 +78,7 @@ static int is_other(int c)  { return !is_space(c) && !is_letter(c) && !is_digit(
  * own greedy/backtracking behaviour. That is exactly the control flow below.
  * Always returns >= 1 (every ASCII byte is covered), and never reads past `len`.
  */
-static uint32_t pretok_len(const uint8_t *t, uint32_t len, uint32_t pos) {
+static uint32_t pretok_len_qwen(const uint8_t *t, uint32_t len, uint32_t pos) {
     int c = t[pos];
     uint32_t i;
 
@@ -150,6 +154,76 @@ static uint32_t pretok_len(const uint8_t *t, uint32_t len, uint32_t pos) {
     }
 }
 
+/*
+ * Length of the next pretoken at t[pos..len) under GPT-2's Split regex, which
+ * is what tiktoken's "gpt2" encoding — Ember's tokenizer — runs:
+ *
+ *   's|'t|'re|'ve|'m|'ll|'d| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+
+ *
+ * (tiktoken ships it in a possessive form — `'(?:[sdmt]|ll|ve|re)| ?\p{L}++|
+ * ?\p{N}++| ?[^\s\p{L}\p{N}]++|\s++$|\s+(?!\S)|\s` — that matches the same
+ * strings the same way.) The differences from Qwen2's split are the whole point
+ * of having two: contractions are CASE-SENSITIVE ("DON'T" is DON ' T), only a
+ * plain space may lead a word/number/punctuation run (Qwen lets any
+ * non-letter lead a word), DIGITS RUN TOGETHER ("2025" is one pretoken, BPE
+ * then makes "20" "25"), and a punctuation run does not absorb the newlines
+ * after it. Ordered alternation, same control flow as the Qwen port above.
+ * Always returns >= 1 and never reads past `len`.
+ */
+static uint32_t pretok_len_gpt2(const uint8_t *t, uint32_t len, uint32_t pos) {
+    int c = t[pos];
+
+    /* Alt 1: 's|'t|'re|'ve|'m|'ll|'d — exact case. */
+    if (c == '\'' && pos + 1 < len) {
+        int a = t[pos + 1];
+        if (a == 's' || a == 't' || a == 'm' || a == 'd') return 2;
+        if (a == 'r' && pos + 2 < len && t[pos + 2] == 'e') return 3;
+        if (a == 'v' && pos + 2 < len && t[pos + 2] == 'e') return 3;
+        if (a == 'l' && pos + 2 < len && t[pos + 2] == 'l') return 3;
+        /* an apostrophe that starts no contraction falls through to Alt 4 */
+    }
+
+    /* Alts 2-4 share one shape: an optional single space, then a run of one
+     * class. The optional space is greedy, so it is taken only when the class
+     * run can follow it; a space followed by anything else is whitespace and
+     * falls through to Alts 5-6. */
+    {
+        uint32_t p = (c == ' ' && pos + 1 < len) ? pos + 1 : pos;
+        int d = t[p];
+        int (*cls)(int) = 0;
+        if (is_letter(d))      cls = is_letter;   /* Alt 2:  ?\p{L}+            */
+        else if (is_digit(d))  cls = is_digit;    /* Alt 3:  ?\p{N}+            */
+        else if (is_other(d))  cls = is_other;    /* Alt 4:  ?[^\s\p{L}\p{N}]+  */
+        if (cls) {
+            uint32_t q = p;
+            while (q < len && cls(t[q])) q++;     /* q > p, so return >= 1 */
+            return q - pos;
+        }
+    }
+
+    /* Alts 5-6 consume whitespace; c is whitespace here (every other class was
+     * rejected above, and a space is only taken by Alts 2-4 when a class run
+     * follows it).
+     *   Alt 5: \s+(?!\S)  — the whole run at end of string, else a run of >= 2
+     *                       minus its last char (left for the following word).
+     *   Alt 6: \s+        — the leftover: a lone whitespace char before non-ws. */
+    {
+        uint32_t wend = pos;
+        while (wend < len && is_space(t[wend])) wend++;   /* wend > pos */
+        if (wend == len)           return wend - pos;                    /* Alt 5 (EOF) */
+        if (wend - pos >= 2)       return (wend - 1) - pos;              /* Alt 5 (leave one) */
+        return 1;                                                        /* Alt 6 */
+    }
+}
+
+/* The split the table was trained under. A table that does not say (UNSPEC,
+ * from before the field existed) is a Qwen table. */
+static uint32_t pretok_len(const struct tok_table *tab, const uint8_t *t,
+                           uint32_t len, uint32_t pos) {
+    if (tab->kind == TOK_KIND_GPT2) return pretok_len_gpt2(t, len, pos);
+    return pretok_len_qwen(t, len, pos);
+}
+
 /* Binary search the key-sorted merge table for `key = (left<<32)|right`. On a
  * hit, writes rank+result and returns 1; else returns 0. Keys are strictly
  * increasing (proven at parse), so a plain lower-bound search is exact. */
@@ -203,7 +277,7 @@ int tok_encode_tab(const struct tok_table *t, const char *text, uint32_t text_le
     uint32_t pos = 0;
 
     while (pos < text_len) {
-        uint32_t seg = pretok_len(b, text_len, pos);    /* >= 1, so pos advances */
+        uint32_t seg = pretok_len(t, b, text_len, pos); /* >= 1, so pos advances */
 
         for (uint32_t off = 0; off < seg; ) {
             uint32_t chunk = seg - off;
@@ -272,10 +346,12 @@ const char *tok_parse(const void *base, uint32_t len, struct tok_table *out) {
     uint32_t off_ofs  = rd32(b + 20);
     uint32_t off_blb  = rd32(b + 24);
     uint32_t blob_len = rd32(b + 28);
+    uint32_t kind     = rd32(b + 32);   /* 0 in tables from before the field */
 
     if (magic != TOK_MAGIC)     return "bad magic";
     if (version != TOK_VERSION) return "bad version";
     if (n_tokens == 0)          return "no tokens";
+    if (kind > TOK_KIND_MAX)    return "bad tokenizer kind";
 
     /* Recompute the deterministic layout (mktok.py: byte2id at 64, then merges,
      * offsets, an 8-aligned blob). uint64_t throughout so the products cannot
@@ -323,7 +399,7 @@ const char *tok_parse(const void *base, uint32_t len, struct tok_table *out) {
     }
     if (prev_off != blob_len) return "offsets do not cover blob";
 
-    out->base = b;         out->len = len;
+    out->base = b;         out->len = len;         out->kind = kind;
     out->n_tokens = n_tokens; out->n_merges = n_merges;
     out->byte2id = byte2id; out->merges = merges;
     out->offsets = offsets; out->blob = blob; out->blob_len = blob_len;
@@ -345,6 +421,16 @@ const char *tok_init(const void *base, uint32_t len) {
 }
 
 int tok_ready(void) { return g_ready; }
+
+uint32_t tok_kind(void) { return g_ready ? g_tab.kind : TOK_KIND_UNSPEC; }
+
+int tok_set_kind(uint32_t kind) {
+    if (!g_ready) return -1;
+    if (kind == TOK_KIND_UNSPEC || kind > TOK_KIND_MAX) return -1;
+    if (g_tab.kind != TOK_KIND_UNSPEC && g_tab.kind != kind) return -1;
+    g_tab.kind = kind;
+    return 0;
+}
 
 int tok_encode(const char *text, uint32_t text_len, uint32_t *out_ids, uint32_t max) {
     if (!g_ready) return -1;

@@ -1,5 +1,21 @@
 #!/usr/bin/env python3
-"""Convert a Qwen byte-level BPE tokenizer into a flat binary the kernel maps.
+"""Convert a byte-level BPE tokenizer into a flat binary the kernel maps.
+
+TWO SOURCES, one table format:
+    mktok.py vocab.json merges.txt out.bin     a HuggingFace Qwen2.5 tokenizer
+    mktok.py --gpt2 out.bin                    tiktoken's "gpt2" — Ember's tokenizer
+
+Ember (custom-model/train_best.py, finetune.py, chat.py) tokenizes with
+tiktoken.get_encoding("gpt2"): 50257 tokens, <|endoftext|> = 50256, and the
+GPT-2 split regex — NOT Qwen's. The kernel's tok.c carries both splits and
+picks one by the KIND written into this header (byte 32), which the brain file
+(AMW2) cross-checks at boot so a Qwen table can never be run in front of a
+GPT-2 model. tiktoken has no merges.txt: it holds bytes -> rank, and merges by
+looking up the concatenated BYTES of any adjacent pair (its _byte_pair_merge).
+That is reproduced exactly by listing, for every token, every split into two
+tokens as a merge rule whose priority is the result's rank — tests/test_tok_gpt2.c
+holds tok.c to tiktoken's ids over a corpus, so the equivalence is gated, not
+assumed.
 
 WHY THIS RUNS ON THE HOST. vocab.json is 2.7 MB of JSON carrying \\u escapes and
 the GPT-2 byte<->unicode mapping, and resolving each merge to its result token
@@ -11,7 +27,8 @@ with bounds checks alone.
 
 OUTPUT LAYOUT (little-endian, every section 8-byte aligned):
 
-    header    64 B    magic/version/counts/section offsets
+    header    64 B    magic/version/counts/section offsets; byte 32 = KIND
+                      (tok.h TOK_KIND_*: 1 qwen2, 2 gpt2; 0 in older tables)
     byte2id  1024 B   the 256 single-byte tokens, the BPE starting alphabet
     merges     16 B * n_merges, SORTED BY KEY so the kernel binary-searches
                       key u64 = (left_id << 32) | right_id
@@ -27,6 +44,8 @@ back into text.
 import json, struct, sys
 
 MAGIC = 0x314B5441          # "ATK1"
+KIND_QWEN2 = 1              # tok.h TOK_KIND_QWEN2
+KIND_GPT2 = 2               # tok.h TOK_KIND_GPT2
 
 
 def bytes_to_unicode():
@@ -41,7 +60,36 @@ def bytes_to_unicode():
     return dict(zip(bs, [chr(c) for c in cs]))
 
 
-def main(vocab_path, merges_path, out_path):
+def load_gpt2():
+    """tiktoken's gpt2 encoding -> (n_tokens, id_bytes, merges, byte2id).
+
+    _mergeable_ranks is {token bytes: id} for the 50256 ordinary tokens; the
+    one special token <|endoftext|> (50256) is appended so decode is faithful
+    and the table's vocab is the full 50257. Merge rules are every (left, right)
+    token pair whose concatenation is a token, priority = the result's id, which
+    is exactly the pair tiktoken would merge at that step (it hashes the bytes,
+    and ranks are ids). Ties between positions resolve leftmost in both."""
+    import tiktoken
+    enc = tiktoken.get_encoding("gpt2")
+    ranks = enc._mergeable_ranks
+    n_tokens = enc.n_vocab                                   # 50257
+    id_bytes = [b""] * n_tokens
+    for tok, tid in ranks.items():
+        id_bytes[tid] = tok
+    for tok, tid in enc._special_tokens.items():
+        id_bytes[tid] = tok.encode("utf-8")
+    merges = []
+    for tok, tid in ranks.items():
+        for k in range(1, len(tok)):
+            left, right = ranks.get(tok[:k]), ranks.get(tok[k:])
+            if left is not None and right is not None:
+                merges.append((left, right, tid, tid))
+    byte2id = [ranks[bytes([b])] for b in range(256)]
+    return n_tokens, id_bytes, merges, byte2id
+
+
+def load_hf(vocab_path, merges_path):
+    """A HuggingFace vocab.json + merges.txt (Qwen2.5) -> the same tuple."""
     byte_enc = bytes_to_unicode()
     uni_to_byte = {v: k for k, v in byte_enc.items()}
 
@@ -72,8 +120,14 @@ def main(vocab_path, merges_path, out_path):
                 continue
             merges.append((vocab[a], vocab[b], len(merges), vocab[a + b]))
 
+    byte2id = [vocab[byte_enc[b]] for b in range(256)]
+    return n_tokens, id_bytes, merges, byte2id
+
+
+def write_table(out_path, kind, n_tokens, id_bytes, merges, byte2id):
     # Sorted by key so the kernel can binary-search without a hash allocator.
     merges.sort(key=lambda m: (m[0] << 32) | m[1])
+    assert len({(m[0], m[1]) for m in merges}) == len(merges), "duplicate merge pair"
 
     blob = bytearray()
     offsets = []
@@ -81,10 +135,6 @@ def main(vocab_path, merges_path, out_path):
         offsets.append(len(blob))
         blob += b
     offsets.append(len(blob))
-
-    byte2id = [0] * 256
-    for b in range(256):
-        byte2id[b] = vocab[byte_enc[b]]
 
     def pad8(n):
         return (8 - (n % 8)) % 8
@@ -96,7 +146,8 @@ def main(vocab_path, merges_path, out_path):
     off_blb += pad8(off_blb)
 
     hdr = struct.pack("<8I", MAGIC, 1, n_tokens, len(merges),
-                      off_mrg, off_ofs, off_blb, len(blob)) + b"\0" * 32
+                      off_mrg, off_ofs, off_blb, len(blob))
+    hdr += struct.pack("<I", kind) + b"\0" * 28              # byte 32: KIND
 
     with open(out_path, "wb") as f:
         f.write(hdr)
@@ -108,6 +159,7 @@ def main(vocab_path, merges_path, out_path):
         f.write(bytes(blob))
 
     total = off_blb + len(blob)
+    print("kind          %8d  (1 qwen2, 2 gpt2)" % kind)
     print("tokens        %8d" % n_tokens)
     print("merges        %8d  (%.2f MB)" % (len(merges), 16 * len(merges) / 1e6))
     print("offsets       %8d  (%.2f MB)" % (len(offsets), 4 * len(offsets) / 1e6))
@@ -118,7 +170,15 @@ def main(vocab_path, merges_path, out_path):
     print("TOTAL         %8d B (%.2f MB)" % (total, total / 1e6))
 
 
+def main(argv):
+    if len(argv) == 3 and argv[1] == "--gpt2":
+        write_table(argv[2], KIND_GPT2, *load_gpt2())
+    elif len(argv) == 4:
+        write_table(argv[3], KIND_QWEN2, *load_hf(argv[1], argv[2]))
+    else:
+        sys.exit("usage: mktok.py vocab.json merges.txt out.bin   (Qwen2.5, HF files)\n"
+                 "       mktok.py --gpt2 out.bin                  (tiktoken gpt2, Ember)")
+
+
 if __name__ == "__main__":
-    if len(sys.argv) != 4:
-        sys.exit("usage: mktok.py vocab.json merges.txt out.bin")
-    main(*sys.argv[1:])
+    main(sys.argv)

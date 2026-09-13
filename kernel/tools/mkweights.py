@@ -2,7 +2,7 @@
 """Convert a trained transformer into the flat "brain file" the kernel maps.
 
 This is the host half of M6. It quantizes and serialises a model into ONE flat
-little-endian blob (magic "AMW1"), the exact byte layout src/model_load.c reads
+little-endian blob (magic "AMW2"), the exact byte layout src/model_load.c reads
 back and points struct model_weights at (zero-copy). Because the pipeline is
 quantize -> serialise here, then C-deserialise -> forward in the kernel, any
 byte-layout disagreement between this file and model_load.c shows up as a logit
@@ -15,9 +15,15 @@ that has bitten this kernel repeatedly. So it happens once, here, and the kernel
 receives something it validates with bounds checks alone.
 
 THE FORMAT is defined once, in the comment block at the top of src/model_load.c
-("ON-DISK FORMAT AMW1"). This file MUST match it byte-for-byte; the two reference
+("ON-DISK FORMAT AMW2"). This file MUST match it byte-for-byte; the two reference
 the same spec. In short:
-  * header (80 B): magic, version, the full model_config, file_len, n_matrices.
+  * header (128 B): magic, version, the full model_config, file_len, n_matrices,
+    then HOW THE MODEL TALKS: the tokenizer kind it was trained under (1 qwen2,
+    2 gpt2), the id that ends a reply, and the chat template as a prefix and a
+    suffix around the user's message. The kernel used to guess Qwen's answers
+    for all three; Ember is trained on tiktoken's gpt2 (vocab 50257, eot 50256)
+    with custom-model/emberfmt.py's "User: ...\nEmber:" turns, and a GPT-2
+    model fed Qwen ids is a broken model that looks like a bad one.
   * then fixed-order sections, each 8-byte aligned: embed, per-layer
     {ln1, ln2, bq, bk, bv, [qk_g], wq, wk, wv, wo, w_gate, w_up, w_down},
     final_ln, lm_head.
@@ -38,8 +44,15 @@ TWO INPUT MODES:
     python3 mkweights.py --oracle     build/oracle.bin
     python3 mkweights.py --oracle-qk  build/oracle_qk.bin
     python3 mkweights.py --ckpt custom-model/ember.pt  build/ember.bin
+
+The oracle blobs say qwen2 / eos 151643 / no template (the tiny test brain has
+48 tokens, so that EOS never fires and a proof run gives full-length output, and
+the prompt goes in exactly as typed). A checkpoint says gpt2 / 50256 / Ember's
+template, read from emberfmt.py so the two cannot drift. --tok-kind, --eos,
+--tpl-prefix and --tpl-suffix override any of it (the loader test uses them).
 """
 import argparse
+import ast
 import os
 import struct
 import sys
@@ -47,9 +60,16 @@ import sys
 import numpy as np
 
 # ── format constants — must match src/model_load.c and include/q8.h / model.h ──
-AMW_MAGIC       = 0x31574D41   # "AMW1"
-AMW_VERSION     = 1
-AMW_HDR         = 80           # header size, a multiple of 8
+AMW_MAGIC       = 0x32574D41   # "AMW2"
+AMW_VERSION     = 2
+AMW_HDR         = 128          # header size, a multiple of 8
+TPL_LEN         = 20           # model.h MODEL_TPL_LEN — each template field, incl. NUL
+
+# tok.h TOK_KIND_*
+TOK_KIND = {"unspec": 0, "qwen2": 1, "gpt2": 2}
+QWEN_EOS = 151643              # Qwen <|endoftext|>
+GPT2_EOS = 50256               # tiktoken gpt2 eot_token — Ember's end-of-reply
+NO_EOS   = 0xFFFFFFFF
 Q8_GROUP        = 64           # q8.h Q8_GROUP
 Q8_SCALE_SHIFT  = 20           # q8.h Q8_SCALE_SHIFT — activation/weight fixed-point
 EPS_SHIFT       = 40           # model.h MODEL_EPS_SHIFT — rms_eps fixed-point
@@ -181,8 +201,47 @@ def emit_blob(config, w):
     hdr += struct.pack("<qq", config["rope_theta"], config["rms_eps_fp"])
     hdr += struct.pack("<Q", file_len)
     hdr += struct.pack("<II", n_matrices, 0)                       # n_matrices, reserved2
+    hdr += struct.pack("<II", config["tok_kind"], config["eos_id"])
+    hdr += tpl_field(config["tpl_prefix"]) + tpl_field(config["tpl_suffix"])
     assert len(hdr) == AMW_HDR, len(hdr)
     return bytes(hdr) + bytes(body)
+
+
+def tpl_field(text):
+    """One chat-template field: ASCII, NUL-terminated INSIDE the TPL_LEN bytes
+    (model_load.c rejects a field with no terminator, so the longest template
+    is TPL_LEN-1 chars). Only the bytes the console can show are allowed —
+    printable ASCII plus tab/LF/CR, which is what the templates use."""
+    raw = text.encode("ascii")                     # non-ASCII raises here, on purpose
+    for b in raw:
+        if not (0x20 <= b <= 0x7E or b in (0x09, 0x0A, 0x0D)):
+            raise SystemExit("template byte 0x%02x is not console-safe ASCII" % b)
+    if len(raw) >= TPL_LEN:
+        raise SystemExit("template %r is %d bytes; the header field holds %d + NUL"
+                         % (text, len(raw), TPL_LEN - 1))
+    return raw + b"\0" * (TPL_LEN - len(raw))
+
+
+def ember_template():
+    """Ember's turn format, read from custom-model/emberfmt.py WITHOUT importing
+    it (that module imports torch at top level; this converter must run on a
+    numpy-only host). The tags are plain string constants, so the AST has them.
+    build_prompt() there is f"{USER_TAG} {user_msg}\n{BOT_TAG}" — the prefix is
+    the user tag plus a space, the suffix a newline plus the bot tag."""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "..", "..", "custom-model", "emberfmt.py")
+    with open(path, encoding="utf-8") as f:
+        tree = ast.parse(f.read(), path)
+    tags = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 \
+                and isinstance(node.targets[0], ast.Name) \
+                and isinstance(node.value, ast.Constant) \
+                and isinstance(node.value.value, str):
+            tags[node.targets[0].id] = node.value.value
+    if "USER_TAG" not in tags or "BOT_TAG" not in tags:
+        raise SystemExit("%s: USER_TAG / BOT_TAG not found" % path)
+    return tags["USER_TAG"] + " ", "\n" + tags["BOT_TAG"]
 
 
 # ── input mode 1: the oracle's tiny weights (the tested path) ──
@@ -195,6 +254,11 @@ def blob_config(cfg, max_seq):
         "qk_norm": 1 if cfg.get("qk_norm", False) else 0,
         "rope_theta": int(round(cfg["rope_theta"])),
         "rms_eps_fp": int(round(cfg["rms_eps"] * (1 << EPS_SHIFT))),
+        # The oracle is a 48-token random brain in front of whatever tokenizer
+        # is loaded (the Qwen table, in every boot so far): Qwen split, an EOS
+        # above its vocab so generation runs to the cap, prompt as typed.
+        "tok_kind": TOK_KIND["qwen2"], "eos_id": QWEN_EOS,
+        "tpl_prefix": "", "tpl_suffix": "",
     }
 
 
@@ -281,6 +345,10 @@ def from_ckpt(path, max_seq_override):
             lw["qk_g"] = named[p + "qk_g"]
         w["layers"].append(lw)
 
+    # Ember: tiktoken gpt2 (train_best.py / finetune.py / chat.py all call
+    # tiktoken.get_encoding("gpt2")), stops at eot_token 50256, and is finetuned
+    # on emberfmt.py's "User: <msg>\nEmber:" turns.
+    prefix, suffix = ember_template()
     config = {
         "dim": dim, "n_layers": NL, "n_heads": n_head, "n_kv_heads": n_kv,
         "head_dim": head_dim, "ffn_dim": cfg["ffn_dim"], "vocab": cfg["vocab"],
@@ -288,6 +356,8 @@ def from_ckpt(path, max_seq_override):
         "qk_norm": 1 if qk else 0,
         "rope_theta": int(round(cfg["rope_theta"])),
         "rms_eps_fp": int(round(cfg["rms_eps"] * (1 << EPS_SHIFT))),
+        "tok_kind": TOK_KIND["gpt2"], "eos_id": GPT2_EOS,
+        "tpl_prefix": prefix, "tpl_suffix": suffix,
     }
     return config, w
 
@@ -300,6 +370,9 @@ def print_summary(config, blob, out_path):
              c["ffn_dim"], c["vocab"], c["max_seq"]))
     print("  qk_norm %d  rope_theta %d  rms_eps_fp %d  (int8 matrices, int64 vectors)"
           % (c["qk_norm"], c["rope_theta"], c["rms_eps_fp"]))
+    kind_name = {v: k for k, v in TOK_KIND.items()}.get(c["tok_kind"], "?")
+    print("  talks:  tok_kind %d (%s)  eos %d  template %r + msg + %r"
+          % (c["tok_kind"], kind_name, c["eos_id"], c["tpl_prefix"], c["tpl_suffix"]))
     print("  size:   %d bytes (%.2f MB)" % (len(blob), len(blob) / 1e6))
 
 
@@ -314,6 +387,12 @@ def main():
                      help="a real Ember PyTorch checkpoint (UNVERIFIED — no .pt exists yet)")
     ap.add_argument("--max-seq", type=int, default=0,
                     help="KV-cache capacity recorded in the header (0 = default: 12 for oracle, block_size for a ckpt)")
+    ap.add_argument("--tok-kind", choices=sorted(TOK_KIND), default=None,
+                    help="override the tokenizer kind written to the header")
+    ap.add_argument("--eos", type=int, default=None,
+                    help="override the end-of-reply id (0..2^32-1; 4294967295 = none)")
+    ap.add_argument("--tpl-prefix", default=None, help="override the chat-template prefix")
+    ap.add_argument("--tpl-suffix", default=None, help="override the chat-template suffix")
     ap.add_argument("out", help="output blob path")
     args = ap.parse_args()
 
@@ -323,6 +402,17 @@ def main():
         print("WARNING: --ckpt is the UNVERIFIED real-model path; no Ember .pt has "
               "round-tripped through the C engine yet.", file=sys.stderr)
         config, w = from_ckpt(args.ckpt, args.max_seq)
+
+    if args.tok_kind is not None:
+        config["tok_kind"] = TOK_KIND[args.tok_kind]
+    if args.eos is not None:
+        if not 0 <= args.eos <= 0xFFFFFFFF:
+            raise SystemExit("--eos must fit in a u32")
+        config["eos_id"] = args.eos
+    if args.tpl_prefix is not None:
+        config["tpl_prefix"] = args.tpl_prefix.encode("utf-8").decode("unicode_escape")
+    if args.tpl_suffix is not None:
+        config["tpl_suffix"] = args.tpl_suffix.encode("utf-8").decode("unicode_escape")
 
     blob = emit_blob(config, w)
     with open(args.out, "wb") as f:
