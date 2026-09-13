@@ -243,7 +243,33 @@ def _carr(f, name, length, flat):
     f.write("};\n\n")
 
 
-def emit_c_header(path, cfg, tokens, w, trace, gen_new, qk_g_flat, qk_logits):
+def long_context(w, cfg, max_seq=64, ntok=4, theta=1e6, seed=4):
+    """The long-context fixture: forced tokens over a full cache, and a greedy
+    run that grows the cache to its last slot. See emit_c_header."""
+    cfg_long = dict(cfg)
+    cfg_long["rope_theta"] = theta
+    rng = np.random.default_rng(seed)
+    tokens = [int(t) for t in rng.integers(0, cfg["vocab"], size=max_seq)]
+    logits = forward(tokens, w, cfg_long)
+    assert logits.shape == (max_seq, cfg["vocab"])
+    assert np.all(np.isfinite(logits)), "non-finite long-context logits"
+    # The greedy trajectory must be decidable in fixed point: every step's
+    # top-two margin has to dwarf the engine's ~1e-4 error, or a correct C
+    # engine could legitimately pick the other token and the gate would lie.
+    seq = list(tokens[:ntok])
+    margins = []
+    for _ in range(max_seq - ntok):
+        lg = forward(seq, w, cfg_long)[-1]
+        top = np.sort(lg)[-2:]
+        margins.append(float(top[1] - top[0]))
+        seq.append(int(lg.argmax()))
+    assert min(margins) > 2e-3, "greedy long run has a near-tie: %.5f" % min(margins)
+    return {"max_seq": max_seq, "theta": theta, "ntok": ntok, "tokens": tokens,
+            "gen": seq[ntok:], "logits": logits.astype(np.float64).ravel(),
+            "min_margin": min(margins)}
+
+
+def emit_c_header(path, cfg, tokens, w, trace, gen_new, qk_g_flat, qk_logits, long_fx):
     """Dump config + weights + every per-op intermediate as a C header.
 
     Layout mirrors model.h's structs exactly so test_model.c can convert the
@@ -327,6 +353,27 @@ def emit_c_header(path, cfg, tokens, w, trace, gen_new, qk_g_flat, qk_logits):
         # which also differs from RF_LOGITS, so a no-op qk-norm fails too.
         _carr(f, "RF_QK_G",      NL * HD,   qk_g_flat)
         _carr(f, "RF_QK_LOGITS", ntok * V,  qk_logits)
+
+        # LONG CONTEXT: the same base weights at rope_theta 1e6 (Ember's, not
+        # the 1e4 above) over RF_LONG_MAX_SEQ positions — the cache full to the
+        # last slot. Everything above proves the math at positions 0..11 with
+        # small RoPE angles; a real Ember runs to 1024+ with angles in the
+        # tens of radians and attention over a long context, and none of that
+        # was exercised. RF_LONG_TOKENS is a forced (pseudo-random) sequence so
+        # the logits at EVERY position can be diffed regardless of argmax ties;
+        # RF_LONG_GEN is the greedy trajectory from the first RF_LONG_NTOK
+        # tokens, which is what proves the incremental cache stays right as it
+        # grows one slot per generated token all the way to max_seq.
+        lg = long_fx
+        f.write("#define RF_LONG_MAX_SEQ %d\n" % lg["max_seq"])
+        f.write("#define RF_LONG_THETA %d\n" % int(lg["theta"]))
+        f.write("#define RF_LONG_NTOK %d\n" % lg["ntok"])
+        f.write("static const int RF_LONG_TOKENS[RF_LONG_MAX_SEQ] = { %s };\n"
+                % ", ".join(str(t) for t in lg["tokens"]))
+        f.write("#define RF_LONG_GEN_N %d\n" % len(lg["gen"]))
+        f.write("static const int RF_LONG_GEN[RF_LONG_GEN_N] = { %s };\n\n"
+                % ", ".join(str(t) for t in lg["gen"]))
+        _carr(f, "RF_LONG_LOGITS", lg["max_seq"] * V, lg["logits"])
         f.write("#endif /* REF_FORWARD_FIXTURE_H */\n")
 
 
@@ -381,9 +428,15 @@ def main():
     assert not np.allclose(qk_logits, logits.ravel()), "qk-norm made no difference — fixture is vacuous"
     print(f"qk-norm: logits shifted (max |d| {float(np.abs(qk_logits - logits.ravel()).max()):.3f})")
 
+    # Long context at Ember's rope_theta over a full 64-slot cache. Uses the
+    # base weights WITHOUT the qk gain (qk_norm off), same as RF_LOGITS.
+    long_fx = long_context(w, cfg)
+    print("long:    %d positions at theta %g, greedy from %d tokens, min margin %.4f"
+          % (long_fx["max_seq"], long_fx["theta"], long_fx["ntok"], long_fx["min_margin"]))
+
     # The C header is the real gate: config, weights and EVERY per-op
     # intermediate, so test_model.c diffs layer-by-layer, not just at the logits.
-    emit_c_header("ref_forward_fixture.h", cfg, tokens, w, trace, gen_new, qk_g_flat, qk_logits)
+    emit_c_header("ref_forward_fixture.h", cfg, tokens, w, trace, gen_new, qk_g_flat, qk_logits, long_fx)
     print("wrote ref_forward_fixture.h  (%d positions x %d layers traced)"
           % (len(tokens), cfg["n_layers"]))
     return 0

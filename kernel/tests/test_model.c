@@ -124,11 +124,21 @@ static void build_weights(struct model_weights *w)
     build_matrix(&w->lm_head, RF_LMHEAD, RF_VOCAB, RF_DIM);
 }
 
+/* One extra cache row per cache, beyond model_kv_len(). The engine never
+ * touches it while the pos >= max_seq guard holds; the guard's CONTROL lifts
+ * the guard and writes slot max_seq of the last layer, and this slack is what
+ * keeps that write inside memory the test owns (so the control runs clean
+ * under ASan too, and the test can observe the write instead of crashing). */
+static size_t kv_slack(const struct model_config *c)
+{
+    return (size_t)c->n_kv_heads * c->head_dim;
+}
+
 static void build_state(struct model_state *st, const struct model_config *c)
 {
     memset(st, 0, sizeof *st);
-    st->kcache   = malloc(model_kv_len(c) * sizeof(int64_t));
-    st->vcache   = malloc(model_kv_len(c) * sizeof(int64_t));
+    st->kcache   = malloc((model_kv_len(c) + kv_slack(c)) * sizeof(int64_t));
+    st->vcache   = malloc((model_kv_len(c) + kv_slack(c)) * sizeof(int64_t));
     st->inv_freq = malloc((size_t)(c->head_dim / 2) * sizeof(int64_t));
     st->x   = malloc((size_t)c->dim * sizeof(int64_t));
     st->xn  = malloc((size_t)c->dim * sizeof(int64_t));
@@ -372,6 +382,119 @@ int main(void)
         printf("qk-norm    on: max|d| vs oracle %.2e, vs qk-off %.3f\n", vs_oracle, vs_off);
         want_below("qk-norm ON matches the oracle", vs_oracle, TOL_FULL);
         want_above("qk-norm ON actually changes the logits (not a no-op)", vs_off, TOL_FULL);
+    }
+
+    /* ── Gate 5: LONG CONTEXT — Ember's rope_theta over a full 64-slot cache ──
+     *
+     * KNOWN RED UNDER THE SANITIZERS (build/san/test_model), 2026-09-13:
+     *   src/model.c:139: runtime error: left shift of negative value
+     * fx_ln() folds the mantissa to [1/sqrt2, 1) whenever theta's mantissa is
+     * above sqrt2 -- true for 1e6 (Ember, Qwen), false for the 1e4 every
+     * earlier fixture used -- and then computes (m - FX_ONE) << FXQ on a
+     * negative value, which C11 6.5.7p4 leaves undefined. gcc and clang emit a
+     * plain shift so the plain build matches the oracle to 2.9e-5; the
+     * sanitized build (-fno-sanitize-recover=all) aborts. This is a real
+     * defect in the engine, found by making this test reach Ember's theta;
+     * the test is deliberately NOT loosened. Fix belongs in model.c (multiply
+     * by (1 << FXQ) instead of shifting, or shift the magnitude). Remove this
+     * note when it is fixed.
+     *
+     * Everything above stops at position 11. A real Ember runs to 1024+ with
+     * theta 1e6 (angles in the tens of radians, so the integer sin/cos must
+     * range-reduce correctly) and attends over a long context (the softmax
+     * over 64 scores, the V accumulation over 64 rows). Same base weights, a
+     * separate state sized max_seq=64, forced tokens so every position's
+     * logits can be diffed regardless of ties. */
+    {
+        struct model_weights wl = w;             /* same weights, own config */
+        wl.cfg.max_seq    = RF_LONG_MAX_SEQ;
+        wl.cfg.rope_theta = RF_LONG_THETA;
+        wl.cfg.qk_norm    = 0;
+        struct model_state sl;
+        build_state(&sl, &wl.cfg);
+        int64_t logits[RF_VOCAB];
+        double worst_full = 0.0, worst_q8 = 0.0, worst_full_last = 0.0;
+        for (int mode = 0; mode < 2; mode++) {
+            sl.mode = mode == 0 ? MODEL_FULL : MODEL_Q8;
+            sl.pos = 0; sl.trace = NULL; model_ctrl = 0;
+            for (int p = 0; p < RF_LONG_MAX_SEQ; p++) {
+                model_forward(&wl, &sl, (uint32_t)RF_LONG_TOKENS[p], logits);
+                double m = 0.0;
+                upd(&m, logits, RF_LONG_LOGITS + (size_t)p * RF_VOCAB, RF_VOCAB);
+                if (mode == 0) { if (m > worst_full) worst_full = m; if (p == RF_LONG_MAX_SEQ - 1) worst_full_last = m; }
+                else           { if (m > worst_q8)   worst_q8   = m; }
+            }
+            if (sl.pos != RF_LONG_MAX_SEQ) { printf("  FAIL long: pos %u after %d tokens\n", sl.pos, RF_LONG_MAX_SEQ); failures++; }
+        }
+        printf("long       theta %d, %d positions: FULL max|d| %.2e (pos %d: %.2e), Q8 max|d| %.2e\n",
+               RF_LONG_THETA, RF_LONG_MAX_SEQ, worst_full, RF_LONG_MAX_SEQ - 1, worst_full_last, worst_q8);
+        want_below("long-context FULL logits, all 64 positions", worst_full, TOL_FULL);
+        want_below("long-context Q8 logits, all 64 positions",   worst_q8,   TOL_Q8);
+
+        /* The cache growing one slot per GENERATED token, all the way to the
+         * last slot: greedy from the first RF_LONG_NTOK tokens must reproduce
+         * the oracle's 60-token trajectory (oracle re-ran the whole forward per
+         * step; this reuses the incremental cache — matching is the proof). */
+        sl.mode = MODEL_FULL; sl.pos = 0; model_ctrl = 0;
+        uint32_t next = 0;
+        for (int p = 0; p < RF_LONG_NTOK; p++) {
+            model_forward(&wl, &sl, (uint32_t)RF_LONG_TOKENS[p], logits);
+            next = model_argmax(logits, RF_VOCAB);
+        }
+        int first_bad = -1;
+        for (int g = 0; g < RF_LONG_GEN_N; g++) {
+            if ((int)next != RF_LONG_GEN[g] && first_bad < 0) first_bad = g;
+            model_forward(&wl, &sl, next, logits);
+            next = model_argmax(logits, RF_VOCAB);
+        }
+        if (first_bad >= 0) { printf("  FAIL long greedy diverged from the oracle at generated token %d\n", first_bad); failures++; }
+        else printf("generate   long greedy loop matches the oracle for all %d tokens (cache full: pos %u)\n", RF_LONG_GEN_N, sl.pos);
+
+        /* ── Gate 6: the KV-cache bound ──
+         * pos is now exactly max_seq: the cache is full. One more forward must
+         * be a no-op — no cache write (that would be slot max_seq, off the end
+         * of the last layer's region), no logits, no pos increment. Snapshot,
+         * poke, compare. */
+        {
+            size_t kvn = model_kv_len(&wl.cfg) + kv_slack(&wl.cfg);
+            int64_t *ks = malloc(kvn * sizeof(int64_t)), *vs = malloc(kvn * sizeof(int64_t));
+            memcpy(ks, sl.kcache, kvn * sizeof(int64_t));
+            memcpy(vs, sl.vcache, kvn * sizeof(int64_t));
+            for (int i = 0; i < RF_VOCAB; i++) logits[i] = 0x5EA1ED;   /* sentinel */
+            uint32_t pos_before = sl.pos;
+            if (pos_before != RF_LONG_MAX_SEQ) { printf("  FAIL bound: expected pos == max_seq before the poke\n"); failures++; }
+            model_ctrl = 0;
+            model_forward(&wl, &sl, (uint32_t)RF_LONG_TOKENS[0], logits);
+            int cache_same = memcmp(ks, sl.kcache, kvn * sizeof(int64_t)) == 0
+                          && memcmp(vs, sl.vcache, kvn * sizeof(int64_t)) == 0;
+            int logits_same = 1;
+            for (int i = 0; i < RF_VOCAB; i++) if (logits[i] != 0x5EA1ED) logits_same = 0;
+            if (!cache_same)  { printf("  FAIL bound: forward at pos == max_seq wrote the KV cache\n"); failures++; }
+            if (!logits_same) { printf("  FAIL bound: forward at pos == max_seq wrote logits\n"); failures++; }
+            if (sl.pos != pos_before) { printf("  FAIL bound: forward at pos == max_seq advanced pos to %u\n", sl.pos); failures++; }
+            if (cache_same && logits_same && sl.pos == pos_before)
+                printf("bound      forward at pos == max_seq (%u): cache, logits and pos untouched\n", pos_before);
+
+            /* Control: lift the guard. The same call must now write slot
+             * max_seq (into the slack) and advance pos — proving the assertions
+             * above are looking at the right thing and the guard is the only
+             * reason they hold. */
+            model_ctrl = MODEL_CTRL_NO_SEQ_GUARD;
+            model_forward(&wl, &sl, (uint32_t)RF_LONG_TOKENS[0], logits);
+            model_ctrl = 0;
+            int ctrl_cache_moved = memcmp(ks, sl.kcache, kvn * sizeof(int64_t)) != 0
+                                || memcmp(vs, sl.vcache, kvn * sizeof(int64_t)) != 0;
+            int ctrl_logits_moved = 0;
+            for (int i = 0; i < RF_VOCAB; i++) if (logits[i] != 0x5EA1ED) ctrl_logits_moved = 1;
+            if (!ctrl_cache_moved || !ctrl_logits_moved || sl.pos != pos_before + 1) {
+                printf("  FAIL control: with the guard lifted, forward at pos == max_seq changed nothing (cache %d logits %d pos %u)\n",
+                       ctrl_cache_moved, ctrl_logits_moved, sl.pos);
+                failures++;
+            } else {
+                printf("bound      control: guard lifted -> cache and logits written, pos %u (the gate can fail)\n", sl.pos);
+            }
+            free(ks); free(vs);
+        }
     }
 
     printf("\nfailures  %d\n", failures);

@@ -179,6 +179,7 @@ extern unsigned model_ctrl;
 #define MODEL_CTRL_NO_RESIDUAL   1u   /* drop the residual adds               */
 #define MODEL_CTRL_NO_ROPE       2u   /* skip RoPE on Q and K                 */
 #define MODEL_CTRL_GQA_MISGROUP  4u   /* map Q head -> KV head as h%KV, not h/group */
+#define MODEL_CTRL_NO_SEQ_GUARD  8u   /* ignore pos >= max_seq: write past the cache */
 
 /* Precompute RoPE inverse frequencies into st->inv_freq. Call once after the
  * config is set and before the first forward. */

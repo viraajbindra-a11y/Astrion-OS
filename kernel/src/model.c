@@ -396,8 +396,11 @@ void model_forward(const struct model_weights *w, struct model_state *st,
 
     /* The KV cache holds exactly max_seq positions; writing slot `pos` past that
      * would run off the end. Refuse rather than corrupt — the caller owns the
-     * decode-length policy (stop or slide) and must keep pos < max_seq. */
-    if (st->pos >= cfg->max_seq) return;
+     * decode-length policy (stop or slide) and must keep pos < max_seq.
+     * (MODEL_CTRL_NO_SEQ_GUARD is the host test's control for THIS line: it
+     * allocates one slot of slack, lifts the guard, and must see the cache
+     * change. Never set in the kernel.) */
+    if (st->pos >= cfg->max_seq && !(model_ctrl & MODEL_CTRL_NO_SEQ_GUARD)) return;
 
     mdl_copy(st->x, w->embed + (uint64_t)token * D, D);
 
