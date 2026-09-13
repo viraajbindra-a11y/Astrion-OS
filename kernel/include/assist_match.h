@@ -361,16 +361,26 @@ static inline enum am_intent am_classify(const char *p)
      * claiming it would mean confidently closing a window when the user asked
      * to turn the computer off. Falling through to the menu is the honest
      * answer until a power intent exists. */
-    if (am_word_any(p, "quit|exit") ||
-        am_is_just(p, "close|shut|dismiss") ||
-        /* Ways of leaving that never use the word "close". Whole phrases, not
-         * keywords, because "mind", "away" and "out" on their own belong to
-         * far too many other sentences. */
-        am_has(p, "never mind") || am_has(p, "go away") ||
-        am_has(p, "get out of here") ||
-        (am_word_any(p, "close|dismiss|hide|shut") &&
-         am_word_any(p, "window|windows|assistant|chat|this|it|yourself") &&
-         !am_word_any(p, "down|off")))
+    if (/* A bare dismissal is the whole sentence and IS its own negation, so it
+         * has to escape the guard below: "never mind" on its own means close
+         * the window, while "never mind, don't rename notes.txt" is somebody
+         * CANCELLING a rename and must do nothing at all. Whole-prompt match,
+         * so the escape cannot widen. */
+        am_is_just(p, "never mind|nevermind|go away") ||
+        ((am_word_any(p, "quit|exit") ||
+         am_is_just(p, "close|shut|dismiss") ||
+         /* Ways of leaving that never use the word "close". Whole phrases, not
+          * keywords, because "mind", "away" and "out" on their own belong to
+          * far too many other sentences. */
+         am_has(p, "never mind") || am_has(p, "go away") ||
+         am_has(p, "get out of here") ||
+         (am_word_any(p, "close|dismiss|hide|shut") &&
+          am_word_any(p, "window|windows|assistant|chat|this|it|yourself") &&
+          !am_word_any(p, "down|off"))) &&
+         /* CLOSE is an ACTION, so a negated sentence must not reach it.
+          * "never mind, don't rename notes.txt" matched "never mind" and shut
+          * the window on someone who was cancelling a rename. */
+         !am_negated(p)))
         return AM_CLOSE;
 
     /* Change a setting. Needs BOTH a change verb and the name of a settings
@@ -387,7 +397,7 @@ static inline enum am_intent am_classify(const char *p)
           * DATE, which owns the word "clock" and was answering it with the
           * time. The digits are what keep the question "what time is it" out. */
          (am_word_any(p, "12|24") && am_word_any(p, "hour|hours|clock"))) &&
-        !am_has(p, ".txt"))
+        !am_has(p, ".txt") && !am_negated(p))       /* an action: see CLOSE */
         return AM_SET_CHANGE;
 
     /* Report the current settings. The !open guard matters: "open the
@@ -446,7 +456,8 @@ static inline enum am_intent am_classify(const char *p)
      * both would turn "erase notes.txt" into a screen wipe. The .txt guard is
      * the same idea for "wipe notes.txt". */
     if (am_word_any(p, "clear|wipe|clean") &&
-        !am_word_any(p, "file|files|history") && !am_has(p, ".txt"))
+        !am_word_any(p, "file|files|history") && !am_has(p, ".txt") &&
+        !am_negated(p))                             /* an action: see CLOSE */
         return AM_CLEAR;
 
     /* Screen geometry. Both a screen noun AND a size noun are required, so
@@ -547,6 +558,33 @@ static inline enum am_open am_open_target(const char *p)
 
 static inline enum am_action am_action_of(const char *p)
 {
+    /* ── AN INSTRUCTION NOT TO ACT IS NOT AN INSTRUCTION TO ACT ──
+     *
+     * Every arm below DOES something, so a negated sentence must reach none of
+     * them. This guard used to sit on the DELETE arm alone, on the reasoning
+     * that delete was the only arm that destroyed data. That was wrong twice
+     * over: the other arms grew later - write, copy, append and open all
+     * landed after it and none consulted it - and write and append destroy
+     * data too.
+     *
+     * Booted, before this line existed:
+     *
+     *     do not write to notes.txt   ->  WROTE notes.txt, contents "not write"
+     *     please do not open snake    ->  opened Snake, fullscreen
+     *     don't close it              ->  closed the window
+     *
+     * The first is the one that matters. The user said do not, and the machine
+     * overwrote a file and put the word "not" inside it.
+     *
+     * The cost of being crude here is a clarifying reply on a sentence like
+     * "delete notes.txt, don't keep it", which am_negated cannot scope to a
+     * clause. That is the right side to be wrong on: a refusal costs one more
+     * sentence, and obeying "do not" costs a file. The QUESTION intents in
+     * am_classify deliberately do NOT carry this guard - "I don't know how
+     * much memory I have" is a real thing to type and answering it is
+     * harmless. */
+    if (am_negated(p)) return AM_ACT_NONE;
+
     if (am_word_any(p, "rename|move")) return AM_ACT_RENAME;
 
     /* "change a.txt to b.txt" and "call a.txt b.txt instead" are renames in
