@@ -195,7 +195,15 @@ def boot_and_probe(iso, tag, out):
     qemu = subprocess.Popen([
         "qemu-system-x86_64", "-cdrom", iso, "-m", "512", "-display", "none", *QEMU_GUARD,
         "-serial", f"file:{serial}", "-qmp", f"unix:{sock},server,nowait",
-        "-netdev", "user,id=n0", "-device", "e1000,netdev=n0",
+        # NET_TEST_NETDEV exists for ONE reason: the DNS block below has a
+        # branch that only runs when no answer comes back, and on a machine
+        # with working DNS that branch is unreachable. Setting it to
+        # "user,id=n0,restrict=on" gives a guest that can still DHCP and ARP
+        # against slirp but whose DNS forward goes nowhere -- the control that
+        # proves the no-answer branch FAILS instead of skipping. Never set in
+        # normal runs or in CI.
+        "-netdev", os.environ.get("NET_TEST_NETDEV", "user,id=n0"),
+        "-device", "e1000,netdev=n0",
         "-object", f"filter-dump,id=d0,netdev=n0,file={pcap}",
     ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
@@ -386,8 +394,49 @@ def main():
     nm = re.search(re.escape(DNS_NAME) + r" is (\d+\.\d+\.\d+\.\d+)", shell)
 
     if not answers:
-        print(f"[{tag}] [SKIP] DNS: no response reached the guest - this host "
-              f"has no working resolver, so there is nothing to check")
+        # NO ANSWER IS NOT AUTOMATICALLY A SKIP.
+        #
+        # It used to be: no answer -> SKIP -> the whole DNS block never ran and
+        # the test still printed CLEAN. That makes a kernel which never sends
+        # the query indistinguishable from a host with no internet, and on a CI
+        # runner with no outbound DNS it would be green forever while the
+        # resolver was broken.
+        #
+        # The two are separable with what is already in hand:
+        #   - did a query LEAVE THE GUEST? That is in the capture, and it is
+        #     entirely the kernel's doing. No query = the kernel never asked =
+        #     FAIL, regardless of what the host can reach.
+        #   - can THIS HOST resolve the name at all? socket.getaddrinfo, no
+        #     extra packages. If the host cannot, a missing answer is the
+        #     host's, and only then is it a SKIP.
+        host_can_resolve = None
+        try:
+            import socket
+            socket.setdefaulttimeout(5)
+            socket.getaddrinfo(DNS_NAME, 80, socket.AF_INET)
+            host_can_resolve = True
+        except Exception as e:                       # noqa: BLE001 - want the reason
+            host_can_resolve = False
+            why = "%s: %s" % (type(e).__name__, e)
+        check(bool(queries),
+              f"a DNS query for {DNS_NAME} left the machine (no answer came "
+              f"back, so this is the half the kernel is responsible for)")
+        if queries:
+            check(queries[0][3] == DNS_NAME,
+                  f"the query names {DNS_NAME} in length-prefixed labels")
+            check(queries[0][1] & 0x0100,
+                  "RD is set - without it a resolver answers only from cache")
+        if host_can_resolve:
+            check(False,
+                  f"no DNS response reached the guest, but THIS HOST resolves "
+                  f"{DNS_NAME} fine - so the network path exists and something "
+                  f"in the guest or the QEMU user-net forwarding dropped it. "
+                  f"Not a skip.")
+        else:
+            print(f"[{tag}] [SKIP] DNS response: this host cannot resolve "
+                  f"{DNS_NAME} either ({why}), so there is nothing for the "
+                  f"guest to have received. The query-left-the-machine checks "
+                  f"above still ran.")
     else:
         check(bool(queries), f"a DNS query for {DNS_NAME} left the machine")
         if queries:
