@@ -23,6 +23,20 @@ const wallpapers = [
   { id: 'forest',    name: 'Forest',    colors: "url('assets/wallpapers/forest.svg')" },
 ];
 
+// Text tones. One rule for the whole wizard: anything a person is meant to
+// read is at least 65% white and at least 12px. The number was chosen on
+// the LIGHTEST background this wizard draws over -- the wallpaper step sits
+// on the user's chosen wallpaper -- where 0.65 white is 5.4:1 and 0.45 was
+// 3.4:1. On the dark steps 0.65 lands at 7.6-8.2:1. Measured from rendered
+// pixels, 2026-09-13: the old 11px small print was 2.66:1 (0.30 white) on
+// the account step and 3.74:1 (0.40 white) on the welcome cards; both fail
+// 4.5:1, which is the floor for text that small.
+const INK = {
+  strong: '#ffffff',
+  body: 'rgba(255,255,255,0.72)',
+  quiet: 'rgba(255,255,255,0.65)',
+};
+
 // The frame. The nav bar is IN FLOW, below the content, so a tall step can
 // never slide underneath its own buttons; it either fits or it scrolls
 // (each step decides what scrolls -- see the Ember step). Before this the
@@ -111,7 +125,7 @@ export function showSetupWizard() {
             <div id="setup-content" style="min-height:0;display:flex;flex-direction:column;animation:scaleIn 0.35s cubic-bezier(0.16,1,0.3,1);"></div>
           </div>
           <div style="flex:none;display:flex;justify-content:center;align-items:center;gap:16px;padding:${FRAME.navTop}px 0 ${FRAME.bottom}px;${aiBrainBlocking ? 'visibility:hidden;' : ''}">
-            ${step > 0 ? `<button id="setup-back" style="background:rgba(255,255,255,0.08);border:none;color:rgba(255,255,255,0.6);padding:10px 24px;border-radius:10px;font-size:14px;font-family:var(--font);cursor:pointer;">Back</button>` : ''}
+            ${step > 0 ? `<button id="setup-back" style="background:rgba(255,255,255,0.08);border:none;color:${INK.quiet};padding:10px 24px;border-radius:10px;font-size:14px;font-family:var(--font);cursor:pointer;">Back</button>` : ''}
             <div style="display:flex;gap:6px;">
               ${Array.from({length: totalSteps}, (_, i) => `<div style="width:${i === step ? '24px' : '8px'};height:8px;border-radius:4px;background:${i === step ? 'var(--accent)' : i < step ? 'rgba(255,255,255,0.4)' : 'rgba(255,255,255,0.15)'};transition:all 0.3s;"></div>`).join('')}
             </div>
@@ -142,22 +156,22 @@ export function showSetupWizard() {
                 </svg>
               </div>
               <h1 style="font-size:36px;font-weight:700;margin-bottom:8px;letter-spacing:-0.5px;">Welcome to Astrion OS</h1>
-              <p style="font-size:17px;color:rgba(255,255,255,0.5);margin-bottom:48px;">The AI-native operating system</p>
+              <p style="font-size:17px;color:${INK.quiet};margin-bottom:48px;">The AI-native operating system</p>
               <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;text-align:center;">
                 <div style="background:rgba(255,255,255,0.05);border-radius:16px;padding:24px 12px;">
                   <div style="font-size:32px;margin-bottom:8px;">&#x2728;</div>
                   <div style="font-size:13px;font-weight:600;margin-bottom:4px;">AI Everywhere</div>
-                  <div style="font-size:11px;color:rgba(255,255,255,0.4);">Built into every app</div>
+                  <div style="font-size:12px;color:${INK.quiet};">Built into every app</div>
                 </div>
                 <div style="background:rgba(255,255,255,0.05);border-radius:16px;padding:24px 12px;">
                   <div style="font-size:32px;margin-bottom:8px;">&#x1F4BB;</div>
                   <div style="font-size:13px;font-weight:600;margin-bottom:4px;">${appCounts().apps} Apps</div>
-                  <div style="font-size:11px;color:rgba(255,255,255,0.4);">+ ${appCounts().toys} toys included</div>
+                  <div style="font-size:12px;color:${INK.quiet};">+ ${appCounts().toys} toys included</div>
                 </div>
                 <div style="background:rgba(255,255,255,0.05);border-radius:16px;padding:24px 12px;">
                   <div style="font-size:32px;margin-bottom:8px;">&#x1F6CD;&#xFE0F;</div>
                   <div style="font-size:13px;font-weight:600;margin-bottom:4px;">App Store</div>
-                  <div style="font-size:11px;color:rgba(255,255,255,0.4);">AI skills & apps</div>
+                  <div style="font-size:12px;color:${INK.quiet};">AI skills & apps</div>
                 </div>
               </div>
             </div>
@@ -169,7 +183,7 @@ export function showSetupWizard() {
             <div style="text-align:center;">
               <div style="font-size:56px;margin-bottom:16px;">&#x1F44B;</div>
               <h1 style="font-size:30px;font-weight:700;margin-bottom:8px;">Create your account</h1>
-              <p style="font-size:15px;color:rgba(255,255,255,0.45);margin-bottom:28px;">Astrion uses this to personalize your experience and lock your screen</p>
+              <p style="font-size:15px;color:${INK.quiet};margin-bottom:28px;">Astrion uses this to personalize your experience and lock your screen</p>
               <div style="display:flex;flex-direction:column;gap:10px;width:300px;margin:0 auto;">
                 <input type="text" id="setup-name" placeholder="Name" value="${userName}"
                   style="padding:13px 18px;background:rgba(255,255,255,0.08);border:2px solid rgba(255,255,255,0.12);border-radius:12px;color:white;font-size:15px;font-family:var(--font);outline:none;text-align:center;">
@@ -177,7 +191,7 @@ export function showSetupWizard() {
                   style="padding:13px 18px;background:rgba(255,255,255,0.08);border:2px solid rgba(255,255,255,0.12);border-radius:12px;color:white;font-size:15px;font-family:var(--font);outline:none;text-align:center;">
                 <div id="setup-pw-strength" style="height:4px;border-radius:2px;background:rgba(255,255,255,0.06);"></div>
               </div>
-              <div style="margin-top:14px;font-size:11px;color:rgba(255,255,255,0.3);max-width:320px;margin-left:auto;margin-right:auto;line-height:1.5;">Leave the password blank to use Astrion without a lock screen. You can change this later in Settings.</div>
+              <div style="margin-top:14px;font-size:12px;color:${INK.quiet};max-width:320px;margin-left:auto;margin-right:auto;line-height:1.5;">Leave the password blank to use Astrion without a lock screen. You can change this later in Settings.</div>
             </div>
           `;
           const nameInput = el.querySelector('#setup-name');
@@ -210,7 +224,7 @@ export function showSetupWizard() {
           el.innerHTML = `
             <div style="text-align:center;">
               <h1 style="font-size:30px;font-weight:700;margin-bottom:8px;">Choose your look</h1>
-              <p style="font-size:15px;color:rgba(255,255,255,0.45);margin-bottom:28px;">Pick a wallpaper for your desktop</p>
+              <p style="font-size:15px;color:${INK.quiet};margin-bottom:28px;">Pick a wallpaper for your desktop</p>
               <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:12px;">
                 ${wallpapers.map(w => {
                   const isSvg = w.colors.startsWith('url(');
@@ -220,7 +234,7 @@ export function showSetupWizard() {
                   return `
                   <div data-wp="${w.id}" style="aspect-ratio:16/10;border-radius:12px;${bgStyle}cursor:pointer;border:3px solid ${w.id === selectedWallpaper ? 'var(--accent)' : 'transparent'};transition:border-color 0.2s,transform 0.15s;position:relative;overflow:hidden;min-width:0;"
                     onmouseenter="this.style.transform='scale(1.03)'" onmouseleave="this.style.transform='scale(1)'">
-                    <div style="position:absolute;bottom:0;left:0;right:0;padding:6px 10px;background:linear-gradient(transparent,rgba(0,0,0,0.5));font-size:11px;color:rgba(255,255,255,0.8);text-align:left;box-sizing:border-box;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${w.name}</div>
+                    <div style="position:absolute;bottom:0;left:0;right:0;padding:6px 10px;background:linear-gradient(transparent,rgba(0,0,0,0.5));font-size:12px;color:rgba(255,255,255,0.85);text-align:left;box-sizing:border-box;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${w.name}</div>
                   </div>
                 `;
                 }).join('')}
@@ -243,7 +257,7 @@ export function showSetupWizard() {
           el.innerHTML = `
             <div style="text-align:center;">
               <h1 style="font-size:30px;font-weight:700;margin-bottom:8px;">Pick your color</h1>
-              <p style="font-size:15px;color:rgba(255,255,255,0.45);margin-bottom:32px;">This accent color is used throughout Astrion OS</p>
+              <p style="font-size:15px;color:${INK.quiet};margin-bottom:32px;">This accent color is used throughout Astrion OS</p>
               <div style="display:flex;justify-content:center;gap:16px;margin-bottom:36px;">
                 ${accents.map(a => `
                   <div data-color="${a.color}" style="width:48px;height:48px;border-radius:50%;background:${a.color};cursor:pointer;border:4px solid ${a.color === selectedAccent ? 'white' : 'transparent'};transition:all 0.2s;box-shadow:0 4px 12px rgba(0,0,0,0.3);"
@@ -306,34 +320,34 @@ export function showSetupWizard() {
           el.innerHTML = `
             <div style="text-align:center;">
               <h1 style="font-size:30px;font-weight:700;margin-bottom:8px;">Quick tips</h1>
-              <p style="font-size:15px;color:rgba(255,255,255,0.45);margin-bottom:28px;">Here's how to get the most out of Astrion OS</p>
+              <p style="font-size:15px;color:${INK.quiet};margin-bottom:28px;">Here's how to get the most out of Astrion OS</p>
               <div style="display:flex;flex-direction:column;gap:12px;text-align:left;">
                 <div style="display:flex;align-items:center;gap:16px;background:rgba(255,255,255,0.05);border-radius:14px;padding:16px 20px;">
                   <div style="font-size:28px;width:44px;text-align:center;">&#x1F50D;</div>
                   <div>
                     <div style="font-size:14px;font-weight:600;">Search</div>
-                    <div style="font-size:12px;color:rgba(255,255,255,0.45);margin-top:2px;">Press <kbd style="background:rgba(255,255,255,0.1);padding:2px 6px;border-radius:4px;font-size:11px;">Cmd+Space</kbd> to search, launch apps, or ask AI anything</div>
+                    <div style="font-size:12px;color:${INK.quiet};margin-top:2px;">Press <kbd style="background:rgba(255,255,255,0.1);padding:2px 6px;border-radius:4px;font-size:12px;color:${INK.body};">Cmd+Space</kbd> to search, launch apps, or ask AI anything</div>
                   </div>
                 </div>
                 <div style="display:flex;align-items:center;gap:16px;background:rgba(255,255,255,0.05);border-radius:14px;padding:16px 20px;">
                   <div style="font-size:28px;width:44px;text-align:center;">&#x1F3AF;</div>
                   <div>
                     <div style="font-size:14px;font-weight:600;">App Grid</div>
-                    <div style="font-size:12px;color:rgba(255,255,255,0.45);margin-top:2px;">Press <kbd style="background:rgba(255,255,255,0.1);padding:2px 6px;border-radius:4px;font-size:11px;">F4</kbd> to see all your apps in a grid</div>
+                    <div style="font-size:12px;color:${INK.quiet};margin-top:2px;">Press <kbd style="background:rgba(255,255,255,0.1);padding:2px 6px;border-radius:4px;font-size:12px;color:${INK.body};">F4</kbd> to see all your apps in a grid</div>
                   </div>
                 </div>
                 <div style="display:flex;align-items:center;gap:16px;background:rgba(255,255,255,0.05);border-radius:14px;padding:16px 20px;">
                   <div style="font-size:28px;width:44px;text-align:center;">&#x1F4F6;</div>
                   <div>
                     <div style="font-size:14px;font-weight:600;">Quick Settings</div>
-                    <div style="font-size:12px;color:rgba(255,255,255,0.45);margin-top:2px;">Click the Wi-Fi or battery icon for quick settings</div>
+                    <div style="font-size:12px;color:${INK.quiet};margin-top:2px;">Click the Wi-Fi or battery icon for quick settings</div>
                   </div>
                 </div>
                 <div style="display:flex;align-items:center;gap:16px;background:rgba(255,255,255,0.05);border-radius:14px;padding:16px 20px;">
                   <div style="font-size:28px;width:44px;text-align:center;">&#x1F5B1;&#xFE0F;</div>
                   <div>
                     <div style="font-size:14px;font-weight:600;">Window Snapping</div>
-                    <div style="font-size:12px;color:rgba(255,255,255,0.45);margin-top:2px;">Drag windows to screen edges to snap them into place</div>
+                    <div style="font-size:12px;color:${INK.quiet};margin-top:2px;">Drag windows to screen edges to snap them into place</div>
                   </div>
                 </div>
               </div>
@@ -346,21 +360,21 @@ export function showSetupWizard() {
             <div style="text-align:center;">
               <div style="font-size:72px;margin-bottom:20px;animation:dockBounce 0.8s ease;">&#x1F680;</div>
               <h1 style="font-size:34px;font-weight:700;margin-bottom:8px;">You're all set${userName ? ', ' + userName : ''}!</h1>
-              <p style="font-size:17px;color:rgba(255,255,255,0.5);margin-bottom:36px;">Astrion OS is ready for you</p>
+              <p style="font-size:17px;color:${INK.quiet};margin-bottom:36px;">Astrion OS is ready for you</p>
               <div style="display:inline-flex;flex-direction:column;gap:8px;text-align:left;">
-                <div style="display:flex;align-items:center;gap:10px;font-size:14px;color:rgba(255,255,255,0.6);">
+                <div style="display:flex;align-items:center;gap:10px;font-size:14px;color:${INK.body};">
                   <span style="color:var(--accent);">&#x2713;</span> Desktop customized
                 </div>
-                <div style="display:flex;align-items:center;gap:10px;font-size:14px;color:rgba(255,255,255,0.6);">
+                <div style="display:flex;align-items:center;gap:10px;font-size:14px;color:${INK.body};">
                   <span style="color:var(--accent);">&#x2713;</span> ${Object.keys(wallpapers).length > 0 ? 'Wallpaper selected' : 'Default wallpaper'}
                 </div>
-                <div style="display:flex;align-items:center;gap:10px;font-size:14px;color:rgba(255,255,255,0.6);">
+                <div style="display:flex;align-items:center;gap:10px;font-size:14px;color:${INK.body};">
                   <span style="color:var(--accent);">&#x2713;</span> Accent color applied
                 </div>
-                <div style="display:flex;align-items:center;gap:10px;font-size:14px;color:rgba(255,255,255,0.6);">
+                <div style="display:flex;align-items:center;gap:10px;font-size:14px;color:${INK.body};">
                   <span style="color:var(--accent);">&#x2713;</span> ${appCounts().apps} apps + ${appCounts().toys} toys ready to use
                 </div>
-                <div style="display:flex;align-items:center;gap:10px;font-size:14px;color:rgba(255,255,255,0.6);">
+                <div style="display:flex;align-items:center;gap:10px;font-size:14px;color:${INK.body};">
                   <span style="color:var(--accent);">&#x2713;</span> ${(() => {
                     const opt = BRAIN_OPTIONS.find(o => o.id === aiBrainState.brain);
                     if (!opt || opt.id === 'none') return 'Assistant standing by &mdash; add Ember in Settings';
