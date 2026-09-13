@@ -1,3 +1,5 @@
+> **SUPERSEDED (2026-09-13) — see tasks/LAUNCH-SEPT.md.** April 2026 handoff for the web-desktop track (frozen until Oct 1). The "80 apps" below was the count at the time; `js/apps/` holds 78 app files today (62 real + 16 toys).
+
 # Session Handoff: M4 dock + Ollama JSON-mode + M7 Skill Marketplace + M8 Self-Mod Substrate
 
 **Date:** 2026-04-18 → 2026-04-20
@@ -17,7 +19,7 @@
 
 **Date:** 2026-04-17 → 2026-04-18
 **Branch:** main (36 new commits ahead of origin — not pushed)
-**Starting point:** 80 apps, commit `f8a47fa` (timer.js leak fix)
+**Starting point:** 80 apps (count as of April 2026; 78 `.js` files in `js/apps/` as of 2026-09-13), commit `f8a47fa` (timer.js leak fix)
 **Ending point:** commit `115b2c1` (M5.P3.b Spotlight branches command)
 **Verification:** **170/170 tests** in `test/v03-verification.html` + M5.P2.c verified end-to-end via real Spotlight + simulated Enter/Escape + M5.P3.b verified via Spotlight "branches" query rendering 20 branches. **Full M5 (incl. UI) + M6.P1 + M6.P4 + M6.P4.c shipped**.
 

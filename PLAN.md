@@ -1,5 +1,7 @@
 # Astrion OS — PLAN v2
 
+> **Scope note (2026-09-13):** this is the architecture plan for the **web desktop track**, frozen until Oct 1 (`tasks/PLAN-SEPT.md`). The product that launches Sep 28 is the from-scratch kernel in `kernel/`; see `tasks/LAUNCH-SEPT.md`. Three factual corrections are inline below, marked *2026-09-13*.
+
 *A rewrite of the plan after an adversarial audit of v1. Written so a 12-year-old (me) can read it and still precise enough to guide real code.*
 
 ---
@@ -104,6 +106,8 @@ Notes, Finder, Kanban, Pomodoro, Todo, Calendar, Reminders, Sticky Notes, Kanban
 
 **That's 48 apps demoted.** This is the single biggest change and the hardest one. They still work — you can still run them — but they stop being "shipped apps" and become examples the AI uses when you express intent like "I want to track habits" → AI instantiates the habit template into a graph-native view.
 
+> *2026-09-13 — this demotion never happened.* The list above has 48 unique names (Kanban is listed twice), so the count matches the list, but the plan was not executed: every one of the 78 app files in `js/apps/` (62 real + 16 toys) is still registered and shipped as an app (`js/kernel/app-stubs.js`), and the README counts them that way. The "61 real apps" figure the README used to carry was the same set minus Healer Log.
+
 ### Deleted
 Nothing yet. Deletion is irreversible — we demote first, delete only after we're sure nothing depends on it.
 
@@ -143,9 +147,9 @@ Each milestone has: a 1-sentence success definition, **explicit phases** (the su
 - **M0.P3 — Web Apps in Native Mode** *(Day 5–6)* ✅ **COMPLETE — 2026-04-17**
   - ✅ `/app/:appId` route serves stripped page: only `system.css` + `window.css` + the requested app's CSS (if it exists). Shell chrome (menubar/dock/spotlight/control-center/launchpad/setup) NOT loaded.
   - ✅ `body.nova-native-app` + inline display:none rules hide any chrome elements that boot.js's window-manager still references.
-  - ✅ Per-app CSS dynamic include via `existsSync('css/apps/${appId}.css')` — covers all 76 apps (previously hardcoded list covered 17).
+  - ✅ Per-app CSS dynamic include via `existsSync('css/apps/${appId}.css')` — covers all 76 apps (previously hardcoded list covered 17). *2026-09-13: "17" is the size of the hardcoded per-app CSS allow-list that this commit replaced in `server/index.js`; the list no longer exists to recount, so TODO if it ever matters: `git show` the M0.P3 commit. "76" was the app count on 2026-04-17; it is 78 today.*
   - ✅ Path traversal guard: `/^[a-z0-9-]+$/` whitelist on `:appId` returns 400 for `/app/../../etc/passwd`.
-  - ✅ Browser app: launches Chromium (decision changed from PLAN v1's `astrion-browser` per ISO session lessons — Chromium is a battle-tested fallback. The standalone `astrion-browser.c` exists in source for reference but is not wired.)
+  - ✅ Browser app: launches Chromium (decision changed from PLAN v1's `astrion-browser` per ISO session lessons — Chromium is a battle-tested fallback. The standalone `astrion-browser.c` exists in source for reference but is not wired.) *2026-09-13: "not wired" refers to the C file `distro/nova-renderer/astrion-browser.c`, and is still true. Separately, the Electron **Astrion Browser** in `distro/astrion-browser/` was built in May 2026 and IS installed into the Debian ISO by `distro/build.sh` (`/opt/astrion-browser`, launcher `/usr/bin/astrion-browser`); it has never been run outside the dev preview. The README says exactly that.*
   - Native-window E2E test of all 76 apps requires real hardware boot — that piece deferred until next ISO build.
 - **M0.P4 — Install + Persistence** *(Day 7–8)* ✅ **COMPLETE — already shipped, verified 2026-04-17**
   - ✅ `nova-first-boot.sh` (zenity install/try/never-ask dialog) wired in `.xinitrc` before nova-shell starts (build.sh:731).

@@ -1,3 +1,5 @@
+> **SUPERSEDED (2026-09-13) — see tasks/LAUNCH-SEPT.md.** This is the April 2026 handoff for the web-desktop track, which is frozen until Oct 1. Do not paste it into a session. The product is the kernel in `kernel/`; start from `tasks/LAUNCH-SEPT.md` and `kernel/README.md`.
+
 # Paste this into the next session
 
 ```

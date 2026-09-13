@@ -1,3 +1,5 @@
+> **SUPERSEDED (2026-09-13) — see tasks/LAUNCH-SEPT.md.** Everything below is the web-desktop launch (Dec 21, Product Hunt, Twitter, waitlist, Pro tier). The actual launch is the kernel ISO on Sep 28 with one Show HN and one r/osdev post, QEMU one-liner first. Kept for the Q&A table, some of which is still usable.
+
 # Launch Prep — running file for distribution + marketing
 
 > Living document. Add ideas as they come, prune when shipped or rejected.
@@ -200,3 +202,4 @@ press-kit/
 - **(to fill in):** URL chosen
 - **(to fill in):** Phase 1 path (Option A vs B)
 - **(to fill in):** Stripe entity setup
+- **2026-09-13:** superseded by `tasks/LAUNCH-SEPT.md` — kernel ISO, Sep 28, Show HN + r/osdev only

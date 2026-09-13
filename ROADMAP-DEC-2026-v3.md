@@ -1,3 +1,5 @@
+> **SUPERSEDED (2026-09-13) — see tasks/LAUNCH-SEPT.md.** The Dec 21 date, the web-desktop launch and every phase below are dead. The product is the from-scratch kernel; it launches Sep 28. Kept for the reasoning only.
+
 # Astrion OS — Road to v1.0 on December 21, 2026 (v3, post-audit)
 
 **Today:** Mon Apr 20, 2026 — 246 days to launch.
@@ -19,8 +21,8 @@ Substrate as of commit `b6e89d4` (auto-push job confirms pushed):
 | M4 — Verifiable Code Gen | ✅ shipped | spec→tests→sandbox→code→app-in-dock |
 | M5 — Reversibility | ✅ shipped | Branch, interceptor, rewind, PONR, typed confirm |
 | M6 — Socratic + Red-Team | ✅ shipped | All P1–P4 + chaos + Settings dashboard |
-| M7 — Skill Marketplace | 🟡 substrate | DSL + parser + 55 bundled skills + scheduler. **Cloud catalog not built.** |
-| M8 — Self-Modification | 🟡 substrate | All 5 gates run. **Disk-write side (P5) not implemented.** |
+| M7 — Skill Marketplace | 🟡 substrate | DSL + parser + 55 bundled skills + scheduler. **Local catalog browse UI shipped 2026-05-15 (`b7e70d1`, reads `/skills/manifest.json`); the hosted cloud catalog was never built** (corrected 2026-09-13; `PLAN.md:502` says "shipped" and means the local browse UI). |
+| M8 — Self-Modification | 🟡 substrate | All 5 gates run. **Disk-write side (P5) not implemented.** *(Later shipped 2026-05-15, soak-verified 2026-05-24 — see PLAN.md.)* |
 
 **170/170 verification tests** green offline (stubbed AI). **Real-API soak: incomplete.**
 
@@ -57,7 +59,7 @@ The architectural moat is built. **What's left is making it real, soaking it, ge
 
 4. **Real-API soak is a 1-day task, not a 2-week phase.** It's blocking everything else (the entire safety story is unverified at the LLM boundary until this happens). **Do it Week 1. Today.**
 
-5. **Browser-inside-Astrion is a v2 feature, not v1.** The Chromium-as-app fallback already works. Three weeks of tabbed-browser work is three weeks not spent on the safety-as-marketing video, distribution, or hardware soak. **Cut from v1.0.**
+5. **Browser-inside-Astrion is a v2 feature, not v1.** The Chromium-as-app fallback already works. Three weeks of tabbed-browser work is three weeks not spent on the safety-as-marketing video, distribution, or hardware soak. **Cut from v1.0.** *(Overtaken by events: the Electron Astrion Browser was built anyway in May — `distro/astrion-browser/`, installed into the Debian ISO by `distro/build.sh`, never run outside the dev preview. Noted 2026-09-13.)*
 
 6. **Voice I/O is a v2 feature, not v1.** "Hey Astrion" is a Wow demo for hands-on users but adds zero to the safety story and consumes 2 weeks. **Cut from v1.0** unless Phase 1 finishes a week early.
 
@@ -124,6 +126,8 @@ Total: 35 weeks. Build assumes ~70% on-time delivery (so deliver 35w of work in 
 
 **Goal:** The marketplace is live. There are 50+ installable skills. One feature exists that makes people screenshot and share.
 
+*(Count check 2026-09-13: 55 `.skill` files exist in `skills/examples/` and are listed in `skills/manifest.json`; the "50" targets below were met by the bundled set, the hosted marketplace never happened.)*
+
 - Week 26 (Jun 29 – Jul 5): **Marketplace backend.** Cloudflare Workers or Deno Deploy. `/api/skills/catalog` JSON. Manual moderation — no auto-review yet.
 - Week 27 (Jul 6–12): **Catalog UI in App Store app.** Browse, install, rate.
 - Week 28–29 (Jul 13–26): **Seed 50 skills.** 30 you write. 20 from friends/community via PR. Cover real use cases: "organize downloads," "morning brief," "study plan generator," "screenshot annotator," etc.
@@ -180,7 +184,7 @@ Total: 35 weeks. Build assumes ~70% on-time delivery (so deliver 35w of work in 
 ## What gets cut and when
 
 **Cut from v1.0 today (don't even start):**
-- Tabbed browser inside Astrion (Chromium-as-app stays)
+- Tabbed browser inside Astrion (Chromium-as-app stays) *(built anyway in May as the Electron Astrion Browser; see note in "What v2 underweights" #5)*
 - Voice I/O (push to v1.1)
 - LibreOffice macro bridge
 - Multi-agent specialization

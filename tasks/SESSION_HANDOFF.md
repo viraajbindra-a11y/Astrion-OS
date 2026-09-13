@@ -1,3 +1,5 @@
+> **SUPERSEDED (2026-09-13) — see tasks/LAUNCH-SEPT.md.** Historical handoffs, May–July 2026. Kept as the record of how the kernel got here; the dates, "next ranked" lists and the Dec 21 line are dead.
+
 # Session Handoff — 2026-05-26 → next session
 
 **~13 commits across three arcs:** v2.0 kernel infrastructure (retrage

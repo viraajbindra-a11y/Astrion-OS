@@ -1,3 +1,5 @@
+> **SUPERSEDED (2026-09-13) — see tasks/LAUNCH-SEPT.md.** Aug 31 is dead; the launch is Sep 28 and the ten-line checklist lives there. Item 7 below (release, README, deploy) was green-lit and done 2026-09-13. The hardware notes are still useful and still true: never booted on metal.
+
 # Your checklist — things only you can do (Jul 18 → Aug 31)
 
 Plan: **rest of July = design + features** (my work) · **August = real hardware**
@@ -117,15 +119,16 @@ This is the single most convincing asset you own, and it does not exist yet.
 
 ## 🟢 DECISIONS — only you can authorize
 
-### 7. Green-light going public — **by Fri Aug 15**
+### 7. Green-light going public — **by Fri Aug 15** *(DONE 2026-09-13)*
 Three things I will **not** do without your word, because they're public and carry
 your name:
 - Cut a **GitHub Release** with the bootable ISO attached (right now there is no
   link a stranger can click — your newest release is from June 5 and predates all
-  of this).
-- **Rewrite the README** to lead with the from-scratch kernel.
+  of this). *(release-os.yml rewritten; tag `os-v0.3` fires it.)*
+- **Rewrite the README** to lead with the from-scratch kernel. *(Done.)*
 - **Fix `deploy.yml`** so kernel commits stop republishing the old desktop app to
-  astrion-os.com.
+  astrion-os.com. *(astrion-os.com no longer resolves; the links are gone from
+  the docs. build-desktop.yml and build-iso.yml are manual-only.)*
 
 Say go and I'll draft all three and show you before anything ships. ~half a day.
 
