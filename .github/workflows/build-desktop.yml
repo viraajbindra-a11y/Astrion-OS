@@ -34,6 +34,12 @@ jobs:
       # (runtime ignored) and requires itself to go red before passing.
       - name: ai-service cloud clause
         run: npm run test:ai-service
+      # The FROM guard on /api/ai/ollama-create: the test imports the same
+      # server/modelfile-guard.js the endpoint runs (it used to test a copy of
+      # the regex, so loosening the server's copy changed nothing here) and
+      # checks index.js has not grown a private regex again.
+      - name: ollama-create FROM guard
+        run: npm run test:server
 
   # ───────────────────────────────────────────────
   # 1. Compute a new auto-incrementing version tag

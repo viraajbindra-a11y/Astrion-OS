@@ -1,0 +1,41 @@
+name: Node tests (no network, no model)
+
+# The two node tests that guard the web track's AI surface, run on every push
+# that could break them. build-desktop.yml runs the same two before it builds,
+# but that workflow is manual-only since 2026-09-13, and a test that runs only
+# when someone remembers to press a button is not a gate.
+#
+#   test:ai-service  the Anthropic leg carries the CLOUD privacy clause, never
+#                    the local one (fetch stubbed; the test plants the bug and
+#                    requires itself to go red first)
+#   test:server      the /api/ai/ollama-create FROM guard, imported from the
+#                    same module the server runs, not a copy
+
+on:
+  push:
+    paths:
+      - 'js/kernel/**'
+      - 'server/**'
+      - 'tests/**'
+      - 'package.json'
+      - '.github/workflows/node-tests.yml'
+  pull_request:
+    paths:
+      - 'js/kernel/**'
+      - 'server/**'
+      - 'tests/**'
+      - 'package.json'
+      - '.github/workflows/node-tests.yml'
+
+jobs:
+  node-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: ai-service cloud clause
+        run: npm run test:ai-service
+      - name: ollama-create FROM guard
+        run: npm run test:server

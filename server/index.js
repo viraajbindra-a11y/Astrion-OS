@@ -10,6 +10,7 @@ import { spawn } from 'child_process';
 // Phase 1 — File I/O Bridge (Agent Core Expansion)
 import { readFile as fsReadFile, writeFile as fsWriteFile, readdir, stat, mkdir, realpath as fsRealpath } from 'fs/promises';
 import { existsSync } from 'fs';
+import { checkModelfile } from './modelfile-guard.js';
 
 // Force IPv4 DNS resolution first — many networks (including some home
 // Wi-Fi) have broken IPv6. Node's default undici fetch prefers IPv6 and
@@ -240,14 +241,11 @@ app.post('/api/ai/ollama-create', async (req, res) => {
   // directive that names something to run, so it is the one worth pinning:
   // refuse anything whose base is not a plain registry tag. Without this, a
   // page that can reach this server can point Ollama at an arbitrary source.
-  const from = /^\s*FROM\s+(\S+)/im.exec(modelfile);
-  if (!from) {
-    return res.status(400).json({ error: 'modelfile must start with a FROM line' });
-  }
-  if (!/^[a-z0-9._-]+(:[a-z0-9._-]+)?$/i.test(from[1])) {
-    return res.status(400).json({
-      error: 'FROM must be a plain model tag, not a path or a URL: ' + from[1],
-    });
+  // The guard lives in ./modelfile-guard.js so the test imports the SAME
+  // function this endpoint runs, not a copy of it.
+  const guard = checkModelfile(modelfile);
+  if (!guard.ok) {
+    return res.status(400).json({ error: guard.error });
   }
 
   const ollamaUrl = url || 'http://localhost:11434';
