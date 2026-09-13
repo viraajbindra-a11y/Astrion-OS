@@ -27,6 +27,7 @@ Offline. No model, no network, no Ollama. ASCII only.
 """
 import ast
 import io
+import json
 import os
 import shutil
 import subprocess
@@ -80,11 +81,20 @@ MUTANTS = [
      '            hits.append("names " + lab + " as its maker (noun form): "\n',
      '            continue; hits.append("names " + lab + " as its maker (noun form): "\n'),
     ('clause cut on a spaced dash / colon',
-     '        window = re.split(r"[.;!?\\n:]| - ", window)[0]\n',
-     '        window = re.split(r"[.;!?\\n]", window)[0]\n'),
+     '        window = re.split(r"\\.(?![0-9])|(?<![0-9])\\.|[;!?\\n:]| - ", window)[0]\n',
+     '        window = re.split(r"\\.(?![0-9])|(?<![0-9])\\.|[;!?\\n]", window)[0]\n'),
     ('comparison escape: "than"',
      '_COMPARISON = ("like", "similar to", "comparable to", "in the same family", " than ",',
      '_COMPARISON = ("like", "similar to", "comparable to", "in the same family",'),
+    ('comparison escape (impersonates)',
+     '            if any(c in span for c in _COMPARISON):\n                continue                      # "I\'m like ChatGPT but smaller"',
+     '            if False:\n                continue'),
+    ('self-reference: "you\'re talking to" form',
+     'r"\\byou(?:\'re|\\s+are)\\s+(?:talking\\s+to|speaking\\s+(?:to|with)|chatting\\s+with)\\b)")',
+     'r"(?!x)x)")'),
+    ('version numbers survive the sentence split ("gpt-3.5")',
+     '        window = re.split(r"\\.(?![0-9])|(?<![0-9])\\.|[;!?\\n:]| - ", window)[0]',
+     '        window = re.split(r"[.;!?\\n:]| - ", window)[0]'),
     ('comparison escape (possessive branch)',
      '            if any(c in " " + lead + " " for c in _COMPARISON):\n                continue                      # "unlike OpenAI\'s models, I ..."',
      '            if False and any(c in " " + lead + " " for c in _COMPARISON):\n                continue                      # "unlike OpenAI\'s models, I ..."'),
@@ -193,13 +203,66 @@ MUTANTS = [
 ]
 
 
+def vocabulary_mutants(src):
+    """One mutant per vocabulary entry: delete the alias (or lab) from its
+    table and require --selftest's generated sweep to flip. Generated from the
+    gate's own tables, so a new entry gets a mutant the moment it is added;
+    the anchor is the whole table literal, so a missing or reformatted table
+    is an ANCHOR-MISS, not a silent skip."""
+    out = []
+    a0 = src.index("FOREIGN_ASSISTANTS = {")
+    a1 = src.index("\n}\n", a0) + 3
+    table = src[a0:a1]
+    ns = {}
+    exec(table, ns)                          # the literal only; no code runs
+    for key, aliases in ns["FOREIGN_ASSISTANTS"].items():
+        for alias in aliases:
+            kept = tuple(a for a in aliases if a != alias)
+            entry_old = '"%s": (%s%s),' % (key, ", ".join('"%s"' % a for a in aliases),
+                                            "," if len(aliases) == 1 else "")
+            entry_new = '"%s": (%s%s),' % (key, ", ".join('"%s"' % a for a in kept),
+                                            "," if len(kept) == 1 else "")
+            if not kept:
+                entry_new = '"%s": ("zz-deleted-alias",),' % key
+            if entry_old not in table:
+                out.append(('alias "%s" (table entry not found as written)' % alias,
+                            "<<no such anchor>>", ""))
+                continue
+            out.append(('alias "%s" deleted from FOREIGN_ASSISTANTS' % alias,
+                        table, table.replace(entry_old, entry_new, 1)))
+    m0 = src.index("FOREIGN_MAKERS = (")
+    m1 = src.index(")\n", m0) + 2
+    makers = src[m0:m1]
+    ns = {}
+    exec(makers, ns)
+    for lab in ns["FOREIGN_MAKERS"]:
+        kept = tuple(l for l in ns["FOREIGN_MAKERS"] if l != lab)
+        out.append(('lab "%s" deleted from FOREIGN_MAKERS' % lab, makers,
+                    "FOREIGN_MAKERS = (%s)\n" % ", ".join('"%s"' % l for l in kept)))
+    return out
+
+
+def original_vocab(src):
+    """The gate's tables as they are on disk, for the sweep inside a mutant."""
+    ns = {}
+    a0 = src.index("FOREIGN_ASSISTANTS = {"); a1 = src.index("\n}\n", a0) + 3
+    exec(src[a0:a1], ns)
+    m0 = src.index("FOREIGN_MAKERS = ("); m1 = src.index(")\n", m0) + 2
+    exec(src[m0:m1], ns)
+    return {"assistants": {k: list(v) for k, v in ns["FOREIGN_ASSISTANTS"].items()},
+            "makers": list(ns["FOREIGN_MAKERS"])}
+
+
 def main():
     src = io.open(GATE, encoding="utf-8").read()
+    mutants = MUTANTS + vocabulary_mutants(src)
+    env = dict(os.environ)
+    env["IDENTITY_GATE_SWEEP_VOCAB"] = json.dumps(original_vocab(src))
     tmp = tempfile.mkdtemp(prefix="ember-mutation-")
     copy = os.path.join(tmp, "identity_gate.py")
     missed = []
     try:
-        for name, old, new in MUTANTS:
+        for name, old, new in mutants:
             if old not in src:
                 print("  ANCHOR-MISS  " + name)
                 missed.append(name)
@@ -213,7 +276,7 @@ def main():
                 continue
             io.open(copy, "w", encoding="utf-8").write(mutant)
             r = subprocess.run([sys.executable, copy, "--selftest"],
-                               capture_output=True, text=True)
+                               capture_output=True, text=True, env=env)
             crashed = bool(r.stderr.strip())
             caught = r.returncode != 0 and not crashed
             flips = r.stdout.count("<<<")
@@ -229,7 +292,8 @@ def main():
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
-    print("\n  %d/%d mutants caught" % (len(MUTANTS) - len(missed), len(MUTANTS)))
+    print("\n  %d/%d mutants caught (%d hand-written, %d generated from the vocabulary tables)"
+          % (len(mutants) - len(missed), len(mutants), len(MUTANTS), len(mutants) - len(MUTANTS)))
     if missed:
         print("  NOT CAUGHT: " + ", ".join(missed))
         print("\nMUTATION CHECK FAILED: the selftest table does not exercise "

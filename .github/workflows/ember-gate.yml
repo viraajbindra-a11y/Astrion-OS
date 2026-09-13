@@ -10,13 +10,18 @@ name: Ember identity gate
 # replaced it is only worth anything for as long as it can still fail, and
 # that is exactly what these two commands measure.
 #
-#   --selftest       86 canned answers, 38 must-pass and 48 must-fail, plus a
-#                    control proving the OLD predicate accepts 27 of the bad
-#                    ones. If that control ever stops firing, the gate has
+#   --selftest       113 canned answers (49 must-pass, 64 must-fail), a
+#                    generated vocabulary sweep (every foreign alias and lab
+#                    as a lie), a control proving the OLD predicate accepts
+#                    dozens of the bad ones, and the live runner driven end
+#                    to end against a fake Ollama for exit codes 0/1/2. If
+#                    the legacy control ever stops firing, the gate has
 #                    drifted back toward the bug it replaced.
 #   mutation_check   plants one defect at a time into a copy of the gate and
-#                    demands the selftest go red. 30/30. This is what makes
-#                    "every guard is load-bearing" a measurement.
+#                    demands the selftest go red: 52 hand-written mutants plus
+#                    one generated per vocabulary entry (78 total). This is
+#                    what makes "every guard is load-bearing" a measurement;
+#                    the counts move, the rule does not.
 #
 # Also checks the generated Modelfiles still match js/kernel/ember-identity.js.
 # The local model and the cloud model claiming different identities is worse
