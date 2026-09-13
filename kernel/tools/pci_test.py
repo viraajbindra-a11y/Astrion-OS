@@ -24,7 +24,7 @@ list" alone would not.
 import os, re, subprocess, sys, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from drag_test import wait_for_boot
+from drag_test import wait_for_boot, QEMU_GUARD
 from dock_test import scan_faults
 
 
@@ -33,7 +33,7 @@ def boot(iso, serial, extra):
     if os.path.exists(serial):
         os.remove(serial)
     qemu = subprocess.Popen([
-        "qemu-system-x86_64", "-cdrom", iso, "-m", "512", "-display", "none",
+        "qemu-system-x86_64", "-cdrom", iso, "-m", "512", "-display", "none", *QEMU_GUARD,
         "-serial", f"file:{serial}",
     ] + extra, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:

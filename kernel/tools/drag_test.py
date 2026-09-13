@@ -18,6 +18,22 @@ ACCENT = (0x0A, 0x84, 0xFF)      # COL_ACCENT 0x0A84FF — the ink colour
 CUR_W, CUR_H = 22, 36            # cursor footprint in real pixels (11x18 @ 2x)
 
 
+# Every QEMU launch in this directory carries these two flags.
+#
+# Without them a triple fault is INVISIBLE to the suite: QEMU silently resets
+# the machine and boots a fresh desktop, the serial log just shows a second
+# boot banner, and a screenshot taken afterwards is a perfectly healthy
+# desktop. A kernel that crashed on Snake exit passed snake_clock_test that
+# way, because "the clock resumed" was measured as "the top band changed",
+# and a reboot changes it. With -no-reboot the reset does not happen; with
+# -no-shutdown QEMU stays up (paused, run-state "shutdown") instead of
+# exiting, so the QMP socket survives, the serial log ends exactly where the
+# kernel died, and a screendump still shows the last frame it painted.
+# Qmp.cmd("quit") below checks the run-state first, so the crash surfaces as a
+# test failure with the serial path, not as a mysteriously clean run.
+QEMU_GUARD = ["-no-reboot", "-no-shutdown"]
+
+
 class Qmp:
     def __init__(self, path):
         for _ in range(100):                     # qemu takes a moment to bind
@@ -34,6 +50,21 @@ class Qmp:
         self.cmd("qmp_capabilities")
 
     def cmd(self, name, **args):
+        if name == "quit":
+            # Last thing before the test lets go of the machine: is the guest
+            # still RUNNING? With QEMU_GUARD a triple fault or a halt parks
+            # the VM in run-state "shutdown"/"paused" rather than rebooting
+            # it, and this is where that surfaces. A test that got this far
+            # with a dead guest has been measuring a corpse.
+            st = self.cmd("query-status")
+            if st.get("running") is False:
+                self.f.write(json.dumps({"execute": "quit", "arguments": {}}) + "\n")
+                self.f.flush()
+                raise SystemExit(
+                    "guest is not running (run-state %r): the kernel reset or "
+                    "halted during the test. With -no-reboot/-no-shutdown that "
+                    "is a triple fault or a hang, not a pass. Read the serial "
+                    "log for the last line it printed." % st.get("status"))
         self.f.write(json.dumps({"execute": name, "arguments": args}) + "\n")
         self.f.flush()
         while True:                              # skip async events
@@ -168,6 +199,7 @@ def main():
 
     qemu = subprocess.Popen([
         "qemu-system-x86_64", "-cdrom", iso, "-m", "512", "-display", "none",
+        *QEMU_GUARD,
         "-serial", f"file:{serial}", "-qmp", f"unix:{sock},server,nowait",
     ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 

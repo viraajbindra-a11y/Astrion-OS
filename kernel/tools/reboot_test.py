@@ -28,7 +28,7 @@ so nothing survives in RAM between them.
 import os, subprocess, sys, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from drag_test import Qmp, wait_for_boot
+from drag_test import Qmp, wait_for_boot, QEMU_GUARD
 from dock_test import scan_faults
 
 TOKEN = "persisted-across-reboot-lynx"
@@ -45,7 +45,7 @@ def boot(iso, disk, serial, cmds, label):
     qemu = subprocess.Popen([
         "qemu-system-x86_64", "-cdrom", iso,
         "-drive", f"file={disk},format=raw,if=ide",
-        "-m", "512", "-display", "none",
+        "-m", "512", "-display", "none", *QEMU_GUARD,
         "-serial", f"file:{serial}", "-qmp", f"unix:{sock},server,nowait",
     ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:

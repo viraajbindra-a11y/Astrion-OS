@@ -16,7 +16,7 @@ mouse.c unscaled, verified by homing to (0,0) and stepping a known distance.
 import os, subprocess, sys, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from drag_test import Qmp, read_ppm, wait_for_boot
+from drag_test import Qmp, read_ppm, wait_for_boot, QEMU_GUARD, BOOT_MARKER
 
 # Dock icon centres at 1280x800, read off a booted screendump.
 DOCK_Y = 750
@@ -58,14 +58,31 @@ def changed(a, b):
 def scan_faults(path):
     """Real faults only. 'IDT: installing 256-entry table (32 exceptions...)'
     is a boot banner — matching bare 'exception' calls it a crash and makes
-    every run look broken, which is worse than not checking at all."""
+    every run look broken, which is worse than not checking at all.
+
+    Also counts the boot marker. A triple fault prints NOTHING — no panic, no
+    #pf — the machine just resets and boots a fresh desktop, so a log that
+    greps clean can still be a log of a crash. The one trace it leaves is a
+    second 'TASKS: scheduler up'. Every launch now carries -no-reboot so the
+    reset cannot happen at all (see drag_test.QEMU_GUARD); this is the
+    backstop for the day somebody drops the flag."""
     out = []
+    marker = BOOT_MARKER.decode()
+    boots = 0
     with open(path, errors="replace") as fh:
         for n, line in enumerate(fh, 1):
             low = line.lower()
+            if marker in line:
+                boots += 1
+                if boots > 1:
+                    out.append(f"{n}: {line.rstrip()}   <- SECOND boot banner: "
+                               f"the guest reset (triple fault?) and booted again")
             if ("panic" in low or "triple" in low or "cpu exception" in low
                     or "#pf" in low or "page fault" in low):
                 out.append(f"{n}: {line.rstrip()}")
+    if boots == 0:
+        out.append(f"0: boot marker {marker!r} never printed — the kernel did "
+                   f"not finish booting, so nothing after this was measured")
     return out
 
 
@@ -83,7 +100,7 @@ def try_one(iso, out, name, x):
     if os.path.exists(sock):
         os.remove(sock)
     qemu = subprocess.Popen([
-        "qemu-system-x86_64", "-cdrom", iso, "-m", "512", "-display", "none",
+        "qemu-system-x86_64", "-cdrom", iso, "-m", "512", "-display", "none", *QEMU_GUARD,
         "-serial", f"file:{serial}", "-qmp", f"unix:{sock},server,nowait",
     ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:

@@ -46,7 +46,7 @@ the kernel has to say so rather than printing a plausible MAC anyway.
 import os, re, struct, subprocess, sys, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from drag_test import Qmp, wait_for_boot
+from drag_test import Qmp, wait_for_boot, QEMU_GUARD
 from dock_test import scan_faults
 
 GATEWAY = "10.0.2.2"          # QEMU user-mode network always presents this
@@ -193,7 +193,7 @@ def boot_and_probe(iso, tag, out):
             os.remove(p)
 
     qemu = subprocess.Popen([
-        "qemu-system-x86_64", "-cdrom", iso, "-m", "512", "-display", "none",
+        "qemu-system-x86_64", "-cdrom", iso, "-m", "512", "-display", "none", *QEMU_GUARD,
         "-serial", f"file:{serial}", "-qmp", f"unix:{sock},server,nowait",
         "-netdev", "user,id=n0", "-device", "e1000,netdev=n0",
         "-object", f"filter-dump,id=d0,netdev=n0,file={pcap}",
@@ -231,7 +231,7 @@ def boot_no_nic(iso, tag, out):
     if os.path.exists(serial):
         os.remove(serial)
     qemu = subprocess.Popen([
-        "qemu-system-x86_64", "-cdrom", iso, "-m", "512", "-display", "none",
+        "qemu-system-x86_64", "-cdrom", iso, "-m", "512", "-display", "none", *QEMU_GUARD,
         "-serial", f"file:{serial}", "-nic", "none",
     ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:

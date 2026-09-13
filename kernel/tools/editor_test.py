@@ -22,7 +22,7 @@ is to distinguish "saved" from "looked like it saved".
 import os, subprocess, sys, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from drag_test import Qmp, wait_for_boot
+from drag_test import Qmp, wait_for_boot, QEMU_GUARD
 from dock_test import scan_faults
 
 # Not a word, so finding it after the save means it came off the disk. Lowercase
@@ -46,7 +46,7 @@ def main():
             os.remove(p)
 
     qemu = subprocess.Popen([
-        "qemu-system-x86_64", "-cdrom", iso, "-m", "512", "-display", "none",
+        "qemu-system-x86_64", "-cdrom", iso, "-m", "512", "-display", "none", *QEMU_GUARD,
         "-serial", f"file:{serial}", "-qmp", f"unix:{sock},server,nowait",
     ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
