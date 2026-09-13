@@ -14,6 +14,7 @@
 #include "clipboard.h"  /* copy the current line / paste at the cursor */
 #include "heap.h"       /* kmalloc/kfree (ksize_t) */
 #include "console.h"    /* console_clear/console_puts */
+#include "serial.h"     /* the WM: open <app> test hook */
 #include "learn.h"      /* what the Assistant has learned from you */
 #include "snake.h"      /* snake_play */
 #include "mouse.h"      /* mouse_x/y/left_down/take_left_click/lift */
@@ -747,6 +748,22 @@ static char     as_prompt[128];
 static char     as_learn_pending[sizeof(as_prompt)];
 static int      as_plen;
 static uint32_t as_ox, as_oy;      /* streaming output cursor */
+/* ─── the output area scrolls, and says when it has ───
+ *
+ * The area holds 15 lines and `help` was 17, so the last two were simply not
+ * drawn: assist_put() clipped them and nothing said so. A person reading a
+ * list that stops mid-thought has no way to tell a short answer from a cut
+ * one -- and the two lines that fell off were the ones about the on-device
+ * model, which is the thing this window exists to show off.
+ *
+ * So the area keeps the TAIL, the way every terminal does: as_skip is how
+ * many lines of the recorded answer have scrolled off the top, and the top
+ * row says so rather than leaving the cut silent. `as_line` is the logical
+ * line the output cursor is on, counted from the start of the answer, so
+ * the two survive a repaint together. */
+static int as_line, as_skip;
+static int as_top_row;             /* screen row the first visible line sits on */
+static int as_overflow;            /* a line did not fit: re-render to the tail */
 /* Everything the assistant has emitted for the current answer. Kept so the
  * output can be repainted when the window moves / is raised — pixels alone
  * can't be recovered once another window has covered them. */
@@ -897,11 +914,37 @@ static void assist_prompt_line(void) {
     fb_rect_x(caret, py, 2, GH, settings_accent());
 }
 
-/* Draw one char at the streaming cursor, wrapping + clipping. Draw only. */
+static void assist_render_output(void);   /* defined below; assist_emit scrolls through it */
+
+/* Top of the output area, and how many lines of it there are. */
+static uint32_t as_out_y0(void) { return cy + 96; }
+static int as_out_rows(void) {
+    uint32_t oy0 = as_out_y0();
+    if (cy + ch < oy0 + GH) return 1;
+    return (int)((cy + ch - oy0 - GH) / LINE) + 1;
+}
+
+/* Which screen row of the output area a logical line lands on. Row 0 is the
+ * marker's when anything has scrolled off, so the text starts at row 1. */
+static int as_row_of(int line) { return line - as_skip + as_top_row; }
+
+/* Put the output cursor's y where its logical line says it belongs. */
+static void as_sync_y(void) {
+    as_oy = as_out_y0() + (uint32_t)as_row_of(as_line) * LINE;
+}
+
+/* Draw one char at the streaming cursor, wrapping + scrolling. Draw only.
+ * Lines above the view are still walked (the column has to advance or the
+ * wrapping below them would be wrong); they just don't paint. */
 static void assist_put(char c) {
-    if (c == '\n') { as_ox = cx; as_oy += LINE; return; }
-    if (as_ox + GW > cx + cw) { as_ox = cx; as_oy += LINE; }
-    if (as_oy + GH > cy + ch) return;         /* full */
+    if (c == '\n') { as_ox = cx; as_line++; as_sync_y(); return; }
+    if (as_ox + GW > cx + cw) { as_ox = cx; as_line++; as_sync_y(); }
+    if (as_line < as_skip) { as_ox += GW; return; }      /* scrolled off the top */
+    if (as_row_of(as_line) >= as_out_rows()) {           /* past the bottom */
+        as_overflow = 1;                                 /* assist_emit re-renders */
+        as_ox += GW;
+        return;
+    }
     char s[2] = { c, 0 };
     af_draw(as_ox, as_oy, s, AC_WHITE, AF_MONO);
     as_ox += GW;
@@ -912,6 +955,11 @@ static void assist_put(char c) {
 static void assist_emit(char c) {
     if (as_olen < (int)sizeof(as_out) - 1) as_out[as_olen++] = c;
     assist_put(c);
+    /* The answer outgrew the area. Re-render to its tail, which is one pass
+     * over the recorded text and happens once per line that overflows --
+     * never per character. Streaming output scrolls as it arrives, so a long
+     * generation reads like a terminal instead of stopping mid-sentence. */
+    if (as_overflow) assist_render_output();
     /* ...and out the serial port. The Assistant is the one part of Astrion that
      * an onlooker actually judges, and it was invisible to every test we have:
      * it paints its own text and never touches console.c, so a headless boot and
@@ -938,12 +986,45 @@ static void assist_echo_char(char c) {
     assist_put(c);
 }
 
-/* Repaint the output area from the recorded answer. */
+/* How many logical lines the recorded answer occupies, by the same wrap rule
+ * assist_put() uses. Measuring rather than guessing is what lets the scroll
+ * land on the last line exactly, whatever the window width is. */
+static int as_measure_lines(void) {
+    int lines = 1;
+    uint32_t ox = cx;
+    for (int i = 0; i < as_olen; i++) {
+        if (as_out[i] == '\n') { ox = cx; lines++; continue; }
+        if (ox + GW > cx + cw)  { ox = cx; lines++; }
+        ox += GW;
+    }
+    return lines;
+}
+
+/* Repaint the output area from the recorded answer, showing its tail. */
 static void assist_render_output(void) {
-    uint32_t oy0 = cy + 96;
+    uint32_t oy0 = as_out_y0();
+    int rows  = as_out_rows();
+    int total = as_measure_lines();
+    /* When it does not all fit, the top row is spent saying so and the rest
+     * holds the last (rows - 1) lines. Spending a row on the marker is the
+     * whole point: an answer that silently loses its head is the same bug
+     * this fixes, pointed the other way. */
+    if (total <= rows) { as_skip = 0; as_top_row = 0; }
+    else               { as_skip = total - (rows - 1); as_top_row = 1; }
+
     fb_rect_x(cx, oy0, cw, (cy + ch) - oy0, AC_TERM_BG);
-    as_ox = cx; as_oy = oy0;
+    if (as_skip > 0) {
+        /* ASCII only -- everything in this file can reach the serial log. */
+        af_draw(cx, oy0, "^ earlier lines scrolled off", AC_MUTED, AF_REG13);
+    }
+
+    /* Walk the WHOLE answer. Lines above as_skip advance the column without
+     * painting, so the first visible line starts in the column it really
+     * would have -- a wrapped line resumed mid-word otherwise. */
+    as_overflow = 0;
+    as_line = 0; as_ox = cx; as_sync_y();
     for (int i = 0; i < as_olen; i++) assist_put(as_out[i]);
+    as_overflow = 0;               /* a full render is by definition not overflowing */
 }
 
 /* ─── local command layer: the assistant DOES things, fully offline ─── */
@@ -1061,6 +1142,7 @@ static void assist_begin_output(void) {
     fb_rect_x(cx, oy0, cw, (cy + ch) - oy0, AC_TERM_BG);
     as_ox = cx; as_oy = oy0;
     as_olen = 0;                 /* start recording a fresh answer */
+    as_line = 0; as_skip = 0; as_top_row = 0; as_overflow = 0;
     /* "you: ", not "> ". The first attempt echoed the question with the same
      * ">" the prompt uses, and on screen that put two identical ">" markers a
      * line and a half apart — the live empty one and the echoed one — with
@@ -1163,19 +1245,26 @@ static void assist_report(enum am_intent w, const char *p) {
 
     case AM_HELP:
         assist_begin_output();
+        /* Thirteen lines, which is what the output area holds under the
+         * echoed question. It was seventeen: the last two fell off the
+         * bottom with nothing to say they had, and they were the two about
+         * the on-device model -- the part this window exists to show. The
+         * area scrolls now, but `help` is a menu and a menu you have to
+         * scroll is a menu that failed. Same commands, said shorter: the
+         * file verbs share one line because they take the same shape, and
+         * the closer no longer quotes a parameter count that is only true
+         * of the demo brain. */
         assist_say("I run this machine, all offline:\n\n");
         assist_say("  machine: how much memory / disk space / what cpu\n");
         assist_say("           what's running / uptime / what version\n");
         assist_say("           screen resolution / what happened at boot\n");
-        assist_say("  files:   list my files / how many files\n");
-        assist_say("           make notes.txt / read notes.txt\n");
+        assist_say("  files:   list my files / make notes.txt / read notes.txt\n");
         assist_say("           write hi to notes.txt / append bye to notes.txt\n");
-        assist_say("           copy notes.txt to backup.txt\n");
-        assist_say("           rename notes.txt to todo.txt / delete notes.txt\n");
+        assist_say("           copy, rename or delete notes.txt\n");
         assist_say("  desktop: what apps do i have / open the editor\n");
         assist_say("           set the accent to teal / clear the screen\n\n");
-        assist_say("ask me to write a story or a poem and you get the on-device\n");
-        assist_say("model - 212K parameters, so expect nonsense. No internet, ever.\n");
+        assist_say("ask me to write a story and the on-device model writes it,\n");
+        assist_say("offline like everything else here.\n");
         return;
 
     /* ─── change a setting, for real: this repaints the whole desktop ─── */
@@ -3243,9 +3332,39 @@ static uint32_t cascade_free_step(uint32_t ty, uint32_t h) {
     return 0;
 }
 
+/* The ONE test hook in this file: say on serial which app was just opened.
+ *
+ * dock_test.py and intent_live_test.py both decided "an app opened" by
+ * counting changed pixels -- 20,000+ means a window appeared. That number
+ * cannot tell WHICH window: clicking Files and getting the Calculator repaints
+ * just as much and scored OPENED, and "fire up snake" opening Settings passed
+ * the same way. That is precisely the demo failure those tests exist to stop,
+ * so they now read this line and assert the name.
+ *
+ * Names are the dock's own ids (lowercase, stable), not title_for() -- the
+ * Editor's title carries the open file name and would make the hook a moving
+ * target. Costs one serial line per open; the console is untouched. */
+static void wm_log_open(enum app_kind app) {
+    const char *n;
+    switch (app) {
+        case APP_FILES:  n = "files";     break;
+        case APP_EDITOR: n = "editor";    break;
+        case APP_ASSIST: n = "assistant"; break;
+        case APP_MON:    n = "monitor";   break;
+        case APP_CALC:   n = "calc";      break;
+        case APP_SET:    n = "settings";  break;
+        case APP_TERM:   n = "terminal";  break;
+        default:         n = "app";       break;
+    }
+    serial_puts("WM: open ");
+    serial_puts(n);
+    serial_puts("\n");
+}
+
 static void open_common(enum app_kind app) {
     int s = slot_of(app);
     if (s < 0) return;
+    wm_log_open(app);
     struct window *w = &wins[s];
     SW = fb_width_x(); SH = fb_height_x();
     if (!w->open) {
@@ -3351,6 +3470,10 @@ void wm_open_editor(const char *name) {
 }
 
 static void run_snake(void) {
+    /* Snake has no window, so it never reaches open_common -- but the dock
+     * click and "fire up snake" both land here, and both tests need to know
+     * WHICH app answered. Same line, same format. */
+    serial_puts("WM: open snake\n");
     /* Claim the screen for the whole run. snake_play() blocks task 0, so
      * nothing here can repair damage while it's inside — and the clock task
      * repaints the top bar every 250ms regardless of who owns the pixels. It
