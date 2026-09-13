@@ -235,6 +235,15 @@ void ac_fill_round(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
     }
 }
 
+uint32_t ac_round_inset(uint32_t j, uint32_t h, uint32_t r) {
+    if (r > h / 2) r = h / 2;
+    if (!r || j >= h) return 0;
+    int straight;
+    int dy8 = corner_dy8(j, h, r, &straight);
+    if (straight) return 0;
+    return (r * 8 - arc_half8(r, dy8) + 7) / 8;
+}
+
 void ac_stroke_round(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
                      uint32_t r, uint32_t color) {
     if (!w || !h) return;
@@ -806,11 +815,7 @@ static void draw_tile(uint32_t ix, uint32_t iy, uint32_t base, int active) {
      * instead of cutting across it. */
     ac_fill_round(ix, iy, ICON_SZ, ICON_SZ, TILE_R, top);
     for (uint32_t j = 1; j < ICON_SZ - 1; j++) {
-        int straight;
-        int dy8 = corner_dy8(j, ICON_SZ, TILE_R, &straight);
-        uint32_t inset = 0;
-        if (!straight)
-            inset = (TILE_R * 8 - arc_half8(TILE_R, dy8) + 7) / 8;   /* round up */
+        uint32_t inset = ac_round_inset(j, ICON_SZ, TILE_R);
         inset += 1;                     /* leave ac_fill_round's edge pixel be */
         if (inset * 2 < ICON_SZ)
             fb_rect_x(ix + inset, iy + j, ICON_SZ - inset * 2, 1,

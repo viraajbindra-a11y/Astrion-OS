@@ -169,11 +169,6 @@ static void str_copy(char *d, const char *s, int max) {
     int i = 0; while (s && s[i] && i < max - 1) { d[i] = s[i]; i++; } d[i] = 0;
 }
 
-static void draw_border(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t c) {
-    fb_rect_x(x, y, w, 1, c); fb_rect_x(x, y + h - 1, w, 1, c);
-    fb_rect_x(x, y, 1, h, c); fb_rect_x(x + w - 1, y, 1, h, c);
-}
-
 static void save_rect(uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t *buf) {
     if (!fb_present_x() || !buf) return;
     uint32_t pitch;
@@ -2586,8 +2581,11 @@ static void mon_key(char c) {
 /* May the monitor paint its own content rect right now without touching a
  * window above it? See the header comment — this is the whole live-update
  * contract in one function. */
-static int mon_can_live_paint(void) {
-    int s = slot_of(APP_MON);
+/* Can slot s repaint part of its own content right now without painting over
+ * somebody? True when no window above it in the z-order overlaps its content
+ * rect. Written for the Monitor's live numbers; the Calculator's press light
+ * uses it too. */
+static int win_can_live_paint(int s) {
     if (s < 0 || !wins[s].open) return 0;
     struct window *w = &wins[s];
 
@@ -2605,6 +2603,8 @@ static int mon_can_live_paint(void) {
     }
     return 1;
 }
+
+static int mon_can_live_paint(void) { return win_can_live_paint(slot_of(APP_MON)); }
 
 /* Called from wm_tick — task 0, same thread as every other wm draw. */
 static void mon_tick(void) {
@@ -2647,6 +2647,22 @@ static void mon_tick(void) {
 #define CALC_DISP_H  84u    /* the display panel: expression line + big number */
 #define CALC_COLS    4u
 #define CALC_ROWS    5u
+/* Every control in this OS is a rounded object -- the windows, the dock tiles,
+ * the power dialog's buttons -- so the keys are too. Same radius as the power
+ * dialog's buttons, which these borrowed their tiers from. */
+#define CALC_KEY_R   8u
+/* How long a pressed key stays lit. One frame of the eye, not of the clock:
+ * long enough to register as "that one", short enough never to lag a fast
+ * typist -- the next key's press simply moves the light. */
+#define CALC_PRESS_MS 90u
+
+static uint32_t set_blend(uint32_t a, uint32_t b, int num, int den);   /* Settings, below */
+
+/* The key most recently pressed, lit until calc_tick() puts it back. Both the
+ * keyboard and the mouse land here through calc_press_btn(), so a typed 7 and
+ * a clicked 7 light the same key. */
+static int      calc_lit = -1;
+static uint64_t calc_lit_ms;
 
 /* Button tiers, borrowed wholesale from the power dialog so the two speak the
  * same language: one accent primary, an outlined alternative, a quiet ghost.
@@ -2725,8 +2741,18 @@ static void calc_draw_key(int i, uint32_t gx, uint32_t gy, uint32_t bw, uint32_t
         case KB_EQ: fill = settings_accent(); ink = AC_WHITE; break;
         default:    fill = AC_PANEL;          ink = AC_WHITE; break;
     }
-    fb_rect_x(rx, ry, rw, rh, fill);
-    if (outline) draw_border(rx, ry, rw, rh, AC_BORDER);
+    /* The pressed key lifts a step toward white for one beat. The display
+     * already answers every press; this is the key itself saying "me". */
+    if (i == calc_lit) {
+        fill = set_blend(fill, AC_WHITE, 1, 5);
+        if (outline) { outline = 0; ink = AC_WHITE; }
+    }
+    /* Clear the rect first: the rounded fill blends its edge pixels onto
+     * whatever is there, and a key repainted in place would otherwise stack
+     * its rim on the last one's rim and slowly grow a hard corner. */
+    fb_rect_x(rx, ry, rw, rh, AC_TERM_BG);
+    ac_fill_round(rx, ry, rw, rh, CALC_KEY_R, fill);
+    if (outline) ac_stroke_round(rx, ry, rw, rh, CALC_KEY_R, AC_BORDER);
     af_draw_center(rx + rw / 2, ry + rh / 2 - (uint32_t)af_line_height(AF_SB16) / 2,
                    calc_keys[i].label, ink, AF_SB16);
 }
@@ -2738,7 +2764,8 @@ static void calc_draw_key(int i, uint32_t gx, uint32_t gy, uint32_t bw, uint32_t
  * overflowing the panel — a long answer stays inside its box instead of running
  * out over the buttons. */
 static void calc_draw_display(void) {
-    fb_rect_x(cx, cy, cw, CALC_DISP_H, AC_PANEL);
+    /* Same radius as the keys under it, so the window is one object. */
+    ac_fill_round(cx, cy, cw, CALC_DISP_H, CALC_KEY_R, AC_PANEL);
 
     uint32_t pad   = 12;
     uint32_t avail = (cw > 2 * pad) ? cw - 2 * pad : 0;
@@ -2785,6 +2812,16 @@ static void calc_draw(void) {
     if (cw > hw) af_draw(cx + cw - hw, fy, hint, AC_MUTED, AF_REG13);
 }
 
+/* Press button b: the arithmetic, then light its key and repaint. */
+static void calc_press_btn(int b) {
+    calc_press(b);
+    calc_lit = -1;
+    for (int i = 0; i < CALC_NKEYS; i++)
+        if (calc_keys[i].btn == b) { calc_lit = i; break; }
+    calc_lit_ms = pit_elapsed_ms();
+    calc_draw();
+}
+
 static void calc_click(int mx, int my) {
     uint32_t gx, gy, bw, bh;
     if (!calc_grid(&gx, &gy, &bw, &bh)) return;
@@ -2793,8 +2830,7 @@ static void calc_click(int mx, int my) {
         calc_key_rect(i, gx, gy, bw, bh, &rx, &ry, &rw, &rh);
         if (mx < (int)rx || mx >= (int)(rx + rw)) continue;
         if (my < (int)ry || my >= (int)(ry + rh)) continue;
-        calc_press(calc_keys[i].btn);
-        calc_draw();
+        calc_press_btn(calc_keys[i].btn);
         return;
     }
 }
@@ -2803,8 +2839,25 @@ static void calc_key(char c) {
     if (c == 27) { wm_close(); return; }      /* Esc closes, as everywhere else */
     int b = calc_key_to_btn(c);
     if (b == CB_NONE) return;                 /* a key that means nothing here */
-    calc_press(b);
-    calc_draw();
+    calc_press_btn(b);
+}
+
+/* Put a lit key back once its beat is over. Same live-paint discipline as
+ * mon_tick: only when nothing covers the Calculator, cursor lifted first, one
+ * key repainted in place. Covered, the light simply goes out in the model and
+ * the next full repaint draws the key at rest. */
+static void calc_tick(void) {
+    if (calc_lit < 0) return;
+    if (pit_elapsed_ms() - calc_lit_ms < CALC_PRESS_MS) return;
+    int i = calc_lit;
+    calc_lit = -1;
+    int s = slot_of(APP_CALC);
+    if (s < 0 || !wins[s].open || !win_can_live_paint(s)) return;
+    set_content_rect(&wins[s]);
+    uint32_t gx, gy, bw, bh;
+    if (!calc_grid(&gx, &gy, &bw, &bh)) return;
+    mouse_lift();
+    calc_draw_key(i, gx, gy, bw, bh);
 }
 
 /* ─── Settings ───
@@ -2836,6 +2889,7 @@ static void calc_key(char c) {
  * it is a ring nothing ever erases — move the selection and the old one stays
  * on the window body for the rest of the session. */
 #define SET_RING      3u
+#define SET_CHIP_R    8u     /* corner radius, the same as the Calculator's keys */
 
 static int st_row;           /* which group has the keyboard */
 
@@ -2894,10 +2948,20 @@ static void set_draw_chip(int g, int i, int selected, int focused_row) {
     uint32_t rx, ry, rw, rh, top, bot;
     if (!set_chip_rect(g, i, &rx, &ry, &rw, &rh)) return;
 
+    /* Rounded, like every other control on this machine. The rect is cleared
+     * first for the reason calc_draw_key gives: a rounded fill blends its rim
+     * onto what is there, and a chip repainted in place must not stack rims. */
+    fb_rect_x(rx - SET_RING, ry - SET_RING, rw + 2 * SET_RING, rh + 2 * SET_RING, AC_TERM_BG);
     if (settings_swatch(g, i, &top, &bot)) {
-        if (top == bot) fb_rect_x(rx, ry, rw, rh, top);
-        else for (uint32_t r = 0; r < rh; r++)
-                 fb_rect_x(rx, ry + r, rw, 1, set_blend(top, bot, (int)r, (int)rh));
+        ac_fill_round(rx, ry, rw, rh, SET_CHIP_R, top);
+        /* The gradient rows follow the arc, one pixel inside the rim. */
+        if (top != bot)
+            for (uint32_t r = 1; r + 1 < rh; r++) {
+                uint32_t inset = ac_round_inset(r, rh, SET_CHIP_R) + 1;
+                if (inset * 2 < rw)
+                    fb_rect_x(rx + inset, ry + r, rw - inset * 2, 1,
+                              set_blend(top, bot, (int)r, (int)rh));
+            }
         /* The same 1px border the labelled chips below already get, and for a
          * sharper reason. Every wallpaper in the list is DARK — that is what
          * makes it a wallpaper for a desktop full of white text — and they
@@ -2906,10 +2970,10 @@ static void set_draw_chip(int g, int i, int selected, int focused_row) {
          * panel behind them and read as an empty row with one selected thing
          * floating in it. The border does not describe the colour; it says
          * "there is a swatch here", which is the part that was missing. */
-        draw_border(rx, ry, rw, rh, AC_BORDER);
+        ac_stroke_round(rx, ry, rw, rh, SET_CHIP_R, AC_BORDER);
     } else {
-        fb_rect_x(rx, ry, rw, rh, selected ? AC_PANEL : AC_TERM_BG);
-        draw_border(rx, ry, rw, rh, AC_BORDER);
+        ac_fill_round(rx, ry, rw, rh, SET_CHIP_R, selected ? AC_PANEL : AC_TERM_BG);
+        ac_stroke_round(rx, ry, rw, rh, SET_CHIP_R, AC_BORDER);
         af_draw_center(rx + rw / 2, ry + rh / 2 - set_label_h() / 2,
                        settings_label(g, i), selected ? AC_WHITE : AC_MUTED, AF_REG13);
     }
@@ -2922,10 +2986,10 @@ static void set_draw_chip(int g, int i, int selected, int focused_row) {
      * unfocused row keeps its ring in muted, so you can still see what is set
      * everywhere while only one row is taking arrows. */
     uint32_t c = focused_row ? AC_WHITE : AC_MUTED;
-    fb_rect_x(rx - 3, ry - 3,      rw + 6, 2,      c);
-    fb_rect_x(rx - 3, ry + rh + 1, rw + 6, 2,      c);
-    fb_rect_x(rx - 3, ry - 3,      2,      rh + 6, c);
-    fb_rect_x(rx + rw + 1, ry - 3, 2,      rh + 6, c);
+    /* A 2px ring, concentric with the chip: two 1px outlines at radius + 3
+     * and + 2, so the ring keeps the chip's corner rather than boxing it. */
+    ac_stroke_round(rx - 3, ry - 3, rw + 6, rh + 6, SET_CHIP_R + 3, c);
+    ac_stroke_round(rx - 2, ry - 2, rw + 4, rh + 4, SET_CHIP_R + 2, c);
 }
 
 static void settings_draw(void) {
@@ -3508,4 +3572,5 @@ void wm_tick(void) {
      * The early returns above either end in a full repaint or cost a single
      * ~10ms iteration that the next tick picks up — neither loses an update. */
     mon_tick();
+    calc_tick();
 }

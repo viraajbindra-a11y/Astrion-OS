@@ -117,6 +117,12 @@ int  desktop_window_close_hit(uint32_t x, uint32_t y, int px, int py);
 void ac_fill_round(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
                    uint32_t r, uint32_t color);
 
+/* Whole-pixel inset of the solid run on row j of an h-tall rounded shape of
+ * radius r -- the same arc ac_fill_round paints, rounded UP so a caller
+ * painting rows inside the shape (a gradient) never crosses its rim. 0 on the
+ * straight rows between the corners. */
+uint32_t ac_round_inset(uint32_t j, uint32_t h, uint32_t r);
+
 /* 1px rounded outline, matching ac_fill_round's geometry exactly. */
 void ac_stroke_round(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
                      uint32_t r, uint32_t color);
