@@ -27,11 +27,13 @@ on:
   push:
     paths:
       - 'custom-model/ember/**'
+      - 'custom-model/readiness.py'
       - 'js/kernel/ember-identity.js'
       - '.github/workflows/ember-gate.yml'
   pull_request:
     paths:
       - 'custom-model/ember/**'
+      - 'custom-model/readiness.py'
       - 'js/kernel/ember-identity.js'
       - '.github/workflows/ember-gate.yml'
 
@@ -61,6 +63,15 @@ jobs:
         env:
           ASTRION_NO_MODEL_PULL: '1'
         run: python3 custom-model/ember/mutation_check.py
+
+      # readiness.py grades the from-scratch Ember with the same gate. Its own
+      # control: the OLD grader must still say READY on a run that answers
+      # "I run in the cloud" and "Yes, I'm ... the same thing as ChatGPT", and
+      # the new one must not. No torch, no model.
+      - name: readiness.py grader control (no model, no torch)
+        env:
+          ASTRION_NO_MODEL_PULL: '1'
+        run: python3 custom-model/readiness.py --selftest
 
       - name: Modelfiles match the identity module
         run: node custom-model/ember/build-modelfile.js --check
