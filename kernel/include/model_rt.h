@@ -24,6 +24,23 @@
  *      -> stream bytes out. No float anywhere; the engine is integer end to end.
  */
 
+/* Can a tokenizer with `tok_n` ids drive a brain with `vocab` embedding rows?
+ *
+ * The rule is tok_n <= vocab, NOT tok_n == vocab. GPT-2's tiktoken table has
+ * 50257 ids and Ember pads its vocab to 50304 for the matmul, and that pair
+ * must load: every id the tokenizer can produce has a row. A Qwen table
+ * (151k) in front of the 48-row test brain, or in front of Ember, cannot be
+ * right -- most ids have no row, and the id % vocab clamp that keeps the
+ * embedding lookup in bounds turns the mismatch into a model that runs and
+ * says nonsense, which is indistinguishable from a broken model. tok_n == 0
+ * means no tokenizer is installed (raw-byte fallback), which is always usable.
+ *
+ * Pure, so tests/test_vocab_match.c can gate it on the host; model_rt_init()
+ * applies it at boot and disables generation with a serial line on refusal. */
+static inline int model_rt_vocab_ok(uint32_t tok_n, uint32_t vocab) {
+    return tok_n == 0u || tok_n <= vocab;
+}
+
 /* Scan modules, install the tokenizer + load the brain, allocate scratch. Logs
  * the outcome (and the config: dim / n_layers / n_heads / vocab) to serial.
  * Call ONCE, after heap_init() (it kmalloc's the KV cache + scratch) and after

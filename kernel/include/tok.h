@@ -99,6 +99,13 @@ int tok_ready(void);
 /* The installed table's kind (TOK_KIND_*), or TOK_KIND_UNSPEC if none. */
 uint32_t tok_kind(void);
 
+/* The installed table's vocabulary size (valid ids are 0..n-1), or 0 if none.
+ * The runtime compares this against the brain's vocab before enabling
+ * generation: a table that can produce an id the brain has no row for is a
+ * mismatched pair, and a mismatched pair generates plausible-looking garbage
+ * rather than an obvious error. */
+uint32_t tok_n_tokens(void);
+
 /* Select the pretokenizer for the installed table: the brain file names the
  * kind it was trained with (AMW2 tok_kind) and the runtime applies it here.
  * Returns 0 on success; -1 if no table is installed, `kind` is not a known

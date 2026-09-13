@@ -424,6 +424,8 @@ int tok_ready(void) { return g_ready; }
 
 uint32_t tok_kind(void) { return g_ready ? g_tab.kind : TOK_KIND_UNSPEC; }
 
+uint32_t tok_n_tokens(void) { return g_ready ? g_tab.n_tokens : 0; }
+
 int tok_set_kind(uint32_t kind) {
     if (!g_ready) return -1;
     if (kind == TOK_KIND_UNSPEC || kind > TOK_KIND_MAX) return -1;

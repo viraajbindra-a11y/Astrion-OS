@@ -275,6 +275,23 @@ void model_rt_init(void) {
         return;
     }
 
+    /* The table and the brain must agree on how many ids exist. The id %= V
+     * clamp in model_rt_generate() keeps a mismatched pair from indexing past
+     * the embedding table, but it also keeps it RUNNING -- producing tokens the
+     * model never saw, decoded through a table the model never used. That is
+     * garbage that looks like a broken model rather than a wrong module, so it
+     * is refused here, at boot, where the serial line says exactly which two
+     * numbers disagree. See model_rt_vocab_ok() for why the rule is <=. */
+    if (!model_rt_vocab_ok(tok_n_tokens(), g_w.cfg.vocab)) {
+        serial_puts_x("MODEL: tokenizer/brain vocab mismatch - tokenizer has ");
+        serial_put_u64_x(tok_n_tokens());
+        serial_puts_x(" ids, brain vocab is ");
+        serial_put_u64_x(g_w.cfg.vocab);
+        serial_puts_x(" - generation disabled\n");
+        kfree(g_layers); g_layers = 0;
+        return;
+    }
+
     if (!rt_alloc_scratch(&g_w.cfg)) {
         serial_puts_x("MODEL: out of memory for forward-pass scratch — generation disabled\n");
         kfree(g_layers); g_layers = 0;      /* rt_alloc_scratch freed the rest   */

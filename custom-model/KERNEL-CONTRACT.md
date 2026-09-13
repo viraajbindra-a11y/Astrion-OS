@@ -34,6 +34,17 @@ torch.save({"model": model.state_dict(), "cfg": cfg}, "ember.pt")
 `n_kv_head`, `ffn_dim`, `block_size`, `vocab`, `rope_theta`, `rms_eps`,
 `qk_norm`. Tied embeddings are handled automatically.
 
+**tokenizer.** Ember encodes with tiktoken `gpt2` (50257 ids) and pads `vocab`
+to 50304; the kernel ships the table as a second boot module (`tools/mktok.py
+--gpt2`), and the brain header names its tokenizer kind. The kernel checks the
+pair at boot: a table with more ids than the brain has embedding rows is
+refused with `MODEL: tokenizer/brain vocab mismatch - tokenizer has N ids,
+brain vocab is V - generation disabled` (rule: `N <= V`, so 50257 into 50304
+loads and the 151k-id Qwen table into anything smaller does not). Before that
+check the kernel reduced every id modulo `vocab` and RAN the mismatched pair,
+which produced fluent-looking nonsense nothing could tell from a broken model.
+`tools/vocab_test.py` boots all three cases against the real kernel.
+
 **parameter names** (from `train.py`'s `GPT`) — every one maps cleanly through
 `mkweights.oracle_name`, and the Linear `[out, in]` shapes match what the engine
 expects:

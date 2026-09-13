@@ -588,6 +588,11 @@ ui-test: $(BUILD_DIR)/kernel_mb2.elf
 	    > $(BUILD_DIR)/iso-grub/boot/grub/grub.cfg
 	@$(GRUB_MKRESCUE) -o $(BUILD_DIR)/astrion-ui.iso $(BUILD_DIR)/iso-grub >/dev/null 2>&1
 	python3 tools/uitest.py $(BUILD_DIR)/astrion-ui.iso $(BUILD_DIR)/uitest
+	# The one boot test that needs its own ISOs: a tokenizer/brain pair that
+	# do not agree on the vocab must be refused at boot, and a pair that do
+	# must still load. Builds three tiny ISOs from generated blobs (no model,
+	# no tiktoken) and reads the serial line. See tools/vocab_test.py.
+	python3 tools/vocab_test.py $(BUILD_DIR)/kernel_mb2.elf ui $(BUILD_DIR)/uitest
 
 .PHONY: test ui-test
 
