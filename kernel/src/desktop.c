@@ -360,39 +360,65 @@ void ac_shadow(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
     }
 }
 
-/* The IEC power symbol: a ring broken at 12 o'clock by a vertical stub. Built
- * from the integer distance test (no sqrt, no diagonals) a pixel at a time — a
- * few hundred pokes, done once. It reads as exactly one thing in any language,
- * which is why it earns the corner over a word. */
-static void draw_power_glyph(int cx, int cy, int r, int t, uint32_t color) {
-    int ro2 = r * r, ri = r - t, ri2 = ri * ri;
-    for (int dy = -r; dy <= r; dy++)
-        for (int dx = -r; dx <= r; dx++) {
-            int d2 = dx * dx + dy * dy;
-            if (d2 > ro2 || d2 < ri2) continue;          /* the ring band only */
-            if (dy < 0 && dx > -2 && dx < 2) continue;   /* gap for the stub    */
-            fb_rect_x((uint32_t)(cx + dx), (uint32_t)(cy + dy), 1, 1, color);
+/* ─── Antialiased ring, the shape the two glyphs below share ───
+ *
+ * The first cut of these built the ring from the integer distance test alone:
+ * a pixel was in or out, nothing between. At r=8 that is a ring of staircases,
+ * and it sat in the top bar next to text that af.c antialiases -- the one
+ * jagged thing on the screen, and it was the power button.
+ *
+ * Same idea as ac_fill_round: work in EIGHTHS of a pixel. A pixel's centre
+ * sits at radial distance d8 (eighths) from the ring's centre, and the pixel
+ * spans d8-4 .. d8+4 along that radius. The band is ri8 .. ro8. The overlap
+ * of the two, in eighths, is how much of the pixel the ring covers. One
+ * isqrt per pixel over a (2r+3)^2 box, done once per repaint. */
+static void draw_ring_aa(int cx, int cy, int r, int t, int gap, uint32_t color) {
+    int ro8 = r * 8, ri8 = (r - t) * 8;
+    for (int dy = -r - 1; dy <= r + 1; dy++)
+        for (int dx = -r - 1; dx <= r + 1; dx++) {
+            /* The power symbol's ring is broken at 12 o'clock for its stub:
+             * `gap` columns either side of the axis, upper half only. */
+            if (gap && dy < 0 && dx >= -gap && dx <= gap) continue;
+            int d8 = (int)isqrt_u((uint32_t)(64 * (dx * dx + dy * dy)));
+            int lo = (d8 - 4 > ri8) ? d8 - 4 : ri8;
+            int hi = (d8 + 4 < ro8) ? d8 + 4 : ro8;
+            int cov = hi - lo;                     /* 0..8 eighths of the pixel */
+            if (cov <= 0) continue;
+            blend_px(cx + dx, cy + dy, color, cov * 255 / 8);
         }
-    fb_rect_x((uint32_t)(cx - 1), (uint32_t)(cy - r - 2), 2, (uint32_t)(r + 3), color);
+}
+
+/* A vertical bar of 2px WEIGHT centred on a pixel column: a solid core with a
+ * half-covered column either side. A 2px fb_rect can only sit at -1..0 or
+ * 0..+1 of the centre, and both glyphs below are rings centred on a pixel, so
+ * the old stub and pointer each rode one pixel left of their own ring's axis. */
+static void draw_vbar_aa(int cx, int y, int h, uint32_t color) {
+    if (h <= 0) return;
+    fb_rect_x((uint32_t)cx, (uint32_t)y, 1, (uint32_t)h, color);
+    for (int j = 0; j < h; j++) {
+        blend_px(cx - 1, y + j, color, 128);
+        blend_px(cx + 1, y + j, color, 128);
+    }
+}
+
+/* The IEC power symbol: a ring broken at 12 o'clock by a vertical stub. It
+ * reads as exactly one thing in any language, which is why it earns the
+ * corner over a word. */
+static void draw_power_glyph(int cx, int cy, int r, int t, uint32_t color) {
+    draw_ring_aa(cx, cy, r, t, 2, color);
+    draw_vbar_aa(cx, cy - r - 2, r + 3, color);
 }
 
 /* A dial for the Settings tile: a closed ring with a pointer inside it aimed at
- * 12 o'clock. Same integer distance test as the power symbol above, and
- * deliberately NOT the same silhouette — the power ring is BROKEN at the top by
- * a stub that crosses it, this one is whole with a mark that sits inside. It
- * exists because every other dock tile carries a letter and 'S' was already
- * spoken for by Snake; two S tiles is a dock you have to read twice. */
+ * 12 o'clock. Deliberately NOT the same silhouette as the power symbol -- the
+ * power ring is BROKEN at the top by a stub that crosses it, this one is whole
+ * with a mark that sits inside. It exists because every other dock tile
+ * carries a letter and 'S' was already spoken for by Snake; two S tiles is a
+ * dock you have to read twice. */
 static void draw_dial_glyph(int cx, int cy, int r, int t, uint32_t color) {
-    int ro2 = r * r, ri = r - t, ri2 = ri * ri;
-    for (int dy = -r; dy <= r; dy++)
-        for (int dx = -r; dx <= r; dx++) {
-            int d2 = dx * dx + dy * dy;
-            if (d2 > ro2 || d2 < ri2) continue;
-            fb_rect_x((uint32_t)(cx + dx), (uint32_t)(cy + dy), 1, 1, color);
-        }
+    draw_ring_aa(cx, cy, r, t, 0, color);
     if (r - t > 2)   /* the pointer, from just inside the ring to the centre */
-        fb_rect_x((uint32_t)(cx - 1), (uint32_t)(cy - r + t + 1),
-                  2, (uint32_t)(r - t - 1), color);
+        draw_vbar_aa(cx, cy - r + t + 1, r - t - 1, color);
 }
 
 /* ─── Components ─── */
