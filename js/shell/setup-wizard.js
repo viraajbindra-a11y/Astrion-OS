@@ -39,8 +39,8 @@ const INK = {
 
 // The frame. The nav bar is IN FLOW, below the content, so a tall step can
 // never slide underneath its own buttons; it either fits or it scrolls
-// (each step decides what scrolls -- see the Ember step). Before this the
-// nav was absolutely positioned at bottom:32px and the Ember step's last
+// (each step decides what scrolls -- see the Kindling step). Before this the
+// nav was absolutely positioned at bottom:32px and the Kindling step's last
 // card sat under Back/Continue on any 800px-tall screen.
 const FRAME = { top: 40, side: 40, navTop: 20, bottom: 32 };
 
