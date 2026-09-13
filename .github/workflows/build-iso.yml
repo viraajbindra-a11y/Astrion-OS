@@ -1,5 +1,14 @@
 name: Build Astrion OS Bootable ISO
 
+# MANUAL ONLY since 2026-09-13. This builds the Debian-based ISO of the WEB
+# DESKTOP track (distro/), not the from-scratch kernel. It used to fire on
+# every push to distro/** and then upload a ~1.4 GB ISO onto whichever
+# release was Latest. Now that the kernel ISO (release-os.yml, tags os-v*)
+# holds Latest, an automatic run here would have dropped a Debian image on
+# the kernel's release page. The web track is frozen until Oct 1
+# (tasks/PLAN-SEPT.md), so nothing is lost by making this a button, and the
+# upload step below skips os-v* releases even when run by hand.
+
 on:
   workflow_dispatch:
     inputs:
@@ -8,10 +17,6 @@ on:
         required: false
         default: 'true'
         type: boolean
-  push:
-    branches: [main]
-    paths:
-      - 'distro/**'
 
 permissions:
   contents: write
@@ -72,17 +77,21 @@ jobs:
           # Reading version from the release tag instead of package.json avoids
           # a mismatch when the Electron build pipeline bumps package.json
           # independently of the git tag. (Lesson #35)
-          LATEST_TAG=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 10 --json tagName,isDraft,isPrerelease \
-            --jq 'map(select(.isDraft == false and .isPrerelease == false)) | .[0].tagName')
+          #
+          # os-v* releases are the from-scratch kernel (release-os.yml) and
+          # must never receive this Debian image; they are filtered out here
+          # so the ISO lands on the newest web-desktop (v*) release instead.
+          LATEST_TAG=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 20 --json tagName,isDraft,isPrerelease \
+            --jq 'map(select(.isDraft == false and .isPrerelease == false and ((.tagName | startswith("os-v")) | not))) | .[0].tagName')
 
           if [ -z "$LATEST_TAG" ] || [ "$LATEST_TAG" = "null" ]; then
-            echo "::warning::No published release found — skipping release upload. Artifact is still available for 30 days."
+            echo "::warning::No published web-desktop release found — skipping release upload. Artifact is still available for 30 days."
             exit 0
           fi
 
           # Strip leading 'v' from tag: v0.1.95 -> 0.1.95
           VERSION="${LATEST_TAG#v}"
-          echo "Latest release: $LATEST_TAG (version: $VERSION)"
+          echo "Latest web-desktop release: $LATEST_TAG (version: $VERSION)"
 
           # Rename ISO with version + arch
           ASSET_NAME="astrion-os-${VERSION}-amd64.iso"

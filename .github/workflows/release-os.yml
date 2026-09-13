@@ -7,20 +7,25 @@ name: Release Astrion OS (bootable ISO)
 # it as a workflow ARTIFACT, which requires a GitHub account and expires. A
 # tester should be able to click one link.
 #
-# THE RELEASE IS GATED ON THE UI SUITE. Nine tests boot the real kernel in QEMU
-# and drive it — dock, shell, Assistant, editor saves, reboot persistence,
-# learned phrasings. If any of them fails, nothing is published. Shipping a
-# broken ISO to the handful of people willing to try an unknown OS costs more
-# than shipping late; most of them will never try a second time.
+# THE RELEASE IS GATED ON THE UI SUITE. Fourteen tests (kernel/tools/uitest.py)
+# boot the real kernel in QEMU and drive it — dock, shell, Assistant, editor
+# saves, reboot persistence, learned phrasings, a packet on the wire. If any of
+# them fails, nothing is published. Shipping a broken ISO to the handful of
+# people willing to try an unknown OS costs more than shipping late; most of
+# them will never try a second time.
+#
+# A tag push is THE release and is marked Latest (not a pre-release), because
+# releases/latest is the link the README hands out. A manual run defaults to
+# pre-release so a test run cannot take that slot by accident.
 #
 #   Manual:  Actions -> this workflow -> Run workflow -> type a version
-#   By tag:  git tag os-v0.2-mvp && git push origin os-v0.2-mvp
+#   By tag:  git tag os-v0.3 && git push origin os-v0.3
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Version label, e.g. 0.2-mvp'
+        description: 'Version label, e.g. 0.3'
         required: true
         type: string
       prerelease:
@@ -62,7 +67,7 @@ jobs:
           if [ -n "${{ github.event.inputs.version }}" ]; then
             V="${{ github.event.inputs.version }}"
           else
-            # refs/tags/os-v0.2-mvp -> 0.2-mvp
+            # refs/tags/os-v0.3 -> 0.3
             V="${GITHUB_REF#refs/tags/os-v}"
           fi
           echo "version=$V" >> "$GITHUB_OUTPUT"
@@ -98,38 +103,38 @@ jobs:
         with:
           tag_name: ${{ steps.ver.outputs.tag }}
           name: Astrion OS ${{ steps.ver.outputs.version }}
-          prerelease: ${{ github.event.inputs.prerelease != 'false' }}
+          # Tag push: a real release, marked Latest. Manual run: pre-release
+          # unless the box was unticked. github.event.inputs is empty on a
+          # tag push, so the comparison below is false there.
+          prerelease: ${{ github.event.inputs.prerelease == 'true' }}
+          make_latest: ${{ github.event.inputs.prerelease != 'true' }}
           files: |
             kernel/astrion.iso
             kernel/astrion.iso.sha256
           body: |
-            An operating system written from scratch in C. No Linux underneath.
+            An operating system written from scratch in C, with the AI built into the kernel. No Linux underneath.
 
-            **[How to run it](https://github.com/${{ github.repository }}/blob/main/docs/try-astrion.md)**
-            — takes about five minutes in VirtualBox, QEMU or UTM. You do not
-            need a spare computer.
+            ```
+            qemu-system-x86_64 -cdrom astrion.iso -m 512
+            ```
 
-            Download `astrion.iso` below.
+            Download `astrion.iso` below. **[How to run it](https://github.com/${{ github.repository }}/blob/main/docs/try-astrion.md)** — about five minutes in QEMU, VirtualBox or UTM; no spare computer needed.
 
             ### What works
-            Desktop with draggable windows · Terminal (~45 commands) · text
-            editor that saves to a real filesystem · file browser · calculator ·
-            system monitor · settings · Snake · an offline Assistant that
-            **learns how you phrase things** and remembers it across reboots.
+            A desktop with draggable windows · a Terminal with 52 commands · a text editor that saves to a real filesystem · a file browser · calculator · system monitor · settings · Snake · an Assistant that runs the machine from plain English ("write hello to notes.txt", "how much memory", "set the accent to teal") and **learns how you phrase things**, remembering it across reboots. `net` in the Terminal does ARP, DHCP, ping and DNS on QEMU's virtual card — a driver and a stack, not a browser.
+
+            The Assistant lives inside the kernel and has no path to the network.
 
             ### What doesn't, yet
+            - **This ISO has no brain in it.** The on-device language model loads from a separate boot module that is not shipped here. Ask the Assistant to write a poem and it says "no brain loaded"; every other answer (files, machine, settings) is live.
             - Has never been run on real hardware — emulator only.
-            - No networking of any kind.
             - Cannot be installed to a hard drive.
-            - The Assistant runs the machine; it is not a chatbot.
+            - The Assistant is not a chatbot. It runs the machine.
 
             ### Every build is tested
-            Nine automated tests boot this exact ISO in QEMU and drive it with a
-            real mouse and keyboard, checking real pixels and real text. This
-            release does not exist unless all nine passed.
+            Fourteen automated tests boot this exact ISO in QEMU and drive it with a real mouse and keyboard, checking real pixels, real text and, for networking, a packet capture taken from outside the guest. This release does not exist unless all fourteen passed.
 
-            Found a bug? [Open an issue](https://github.com/${{ github.repository }}/issues)
-            — say what you did, what happened, and which emulator you used.
+            Found a bug? [Open an issue](https://github.com/${{ github.repository }}/issues) — say what you did, what happened, and which emulator you used.
 
       - name: Upload evidence
         if: always()
