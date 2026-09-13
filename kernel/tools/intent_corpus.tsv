@@ -289,3 +289,61 @@ i want a dark background	settings.change
 never mind	close
 go away	close
 get out of here	close
+
+# ── CONTROLS: phrasings that must route NOWHERE ────────────────────────────
+#
+# Everything above this line asks "does Astrion understand this?". Nothing
+# asked the other question: does it stay quiet when it should? With only
+# positive rows the gate could only measure UNDER-matching, and routing
+# "do not delete readme.txt" to file.delete would have RAISED coverage.
+#
+# Expected intent is literally `none`. intent_probe scores these separately
+# (they do not enter the coverage denominator) and FAILS if any of them is
+# claimed by the matcher, with or without --min.
+#
+# Two kinds:
+#   nonsense  — a real person typing rubbish, or talking ABOUT the machine
+#               rather than asking it to do something. The Assistant must
+#               answer "I didn't understand that one", not act.
+#   negated   — an instruction NOT to do a thing. Acting on one is the worst
+#               failure this matcher has: the user said don't, and it did.
+
+# nonsense and small talk
+banana socks	none
+purple monkey dishwasher	none
+asdfghjkl	none
+lorem ipsum dolor sit amet	none
+the quick brown fox jumps over	none
+12345	none
+tell me a joke	none
+thanks	none
+lol ok	none
+i like snake	none
+
+# talking about the machine, not asking it to act
+i deleted a file yesterday	none
+what does delete mean	none
+is deleting a file dangerous	none
+#
+# DELIBERATELY NOT CONTROLS, and the reason matters. These route today:
+#   my friend has more ram than me   -> memory
+#   the disk in my old laptop died   -> disk
+# Both are wrong in the strict sense and both are DEFENSIBLE as assistant
+# behaviour: someone who mentions RAM and gets their own RAM figure has not
+# been harmed, and an assistant that volunteers a relevant number is not the
+# bug this file hunts. A gate that fails the build on a judgement call is a
+# gate people delete. They stay written down here, unenforced, so the
+# decision is visible rather than silently omitted.
+
+# negated commands — the user said DO NOT
+do not delete readme.txt	none
+never delete notes.txt	none
+don't delete anything	none
+please do not open snake	none
+don't open the editor	none
+do not clear the screen	none
+don't close it	none
+do not write to notes.txt	none
+never mind, don't rename notes.txt	none
+do not copy notes.txt	none
+do not append anything to notes.txt	none

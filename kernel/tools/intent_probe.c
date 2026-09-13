@@ -93,6 +93,36 @@ static const char *action_name(enum am_action a) {
     return "?";
 }
 
+/* KNOWN RED, 2026-09-13, and not to be loosened.
+ *
+ * The control rows added to tools/intent_corpus.tsv (expected intent `none`)
+ * report 8 FALSE FIREs, every one a negated command:
+ *   please do not open snake        -> app.open
+ *   don't open the editor           -> app.open
+ *   do not clear the screen         -> clear
+ *   don't close it                  -> close
+ *   do not write to notes.txt       -> file.write
+ *   never mind, don't rename notes.txt -> close
+ *   do not copy notes.txt           -> file.copy
+ *   do not append anything to notes.txt -> file.append
+ *
+ * Three of those were confirmed on a REAL BOOT, not just here:
+ *   "please do not open snake"     -> Snake opened FULLSCREEN (404,725 px)
+ *   "do not clear the screen"      -> "cleared."
+ *   "do not write to notes.txt"    -> "wrote to notes.txt:\n  not write"
+ * so the Assistant created a file, with garbage content, from a sentence
+ * instructing it not to.
+ *
+ * CAUSE: include/assist_match.h has am_negated(), and it is consulted by
+ * exactly two places -- the DELETE branch and am_confirm_yes(). Every other
+ * action arm (open, clear, close, write, copy, append, rename) has no
+ * negation veto at all, which is why "do not delete readme.txt" correctly
+ * routes nowhere and every other "do not X" executes X.
+ *
+ * This gate stays red until that is fixed in assist_match.h. Reported to koa
+ * with this repro. Remove this note when the controls pass.
+ */
+
 /* The single label a phrase routes to, in the same order the Assistant tries
  * them. "none" means the Assistant would answer "I didn't understand that one",
  * which for a corpus line with an expected meaning is a MISS — a real request a
@@ -134,6 +164,15 @@ int main(int argc, char **argv) {
 
     char line[512];
     int total = 0, hit = 0, miss = 0, wrong = 0;
+    /* CONTROL rows: corpus lines whose expected intent is literally "none".
+     * The corpus had none of these, so it could only measure UNDER-matching:
+     * routing "do not delete readme.txt" to file.delete would have RAISED
+     * coverage. These are counted separately and never enter the coverage
+     * denominator -- adding a control must not move the number a floor is
+     * compared against -- and ANY of them routing anywhere fails the run,
+     * with or without --min. A confident wrong action on a sentence telling
+     * Astrion not to act is worse than every miss in this file combined. */
+    int ctrl = 0, ctrl_fired = 0;
 
     while (fgets(line, sizeof line, in)) {
         chomp(line);
@@ -153,6 +192,15 @@ int main(int argc, char **argv) {
         *tab = 0;
         const char *phrase = line, *want = tab + 1;
         const char *got = route(phrase);
+
+        if (strcmp(want, "none") == 0) {
+            ctrl++;
+            if (strcmp(got, "none") != 0) {
+                ctrl_fired++;
+                printf("FALSE FIRE  %-40s want nothing      got %s\n", phrase, got);
+            }
+            continue;
+        }
         total++;
 
         if (strcmp(got, want) == 0) {
@@ -175,6 +223,19 @@ int main(int argc, char **argv) {
         printf("\n%d phrasings: %d understood, %d missed, %d to check\n",
                total, hit, miss, wrong);
         if (total) printf("coverage %.1f%%\n", pct);
+        if (ctrl)
+            printf("controls %d nonsense/negated phrasings, %d routed anywhere "
+                   "(must be 0)\n", ctrl, ctrl_fired);
+        if (ctrl_fired) {
+            printf("FAIL: %d phrasing(s) that must route NOWHERE were claimed "
+                   "by the matcher.\n"
+                   "      A negated command is an instruction NOT to act; "
+                   "acting on it is the\n"
+                   "      worst failure this matcher has. See am_negated() in "
+                   "include/assist_match.h --\n"
+                   "      only the DELETE branch consults it.\n", ctrl_fired);
+            return 1;
+        }
         /* Without --min, exit 0 either way. A CHECK line is a candidate for a
          * human to boot and confirm, not a verdict — failing the build on it
          * would be this tool asserting something it cannot actually see. MISS
