@@ -541,7 +541,10 @@ let introPlayed = false;
 function emberStyles(animate) {
   const a = animate ? '' : 'animation:none !important;';
   return `<style>
-    @keyframes ebRise { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:none; } }
+    /* The 'to' frame names no transform on purpose: with fill:both, one here
+       would win the cascade forever and cancel the selected card's lift. */
+    @keyframes ebRise { from { opacity:0; transform:translateY(12px); } to { opacity:1; } }
+    @keyframes ebPop { from { opacity:0; transform:scale(0.4); } to { opacity:1; transform:none; } }
     @keyframes ebResolve {
       from { opacity:0; transform:translateY(10px); letter-spacing:3px; filter:blur(3px); }
       to   { opacity:1; transform:none; letter-spacing:-0.2px; filter:none; }
@@ -588,14 +591,32 @@ function emberStyles(animate) {
       transition: border-color 0.18s, background 0.22s, box-shadow 0.22s, transform 0.18s;
     }
     .eb-card:hover { border-color:rgba(255,255,255,0.20); }
-    .eb-card.eb-tight { border-color:${WARN.line}; background:rgba(16,11,5,0.55); }
+    /* A size that will not fit is warned about in its own numbers (the amber
+       "! wants 8 GB free") and, once picked, in the chip under them. It does
+       NOT get an amber border any more: with the orange accent the user can
+       choose two steps earlier, an amber ring and the selection ring were
+       the same ring. The warm tint stays -- it is quiet, and it is not a
+       shape that selection also uses. */
+    .eb-card.eb-tight { background:rgba(16,11,5,0.55); }
+    /* Selected: the accent ring, a 2px lift, and a check badge in the title
+       row. Three signals that do not depend on the accent being any
+       particular colour. The lift is a state, not a motion -- the whole
+       wizard re-renders on every click, so a transition would never play. */
     .eb-card.eb-on {
       border-color:var(--accent);
       background:rgba(22,16,11,0.62);
+      transform:translateY(-2px);
       box-shadow: inset 0 1px 0 rgba(255,214,170,0.16),
                   0 -8px 26px -10px rgba(${FIRE.warm},0.42),
-                  0 16px 34px -14px rgba(0,0,0,0.8);
+                  0 18px 36px -14px rgba(0,0,0,0.85);
     }
+    .eb-check {
+      flex:none; width:18px; height:18px; border-radius:50%;
+      display:inline-flex; align-items:center; justify-content:center;
+      background:var(--accent); color:#fff; opacity:0; visibility:hidden;
+    }
+    .eb-check.eb-check-on { opacity:1; visibility:visible; animation:ebPop 0.22s cubic-bezier(0.2,0.85,0.25,1) both; ${a} }
+    .eb-check svg { width:10px; height:10px; display:block; }
     .eb-rule { height:1px; background:rgba(255,255,255,0.09); margin:${SPACE.tight}px 2px; }
     .eb-url {
       width:100%; padding:9px 14px; background:rgba(0,0,0,0.34);
@@ -655,6 +676,14 @@ export function renderBrainPicker(el, state, onChange) {
       <span style="width:6px;height:6px;border-radius:50%;background:var(--accent);"></span>Recommended
     </div>`;
 
+  // The selection badge. Rendered on EVERY card, hidden on the ones not
+  // chosen, so the title row keeps its width and "Recommended" does not
+  // hop sideways when the pick changes.
+  const check = (opt) => `
+    <span class="eb-check${state.brain === opt.id ? ' eb-check-on' : ''}" aria-hidden="true">
+      <svg viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 5.2 L4.2 7.4 L8 3"/></svg>
+    </span>`;
+
   const animate = !introPlayed && !prefersReducedMotion();
   // Entrance beats, in ms. One orchestrated moment: the fire catches, the
   // light spreads, the title resolves out of it, then the cards settle in
@@ -697,9 +726,10 @@ export function renderBrainPicker(el, state, onChange) {
       </div>`;
     return shell(opt, tight, i, `
       <div style="padding:14px 18px;">
-        <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
-          <div style="font-size:15px;font-weight:600;color:${INK.strong};">${opt.name}</div>
+        <div style="display:flex;align-items:center;gap:12px;">
+          <div style="font-size:15px;font-weight:600;color:${INK.strong};flex:1;min-width:0;">${opt.name}</div>
           ${badge(opt)}
+          ${check(opt)}
         </div>
         <div style="font-size:13px;line-height:1.45;color:${INK.body};margin-top:${SPACE.hair}px;">${opt.blurb}</div>
         <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:${SPACE.tight}px;font-size:12px;color:${INK.meta};">
@@ -749,6 +779,7 @@ export function renderBrainPicker(el, state, onChange) {
           <div style="font-size:13.5px;font-weight:600;color:rgba(255,255,255,0.92);flex:none;">${opt.name}</div>
           <div style="font-size:12.5px;line-height:1.4;color:${INK.quiet};flex:1;min-width:0;">${opt.blurb}</div>
           ${badge(opt)}
+          <span style="align-self:center;display:inline-flex;">${check(opt)}</span>
         </div>
         ${opt.id === 'remote' && state.brain === 'remote' ? remoteField : ''}
       </div>`)).join('');
