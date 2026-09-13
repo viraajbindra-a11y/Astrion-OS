@@ -80,7 +80,11 @@ fs_node  *fs_next_in(fs_node *dir, fs_node *n);
 
 /* Persistence to/from disk. Both return 0 on success, -1 on no disk
  * or I/O error. sync writes everything in the node list to LBA 0
- * upward; load_from_disk does the inverse and rebuilds the tree. */
+ * upward; load_from_disk does the inverse and rebuilds the tree.
+ * sync also returns -2 when the tree could not be loaded back (nothing
+ * written, image on disk untouched) and -3 when another task's sync
+ * held the disk for too long (the tree is intact in RAM, not written).
+ * Any task may call sync; the FS is locked internally (see fs.c). */
 int fs_sync(void);
 int fs_load_from_disk(void);
 

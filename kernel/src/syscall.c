@@ -124,13 +124,15 @@ static uint64_t sys_read_file(uint64_t name_ptr, uint64_t buf_ptr, uint64_t cap)
     if (!copy_user_name(name_ptr, name, sizeof(name)))       return (uint64_t)-1;
     if (cap > MAX_SYSCALL_LEN) cap = MAX_SYSCALL_LEN;
     if (!validate_user_range(buf_ptr, cap))                  return (uint64_t)-1;
-    fs_node *n = fs_find(name);
-    if (!n || n->kind != FS_FILE)                            return (uint64_t)-1;
-    uint32_t k = n->size;
-    if ((uint64_t)k > cap) k = (uint32_t)cap;
-    uint8_t *dst = (uint8_t *)(uintptr_t)buf_ptr;
-    for (uint32_t i = 0; i < k; i++) dst[i] = n->data[i];
-    return k;
+    /* fs_read copies under the FS lock. This task can be preempted by task 0
+     * rewriting or deleting the file mid-copy; a walk of n->data from here
+     * would resume on a buffer krealloc/kfree had already taken back. The
+     * user range is validated and mapped in this process's CR3, so the copy
+     * lands straight in it. */
+    uint32_t got = 0;
+    int rc = fs_read(name, (uint8_t *)(uintptr_t)buf_ptr, (uint32_t)cap, &got);
+    if (rc < 0)                                              return (uint64_t)-1;
+    return got;
 }
 
 /* SYS_WRITE_FILE: write `len` bytes of user `buf` to file `name` (created if
@@ -142,6 +144,8 @@ static uint64_t sys_write_file(uint64_t name_ptr, uint64_t buf_ptr, uint64_t len
     if (!validate_user_range(buf_ptr, len))                  return (uint64_t)-1;
     int rc = fs_write(name, (const uint8_t *)(uintptr_t)buf_ptr, (uint32_t)len);
     if (rc < 0)                                              return (uint64_t)-1;
+    /* A busy/refused sync leaves the write in RAM; the syscall still reports
+     * the bytes written, exactly as it did when no disk was attached. */
     fs_sync();
     return (uint64_t)rc;
 }

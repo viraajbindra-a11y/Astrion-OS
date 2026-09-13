@@ -1429,6 +1429,12 @@ static void cmd_sync(int argc, char **argv) {
         console_set_color(COL_WHITE);
         return;
     }
+    if (r == -3) {   /* another task's sync has the disk; nothing lost */
+        console_set_color(0xF87171u);
+        console_puts("sync: busy - another program is still saving. try again.\n");
+        console_set_color(COL_WHITE);
+        return;
+    }
     if (r != 0) {
         console_set_color(0xF87171u);
         console_puts("sync: write failed\n");

@@ -19,8 +19,21 @@
  * list. So fs_count() still counts only what the user made, fs_sync()
  * never serialises the root, and free_list() can never free it.
  *
- * Concurrency: same single-thread invariant as the heap. When
- * preemptive multitasking lands, we wrap mutations in a lock.
+ * Concurrency: the heap's rule (heap.c). Preemption is on, and ring-3
+ * programs reach this tree from THEIR OWN task through the read/write
+ * syscalls while the shell, the Assistant and the editor mutate it from
+ * task 0 - so every mutation, and every copy-out that another task can
+ * race, runs under fs_lock(): interrupts off, saved and restored so it
+ * nests. One CPU means cli IS the lock. fs_sync() is the special case:
+ * it snapshots the tree under the lock and then writes the disk with
+ * interrupts ON (PIO takes seconds; masking the timer that long would
+ * stop the machine), guarded by sync_busy so a second sync waits its
+ * turn rather than sharing the buffers - two syncs at once used to
+ * kfree() the same static image buffer out from under each other.
+ * Task 0 walks nodes directly (fs_find, n->data) without the lock; it
+ * is the only task that unlinks, so nothing it holds is freed under it,
+ * and a ring-3 write to the very file it is reading at that instant can
+ * at worst hand it a stale byte, never a wild pointer.
  */
 
 #include <stdint.h>
@@ -45,6 +58,25 @@ static fs_node *nodes;          /* flat list of every node EXCEPT the root */
 static uint32_t node_count;
 static fs_node  root_node;      /* "/" - never in `nodes`, never freed */
 static fs_node *cwd;            /* always non-NULL once fs_init has run */
+
+/* ─── The lock (see the header comment) ───────────────────
+ * Save/restore rather than bare cli/sti so a caller that already had
+ * interrupts off (a console-locked print, the boot path) gets them back
+ * exactly as they were. Identical to heap.c's irq_save/irq_restore. */
+static inline uint64_t fs_lock(void) {
+    uint64_t f;
+    __asm__ volatile("pushfq; pop %0; cli" : "=r"(f) :: "memory");
+    return f;
+}
+static inline void fs_unlock(uint64_t f) {
+    __asm__ volatile("push %0; popfq" :: "r"(f) : "memory", "cc");
+}
+
+/* Set while a sync (or the boot-time load) is between taking its snapshot
+ * and finishing with the disk. Read and written only under fs_lock(). */
+static volatile int sync_busy;
+
+extern void task_yield(void);   /* task.c: let the sync that holds the disk run */
 
 /* tiny libc-style helpers - kept here so fs.c is self-contained. */
 static int sstreq(const char *a, const char *b) {
@@ -238,9 +270,11 @@ uint32_t fs_path(fs_node *n, char *out, uint32_t cap) {
 uint32_t fs_cwd_path(char *out, uint32_t cap) { return fs_path(fs_cwd(), out, cap); }
 
 int fs_chdir(const char *path) {
+    uint64_t f = fs_lock();
     fs_node *n = walk(path, W_NODE, 0);
-    if (!n || n->kind != FS_DIR) return -1;
+    if (!n || n->kind != FS_DIR) { fs_unlock(f); return -1; }
     cwd = n;
+    fs_unlock(f);
     return 0;
 }
 
@@ -313,12 +347,22 @@ fs_node *fs_find(const char *path) {
     return walk(path, W_NODE, 0);
 }
 
-fs_node *fs_create(const char *path, uint32_t kind) {
+/* The unlocked core: fs_write/fs_append create-on-miss inside their own
+ * critical section, so they must not re-take the lock (it would nest fine,
+ * but the point is that the miss and the create are ONE atomic step). */
+static fs_node *create_locked(const char *path, uint32_t kind) {
     char leaf[FS_NAME_MAX + 1];
     fs_node *dir = walk(path, W_PARENT, leaf);
     if (!dir) return 0;                     /* parent missing, or no leaf to make */
     if (child_of(dir, leaf)) return 0;      /* already there */
     return new_node(dir, leaf, kind);
+}
+
+fs_node *fs_create(const char *path, uint32_t kind) {
+    uint64_t f = fs_lock();
+    fs_node *n = create_locked(path, kind);
+    fs_unlock(f);
+    return n;
 }
 
 /* Loader-side create: makes missing parents, and ADOPTS a directory that
@@ -356,46 +400,57 @@ static int ensure_capacity(fs_node *n, uint32_t need) {
 }
 
 int fs_write(const char *name, const uint8_t *data, uint32_t len) {
-    fs_node *n = fs_find(name);
-    if (!n) n = fs_create(name, FS_FILE);
-    if (!n || n->kind != FS_FILE) return -1;
-    if (ensure_capacity(n, len) != 0) return -1;
+    uint64_t f = fs_lock();
+    fs_node *n = walk(name, W_NODE, 0);
+    if (!n) n = create_locked(name, FS_FILE);
+    if (!n || n->kind != FS_FILE)      { fs_unlock(f); return -1; }
+    if (ensure_capacity(n, len) != 0)  { fs_unlock(f); return -1; }
     mmemcpy(n->data, data, len);
     n->size = len;
     n->modified_ms = pit_elapsed_ms();
+    fs_unlock(f);
     return (int)len;
 }
 
 int fs_append(const char *name, const uint8_t *data, uint32_t len) {
-    fs_node *n = fs_find(name);
-    if (!n) n = fs_create(name, FS_FILE);
-    if (!n || n->kind != FS_FILE) return -1;
+    uint64_t f = fs_lock();
+    fs_node *n = walk(name, W_NODE, 0);
+    if (!n) n = create_locked(name, FS_FILE);
+    if (!n || n->kind != FS_FILE)      { fs_unlock(f); return -1; }
     /* Guard size+len overflow: a wrapped sum would satisfy a small
      * capacity and let the mmemcpy run off the end of the heap block. */
-    if (len > FS_FILE_MAX - n->size) return -1;
-    if (ensure_capacity(n, n->size + len) != 0) return -1;
+    if (len > FS_FILE_MAX - n->size)   { fs_unlock(f); return -1; }
+    if (ensure_capacity(n, n->size + len) != 0) { fs_unlock(f); return -1; }
     mmemcpy(n->data + n->size, data, len);
     n->size += len;
     n->modified_ms = pit_elapsed_ms();
+    fs_unlock(f);
     return (int)len;
 }
 
+/* The copy runs under the lock: this is the read path another task can be
+ * standing in when task 0 rewrites or unlinks the file, and a copy that is
+ * interrupted halfway would resume from a data pointer krealloc has since
+ * freed. At most 8 MiB, so the window is milliseconds. */
 int fs_read(const char *name, uint8_t *out, uint32_t cap, uint32_t *out_len) {
-    fs_node *n = fs_find(name);
-    if (!n || n->kind != FS_FILE) return -1;
+    uint64_t f = fs_lock();
+    fs_node *n = walk(name, W_NODE, 0);
+    if (!n || n->kind != FS_FILE) { fs_unlock(f); return -1; }
     uint32_t copy = n->size < cap ? n->size : cap;
     mmemcpy(out, n->data, copy);
+    fs_unlock(f);
     if (out_len) *out_len = copy;
     return (int)copy;
 }
 
 int fs_unlink(const char *path) {
+    uint64_t f = fs_lock();
     fs_node *gone = walk(path, W_NODE, 0);
-    if (!gone || gone == &root_node) return -1;       /* you can't rm / */
+    if (!gone || gone == &root_node) { fs_unlock(f); return -1; }   /* you can't rm / */
     /* A directory with anything in it stays. Without this, its children
      * would keep a parent pointer into freed memory - every later path
      * walk would then be reading a dangling node. */
-    if (gone->kind == FS_DIR && fs_first_in(gone)) return -1;
+    if (gone->kind == FS_DIR && fs_first_in(gone)) { fs_unlock(f); return -1; }
 
     fs_node **p = &nodes;
     while (*p) {
@@ -407,10 +462,12 @@ int fs_unlink(const char *path) {
             if (gone->data) kfree(gone->data);
             kfree(gone);
             node_count--;
+            fs_unlock(f);
             return 0;
         }
         p = &(*p)->next;
     }
+    fs_unlock(f);
     return -1;
 }
 
@@ -510,8 +567,13 @@ struct node_hdr {
     uint64_t modified_ms;
 } __attribute__((packed));
 
+/* The one sector of scratch the superblock goes through, on the way out
+ * (fs_sync) and in (fs_load_from_disk). Both run under sync_busy, so it
+ * has exactly one user at a time. The packed image itself is kmalloc'd
+ * per sync and freed by that same sync - it used to be a static that the
+ * NEXT sync freed on entry, which with two syncs in flight was a
+ * use-after-free on a buffer one of them was still writing to disk. */
 static uint8_t  sec_buf[512];
-static uint8_t *flat_buf;        /* scratch we kmalloc for serialization */
 
 /* Tiny memcpy / memset locally to avoid SSE-via-memcpy. */
 static void cp(uint8_t *d, const uint8_t *s, uint32_t n) { for (uint32_t i = 0; i < n; i++) d[i] = s[i]; }
@@ -569,24 +631,55 @@ static void free_list(fs_node *head) {
     }
 }
 
+/* Take the disk for a sync. Waits while another sync holds it - the holder
+ * is a task that only needs CPU time to finish, so yield to it - but not
+ * forever: a disk that never comes back must not hang the desktop, so
+ * after FS_SYNC_WAIT_MS the caller is told "busy" and keeps its RAM copy.
+ * Returns 1 holding sync_busy, 0 if it gave up. Interrupts are ON on
+ * return either way; the caller takes fs_lock() for its snapshot itself. */
+#define FS_SYNC_WAIT_MS 5000u
+static int sync_acquire(void) {
+    uint64_t t0 = pit_elapsed_ms();
+    for (;;) {
+        uint64_t f = fs_lock();
+        if (!sync_busy) { sync_busy = 1; fs_unlock(f); return 1; }
+        fs_unlock(f);
+        if (pit_elapsed_ms() - t0 > FS_SYNC_WAIT_MS) return 0;
+        task_yield();
+    }
+}
+
+static void sync_release(void) {
+    uint64_t f = fs_lock();
+    sync_busy = 0;
+    fs_unlock(f);
+}
+
 int fs_sync(void) {
     if (!ata_present()) return -1;
+    if (!sync_acquire()) {
+        serial_puts_x("fs: sync busy - another sync held the disk for 5 s; this one refused\n");
+        return -3;   /* busy: the tree is intact in RAM, just not written yet */
+    }
 
     /* Build a single flat layout in RAM first, then split into
      * sectors. That's simpler than tracking partial-sector state
-     * mid-write.
+     * mid-write. The sizing and packing passes run under fs_lock() so
+     * the tree cannot change between them (they must agree byte for
+     * byte); the disk writes below run with interrupts back on.
      *
      * Sizing pass. `needed` is the EXACT packed size of the image, while
      * `count` and `data_bytes` are the two numbers the superblock is about
      * to advertise - which are what the next boot's loader will budget
      * from. All three accumulate in 64-bit, so none of them can wrap. */
+    uint64_t lf = fs_lock();
     uint64_t needed = 0;
     uint64_t count = 0;
     uint64_t data_bytes = 0;
     for (fs_node *n = nodes; n; n = n->next) {
         char pbuf[FS_PATH_MAX + 1];
         uint32_t plen = fs_path(n, pbuf, sizeof(pbuf));
-        if (plen == 0) return -1;                  /* unrepresentable path */
+        if (plen == 0) { fs_unlock(lf); sync_release(); return -1; }   /* unrepresentable path */
         needed += sizeof(struct node_hdr) + (uint64_t)plen + (uint64_t)n->size;
         needed = (needed + 7) & ~(uint64_t)7;
         count++;
@@ -624,12 +717,12 @@ int fs_sync(void) {
         serial_puts_x(" bytes (cap ");
         serial_put_u64_x(FS_LOAD_MAX);
         serial_puts_x(")\n");
+        fs_unlock(lf); sync_release();
         return -2;   /* refused (data-safe), distinct from a real write error */
     }
     uint32_t total = round_up((uint32_t)needed, 512);
-    if (flat_buf) { kfree(flat_buf); flat_buf = 0; }
-    flat_buf = (uint8_t *)kmalloc(total > 0 ? total : 512);
-    if (!flat_buf) return -1;
+    uint8_t *flat_buf = (uint8_t *)kmalloc(total > 0 ? total : 512);
+    if (!flat_buf) { fs_unlock(lf); sync_release(); return -1; }
     zr(flat_buf, total);
 
     /* Pack nodes into flat_buf. Same fs_path() calls as the sizing pass
@@ -641,7 +734,7 @@ int fs_sync(void) {
     for (fs_node *n = nodes; n; n = n->next) {
         char pbuf[FS_PATH_MAX + 1];
         uint32_t plen = fs_path(n, pbuf, sizeof(pbuf));
-        if (plen == 0) return -1;
+        if (plen == 0) { fs_unlock(lf); kfree(flat_buf); sync_release(); return -1; }
         struct node_hdr h;
         h.magic       = MAGIC_NODE;
         h.kind        = n->kind;
@@ -659,9 +752,11 @@ int fs_sync(void) {
         }
         off = round_up(off, 8);
     }
+    fs_unlock(lf);      /* snapshot taken; the disk part runs with IRQs on */
 
     /* Build + write superblock at sector 0. Both casts are the ones
      * image_fits() just vetted. */
+    int rc = 0;
     zr(sec_buf, 512);
     struct sb sb;
     sb.magic = MAGIC_SB;
@@ -670,15 +765,17 @@ int fs_sync(void) {
     sb.total_data_bytes = (uint32_t)data_bytes;
     zr(sb.reserved, sizeof(sb.reserved));
     cp(sec_buf, (const uint8_t *)&sb, sizeof(sb));
-    if (ata_write_sector(0, sec_buf) != 0) return -1;
+    if (ata_write_sector(0, sec_buf) != 0) rc = -1;
 
     /* Write data sectors starting at LBA 1. */
     uint32_t lba = 1;
-    for (uint32_t i = 0; i < total; i += 512) {
-        if (ata_write_sector(lba, flat_buf + i) != 0) return -1;
+    for (uint32_t i = 0; rc == 0 && i < total; i += 512) {
+        if (ata_write_sector(lba, flat_buf + i) != 0) rc = -1;
         lba++;
     }
-    return 0;
+    kfree(flat_buf);
+    sync_release();
+    return rc;
 }
 
 /* Say so, out loud. Past the magic+version checks the superblock is
@@ -695,15 +792,22 @@ static int load_failed(const char *why) {
     return -1;
 }
 
+/* Boot-time only (fs_init, before any other task exists), but it shares
+ * sec_buf with fs_sync and swaps the whole tree at the end, so it holds
+ * sync_busy like a sync does and does the swap under fs_lock(). Every
+ * early return goes through load_done() so the flag cannot leak. */
+static int load_done(int rc) { sync_release(); return rc; }
+
 int fs_load_from_disk(void) {
     if (!ata_present()) return -1;
-    if (ata_read_sector(0, sec_buf) != 0) return -1;
+    if (!sync_acquire()) return -1;
+    if (ata_read_sector(0, sec_buf) != 0) return load_done(-1);
     struct sb sb;
     cp((uint8_t *)&sb, sec_buf, sizeof(sb));
 
     /* Nothing of ours on this platter - a blank or foreign disk. Not an
      * error and not worth a word: fs_init seeds and moves on. */
-    if (sb.magic != MAGIC_SB) return -1;
+    if (sb.magic != MAGIC_SB) return load_done(-1);
 
     /* A real image, but not a format we read (v1 stored leaf names, which
      * would parse as bogus relative paths). Declining is correct; doing it
@@ -714,9 +818,9 @@ int fs_load_from_disk(void) {
         serial_put_u64_x(sb.version);
         serial_puts_x(" image; this kernel reads v2 only - ignoring it and booting seeds.\n"
                       "fs: the old image stays on disk until something syncs over it.\n");
-        return -1;
+        return load_done(-1);
     }
-    if (sb.node_count == 0) return 0;            /* clean disk; nothing to load */
+    if (sb.node_count == 0) return load_done(0);  /* clean disk; nothing to load */
 
     /* How many bytes to slurp - and whether to slurp at all. Same function
      * fs_sync() clears an image through before writing it, so our own sync
@@ -729,15 +833,15 @@ int fs_load_from_disk(void) {
         serial_puts_x(" nodes / ");
         serial_put_u64_x(sb.total_data_bytes);
         serial_puts_x(" data bytes\n");
-        return load_failed("that doesn't fit the load caps (corrupt, hostile, or from a wider-capped kernel)");
+        return load_done(load_failed("that doesn't fit the load caps (corrupt, hostile, or from a wider-capped kernel)"));
     }
     uint32_t bytes = round_up((uint32_t)image_budget(sb.node_count, sb.total_data_bytes), 512);
 
     uint8_t *buf = (uint8_t *)kmalloc(bytes);
-    if (!buf) return load_failed("out of heap for the read buffer");
+    if (!buf) return load_done(load_failed("out of heap for the read buffer"));
     uint32_t lba = 1;
     for (uint32_t i = 0; i < bytes; i += 512) {
-        if (ata_read_sector(lba, buf + i) != 0) { kfree(buf); return load_failed("disk read error"); }
+        if (ata_read_sector(lba, buf + i) != 0) { kfree(buf); return load_done(load_failed("disk read error")); }
         lba++;
     }
 
@@ -750,6 +854,7 @@ int fs_load_from_disk(void) {
      * The cwd is saved and restored alongside the list: it points INTO
      * the list, so a failed parse that restored the nodes but not the
      * cwd would leave us standing in a freed directory. */
+    uint64_t lf = fs_lock();
     fs_node *saved_nodes = nodes;
     uint32_t saved_count = node_count;
     fs_node *saved_cwd   = cwd;
@@ -813,8 +918,10 @@ int fs_load_from_disk(void) {
         nodes = saved_nodes;        /* restore the prior list... */
         node_count = saved_count;
         cwd = saved_cwd;            /* ...and where we were standing in it */
-        return load_failed("a record in it is malformed");
+        fs_unlock(lf);
+        return load_done(load_failed("a record in it is malformed"));
     }
     free_list(saved_nodes);         /* success: drop the old list */
-    return 0;
+    fs_unlock(lf);
+    return load_done(0);
 }
