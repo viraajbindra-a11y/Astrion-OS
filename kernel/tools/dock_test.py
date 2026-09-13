@@ -55,6 +55,20 @@ def changed(a, b):
     return sum(1 for i in range(0, len(a), 3) if a[i:i+3] != b[i:i+3])
 
 
+# Boot banners that TALK about faults. The kernel prints
+#   "IDT: loaded - faults from here on panic visibly"
+# which contains the word "panic" and made every test in the suite report a
+# fault on a perfectly healthy boot. Same trap the docstring below already
+# warns about for the word "exception"; the fix is to name the banner, not to
+# stop looking for the word, because "panic" in any OTHER line is exactly what
+# must be caught. A real panic prints "!!! KERNEL PANIC !!!" (src/idt.c:302),
+# which matches none of these.
+BANNERS = (
+    "idt: installing",
+    "idt: loaded",
+)
+
+
 def scan_faults(path):
     """Real faults only. 'IDT: installing 256-entry table (32 exceptions...)'
     is a boot banner — matching bare 'exception' calls it a crash and makes
@@ -77,6 +91,8 @@ def scan_faults(path):
                 if boots > 1:
                     out.append(f"{n}: {line.rstrip()}   <- SECOND boot banner: "
                                f"the guest reset (triple fault?) and booted again")
+            if any(b in low for b in BANNERS):
+                continue                    # a line ABOUT faults, not a fault
             if ("panic" in low or "triple" in low or "cpu exception" in low
                     or "#pf" in low or "page fault" in low):
                 out.append(f"{n}: {line.rstrip()}")
@@ -84,6 +100,19 @@ def scan_faults(path):
         out.append(f"0: boot marker {marker!r} never printed — the kernel did "
                    f"not finish booting, so nothing after this was measured")
     return out
+
+
+def opened_apps(path, start=0):
+    """The apps wm.c says it opened, in order, from byte `start` of the log.
+
+    Pixels cannot tell WHICH window appeared: clicking Files and getting the
+    Calculator repaints just as much as clicking Files and getting Files, and
+    scored OPENED. wm.c prints one line per open (see wm_log_open); this reads
+    it, so the test checks the app and not just the paint."""
+    with open(path, errors="replace") as fh:
+        fh.seek(start)
+        return [l.split("WM: open ", 1)[1].strip()
+                for l in fh if "WM: open " in l]
 
 
 def try_one(iso, out, name, x):
@@ -111,6 +140,7 @@ def try_one(iso, out, name, x):
         home_and_move(q, x, DOCK_Y)                     # park ON the icon first,
         time.sleep(0.6)                                 # so hover state is in
         q.cmd("screendump", filename=base)              # BOTH shots, not just one
+        mark = os.path.getsize(serial)                  # only THIS click's opens
         q.btn(True);  time.sleep(0.12)
         q.btn(False); time.sleep(2.0)                   # let the WM repaint
         q.cmd("screendump", filename=shot)
@@ -122,7 +152,7 @@ def try_one(iso, out, name, x):
             qemu.kill()
     _, _, a = read_ppm(base)
     _, _, b = read_ppm(shot)
-    return changed(a, b), scan_faults(serial)
+    return changed(a, b), scan_faults(serial), opened_apps(serial, mark)
 
 
 def main():
@@ -135,18 +165,25 @@ def main():
     for name, x in DOCK:
         if only and name not in only:
             continue
-        d, faults = try_one(iso, out, name, x)
+        d, faults, opened = try_one(iso, out, name, x)
+        # Which app did the click actually open? A repaint is not a name.
+        right_app = opened == [name]
         if name in OPEN_AT_BOOT:
             # Clicking an app that is already on screen correctly does almost
             # nothing, so the open-threshold does not apply. Scoring it as a
             # failure made the suite permanently red — and a suite that is
             # always red is one nobody reads, which is strictly worse than not
             # having it. Faults still count.
-            ok = d < OPEN_THRESHOLD and not faults
+            # Already on screen: the click must be near-harmless AND must
+            # raise the app it belongs to, not some other one.
+            ok = d < OPEN_THRESHOLD and not faults and right_app
             note = "ALREADY OPEN (expected)" if ok else "UNEXPECTED REPAINT"
         else:
-            ok = d >= OPEN_THRESHOLD and not faults
+            ok = d >= OPEN_THRESHOLD and not faults and right_app
             note = "OPENED" if d >= OPEN_THRESHOLD else "NO VISIBLE RESPONSE"
+        if not right_app:
+            note += ("  WRONG APP: wm said " + (", ".join(opened) if opened
+                     else "nothing"))
         results.append((name, d, faults, ok))
         if faults:
             note += f"  +{len(faults)} FAULT(S)"

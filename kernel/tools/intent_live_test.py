@@ -63,7 +63,12 @@ TEXT_CHECKS = [
     ("what should i call you",     "no Linux under me"),
     # help. Same reply for both, so again: two different lines out of it.
     ("how do i use this",          "I run this machine"),
-    ("show me what you can do",    "expect nonsense"),
+    # "expect nonsense" was this marker until 33d9028 reworded the help reply
+    # and did not update it here; the reply is correct, the string it quoted no
+    # longer exists. Re-pointed at a line the CURRENT reply really contains and
+    # the prompt does not. Same discipline as above: a different line of the
+    # same answer from the one "how do i use this" checks.
+    ("show me what you can do",    "on-device model"),
     # tasks
     ("whats going on",             "task slots"),
     # clear
@@ -113,11 +118,17 @@ TEXT_CHECKS = [
 # fullscreen exit, a changed accent, and a pending "learn" from the control
 # prompt all leak into later checks. A fresh kernel per phrase costs ~45s and
 # removes the entire class.
+#
+#   4. THE RIGHT APP MUST OPEN. Rules 1-3 are satisfied by ANY window: "fire
+#      up snake" opening Settings echoes verbatim, replies nothing and
+#      repaints 130,000 px, and passed. wm.c now prints "WM: open <app>" on
+#      every open (wm_log_open), so each prompt below carries the app it must
+#      produce and the serial window is checked for that name.
 OPEN_CHECKS = [
-    "show me the monitor",
-    "fire up snake",
-    "i want to use the editor",
-    "bring up the settings",
+    ("show me the monitor", "monitor"),
+    ("fire up snake", "snake"),
+    ("i want to use the editor", "editor"),
+    ("bring up the settings", "settings"),
     # The one line of the corpus this pass did NOT change the code for.
     # intent_corpus.tsv expected `open notes.txt` to be a file.read; the
     # matcher routes it to app.open, and wm.c then finds no app by that name
@@ -126,7 +137,7 @@ OPEN_CHECKS = [
     # the corpus is wrong" is exactly the reasoning that turns a test suite
     # into a rubber stamp, so it is not asserted here, it is booted. readme.txt
     # because it is the file the ISO actually ships with.
-    "open readme.txt",
+    ("open readme.txt", "editor"),
 ]
 
 # A window opening covers far more than this. Tuned low on purpose: the point
@@ -177,7 +188,7 @@ def open_assistant(q):
     time.sleep(0.8)
 
 
-def one_open_check(iso, tag, out, i, prompt):
+def one_open_check(iso, tag, out, i, prompt, want_app):
     proc, q, serial = boot(iso, tag, out, f"open{i}")
     before = os.path.join(out, f"intent-{tag}-open{i}-a.ppm")
     after  = os.path.join(out, f"intent-{tag}-open{i}-b.ppm")
@@ -215,11 +226,25 @@ def one_open_check(iso, tag, out, i, prompt):
                 f"{window.decode(errors='replace').strip()[:80]!r}", serial)
 
     # 2. did anything ANSWER, instead of a window being handed over?
-    tail = window.split(echo, 1)[1].strip()
+    #    The "WM: open <app>" hook is expected in this window and is not a
+    #    reply, so it is lifted out before the leftover text is judged.
+    after_echo = window.split(echo, 1)[1]
+    opened = [l.split("WM: open ", 1)[1].strip()
+              for l in after_echo.decode(errors="replace").splitlines()
+              if "WM: open " in l]
+    tail = "".join(l for l in after_echo.decode(errors="replace").splitlines(True)
+                   if "WM: open " not in l).strip()
     if tail:
         return ("FAIL", prompt,
                 f"something replied instead of opening a window: "
-                f"{tail.decode(errors='replace')[:120]!r}", serial)
+                f"{tail[:120]!r}", serial)
+
+    # 2b. did the RIGHT app open? A repaint is not a name: before wm.c printed
+    #     this line, "fire up snake" opening Settings passed every check here.
+    if opened != [want_app]:
+        return ("FAIL", prompt,
+                f"wanted the {want_app} window; wm.c says it opened "
+                + (", ".join(opened) if opened else "nothing"), serial)
 
     # 3. did a window actually appear?
     w, h, pa = read_ppm(before)
@@ -231,7 +256,8 @@ def one_open_check(iso, tag, out, i, prompt):
                 f"the prompt arrived, nothing answered, and nothing appeared",
                 serial)
     return ("PASS", prompt,
-            f"echoed verbatim, no reply text, {px:,} px changed", serial)
+            f"echoed verbatim, no reply text, wm.c opened {want_app}, "
+            f"{px:,} px changed", serial)
 
 
 def main():
@@ -260,8 +286,8 @@ def main():
             proc.kill()
 
     # ── phase 2: the window openers, one fresh kernel each ──
-    open_results = [one_open_check(iso, tag, out, i, prompt)
-                    for i, prompt in enumerate(OPEN_CHECKS)]
+    open_results = [one_open_check(iso, tag, out, i, prompt, want)
+                    for i, (prompt, want) in enumerate(OPEN_CHECKS)]
 
     with open(serial, "rb") as fh:
         blob = fh.read()
