@@ -1,5 +1,12 @@
 # How Astrion Stays Safe
 
+> **Scope (2026-09-13):** this document describes the **web desktop track**
+> (`js/`, `server/`, the Debian-based ISO in `distro/`), which is frozen until
+> Oct 1 per `tasks/PLAN-SEPT.md`. It does not describe the from-scratch kernel
+> in `kernel/`, whose safety story is different and smaller: ring-3 isolation
+> with per-process page tables and an Assistant that lives inside the kernel and
+> has no path to the network. See the README.
+
 Most "AI" software asks you to trust a black box. Astrion replaces trust
 with **runtime, code-enforced safety**. Every L2+ action passes through
 a stack of gates. This document walks through that stack with a real

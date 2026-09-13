@@ -1,77 +1,97 @@
-# Astrion Kernel (v2.0 bridge)
+# Astrion Kernel
 
-This is the C-language UEFI bootloader + early kernel for the **v2.0 real-OS
-track**. v1.0 (the web-app Astrion desktop, ships Dec 21 2026) does NOT use
-this — v1.0 runs on top of Linux. This directory is the multi-year project
-toward an actual kernel; see `tasks/real-os-design-2026-05-25.md` for the
-honest scope.
+This is the product: an x86-64 operating system written from scratch in C, with
+the Assistant built into the kernel. GRUB hands it control via multiboot2 and
+everything after that is ours. No Linux underneath. It is what the `os-v*`
+releases ship and what `docs/try-astrion.md` tells people to boot.
 
-## Status (2026-06-10)
+The web desktop in the repo root (`js/`, `server/`, `distro/`) is the older
+track and is frozen until Oct 1, 2026 (`tasks/PLAN-SEPT.md`). Plan and dates:
+`tasks/LAUNCH-SEPT.md`.
 
-The multiboot2/GRUB path is the live kernel; it is **no longer a stub**.
-What works today (each milestone has a screenshot in `tasks/first-*.png`):
+## Status (2026-09-13)
 
-| Subsystem | Files | Verified |
-|---|---|---|
-| Boot: GRUB → long mode → 4 GiB identity map | `boot/multiboot2.S` | ✅ |
-| Multiboot2 info parse (mmap, framebuffer) | `src/kernel_mb2.c` | ✅ |
-| Framebuffer text (8×12 font) + boot screen | `src/fb_font.h` | ✅ |
-| IDT + 32 exception handlers + panic screen | `src/isr.S`, `src/idt.{h,c}` | ✅ |
-| PIC remap + IRQ dispatch | `src/idt.c` | ✅ |
-| PIT timer @100 Hz + uptime clock | `src/pit.{h,c}` | ✅ |
-| PS/2 keyboard (incl. arrow keys) | `src/kbd.{h,c}` | ✅ |
-| PS/2 mouse + cursor sprite + drag-paint | `src/mouse.{h,c}` | ✅ |
-| Scrolling console + 25-command shell | `src/console.{h,c}`, `src/shell.{h,c}` | ✅ |
-| Snake game (PIT-timed, arrow-steered) | `src/snake.{h,c}` | ✅ |
-| Heap allocator (kmalloc/kfree/krealloc) | `src/heap.{h,c}` | ✅ |
-| RAM filesystem (ls/cat/write/append/rm) | `src/fs.{h,c}` | ✅ |
-| ATA PIO disk + persistence across reboots | `src/ata.{h,c}` + `fs_sync` | ✅ |
-| Shell scripts (`run`) + redirection (`>`) | `src/shell.c`, `src/console.c` | ✅ |
-| Cooperative scheduler (ps/spawn/kill) | `src/task.{h,c}`, `src/context_switch.S` | ✅ |
+Everything below is in the released ISO and is exercised by the UI suite on
+every release (`tools/uitest.py`, 14 tests that boot the real kernel in QEMU and
+drive it over QMP):
 
-The legacy UEFI/gnu-efi path (`boot/boot.c`, `make iso`) still builds in CI
-but is parked on two stacked OVMF firmware bugs (lesson #194). Surface Pro 6
-hardware remains its next test vector.
+| Subsystem | Files |
+|---|---|
+| Boot: GRUB multiboot2 → long mode → paging (1 GiB pages when the CPU has them) | `boot/multiboot2.S`, `src/kernel_mb2.c` |
+| IDT, exceptions, panic screen, PIC + IRQ dispatch, PIT @100 Hz | `src/isr.S`, `src/idt.{h,c}`, `src/pit.{h,c}` |
+| Physical frame allocator + kernel heap | `src/pmm.{h,c}`, `src/heap.{h,c}` |
+| Preemptive scheduler, ring 3 with a syscall boundary, per-process address spaces | `src/task.{h,c}`, `src/context_switch.S`, `src/usermode.S`, `src/syscall.{h,c}`, `src/vmspace.{h,c}`, `src/usermem.{h,c}` |
+| ELF loader + bundled test programs (`hello`, `rogue`, `poke`, `peek`, `iodemo`) | `src/elf.{h,c}`, `src/*_elf.h` |
+| RAM filesystem, ATA PIO disk, persistence across reboots | `src/fs.{h,c}`, `src/ata.{h,c}` |
+| PS/2 keyboard + mouse, serial console, CMOS RTC, ACPI shutdown/reboot | `src/kbd.{h,c}`, `src/mouse.{h,c}`, `src/serial.{h,c}`, `src/rtc.{h,c}`, `src/acpi.{h,c}`, `src/power.{h,c}` |
+| Framebuffer, antialiased font, window manager, desktop + dock | `src/af.{h,c}`, `src/wm.{h,c}`, `src/desktop.{h,c}`, `src/console.{h,c}` |
+| Apps: Terminal (52 commands), Editor, Files, Calculator, Monitor, Settings, Snake | `src/shell.{h,c}`, `src/calc.{h,c}`, `src/settings.{h,c}`, `src/snake.{h,c}` |
+| Assistant: intent table (files, machine, settings, apps) + learns your phrasing to disk | `src/wm.c`, `include/assist_match.h`, `src/learn.{h,c}` |
+| On-device transformer runtime: loads a weight file from a boot module, runs the forward pass in-kernel | `src/model_rt.c`, `src/model_load.c`, `src/model.c`, `src/tok.c`, `include/model*.h` |
+| PCI scan, e1000 driver, ARP, DHCP, ICMP ping, DNS (Terminal `net`) | `src/pci.{h,c}`, `src/e1000.{h,c}`, `src/mmio.{h,c}`, `include/net_*.h` |
 
-## Local test recipe (macOS)
+Two things to be straight about:
+
+- **The released ISO has no brain module in it.** The model runtime is real and
+  was verified running an in-kernel forward pass (M7, 2026-07-25), but the weight
+  file arrives as a separate multiboot2 module (`make iso-grub MODEL=... TOK=...`)
+  and the release ISO is built without one. The Assistant says "no brain loaded"
+  if you ask it to generate text; everything else it does is live.
+- **The Assistant has no path to the network.** The network code exists for the
+  Terminal's `net` command and the wire-level test; nothing routes the Assistant
+  or the model runtime to it.
+
+Still true: never booted on real hardware (emulator only), no USB, no SMP, ATA
+PIO only, cannot be installed to a disk. The legacy UEFI/gnu-efi path
+(`boot/boot.c`, `make iso`) is parked on OVMF firmware bugs (lesson #194) and is
+not what ships.
+
+## Run it
+
+Download `astrion.iso` from the
+[latest release](https://github.com/viraajbindra-a11y/Astrion-OS/releases/latest)
+(tag `os-v0.3` or newer) and:
+
+```bash
+qemu-system-x86_64 -cdrom astrion.iso -m 512
+```
+
+With a persistent disk and the serial log on your terminal:
+
+```bash
+qemu-img create -f raw astrion.disk 64M
+qemu-system-x86_64 -cdrom astrion.iso -drive file=astrion.disk,format=raw,if=ide -m 512 -serial stdio
+```
+
+`docs/try-astrion.md` covers VirtualBox and UTM too. In the shell, try `help`,
+`ls`, `write hi.sh echo hello`, `run hi.sh`, `sync` (then reboot — files
+persist), `exec rogue.elf` (a hostile program the CPU kills), `isotest`, `ps`,
+`net arp`, `snake`.
+
+## Build and test (macOS or Linux)
 
 ```bash
 cd kernel
-make run-grub        # build + boot the kernel in QEMU
-
-# Or grab the CI artifact and boot with a persistent disk:
-gh run download <run-id> --name astrion-grub-iso
-dd if=/dev/zero of=astrion.disk bs=1M count=16
-qemu-system-x86_64 -cdrom astrion-grub.iso \
-  -drive file=astrion.disk,format=raw,if=ide -m 256M -serial stdio
+make test                                              # host unit tests + header gates
+make CC=x86_64-elf-gcc LD=x86_64-elf-ld kernel-mb2     # the kernel (cross toolchain on macOS)
+make run-grub                                          # build an ISO and boot it in QEMU
+make ui-test                                           # build the ISO and run all 14 UI tests against it
 ```
 
-In the shell, try: `help`, `ls`, `write hi.sh echo hello`, `run hi.sh`,
-`ls > files.txt`, `sync` (then reboot — files persist), `spawn`, `ps`,
-`snake` (the clock + spawned ticker keep running mid-game).
+`make run-grub MODEL=build/oracle.bin TOK=build/qwen.atk` boots with a brain
+module; see the Makefile for how the module reaches the kernel. CI
+(`.github/workflows/build-kernel.yml`, `ui-suite.yml`) runs the same targets on
+every push to `kernel/**`, and `release-os.yml` publishes the ISO on an `os-v*`
+tag only if the whole UI suite passes.
 
-## Why two OVMFs?
+## Why two OVMFs? (UEFI path, parked)
 
 | Firmware | Source | Behavior |
 |---|---|---|
 | `/opt/homebrew/share/qemu/edk2-x86_64-code.fd` | Homebrew QEMU 11.0 (Linaro 2024 build) | **#GP in `BootScriptExecutorDxe`** when calling `LocateHandleBuffer(SimpleFileSystem)`. Not our bug. |
 | `firmware/RELEASEX64_OVMF.fd` | [retrage/edk2-nightly](https://retrage.github.io/edk2-nightly/) (upstream EDK2 nightly) | No firmware crash. Lets us debug actual bootloader bugs. |
 
-The Homebrew OVMF probably has a backport patch in BootScriptExecutorDxe
-that misbehaves with current QEMU. The upstream build is clean. Real
-Surface Pro 6 hardware uses Microsoft's UEFI build, which is yet another
-EDK2 variant — likely fine, but `docs/hardware-testing.md` is the verify
-path.
-
-## Build chain
-
-- `boot/boot.c` — UEFI bootloader (gnu-efi). Sets up serial, GOP (optional),
-  loads kernel.bin from boot device, ExitBootServices, jump to kernel.
-- `src/kernel.c` — early kernel entry. Currently a stub that prints to
-  framebuffer + halts. The real kernel work is multi-year.
-- `Makefile` — `make iso` builds the bootable ISO; `make run-retrage` runs
-  in QEMU with the working OVMF.
-- `scripts/get-ovmf.sh` — downloads the upstream OVMF on demand.
-
-CI builds the ISO on every push to `kernel/**` and uploads it as an
-artifact. Download with `gh run download <run-id>`.
+`scripts/get-ovmf.sh` downloads the upstream OVMF on demand; `make run-retrage`
+runs the UEFI path with it. Real Surface Pro 6 hardware uses Microsoft's UEFI
+build, which is yet another EDK2 variant — `docs/hardware-testing.md` is the
+verify path when that day comes.

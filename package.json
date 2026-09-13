@@ -2,7 +2,7 @@
   "name": "astrion-os",
   "version": "0.2.0",
   "type": "module",
-  "description": "Astrion OS — AI-native operating system with 80 apps",
+  "description": "Astrion OS — web desktop track: AI-native desktop with 78 apps (62 real + 16 toys)",
   "scripts": {
     "start": "node server/index.js",
     "dev": "node server/index.js",

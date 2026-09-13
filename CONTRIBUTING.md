@@ -4,52 +4,8 @@
 
 | Role | Person | Focus |
 |---|---|---|
-| **CEO / Lead Developer** | Viraaj | Architecture, code, features, AI integration |
-| **Chief Marketing Officer** | Naren | Brand, social media, outreach, pitch deck |
+| **Lead Developer** | Viraaj | Architecture, code, features, AI integration |
 | **Tester / QA** | Koa | Bug reports, app testing, UX feedback |
-| **Designer** | Lauren | Icons, UI design, wallpapers, logo |
-
----
-
-## Naren — Chief Marketing Officer
-
-### Your job: make people know about Astrion OS
-
-**Week 1 tasks:**
-
-1. **Create social media accounts**
-   - Twitter/X: @AstrionOS
-   - Instagram: @astrion.os
-   - TikTok: @astrionos
-   - YouTube channel: Astrion OS
-
-2. **Write the pitch** (use this as a starting point):
-   > "Astrion is an OS that won't change itself behind your back.
-   > 61 apps + 16 toys, native C/GTK3 shell, every AI action is
-   > labeled, reversible, and adversarially reviewed. Open source,
-   > free, boots from USB. Built solo by a 12-year-old."
-
-3. **Create content:**
-   - Screen recording of Astrion OS running on the Surface Pro 6
-   - "How a 12-year-old built an operating system" story
-   - Before/after comparison (day 1 vs now)
-   - App showcase videos (30s each for TikTok/Reels)
-
-4. **Outreach:**
-   - Post on r/linux, r/programming, r/webdev
-   - Submit to Hacker News (Show HN: Astrion OS)
-   - Product Hunt launch
-   - Dev.to blog post
-
-5. **Track metrics:**
-   - GitHub stars
-   - Website visits (GitHub Pages)
-   - Social media followers
-   - ISO downloads
-
-**Tools you need:** Canva (free), OBS for recording, your phone for TikTok
-
-**You do NOT need to code.** Everything is marketing, writing, and video.
 
 ---
 
@@ -57,10 +13,20 @@
 
 ### Your job: find every bug and report it
 
-**How to test:**
+**The product is the from-scratch kernel.** Test that first:
 
-1. Go to https://viraajbindra-a11y.github.io/Astrion-OS/
-2. Try EVERY app — there are 76 of them
+1. Read [docs/try-astrion.md](docs/try-astrion.md) and boot the latest
+   `astrion.iso` in VirtualBox, QEMU or UTM.
+2. Do everything the page says to do: the Assistant prompts, the teach-it
+   step, the Terminal commands, the reboot-with-a-disk step.
+3. Anything that looks wrong, freezes, or says something untrue is a bug.
+   A screenshot plus the serial log (`-serial stdio`) is the perfect report.
+
+**The web desktop** (frozen until Oct 1, but still testable):
+
+1. Run it locally (`npm install && npm start`, then http://localhost:3000)
+   or use https://viraajbindra-a11y.github.io/Astrion-OS/
+2. Try EVERY app — there are 78 of them (62 real + 16 toys)
 3. For each app, fill out this template:
 
 ```
@@ -99,7 +65,7 @@ Screenshot: [attach if possible]
 - [ ] Calendar (dates correct?)
 
 **Then test the rest:**
-- [ ] All 77 apps register (61 real apps + 16 toys, plus Adaptations)
+- [ ] All 78 apps register (62 real apps + 16 toys)
 - [ ] Spotlight search (Cmd+Space or Ctrl+Space)
 - [ ] Setup wizard (clear localStorage in DevTools, refresh)
 - [ ] Login screen (set a password in wizard, try logging in)
@@ -111,91 +77,30 @@ Screenshot: [attach if possible]
 
 ---
 
-## Lauren — Designer
-
-### Your job: make Astrion OS look professional
-
-**Week 1 tasks:**
-
-1. **Design a logo** for Astrion OS
-   - Current: simple diamond shape
-   - Needs: professional logo that works at all sizes
-   - Style: modern, dark theme friendly, recognizable
-   - Deliver: SVG file, PNG at 512x512 and 1024x1024
-   - Tools: Figma (free), Illustrator, or Canva
-
-2. **Redesign app icons** (currently basic SVGs)
-   - 77 apps need icons (61 real + 16 toys)
-   - Style guide: rounded square (like macOS), gradient backgrounds
-   - Each icon: 120x120 SVG
-   - Look at macOS/iOS icons for inspiration
-   - Files go in: `assets/icons/[app-name].svg`
-
-3. **Design wallpapers**
-   - Current: 6 SVG wallpapers (basic gradients)
-   - Need: 6-10 beautiful wallpapers
-   - Resolution: 1920x1080 minimum (SVG preferred for scaling)
-   - Style: dark, cosmic, abstract, nature
-   - Files go in: `assets/wallpapers/`
-
-4. **Design the boot screen**
-   - Current: simple logo + progress bar
-   - Could be: animated logo, branded loading screen
-   - Edit: `index.html` (the boot screen section)
-
-5. **Design the login screen**
-   - Current: basic user icon + password field
-   - Could be: beautiful blurred background, profile pic, clock
-
-**How to submit your work:**
-- Option A: Send files to Viraaj, he'll add them
-- Option B: Fork the repo, add files, open a Pull Request
-- Option C: Upload to a shared Google Drive/Dropbox
-
-**Color palette:**
-```
-Background:  #0a0a1a (near black)
-Surface:     #1e1e2e (dark card)
-Accent:      #007aff (blue, configurable)
-Text:        #e0e0e0 (light gray)
-Success:     #34c759 (green)
-Warning:     #ff9500 (orange)
-Error:       #ff3b30 (red)
-```
-
-**You do NOT need to code.** Just design and deliver image files.
-
----
-
 ## Viraaj — Lead Developer
 
 You already know what you're doing. Keep building with Claude.
 
 **Your focus:**
 - Architecture decisions
-- Core system features
-- AI integration (Ollama, Anthropic)
-- ISO builds and Surface Pro testing
+- The kernel (`kernel/`) and its release (`os-v*` tags)
+- AI integration
 - Code review for any PRs
-- Merging contributions from the team
+- Merging contributions
 
 ---
 
 ## How We Work Together
 
-1. **Communication:** Set up a Discord server or group chat
+1. **Communication:** group chat
 2. **Tasks:** Use GitHub Issues for bugs and feature requests
 3. **Code:** Fork → branch → PR → review → merge
-4. **Design:** Share files via Discord or Google Drive
-5. **Marketing:** Naren posts, everyone shares
 
 ## Quick Start (for everyone)
 
-1. Visit https://viraajbindra-a11y.github.io/Astrion-OS/
-2. Try it out
-3. Star the repo: https://github.com/viraajbindra-a11y/Astrion-OS
-4. Join the Discord (link from Viraaj)
-5. Start on your tasks above
+1. Boot the kernel ISO: [docs/try-astrion.md](docs/try-astrion.md)
+2. Star the repo: https://github.com/viraajbindra-a11y/Astrion-OS
+3. Start on your tasks above
 
 ## Gates
 
