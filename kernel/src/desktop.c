@@ -313,10 +313,28 @@ void ac_shadow(uint32_t x, uint32_t y, uint32_t w, uint32_t h,
 
     for (int py = y0; py < y1; py++) {
         int inside_ky = (py >= ky && py < ky + kh);
+        /* Rows between the window's corner arcs: the whole run is body. */
+        int straight  = inside_ky && py >= ky + ri && py < ky + kh - ri;
         for (int px = x0; px < x1; px++) {
             if (inside_ky && px >= kx && px < kx + kw) {
-                px = kx + kw - 1;            /* skip the whole covered run */
-                continue;
+                if (straight) {
+                    px = kx + kw - 1;        /* skip the whole covered run */
+                    continue;
+                }
+                /* A corner row. The body is ROUNDED, so only the part of this
+                 * run inside the arc is going to be painted over; the few
+                 * pixels between the arc and the bounding-box corner are
+                 * wallpaper that stays visible. Skipping the full box here
+                 * left exactly those pixels unshadowed -- a pale notch at
+                 * every window corner, sitting inside a shadow that was
+                 * otherwise continuous. Test each pixel against the arc and
+                 * let the ones outside it fall through to the shadow. */
+                int cdx = 0, cdy = 0;
+                if (px < kx + ri)                cdx = (kx + ri) - px;
+                else if (px > kx + kw - 1 - ri)  cdx = px - (kx + kw - 1 - ri);
+                if (py < ky + ri)                cdy = (ky + ri) - py;
+                else if (py > ky + kh - 1 - ri)  cdy = py - (ky + kh - 1 - ri);
+                if (cdx * cdx + cdy * cdy <= ri * ri) continue;   /* inside the body */
             }
             /* Distance from the (rounded) shadow box, integer. */
             int dx = 0, dy = 0;
