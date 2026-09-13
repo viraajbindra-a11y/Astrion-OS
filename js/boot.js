@@ -285,16 +285,34 @@ function __bootFlush(reason) {
 
   // Wait for login — verify password against stored PBKDF2 hash
   const passwordInput = document.getElementById('login-password');
-  passwordInput.focus();
+  const loginButton = document.getElementById('login-button');
+  const inputWrap = loginScreen.querySelector('.login-input-wrap');
 
   const storedHash = localStorage.getItem('nova-password-hash');
+
+  // One control, and it is the honest one. With a password set, the field.
+  // With none, a Log in button -- not a field that accepts anything, which
+  // is what this screen used to show with "(any password works)" under it.
+  if (storedHash) {
+    passwordInput.focus();
+  } else {
+    inputWrap.classList.add('hidden');
+    loginButton.classList.remove('hidden');
+    loginButton.focus();
+  }
 
   await new Promise(resolve => {
     let failedAttempts = 0;
 
+    // Enter anywhere logs in when there is nothing to type. Removed on the
+    // way out so it cannot fire into the desktop later.
+    const onEnter = (e) => { if (e.key === 'Enter') login(); };
+    if (!storedHash) window.addEventListener('keydown', onEnter);
+    const finish = () => { window.removeEventListener('keydown', onEnter); resolve(); };
+
     const login = async () => {
-      // No password set — any click/enter lets you in
-      if (!storedHash) { resolve(); return; }
+      // No password set — the button, Enter, or a click on the screen
+      if (!storedHash) { finish(); return; }
 
       const pw = passwordInput.value;
       if (!pw) {
@@ -308,7 +326,7 @@ function __bootFlush(reason) {
 
       const ok = await verifyPassword(pw, storedHash);
       if (ok) {
-        resolve();
+        finish();
       } else {
         failedAttempts++;
         passwordInput.value = '';
@@ -339,10 +357,11 @@ function __bootFlush(reason) {
     passwordInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') login();
     });
+    loginButton.addEventListener('click', login);
     loginScreen.addEventListener('click', (e) => {
-      if (e.target.closest('.login-input-wrap')) return;
+      if (e.target.closest('.login-input-wrap, #login-button')) return;
       // Click outside the input only logs in if no password is set
-      if (!storedHash) resolve();
+      if (!storedHash) finish();
     });
   });
 

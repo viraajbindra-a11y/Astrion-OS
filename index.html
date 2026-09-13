@@ -84,10 +84,13 @@
       </svg>
     </div>
     <div class="login-name">User</div>
+    <!-- boot.js shows exactly one of these: the field when a password is
+         set, the button when none is. A field that accepts anything is not
+         a lock, so it is not shown. -->
     <div class="login-input-wrap">
-      <input type="password" id="login-password" class="login-input" placeholder="Enter Password" autofocus>
+      <input type="password" id="login-password" class="login-input" placeholder="Password" aria-label="Password">
     </div>
-    <div class="login-hint">Press Enter or click to log in (any password works)</div>
+    <button type="button" id="login-button" class="login-button hidden">Log in</button>
   </div>
 
   <!-- Desktop -->

@@ -51,10 +51,20 @@ export function initWidgets() {
     x: 30,
     y: 60,
     width: 200,
-    height: 110,
+    height: 70,
     render: renderStatsWidget,
-    updateInterval: 2000,
+    updateInterval: 10000,
   });
+}
+
+// Take a widget down: stop its timer, drop it from the map, remove the node.
+// Used by a renderer that has discovered it has nothing real to show.
+function removeWidget(id) {
+  const w = widgets.get(id);
+  if (!w) return;
+  if (w.updateTimer) clearInterval(w.updateTimer);
+  widgets.delete(id);
+  w.el.remove();
 }
 
 function createWidget(id, opts) {
@@ -121,14 +131,15 @@ function createWidget(id, opts) {
 
   document.getElementById('widget-layer').appendChild(el);
 
-  // Initial render + updates
+  // Register first, then render: a renderer is allowed to call
+  // removeWidget() on itself (the System widget does when there is no real
+  // reading), and that needs the entry to exist.
+  const entry = { el, opts, updateTimer: null };
+  widgets.set(id, entry);
   opts.render(el);
-  let updateTimer = null;
-  if (opts.updateInterval) {
-    updateTimer = setInterval(() => opts.render(el), opts.updateInterval);
+  if (opts.updateInterval && widgets.get(id) === entry) {
+    entry.updateTimer = setInterval(() => opts.render(el), opts.updateInterval);
   }
-
-  widgets.set(id, { el, opts, updateTimer });
 }
 
 function getSavedPos(id) {
@@ -170,7 +181,8 @@ function renderClockWidget(el) {
 }
 
 async function renderWeatherWidget(el) {
-  // Use Open-Meteo (no API key) — fall back to fake data if offline
+  // Use Open-Meteo (no API key). Offline, the card says so and shows no
+  // number: a temperature we made up is not a reading.
   try {
     // Default to NYC if no saved location
     const lat = localStorage.getItem('nova-location-lat') || '40.71';
@@ -181,7 +193,8 @@ async function renderWeatherWidget(el) {
       `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,weather_code&temperature_unit=fahrenheit`
     );
     const data = await res.json();
-    const temp = Math.round(data.current?.temperature_2m ?? 72);
+    if (typeof data.current?.temperature_2m !== 'number') throw new Error('no reading');
+    const temp = Math.round(data.current.temperature_2m);
     const code = data.current?.weather_code ?? 0;
     const { icon, desc } = weatherCodeInfo(code);
 
@@ -203,10 +216,10 @@ async function renderWeatherWidget(el) {
         <div style="font-size: 11px; color: rgba(255,255,255,0.5); text-transform: uppercase;">Weather</div>
         <div style="display: flex; align-items: center; justify-content: space-between; flex: 1;">
           <div>
-            <div style="font-size: 38px; font-weight: 300;">72\u00B0</div>
-            <div style="font-size: 12px; color: rgba(255,255,255,0.6);">Offline</div>
+            <div style="font-size: 38px; font-weight: 300; color: rgba(255,255,255,0.35);">\u2014</div>
+            <div style="font-size: 12px; color: rgba(255,255,255,0.6);">Offline \u00B7 no reading</div>
           </div>
-          <div style="font-size: 48px;">\u2601\uFE0F</div>
+          <div style="font-size: 48px; opacity: 0.5;">\u2601\uFE0F</div>
         </div>
       </div>
     `;
@@ -224,18 +237,34 @@ function weatherCodeInfo(code) {
   return { icon: '\u2601\uFE0F', desc: 'Cloudy' };
 }
 
-function renderStatsWidget(el) {
-  // Fake but plausible system stats — we don't have real OS hooks in the web app
-  const cpu = Math.round(15 + Math.random() * 25);
-  const mem = Math.round(40 + Math.random() * 20);
-  const battery = parseInt(localStorage.getItem('nova-battery') || '100');
+// The System widget shows what the machine can actually report and nothing
+// else. CPU and Memory used to be Math.random dressed as percentages, and
+// Battery was a stored number that drained on a timer; a desktop that
+// greets you with a made-up load is lying on its first screen. The one
+// reading the web build can vouch for is the battery, and only when
+// /api/battery says `available` (a real /sys/class/power_supply, which the
+// ISO has and a browser on a desk does not). Anything less, and the widget
+// takes itself down rather than sit there with nothing true to say.
+async function renderStatsWidget(el) {
+  if (!el.innerHTML) el.style.visibility = 'hidden';   // no empty box while we look
+  let bat = null;
+  try {
+    const res = await fetch('/api/battery');
+    const data = await res.json();
+    if (data && data.available && typeof data.level === 'number') bat = data;
+  } catch {}
+  if (!bat) { removeWidget('stats'); return; }
 
+  const level = Math.max(0, Math.min(100, Math.round(bat.level)));
+  const low = level <= 20 && !bat.charging;
+  const color = bat.charging ? '#34c759' : low ? '#ff3b30' : '#ff9500';
+  const note = bat.charging ? 'Charging' : low ? 'Low battery' : '';
+  el.style.visibility = '';
   el.innerHTML = `
     <div style="font-size: 11px; color: rgba(255,255,255,0.5); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;">System</div>
     <div style="display: flex; flex-direction: column; gap: 8px;">
-      ${statBar('CPU', cpu, '#007aff')}
-      ${statBar('Memory', mem, '#34c759')}
-      ${statBar('Battery', battery, battery > 20 ? '#ff9500' : '#ff3b30')}
+      ${statBar('Battery', level, color)}
+      ${note ? `<div style="font-size: 10px; color: rgba(255,255,255,0.5);">${note}</div>` : ''}
     </div>
   `;
 }
