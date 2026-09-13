@@ -40,7 +40,7 @@ FILES_X = dict(DOCK)["files"]
 # edge or the dock — and then the vacated region I compute is not the region
 # that was actually vacated, which silently invalidates the whole measurement.
 DRAG_DX, DRAG_DY = -180, 0
-TITLEBAR_DY = 30                  # measured: ~16px shadow + into the ~32px title bar
+TITLEBAR_DY = 14                  # from the window's own top edge into its 30px title bar
 
 # The window lives between the top bar and the dock. Everything here is
 # measured inside this band ONLY. The first version of this test took a global
@@ -49,6 +49,40 @@ TITLEBAR_DY = 30                  # measured: ~16px shadow + into the ~32px titl
 # That put the grab point at y=30, on the TOP BAR, so the drag grabbed nothing
 # and the 34.65% "residue" it reported was pure measurement error.
 BODY_TOP, BODY_BOT = 50, 700
+
+
+# The focused window is ringed in the accent (wm draws ac_stroke_round with
+# settings_accent on it and AC_BORDER on everything else), so its top edge is
+# a long horizontal run of accent pixels and nothing else on the desktop is.
+# That is how this test now finds the window it just opened -- see the note at
+# the grab below for why the old "top of the changed region" rule was not
+# enough. Default accent; no test in this suite changes it.
+ACCENT = (0x0A, 0x84, 0xFF)
+ACCENT_TOL = 60          # sum of |channel diff|; the straight edges are exact
+MIN_RUN = 200            # px. A window edge is ~860; the longest accent run
+                         # inside the terminal's text is one word, well under this.
+
+
+def focused_frame(img, w, h):
+    """(x0, x1, y) of the focused window's top edge, or None."""
+    for y in range(BODY_TOP, min(BODY_BOT, h)):
+        row = y * w
+        best = run = 0
+        start = best_start = -1
+        for x in range(w):
+            o = (row + x) * 3
+            if (abs(img[o] - ACCENT[0]) + abs(img[o + 1] - ACCENT[1])
+                    + abs(img[o + 2] - ACCENT[2])) <= ACCENT_TOL:
+                if run == 0:
+                    start = x
+                run += 1
+                if run > best:
+                    best, best_start = run, start
+            else:
+                run = 0
+        if best >= MIN_RUN:
+            return best_start, best_start + best - 1, y
+    return None
 
 
 def bbox(a, b, w, h):
@@ -109,6 +143,14 @@ def main():
         x0, y0, x1, y1 = rect
         print(f"[{tag}] changed-region rect: x {x0}..{x1}  y {y0}..{y1}")
 
+        frame = focused_frame(opened, w, h)
+        if not frame:
+            print(f"[{tag}] INCONCLUSIVE: no accent-ringed window found - "
+                  f"is the focused window still drawn with an accent outline?")
+            q.cmd("quit"); return 2
+        fx0, fx1, fy = frame
+        print(f"[{tag}] focused window: x {fx0}..{fx1}, top edge y {fy}")
+
         # Pick the direction with room, and never ask for more travel than
         # exists. DRAG_DX was a hardcoded -180 chosen when app windows opened
         # near screen centre; when they moved to the Terminal's left edge there
@@ -118,7 +160,7 @@ def main():
         # from where it started — a real-looking failure with no bug behind it.
         # Fourth false failure from this test, same root cause every time:
         # measuring against an assumption about geometry instead of the geometry.
-        room_l, room_r = x0, w - x1
+        room_l, room_r = fx0, w - fx1
         if room_r > room_l:
             dx = min(abs(DRAG_DX), room_r - 20)
         else:
@@ -138,18 +180,25 @@ def main():
             q.cmd("quit"); return 2
         print(f"[{tag}] room: {room_l}px left, {room_r}px right -> dragging {dx:+d}")
 
-        # The bbox top is ~16px ABOVE the window's own top edge: the window
-        # casts a soft shadow, and opening Files also unfocuses Terminal and
-        # recolours its title bar. Two heuristics were tried and both missed —
-        # "first row with a wide run of changed pixels" picks the shadow, which
-        # spans the full window width just like the title bar does.
+        # Grab the FOCUSED window's own title bar, not "30px below the top of
+        # whatever changed".
         #
-        # So the offset is measured, not inferred. Shadow is ~16px, the title
-        # bar is ~32px tall, so bbox-top + 30 lands solidly inside it. If the
-        # chrome is ever restyled this needs remeasuring — and the
-        # "window never moved" guard below is what makes that loud instead of
-        # silently turning the test green.
-        gx, gy = (x0 + x1) // 2, y0 + TITLEBAR_DY
+        # The old rule assumed the window that just opened was the topmost
+        # thing in the changed region. It held only because Files used to open
+        # at exactly the Terminal's y. The cascade now steps each new window
+        # down one title bar (valentina, 2026-09-13), so bbox-top + 30 landed
+        # on the TERMINAL's title bar instead: the test dragged the wrong
+        # window, the click raised it above Files, and the round trip reported
+        # 18.8% "residue" that was the z-order correctly changing. Fifth false
+        # failure from this test, same root cause as the other four --
+        # measuring against an assumption about geometry instead of the
+        # geometry.
+        #
+        # The accent ring is the window manager's own statement about which
+        # window is focused, so it cannot drift from the layout. +14 is from
+        # the edge INTO the title bar (WIN_TITLE_H is 30) rather than from the
+        # shadow, so it needs no shadow constant at all.
+        gx, gy = (fx0 + fx1) // 2, fy + TITLEBAR_DY
         print(f"[{tag}] grabbing title bar at ({gx}, {gy})")
 
         def drag(from_x, from_y, dx):
