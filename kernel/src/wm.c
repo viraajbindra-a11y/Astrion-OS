@@ -61,6 +61,9 @@ extern const char *mb_bootloader_name_x(void);
  * the left 60% and the footer rule framing 245px of nothing. */
 #define APP_W     860u
 #define APP_H     520u
+/* Cascade step: one title bar plus 4px of air, so the title under a window
+ * is never sliced. See the placement note in open_common(). */
+#define CASCADE_STEP (WIN_TITLE_H + 4u)
 /* Window chrome is defined ONCE, in desktop.h, and shared with desktop.c —
  * which computes where the Terminal opens. Same values these always had; they
  * just live in one place now, because the Terminal is a real window and its
@@ -3147,6 +3150,35 @@ static void size_for(enum app_kind a, uint32_t *w, uint32_t *h) {
     *w = APP_W; *h = APP_H;
 }
 
+/* The lowest cascade step no open window is on. Shared across both anchors
+ * (a left-anchored Files and a right-anchored Calculator overlap in the
+ * middle of the Terminal, so they must not share a title row either), and
+ * the Terminal counts: it sits on step 0, and a right-anchored window on the
+ * same step put its title bar level with the Terminal's, so the two read as
+ * one long strip. A window that has been dragged off its step no longer
+ * counts, which is right: the spot it left is empty. */
+static int cascade_step_used(uint32_t y) {
+    for (int i = 0; i < WM_MAX; i++)
+        if (wins[i].open && wins[i].y == y) return 1;
+    return 0;
+}
+
+/* Two passes: first the lowest free step where a window of height h still
+ * clears the dock, then, if every one of those is taken, the lowest free
+ * step at all (the caller clamps it up off the dock). A 520px window has
+ * only three steps that fit on an 800px screen; without the fitting pass a
+ * Files opened after three narrow windows was clamped onto the same y every
+ * time and the fourth, fifth and sixth windows landed exactly on each other. */
+static uint32_t cascade_free_step(uint32_t ty, uint32_t h) {
+    for (uint32_t k = 0; k < WM_MAX; k++) {
+        uint32_t y = ty + k * CASCADE_STEP;
+        if (!cascade_step_used(y) && y + h + WM_DOCK <= SH) return k;
+    }
+    for (uint32_t k = 0; k < WM_MAX; k++)
+        if (!cascade_step_used(ty + k * CASCADE_STEP)) return k;
+    return 0;
+}
+
 static void open_common(enum app_kind app) {
     int s = slot_of(app);
     if (s < 0) return;
@@ -3168,21 +3200,26 @@ static void open_common(enum app_kind app) {
              * the left of every app. That sliver is TEXT, clipped mid-glyph:
              * "As / No / Ne / It / un / th / Or / as". It does not read as two
              * windows, it reads as corrupted memory, and it was in every
-             * screenshot anyone would take of any app. valentina caught it.
+             * screenshot anyone would take of any app.
              *
-             * Anchoring to the Terminal means an app at least as wide as the
-             * Terminal covers it completely, and the deliberately-narrow ones
-             * (Calculator, Settings, Monitor) sit flush at the left edge with
-             * their overhang on the RIGHT, where it is one clean vertical band
-             * of terminal background rather than a column of half-letters.
+             * Vertical step of one title bar plus air, so each title stays
+             * whole above the next window: at 18px, under a 30px title bar,
+             * the cascade sliced every title in half and buried the third
+             * one completely.
              *
-             * Vertical step only, and small: two windows still cannot land
-             * exactly on each other, which is all the cascade was ever for. */
+             * The step is the lowest one no open window is sitting on, NOT
+             * the app's slot number. By slot, the Monitor (slot 3) always
+             * opened ABOVE a Calculator (slot 4) that was already there, and
+             * being newest it opened on top -- so it covered the Calculator's
+             * title from the moment it appeared. First-free puts the window
+             * you just opened below the ones already open, where their titles
+             * stay in view above it; a step freed by a close is reused, so
+             * two windows still cannot land on each other. */
             uint32_t tx, ty, tw, th;
             desktop_terminal_frame(&tx, &ty, &tw, &th);
             w->x = tx;
             if (w->w > SW - tx) w->x = (SW > w->w) ? (SW - w->w) / 2 : 0;
-            w->y = ty + (uint32_t)(s * 18);
+            w->y = ty + cascade_free_step(ty, w->h) * CASCADE_STEP;
             /* Never let the cascade push a window under the dock. */
             if (w->y + w->h + WM_DOCK > SH)
                 w->y = (SH > w->h + WM_DOCK) ? SH - w->h - WM_DOCK : WM_TOP;
