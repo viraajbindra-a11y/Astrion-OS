@@ -1,24 +1,45 @@
 name: Build & Release Astrion OS Desktop App
 
+# MANUAL ONLY since 2026-09-13. This used to fire on every push that touched
+# js/ css/ index.html or assets/, and each run created a GitHub Release, so
+# the Electron desktop app buried the real product (the from-scratch kernel
+# ISO, release-os.yml) under a stack of auto-builds and took the
+# releases/latest slot that the README hands out. The web track is frozen
+# until Oct 1 (tasks/PLAN-SEPT.md), so nothing is lost by making this a
+# button. When it does run, make_latest is false: the kernel ISO keeps
+# Latest.
+
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - 'installer/**'
-      - 'css/**'
-      - 'js/**'
-      - 'index.html'
-      - 'assets/**'
 
 permissions:
   contents: write
 
 jobs:
   # ───────────────────────────────────────────────
+  # 0. Tests that need no network and no model. Nothing is built or
+  #    released if one of these is red.
+  # ───────────────────────────────────────────────
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      # Does the product send the CLOUD privacy clause on the cloud leg?
+      # fetch is stubbed; the captured Anthropic request's system message
+      # must carry "this turn does leave the user's machine" and not the
+      # local "does not leave the machine". The test plants the bug
+      # (runtime ignored) and requires itself to go red before passing.
+      - name: ai-service cloud clause
+        run: npm run test:ai-service
+
+  # ───────────────────────────────────────────────
   # 1. Compute a new auto-incrementing version tag
   # ───────────────────────────────────────────────
   version:
+    needs: test
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.compute.outputs.version }}
@@ -134,9 +155,9 @@ jobs:
           tag_name: ${{ needs.version.outputs.tag }}
           name: Astrion OS ${{ needs.version.outputs.version }}
           body: |
-            **Astrion OS ${{ needs.version.outputs.version }}** — auto-built from commit ${{ github.sha }}
+            **Astrion OS ${{ needs.version.outputs.version }}** — desktop app (web desktop track), built from commit ${{ github.sha }}
 
-            Commit message: ${{ github.event.head_commit.message }}
+            This is the Electron build of the web desktop, not the from-scratch kernel. The kernel ISO is the `os-v*` release marked Latest.
 
             ### Downloads
             - **macOS:** `.dmg`
@@ -147,5 +168,7 @@ jobs:
           files: release/*
           draft: false
           prerelease: false
+          # Never take the Latest slot from the kernel ISO (release-os.yml).
+          make_latest: false
           fail_on_unmatched_files: false
           token: ${{ secrets.GITHUB_TOKEN }}
