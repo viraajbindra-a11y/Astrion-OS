@@ -3660,6 +3660,38 @@ int wm_active(void) { return !shell_has_keys(); }
 
 void wm_repaint(void) { repaint_all(); }
 
+/* ---- the Terminal cursor ----
+ *
+ * Blinked from here rather than from shell_tick(): shell_tick is not on the
+ * main loop at all, and this IS the function the main loop calls every pass
+ * on task 0 with interrupts on -- which is the only place console.c allows
+ * a paint from.
+ *
+ * SOLID WHILE YOU TYPE. A cursor that is blinking is saying "waiting"; mid-
+ * word it should say "here", and a caret that happens to be in its dark half
+ * as you hit a key reads as a dropped keystroke. So a keypress restarts the
+ * phase at ON, and the blink only takes over after a beat of quiet.
+ *
+ * 530ms is the conventional period and it is also the clock task's own beat,
+ * so the cursor and the clock breathe together rather than beating against
+ * each other. */
+#define CUR_BLINK_MS  530u
+#define CUR_SOLID_MS  530u     /* quiet needed before the blink resumes */
+static uint64_t cur_key_ms;    /* when a key last reached the shell */
+
+static void cursor_tick(void) {
+    int s = slot_of(APP_TERM);
+    /* No Terminal window, or it is not the focused one: no cursor. The
+     * keyboard is somewhere else, and two carets on screen would be a lie
+     * about where the next character goes. */
+    struct window *f = focused();
+    if (s < 0 || !wins[s].open || !f || f->app != APP_TERM) { console_cursor(0); return; }
+    if (!win_can_live_paint(s)) { console_cursor(0); return; }
+    uint64_t now = pit_elapsed_ms();
+    if (now - cur_key_ms < CUR_SOLID_MS) { console_cursor(1); return; }
+    console_cursor(((now / CUR_BLINK_MS) & 1u) == 0);
+}
+
 int wm_handle_key(char c) {
     /* The power dialog is modal: while it's up it swallows every key so nothing
      * leaks to the shell, and Esc is the calm way out. */
@@ -3669,8 +3701,9 @@ int wm_handle_key(char c) {
     }
     struct window *f = focused();
     /* The Terminal focused → fall through to the shell, which is what actually
-     * consumes the key. */
-    if (f && f->app == APP_TERM) return 0;
+     * consumes the key. Stamp the time first: the cursor stays solid while
+     * somebody is typing, and only resumes blinking after a beat of quiet. */
+    if (f && f->app == APP_TERM) { cur_key_ms = pit_elapsed_ms(); return 0; }
     /* Nothing open at all — the Terminal has been closed and no app replaced
      * it. Swallow the key rather than letting the shell take it: typing into a
      * console nobody can see, and finding the text waiting when you reopen the
@@ -3799,4 +3832,5 @@ void wm_tick(void) {
      * ~10ms iteration that the next tick picks up — neither loses an update. */
     mon_tick();
     calc_tick();
+    cursor_tick();
 }

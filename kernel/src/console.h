@@ -108,6 +108,23 @@ void     console_backspace(void);    /* erase prior glyph, retreats cursor */
  * something (an overlapping window) has drawn over the terminal. */
 void     console_redraw(void);
 
+/* --- The cursor ---
+ *
+ * The Terminal had none: a prompt, and nothing saying the machine was waiting
+ * for YOU. Every other place you can type in Astrion draws one (the Editor
+ * caret, the Assistant prompt), so the shell read as output rather than as an
+ * invitation.
+ *
+ * `on` is the phase the caller wants -- the wm blinks it off the clock -- and
+ * this is a no-op when nothing would change, so calling it on every pass of
+ * the main loop costs one compare.
+ *
+ * CALL FROM TASK 0 WITH INTERRUPTS ON, never from inside the writer lock: it
+ * paints, and this file paints outside the lock. Nothing inside the lock
+ * needs it, because every write erases the cursor through the unlocked core
+ * before it touches a pixel. */
+void     console_cursor(int on);
+
 /* Repaint only the cells intersecting this rect, clipped to the console region
  * (a no-op if it falls outside). For the main loop's mouse-cursor repair: the
  * cursor can put back the pixels it covered, but not the glyph ink the console

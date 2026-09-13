@@ -19,6 +19,7 @@
 #include "af.h"
 #include "mouse.h"      /* damage(): tell the cursor its cached pixels changed */
 #include "serial.h"     /* every console byte is mirrored to COM1 — see below */
+#include "settings.h"   /* settings_accent(): the cursor is the accent colour */
 
 /* MUST match AC_TERM_BG in desktop.h — the console draws INSIDE the terminal
  * window body that desktop.c/wm.c fill with AC_TERM_BG, so if these two
@@ -82,6 +83,24 @@ static int hidden(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
 /* Set when a write could not put its pixels down and the region now disagrees
  * with the backing store. console_service() on task 0 repairs it. */
 static int g_stale;
+
+/* --- The cursor ---
+ *
+ * A block at the cell the next character will land in. It is NOT in the
+ * backing store -- it is not text, and a repaint from the store must never
+ * bring a stale one back at a position the cursor has since left. One
+ * invariant keeps it from smearing:
+ *
+ *   NOTHING PAINTS INTO THE CONSOLE WHILE THE CURSOR IS SHOWING.
+ *
+ * Every writer goes through putchar_nolock / newline_nolock /
+ * backspace_nolock, and each erases it first (cursor_off_nolock), which is
+ * one fb_rect of one cell plus at most one glyph -- cheap enough to do with
+ * interrupts masked, unlike a redraw. It comes back on the next pass of the
+ * main loop, which is task 0 with interrupts on. */
+static int      g_cur_on;              /* is it on the screen right now? */
+static void     cursor_off_nolock(void);   /* defined with the unlocked cores */
+static uint32_t g_cur_x, g_cur_y;      /* where we put it, in pixels */
 
 /* ─── Cursor damage ───
  * The mouse cursor caches the pixels under itself and paints them back when it
@@ -205,6 +224,10 @@ static void grid_clear_cell(void) {
  * and the very next write or window event paints over it. No state corruption. */
 void console_redraw(void) {
     if (!fb_present_x() || !w_px || !attached) return;
+    /* The cursor is not in the backing store, so a full repaint wipes it.
+     * Drop the flag rather than the pixels: the next main-loop pass draws it
+     * again at wherever the cursor now is. */
+    g_cur_on = 0;
     damage(x0, y0, w_px, h_px);
     /* One occlusion test for the whole region decides which path to take. When
      * nothing covers us — the common case, and always true while the Terminal
@@ -242,6 +265,42 @@ void console_redraw(void) {
             af_draw(px, py, s, g_fg[r][c], AF_MONO);
         }
     }
+}
+
+
+/* Show or hide the cursor. Task 0, interrupts on -- see console.h.
+ *
+ * The lock is taken only around the READ of the cursor cell, never around the
+ * paint: cx/cy are writer-lock state and reading them torn would put the
+ * block in the wrong place, but the paint itself is this file's ordinary
+ * outside-the-lock work. Hidden cells are skipped rather than clipped -- a
+ * one-cell block under a window is nothing to salvage. */
+void console_cursor(int on) {
+    if (!attached || !fb_present_x() || !GW || !GH) { g_cur_on = 0; return; }
+    uint64_t f = irq_save();
+    uint32_t nx = cx, ny = cy;
+    int moved = (nx != g_cur_x || ny != g_cur_y);
+    int showing = g_cur_on;
+    if (showing && (!on || moved)) cursor_off_nolock();
+    irq_restore(f);
+    if (!on) return;
+    if (showing && !moved) return;              /* already there: nothing to do */
+    if (nx + GW > x0 + w_px || ny + GH > y0 + h_px) return;   /* off the region */
+    if (hidden(nx, ny, GW, GH)) return;                       /* a window owns it */
+    /* THE SAME CARET THE EDITOR DRAWS: 2px wide, full cell height, in the
+     * accent. Not a block.
+     *
+     * A block is the older terminal convention and it is more legible in
+     * isolation, but there are four places in Astrion where you can type --
+     * the shell, the Editor, the Assistant, the Settings URL field -- and
+     * three of them already draw this bar. One shape for "your text goes
+     * here" is worth more than the extra legibility of a shape that only
+     * appears in one window. Same width, same colour, same height as
+     * editor_draw(), because it should be the same thing. */
+    g_cur_x = nx; g_cur_y = ny;
+    g_cur_on = 1;
+    damage(nx, ny, GW, GH);
+    fb_rect_x(nx, ny, 2, GH, settings_accent());
 }
 
 /* Repaint if a write had to skip its pixels.
@@ -391,6 +450,10 @@ void console_init(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
 
 void console_detach(void) {
     uint64_t f = irq_save();
+    /* The window is going away; the pixels go with it. Just drop the flag --
+     * erasing into a region the wm is about to paint over would be a race
+     * with the window frame, and a wasted cell either way. */
+    g_cur_on = 0;
     attached = 0;
     irq_restore(f);
 }
@@ -399,6 +462,7 @@ int console_is_attached(void) { return attached; }
 
 void console_attach(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
     uint64_t f = irq_save();
+    g_cur_on = 0;        /* the region moved; the old block is not ours now */
     /* Carry the LOGICAL cursor across, not the pixel one. The window may have
      * been dragged anywhere between detach and attach, so the only thing that
      * survives a move is which row and column we were on. */
@@ -428,6 +492,7 @@ void console_attach(uint32_t x, uint32_t y, uint32_t w, uint32_t h) {
 
 void console_clear(void) {
     uint64_t f = irq_save();
+    g_cur_on = 0;        /* console_redraw() below is about to wipe the region */
     grid_clear();
     cx = x0;
     cy = y0;
@@ -448,13 +513,35 @@ uint32_t console_color(void)       { return color; }
  * never the public wrappers, so the lock is taken exactly once at whichever
  * entry point the caller came in through. That is what keeps the scroll path
  * from re-entering a locked function on its way through newline. */
+/* Erase the cursor if it is showing. Assumes the writer lock is held, or that
+ * we are on task 0 (the only other caller). One cell of background, plus
+ * whatever glyph the store says lives in that cell -- the cursor sits ON a
+ * cell that may already hold a character, which is exactly what happens after
+ * a backspace. */
+static void cursor_off_nolock(void) {
+    if (!g_cur_on) return;
+    g_cur_on = 0;
+    if (!attached || !fb_present_x()) return;
+    if (!GW || !GH || !LINE_STRIDE) return;
+    if (hidden(g_cur_x, g_cur_y, GW, GH)) return;
+    damage(g_cur_x, g_cur_y, GW, GH);
+    fb_rect_x(g_cur_x, g_cur_y, GW, GH, COL_BG);
+    uint32_t col = (g_cur_x - x0) / GW, row = (g_cur_y - y0) / LINE_STRIDE;
+    if (row < CON_MAX_ROWS && col < CON_MAX_COLS && g_ch[row][col]) {
+        char s[2] = { g_ch[row][col], 0 };
+        af_draw(g_cur_x, g_cur_y, s, g_fg[row][col], AF_MONO);
+    }
+}
+
 static void newline_nolock(void) {
+    cursor_off_nolock();
     cx = x0;
     cy += LINE_STRIDE;
     while (cy + GH > y0 + h_px) scroll_one_line();
 }
 
 static void backspace_nolock(void) {
+    cursor_off_nolock();
     if (cx <= x0) return;
     cx -= GW;
     if (attached && !hidden(cx, cy, GW, GH)) {
@@ -593,6 +680,11 @@ static void putchar_nolock(char c) {
         }
         return;
     }
+
+    /* Before a single pixel moves. Every path out of this function either
+     * writes into the region or scrolls it, and both would carry a live
+     * cursor along with them. */
+    cursor_off_nolock();
 
     ser_emit(c);
 
