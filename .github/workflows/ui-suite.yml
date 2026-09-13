@@ -83,7 +83,14 @@ jobs:
       # The fast gates first: host unit tests, the multiboot2 header validator
       # and its self-test, and the ASCII-only check on console strings. Seconds,
       # and no point booting anything if these are red.
-      - name: Host tests + header gates
+      #
+      # `make test` also builds every host test a second time under
+      # -fsanitize=address,undefined (see test-san in kernel/Makefile). That is
+      # the only run that proves the two boot-module parsers -- tok.c and
+      # model_load.c, which read a file that scales to hundreds of MB -- do not
+      # read past a malformed input while rejecting it; the plain build cannot
+      # see an over-read. gcc's asan/ubsan runtimes ship with build-essential.
+      - name: Host tests + header gates (plain and sanitized)
         run: |
           cd kernel
           make test

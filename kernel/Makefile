@@ -460,6 +460,46 @@ $(BUILD_DIR):
 $(BUILD_DIR)/test_%: tests/test_%.c $(HOST_TEST_HDRS) | $(BUILD_DIR)
 	$(HOSTCC) -std=c11 -Wall -Wextra -Werror -Iinclude -o $@ $<
 
+# The same tests again, under AddressSanitizer + UndefinedBehaviorSanitizer.
+#
+# test_tok.c and test_model_load.c feed the two untrusted-module parsers
+# malformed tables on buffers malloc'd to EXACTLY their length, and their
+# headers say "run under -fsanitize=address to prove the second half". The
+# first half -- a bad table is REJECTED -- is what the plain build proves. The
+# second half -- nothing was read past the buffer on the way to rejecting it --
+# is invisible to a plain build: a read 99 bytes past a malloc'd block returns
+# a byte, the parser still says "table exceeds module", and the test prints
+# PASS. Only the redzones see it. That half used to run only when somebody
+# remembered to build with ASan by hand, which is to say it did not run. Now
+# every host test is built a second time with the sanitizers and run again;
+# for the parsers that is the boundary check, for the rest it is free.
+#
+# Control, recorded when this was added: a tok_parse that peeks at the blob's
+# last byte before the size check passes the plain build (rc=0, PASS) and the
+# sanitizer build aborts with heap-buffer-overflow "99 bytes after 7132-byte
+# region" in tok_parse (rc=134).
+HOSTCC_SAN ?= $(HOSTCC)
+SAN_FLAGS  := -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer -g -O1
+SAN_DIR    := $(BUILD_DIR)/san
+SAN_TESTS  := $(patsubst tests/%.c,$(SAN_DIR)/%,$(HOST_TEST_SRCS))
+
+$(SAN_DIR):
+	@mkdir -p $(SAN_DIR)
+
+$(SAN_DIR)/test_%: tests/test_%.c $(HOST_TEST_HDRS) | $(SAN_DIR)
+	$(HOSTCC_SAN) -std=c11 -Wall -Wextra -Werror $(SAN_FLAGS) -Iinclude -o $@ $<
+
+# Same engine-source prerequisites as the plain binaries (see below): an edit
+# to a parser must rebuild its sanitized gate too, or it re-runs stale code.
+$(SAN_DIR)/test_model: src/model.c tools/ref_forward_fixture.h
+$(SAN_DIR)/test_model_load: src/model.c src/model_load.c tools/ref_forward_fixture.h tools/mkweights.py
+$(SAN_DIR)/test_tok: src/tok.c tools/tok_ref_fixture.h
+
+test-san: $(SAN_TESTS)
+	@for t in $(SAN_TESTS); do echo "--- $$t  (asan+ubsan)"; \
+	    ./$$t >$$t.log 2>&1 || { echo "FAIL under sanitizers: $$t"; grep -E 'ERROR|runtime error|SUMMARY' $$t.log | head -5; exit 1; }; done
+	@echo "sanitizer gates: $(words $(SAN_TESTS)) host test(s) clean -- the module parsers read nothing past their buffers"
+
 # test_model.c #includes the engine source and the generated oracle fixture,
 # neither of which the generic rule above tracks; name them so an edit to the
 # forward pass or a regenerated fixture rebuilds the gate instead of re-running
@@ -477,10 +517,11 @@ $(BUILD_DIR)/test_model_load: src/model.c src/model_load.c tools/ref_forward_fix
 # gate instead of re-running a stale binary.
 $(BUILD_DIR)/test_tok: src/tok.c tools/tok_ref_fixture.h
 
-test: $(HOST_TESTS)
+test: $(HOST_TESTS) $(SAN_TESTS)
 	@[ -n "$(HOST_TEST_SRCS)" ] || { echo "FAIL: no tests found in tests/ - refusing to report a pass"; exit 1; }
 	@echo "running $(words $(HOST_TESTS)) host test(s)"
 	@for t in $(HOST_TESTS); do echo "--- $$t"; ./$$t || exit 1; done
+	@$(MAKE) --no-print-directory test-san
 	@echo "--- tools/mb2check.py --selftest"
 	@python3 tools/mb2check.py --selftest
 	# Nothing the console prints may contain non-ASCII. putchar_nolock maps
