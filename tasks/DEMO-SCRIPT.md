@@ -1,3 +1,5 @@
+> **SUPERSEDED (2026-09-13) — use tasks/demo-2026-07-17/DEMO-SCRIPT.md.** Three lines below are no longer true and must not be said on stage: the splash is blue, not orange; the neural-net beat (step 5) cannot be reproduced from the released ISO, which ships without a brain module; and the "did you really build all this?" answer is replaced by the README's "Who wrote it" section — Claude drafts most of the code, the founder directs, decides, reviews and boots every build. Say that, not "the code is mine."
+
 # Astrion v2.0 — Demo Script
 
 Everything you need to present the OS with confidence. Practice it 2–3 times
@@ -116,7 +118,7 @@ Real, specific things you built (all true — say them with confidence):
 If asked **"did you really build all this?"** — be honest: "Yes, I wrote the
 kernel and all of it. I learned from tutorials and used standard tools like
 GRUB and the C compiler, the same way every OS developer does. The design and
-the code are mine."
+the code are mine." *(2026-09-13: do not say this. See the header.)*
 
 ---
 

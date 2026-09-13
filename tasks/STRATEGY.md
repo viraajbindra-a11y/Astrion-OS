@@ -1,3 +1,5 @@
+> **SUPERSEDED (2026-09-13) — see tasks/LAUNCH-SEPT.md.** Kept for the reasoning; the dates and the "no network stack" wording below are stale. The kernel now has a NIC driver and a small stack for the Terminal; the true sentence is: *the AI lives inside the kernel and has no path to the network.*
+
 # Astrion — How We Win (Strategy)
 
 Pairs with `COMPETITIVE-BRIEF.md`. Read that for who the competitors are; this
@@ -39,17 +41,19 @@ You can't walk through the "bigger model" door. You can walk through these.
    learn from — SerenityOS's "built to be understood," but AI-native. An
    education + hobbyist community none of them want.
 3. **Safe & private by physics, not policy.** Apple/MS *promise* privacy but
-   fall back to cloud. Astrion's AI runs in a kernel with **no network stack —
-   it can't leak, by construction** — and safety is enforced by the CPU
-   (ring-3), not a corporate terms-of-service.
+   fall back to cloud. Astrion's AI lives inside the kernel and **has no path
+   to the network** — and safety is enforced by the CPU (ring-3), not a
+   corporate terms-of-service.
 4. **The story is a moat.** A kid building an AI-native OS from scratch, in the
    open, with a community — Microsoft's marketing can't buy that. Linux won on
-   movement, not features.
+   movement, not features. *(Sept 2026: VibeOS now shares the "kid + Claude +
+   from-scratch OS" headline; the story only works with "the model runs inside
+   the kernel" attached. See COMPETITIVE-BRIEF.md.)*
 
 ## Our identity (pick this and commit)
 
-> **"The AI-native OS you can actually understand, that physically can't phone
-> home."**
+> **"The AI-native OS you can actually understand, whose AI lives inside the
+> kernel and has no path to the network."**
 
 Wedges **2 + 3** as the identity; wedge **4** (open-source + your story) as the
 engine; wedge **1** (offline/low-end) as the beachhead market. Aimed at
@@ -74,32 +78,32 @@ a great chatbot, but it can be a great **local command layer**.
 
 ---
 
-## How we PROVE it — the August-end MVP
+## How we PROVE it — the August-end MVP *(dates superseded; see LAUNCH-SEPT.md)*
 
 **Definition of the launchable MVP:** a from-scratch AI-native OS where you
 talk to it in plain English and it **safely does real things, fully offline**,
-and the whole thing is understandable and can't phone home.
+and the whole thing is understandable and its AI has no path to the network.
 
 Already done (proven, on `main`):
 - From-scratch kernel: boot → splash → desktop → windows → Files/Editor → real
   filesystem on disk.
 - Ring-3 isolation + syscalls (kernel-level safety — wedge 3).
-- On-device GPT generating text with no network (wedge 3).
+- On-device transformer runtime, verified in-kernel with a boot module (wedge
+  3). *Not in the released ISO yet — the release ships without a brain module.*
 - ELF programs + ring-3 file I/O via syscalls.
 
 The proof still to build (the differentiator):
 1. **Assistant that DOES things** — a local natural-language command layer:
    type "make a file called notes," "open the editor," "list my files,"
-   "what's my uptime" → it performs the real, safe action, offline. Falls back
-   to the GPT for open-ended text. *(In progress — this is the thesis proof.)*
+   "what's my uptime" → it performs the real, safe action, offline. *(Shipped
+   and rex-verified; it also learns your phrasing.)*
 2. **A tighter demo loop** proving "understandable + offline + safe + it acts."
 3. **Package a launchable build** — a tagged ISO + a one-page "what it is / why
-   it's different" so a stranger can boot it and get it.
+   it's different" so a stranger can boot it and get it. *(os-v0.3 +
+   docs/try-astrion.md.)*
 
-Roadmap to Aug end: (1) intent-executing assistant → (2) harden + a couple more
-safe actions → (3) tag `v0.3-mvp` ISO + landing one-pager + demo video. Tier 3
-depth (per-process spaces) and Tier 4 (real hardware) are *bonuses*, not blockers
-for "launchable."
+Roadmap: see `tasks/LAUNCH-SEPT.md`. Tier 3 depth (per-process spaces) landed;
+Tier 4 (real hardware) remains a bonus, not a blocker for "launchable."
 
 **North star:** someone boots Astrion with no internet, types a sentence, and
 it does something useful and safe — and they can read exactly how it works.

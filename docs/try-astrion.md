@@ -4,10 +4,10 @@ Astrion is an operating system written from scratch in C. There is no Linux
 underneath it and no Windows underneath it — when it boots, the only software
 running on the machine is Astrion.
 
-It has a desktop, windows you can drag, a Terminal with about forty-five
-commands, a text editor that saves to a real filesystem, a file browser, a
-calculator, a system monitor, settings, and Snake. It also has an assistant that
-runs entirely offline and **learns how you phrase things**.
+It has a desktop, windows you can drag, a Terminal with 52 commands, a text
+editor that saves to a real filesystem, a file browser, a calculator, a system
+monitor, settings, and Snake. It also has an assistant that runs the machine
+from plain English, entirely offline, and **learns how you phrase things**.
 
 You can run it in about five minutes, on the computer you already have. You do
 not need a spare machine.
@@ -20,7 +20,10 @@ VirtualBox is free and runs on Windows, Mac and Linux.
 
 1. Install it from [virtualbox.org](https://www.virtualbox.org/wiki/Downloads).
 2. Download **astrion.iso** from the
-   [Releases page](https://github.com/viraajbindra-a11y/Astrion-OS/releases).
+   [os-v0.3 release](https://github.com/viraajbindra-a11y/Astrion-OS/releases/tag/os-v0.3)
+   (also the [latest release](https://github.com/viraajbindra-a11y/Astrion-OS/releases/latest)
+   — the kernel ISO is the release marked *Latest*; anything tagged `v0.x`
+   without the `os-` prefix is the older web-desktop track and is not this).
 3. Open VirtualBox → **New**.
    * Name: `Astrion`
    * Type: **Other**, Version: **Other/Unknown (64-bit)**
@@ -86,6 +89,7 @@ what version
 what's running
 write hello to notes.txt
 read notes.txt
+set the accent to teal
 ```
 
 **Then teach it something.** Ask for something it does not understand:
@@ -105,7 +109,7 @@ That lesson is written to disk and survives a reboot.
 
 **Or stay in the Terminal.** `help` lists everything. `ls`, `cat readme.txt`,
 `edit notes.txt`, `snake`, `ps`, `mem`, `uptime`, `exec hello.elf` all do what
-you would expect.
+you would expect. `net` shows the network card; `net arp` sends the first packet.
 
 ---
 
@@ -161,9 +165,17 @@ Being straight about it, because finding out yourself is worse:
 
 * **It does not run on real hardware yet.** It has only ever booted in an
   emulator. Making that work is the next milestone.
-* **There is no networking.** None. It cannot reach the internet, which is also
-  why the assistant is genuinely offline rather than marketed as offline.
+* **This ISO has no brain in it.** The on-device language model loads from a
+  separate boot module that is not shipped in the release. Ask the assistant to
+  write you a poem and it will tell you plainly that no brain is loaded;
+  everything else it does (files, machine, settings, learning your phrasing) is
+  live and does not need the model.
+* **Networking is a lab bench, not a feature.** The kernel has a driver for the
+  emulator's network card and can ARP, get a DHCP lease, ping and resolve a
+  name from the Terminal. Nothing else uses it: there is no browser and nothing
+  is fetched. The assistant lives inside the kernel and has no path to the
+  network.
 * **You cannot install it** to a hard drive and boot your computer into it.
 * **The assistant is not a chatbot.** It runs the machine — files, settings,
-  telling you about the hardware. Ask it to write you a poem and it will
-  honestly say it cannot, which is the intended behaviour.
+  telling you about the hardware. Ask it something it cannot do and it will
+  honestly say so, which is the intended behaviour.
