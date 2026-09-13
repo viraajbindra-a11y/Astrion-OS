@@ -144,7 +144,15 @@ static void build_state(struct model_state *st, const struct model_config *c)
     st->xn  = malloc((size_t)c->dim * sizeof(int64_t));
     st->q   = malloc((size_t)c->n_heads * c->head_dim * sizeof(int64_t));
     st->heads = malloc((size_t)c->n_heads * c->head_dim * sizeof(int64_t));
-    st->scores = malloc((size_t)c->max_seq * sizeof(int64_t));
+    /* +1, for the same reason the caches get a slack row. Attention scores
+     * every position 0..pos INCLUSIVE, so a forward at pos == max_seq needs
+     * max_seq + 1 slots. The kernel never asks for that - the pos >= max_seq
+     * guard in model_forward refuses first - which means that guard is load
+     * bearing for MEMORY SAFETY and not only for correctness. The control that
+     * lifts it therefore has to own one extra slot here too, or the control
+     * itself is the thing that runs off the end. (ASan caught exactly that:
+     * heap-buffer-overflow at model.c:423, inside the lifted-guard control.) */
+    st->scores = malloc(((size_t)c->max_seq + 1) * sizeof(int64_t));
     st->ff1 = malloc((size_t)c->ffn_dim * sizeof(int64_t));
     st->ff2 = malloc((size_t)c->ffn_dim * sizeof(int64_t));
     st->tmp = malloc((size_t)c->dim * sizeof(int64_t));

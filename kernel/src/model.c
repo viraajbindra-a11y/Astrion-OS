@@ -136,7 +136,19 @@ static int64_t fx_ln(int64_t x)
     int64_t m = msh >= 0 ? (x << msh) : (x >> (-msh));
     if (m > SQRT2_Q30) { m >>= 1; e += 1; }      /* center for a smaller t */
 
-    int64_t t = (int64_t)(((__int128)(m - FX_ONE) << FXQ) / (m + FX_ONE)); /* @Q30 */
+    /* MULTIPLY, do not shift. m is folded into [1/sqrt2, sqrt2), so m - FX_ONE
+     * is NEGATIVE for every x whose mantissa lands below 1.0 - and shifting a
+     * negative signed value left is undefined behaviour in C, however sane the
+     * answer looks on this machine. Multiplying by the same power of two is
+     * defined for negative operands and produces the identical value, so this
+     * is a correctness fix with no numerical change (the reference-forward test
+     * against PyTorch passes unchanged either way).
+     *
+     * It sat here from the day fx_ln was written and nothing could see it until
+     * the sanitizer build existed. That build is the whole reason it is fixed
+     * rather than waiting to be a wrong RoPE table on somebody's laptop. */
+    int64_t t = (int64_t)(((__int128)(m - FX_ONE) * ((__int128)1 << FXQ))
+                          / (m + FX_ONE));                          /* @Q30 */
     int64_t t2 = qmul(t, t);
     int64_t acc = LN_C[6];
     acc = LN_C[5] + qmul(t2, acc);
