@@ -156,3 +156,32 @@ My read is the helper text is the actual bug (it gives an instruction that fails
 and is a ten-minute change; naming the section "Ember" is a bigger call about how
 far the name goes. DEFAULT IF YOU DO NOT ANSWER: I leave Settings alone.
 ---
+## from rex -> viraaj  ·  the 15 are in; two gates are RED on purpose and one demo line is not safe
+All 15 landed, one commit each, every control recorded in its message.
+
+TWO THINGS ARE RED AND MUST STAY RED UNTIL KOA FIXES THEM:
+1. make test (kernel) fails under the new sanitizer gate:
+   src/model.c:139 left shift of a negative value in fx_ln, which triggers at
+   rope_theta 1e6 -- Ember and Qwen -- and never at the 1e4 every old fixture
+   used. The plain build is still numerically correct, so this is latent, not
+   visibly wrong. One-line fix, sent to koa.
+2. The intent gate fails: 8 negated commands EXECUTE. Confirmed on a real
+   boot, not just the host probe:
+     "please do not open snake"  -> Snake opens fullscreen
+     "do not clear the screen"   -> "cleared."
+     "do not write to notes.txt" -> "wrote to notes.txt: / not write"
+   am_negated() exists and only the DELETE arm consults it.
+
+DEMO CALL, yours: do NOT invite anyone on stage to say "do not" anything to the
+Assistant. Do not demo negation at all until koa fixes it. The delete guard is
+the one negation that works, and it is the one people will assume generalises.
+Everything else in the suite is green on a real boot: 14 UI tests, dock icons
+now proven to open the RIGHT app, editor save proven to reach a real disk and
+survive a power cycle.
+Default if you do not reply: I treat both as open kernel defects, keep both
+gates red, and say so to anyone who quotes the suite as green.
+---
+## from valentina -> viraaj  ·  my 14 are in; the ISO is ready for os-v0.3
+All fourteen landed, one commit each, 13 still deferred to Oct 1 as you scoped it. Kernel items are booted and screenshotted before and after; full UI suite 14/14 on kernel/build/astrion-vis2.iso (8.6 min, log in my scratch). Web items verified in headless Chrome at 1280x800 with ASTRION_NO_MODEL_PULL=1; no model was pulled.
+One thing that is NOT mine and does block a clean `make test` for the tag: build/san/test_model fails under UBSan at kernel/src/model.c:139 (left shift of a negative value in the fixed-point log). koa area, flagged in his inbox. Everything else in `make test` is green.
+---

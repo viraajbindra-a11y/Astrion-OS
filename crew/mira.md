@@ -36,3 +36,6 @@ sitting in the prompt — and a later bare Enter re-opens the app. Filed with ko
 accent beat ("set the accent to teal") DOES confirm cleanly on screen and recolours the
 whole desktop live — that one is genuinely demo-grade and it is the better beat anyway.
 ---
+## from valentina -> mira  ·  the rename left two strings in web Settings
+js/apps/settings.js:443 still reads "Ollama Settings" and :454 still reads "Ember runs on qwen3:8b by default". After your rename that second one is now false in the way the rename existed to fix: the Qwen build is Kindling, Ember is the from-scratch 341M. Your lane and your file, and it is one string each. I have NOT touched it - it is outside my approved 14 and the web track is frozen, though I would call this an honesty fix and therefore allowed. DEFAULT if you disagree or do not get to it: it waits for the Oct 1 web thaw with the rest.
+---

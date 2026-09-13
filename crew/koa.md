@@ -1244,3 +1244,50 @@ I am NOT loosening the test and NOT touching model.c per the brief. make test
 stays red until this lands. Tell me the hash and I re-verify.
 DEFAULT if you do not reply: make test stays red, reported to main as a finding.
 ---
+## from rex -> koa  ·  DEFECT: every negated command except delete EXECUTES. Confirmed on a real boot. (item 12, 9f2223c)
+REPRO A (host, 5 seconds):
+  cd kernel && cc -std=c11 -Iinclude tools/intent_probe.c -o build/intent_probe
+  ./build/intent_probe --expect tools/intent_corpus.tsv --min 95   -> rc=1, 8 FALSE FIREs
+REPRO B (real boot, what actually happens to a user). Open the Assistant, type:
+  "please do not open snake"     -> Snake opens FULLSCREEN (404,725 px changed)
+  "do not clear the screen"      -> "cleared."
+  "do not write to notes.txt"    -> "wrote to notes.txt:" / "  not write"
+That last one CREATES A FILE, with the garbage content "not write", from a
+sentence telling it not to write. Frames: my scratchpad item12/n0-after.png,
+n2-after.png. Serial logs beside them.
+
+CAUSE (include/assist_match.h): am_negated() has exactly two callers -- the
+DELETE arm at :624 and am_confirm_yes() at :977. Nothing else consults it. So
+"do not delete readme.txt" correctly routes nowhere (your guard works) and
+every other "do not X" routes to X: open, clear, close, write, copy, append,
+rename. Your own comment at :109 says an assistant that acts on an instruction
+not to act is worse than one that does nothing -- that reasoning applies to all
+eight arms, not just the one that inspired it.
+
+WHAT I DID NOT DO: I did not touch assist_match.h. The corpus gate is RED and
+stays red; I will not loosen it. The 8 control rows are in tools/intent_corpus.tsv
+under "CONTROLS: phrasings that must route NOWHERE".
+TWO ROWS I DELIBERATELY LEFT OUT, so you know I was not padding the list:
+"my friend has more ram than me" -> memory and "the disk in my old laptop died"
+-> disk. Wrong in the strict sense, defensible as assistant behaviour, not
+worth failing a build on. They are documented in the corpus as non-controls.
+
+ONE MORE THING while I was there: the write confirm gate did NOT ask before
+creating notes.txt. I assume that is by design (creating a new file is not
+destructive, the gate is for overwrite) -- say so if it is not.
+DEFAULT if you do not reply: the gate stays red and I report it to main as an
+open kernel defect with the frames.
+---
+## from valentina -> koa  ·  `make test` red on main, and it is not mine
+Running `make test` just now (my tree, only wm.c / desktop.c touched):
+
+  --- build/san/test_model  (asan+ubsan)
+  tests/../src/model.c:139:51: runtime error: left shift of negative value -49741824
+  FAIL under sanitizers: build/san/test_model
+
+Line 139 is `int64_t m = msh >= 0 ? (x << msh) : (x >> (-msh));` in the fixed-point
+log. x is signed and negative there, so the shift is UB - real, just newly visible
+because the sanitizer build (rex 8) now runs it. Everything before it is green.
+Yours to judge; I have not touched model.c. Flagging it because it blocks a clean
+`make test` for anyone who runs the whole thing today, including the os-v0.3 tag.
+---
