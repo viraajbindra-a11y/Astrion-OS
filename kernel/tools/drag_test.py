@@ -181,7 +181,68 @@ def read_ppm(path):
     return w, h, blob[i:i + w * h * 3]
 
 
+def ink_pixels(before, afters, w, h):
+    """Pixels the drag really PAINTED: accent in EVERY after-shot, and not
+    accent before.
+
+    The last clause is not fussiness. The Terminal grew a blinking caret, and
+    the caret is drawn in the accent colour, so whether it happened to be lit
+    in `after` and dark in `before` decided the verdict -- the suite failed
+    with 'ink pixels: 44, trail spans x 270..271, y 427..448', which is a
+    2x22 text caret sitting nowhere near the drag path, and passed on the next
+    run with the identical kernel. A gate that flips on a blink phase is worse
+    than no gate: it teaches people to re-run until it is green.
+
+    Real ink is baked into the wallpaper and is lit in every shot; a caret is
+    not. THREE shots, 400ms apart, is what makes that decisive rather than
+    lucky: the caret is 530ms on, 530ms off (wm.c CUR_BLINK_MS), and there is
+    no phase in which t, t+400 and t+800 all fall inside a lit half -- x < 130
+    puts t+800 in the dark half, x >= 260 puts t+400 there, and 130..260 puts
+    t+800 there too. Two shots a full period apart would NOT have done it:
+    1.2s is 1.13 cycles, so both shots usually land in the same half, which is
+    exactly the coin flip being removed."""
+    out = []
+    for idx in range(w * h):
+        o = idx * 3
+        if tuple(before[o:o+3]) == ACCENT:
+            continue                      # static chrome, not ink
+        if all(tuple(a[o:o+3]) == ACCENT for a in afters):
+            out.append((idx % w, idx // w))
+    return out
+
+
+def selfcheck():
+    """The ink rule, on synthetic frames. Offline, no QEMU."""
+    w = h = 4
+    bg, ac = bytes((10, 10, 20)), bytes(ACCENT)
+    def frame(lit):
+        return b"".join(ac if i in lit else bg for i in range(w * h))
+    cases = [
+        ("clean drag", frame(set()), [frame(set())] * 3, 0),
+        ("real ink is lit in every after-shot", frame(set()),
+         [frame({5, 6})] * 3, 2),
+        ("a caret lit only in the first after-shot", frame(set()),
+         [frame({5}), frame(set()), frame(set())], 0),
+        ("a caret lit only in the middle", frame(set()),
+         [frame(set()), frame({5}), frame(set())], 0),
+        ("a caret lit in two of three", frame(set()),
+         [frame({5}), frame({5}), frame(set())], 0),
+        ("static accent chrome present before", frame({0}), [frame({0})] * 3, 0),
+        ("ink beside static chrome", frame({0}), [frame({0, 9})] * 3, 1),
+    ]
+    bad = 0
+    for name, b, afters, want in cases:
+        got = len(ink_pixels(b, afters, w, h))
+        ok = got == want
+        bad += not ok
+        print("  %-42s ink %d (want %d) %s" % (name, got, want, "" if ok else "<<<"))
+    print("selfcheck: %s" % ("PASS" if not bad else "%d WRONG" % bad))
+    return 1 if bad else 0
+
+
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] == "--selfcheck":
+        return selfcheck()
     iso, tag = sys.argv[1], sys.argv[2]
     # Third arg is an output directory, matching every other test here. This
     # used to always write beside the script, so a run left .ppm and .log files
@@ -191,9 +252,10 @@ def main():
     os.makedirs(here, exist_ok=True)
     sock = f"/tmp/qmp-{tag}.sock"
     before = os.path.join(here, f"{tag}-before.ppm")
-    after = os.path.join(here, f"{tag}-after.ppm")
+    afters = [os.path.join(here, f"{tag}-after{n}.ppm") for n in (1, 2, 3)]
+    after = afters[0]                       # the frame a human should open
     serial = os.path.join(here, f"{tag}-serial.log")
-    for p in (sock, before, after):
+    for p in (sock, before, *afters):
         if os.path.exists(p):
             os.remove(p)
 
@@ -233,7 +295,12 @@ def main():
             q.rel(-6, 14)
             time.sleep(0.03)
         time.sleep(1.5)
-        q.cmd("screendump", filename=after)
+        # Three shots, 400ms apart, nothing touched in between: see
+        # ink_pixels(). Paint is in all three; a blinking caret cannot be.
+        for i, path in enumerate(afters):
+            if i:
+                time.sleep(0.4)
+            q.cmd("screendump", filename=path)
         q.cmd("quit")
     finally:
         try:
@@ -242,17 +309,15 @@ def main():
             qemu.kill()
 
     bw, bh, bpix = read_ppm(before)
-    aw, ah, apix = read_ppm(after)
-    if (bw, bh) != (aw, ah):
-        raise SystemExit("screendump size changed between shots")
+    shots = []
+    for path in afters:
+        aw, ah, pix = read_ppm(path)
+        if (bw, bh) != (aw, ah):
+            raise SystemExit("screendump size changed between shots")
+        shots.append(pix)
+    apix = shots[0]
 
-    # Ink = a pixel that BECAME accent-coloured across the drag. Comparing to
-    # `before` is what excludes the static accent chrome (dock, top bar).
-    ink = []
-    for idx in range(bw * bh):
-        o = idx * 3
-        if tuple(apix[o:o+3]) == ACCENT and tuple(bpix[o:o+3]) != ACCENT:
-            ink.append((idx % bw, idx // bw))
+    ink = ink_pixels(bpix, shots, bw, bh)
 
     # The live cursor is drawn white when the button is up, so it should not
     # register — but subtract its footprint anyway so a stray accent pixel in
