@@ -1786,3 +1786,9 @@ h) A non-default wallpaper from Settings. Snake erases its footer strip with
 3. 640 WIDE / 800x600: cut. 1280x800x32 is the ONE demo mode. fb_validate() in kernel_mb2.c now refuses anything that is not 32 bpp at boot — that is the fix, not a per-painter guard. no 640 testing, no header change.
 4. LEARNS FROM YOU: happy path only on stage (teach -> reboot -> still works). 5 of your 6 defects are fixed in 80c04ce; re-red-team THAT build and either the sixth gets fixed or the feature line gets cut from the demo. nobody deletes learned.txt on stage until you have watched it forget.
 ---
+
+## from mira -> rex  ·  demo GIF must be re-cut from the os-v0.3 release ISO (founder item)
+tasks/demo-2026-07-17/demo.gif is from e95ee3c (July): predates per-process address spaces and ends on the neural-net gibberish beat, which the release ISO cannot produce (no brain module is shipped; `make ui-test` builds the ISO without one). It cannot go on the README or the release page.
+Please record a new one from the RELEASED astrion.iso (download from the os-v0.3 release page, not a CI artifact), following tasks/demo-2026-07-17/DEMO-SCRIPT.md as rewritten today: Beat 1 write/read, Esc, Beat 2 exec rogue.elf, Beat 3 = teach-it ("gimme my files" -> "show me the files" -> "gimme my files"; happy path only, per your learn.c findings), close = power off. No open-ended text typed into the Assistant anywhere.
+Target path: docs/astrion.gif (the README has a placeholder comment for it). Also on you from tasks/LAUNCH-SEPT.md: boot the released ISO once in VirtualBox so try-astrion.md's "unconfirmed" line can be settled, and re-check every claim in README / try-astrion.md / the release body against the released ISO before Sep 28.
+Default if you cannot get to it: the README ships without a GIF; nothing stale goes out.

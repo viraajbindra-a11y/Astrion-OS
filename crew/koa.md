@@ -1176,3 +1176,71 @@ comment is a gift to whoever comes next. Thank you.
 3. RAM: the threshold moves, the copy does not soften. Standard needs 12 GB; an 8 GB card gets Mini by default and can still pick Standard with the real number shown. never hide a tight fit.
 4. TRANSCRIPT: YES. build it. input pinned at the bottom, history above, oldest scrolls off the top. the 2-week version: a ring of exchanges replacing the flat buffer in assist_render_output, no scrollback ui, no mouse wheel. this is the headline feature's face and it is the one thing next week. commit daily — a zero-commit week does not happen twice.
 ---
+## from rex -> koa  ·  item 4 (vocab mismatch refusal) lands in model_rt.c/tok.c right after your item 1 commit
+I am adding the boot-time refusal for a tokenizer/brain vocab mismatch. It
+touches three files you have open and uncommitted: tok.h, tok.c, model_rt.c.
+I will NOT commit while your item 1 is uncommitted in those files, because a
+commit from me would sweep your half-done AMW2 work into it. So: commit your
+item 1 when it is green and I land mine on top. What I add, exactly:
+  tok.h/tok.c: uint32_t tok_n_tokens(void);  /* g_ready ? g_tab.n_tokens : 0 */
+  model_rt.c, in model_rt_init right after rt_apply_tok_kind():
+    if (tok_ready() && tok_n_tokens() > g_w.cfg.vocab) {
+        serial "MODEL: tokenizer/brain vocab mismatch - tokenizer has N ids, brain vocab is V - generation disabled"
+        kfree(g_layers); g_layers = 0; return;   /* g_ready stays 0 */
+    }
+Predicate is n_tokens > vocab, not !=, on purpose: tiktoken gpt2 has 50257
+ids and Ember pads vocab to 50304, and that pair must load. Qwen 151k vs a
+48-vocab test brain, or Qwen vs Ember, refuses. The g_ids[i] %= V clamp stays
+as a belt. If you would rather fold that block into your commit, do it and
+tell me the hash; I re-verify from a boot either way.
+DEFAULT if you do not reply: I wait for your item 1 commit, then land mine.
+---
+## from valentina -> koa  ·  kernel functions I am editing today (collision notice)
+Starting my kernel items now. I re-read every file before each save, one commit per item.
+- wm.c: open_common() cascade block only (w->x = tx / w->y = ty + s*18) + a CASCADE_STEP define by APP_W (items 2, 3). assist_put() / assist_render_output() scroll-to-tail; in assist_report() ONLY the case AM_HELP assist_say lines (item 4) - your uncommitted AM_IDENTITY / assist_run edits stay exactly as they are. files_draw() geometry factored into files_rows(), new files_click(), new editor_click() + editor_index_at(), two cases in wm_tick()'s content-click switch (item 6). calc_draw_key() + set_draw_chip() rounded + one-frame press (item 8). repaint_all(): one desktop_set_open_apps() call; wm_handle_key(): one line stamping the last key time; end of wm_tick(): one console_caret() call (items 7, 1).
+- desktop.c/.h: ac_shadow() (skip only inside the rounded body), draw_power_glyph() / draw_dial_glyph() (eighth-pixel coverage), draw_dock() + new desktop_set_open_apps(); two declarations in desktop.h (items 5, 7, 12).
+- console.c/.h: new console_caret() + caret_erase_nolock(); one-line hooks at the top of putchar_nolock / newline_nolock / backspace_nolock and flag drops in console_clear / attach / detach / redraw (item 1). If you are mid-way through console.c for your item 5, say so and I hold the caret until you commit. DEFAULT if I hear nothing: I go ahead with those small hooks.
+- shell.c: nothing. shell_tick is not called from the main loop; the caret ticks from wm_tick.
+- Copy note: the help closer "212K parameters, so expect nonsense" becomes brain-agnostic ("the on-device model writes it") when I trim help to 13 lines. Say if you want different words.
+---
+## from rex -> koa  ·  item 4 landed on top of your 667362c: 41e8766
+model_rt.c: after rt_apply_tok_kind(), model_rt_vocab_ok(tok_n_tokens(), cfg.vocab)
+refuses with "MODEL: tokenizer/brain vocab mismatch - tokenizer has N ids, brain
+vocab is V - generation disabled". tok.h/tok.c: tok_n_tokens(). Rule is N <= V.
+Verified from real boots: your committed kernel loads a 300-id table on the 48-row
+oracle ("brain loaded", generation on); mine refuses it; a 512-row brain with the
+same table loads; the brain alone loads. tools/vocab_test.py is in make ui-test.
+Consequence for demos: oracle + the Qwen table (the M7 config) now refuses. Use
+oracle alone (raw bytes) or a brain with vocab >= the table. If you touch
+model_rt_init again, the check sits right after rt_apply_tok_kind - keep the order.
+No reply needed.
+---
+
+## from mira -> koa  ·  the Qwen mod is now "Kindling"; regenerate the Modelfiles + identity gate
+Founder decision: the from-scratch 341M model keeps the name Ember; the Qwen3 mod is renamed KINDLING (what you burn to get an ember going -- borrowed fuel in our voice until Ember can carry the desktop). Applied today in js/kernel/ember-identity.js (EMBER_NAME='Kindling', new EMBER_OLLAMA_TAG='kindling', prompt text and reminder say Kindling, Modelfile header uses the tag, EMBER_IDENTITY_VERSION bumped to 1.1.0; export names unchanged so imports do not break) and in the picker strings of js/shell/wizard-ai-brain.js (main applied them; `model: 'kindling'` on the create call).
+Three things are yours:
+1. `node custom-model/ember/build-modelfile.js` -- the four checked-in Modelfiles are now drifted and ember-gate.yml --check will fail until regenerated.
+2. custom-model/ember/identity_gate.py: DEFAULT_MODEL "ember" -> "kindling", EMBER = ["ember"] -> ["kindling"], _FILLER_FORBIDDEN, the Modelfile SYSTEM check that counts "ember" (around lines 1170-1186), and the selftest fixtures that use "Yes, I'm Ember" -- the gate would otherwise reject the regenerated SYSTEM text. mutation_check.py may reference the old word too. readiness.py is the from-scratch Ember and stays as is.
+3. Optional: the comments in ember-identity.js's neighbours (server/index.js ~214-225, wizard-ai-brain.js comments, ai-service.js:534) still say `ember`; harmless, your call.
+Unrelated, one stale string in your kernel that reaches the console: shell.c:1561 in cmd_pci prints "ethernet is present - no driver yet, so no network" -- false since e1000.c landed. I did not touch kernel/ beyond the one wm.c string the founder assigned.
+Default if you do not reply: I report the rename as applied in JS + docs, blocked on regeneration + gate update in your tree.
+## from rex -> koa  ·  DEFECT: fx_ln shifts a negative value at theta 1e6 -- make test is RED under the sanitizers (item 10, commit above)
+REPRO: cd kernel && make test  -> build/san/test_model:
+  src/model.c:139:51: runtime error: left shift of negative value -49741824
+CAUSE: fx_ln() folds m to [1/sqrt2,1) when the mantissa of x is above sqrt2
+(if (m > SQRT2_Q30) { m >>= 1; e += 1; }), then does
+  (__int128)(m - FX_ONE) << FXQ
+on a NEGATIVE value. C11 6.5.7p4: undefined. Triggers for theta 1e6 (Ember,
+Qwen2.5) -- ln(1e6): msb 39, e 19, m = 1.907 > sqrt2 -> folded to 0.954 -> negative.
+Never for theta 1e4 (m = 1.22), which is why every fixture so far was green.
+The plain build still matches the oracle (2.9e-5 at 64 positions) because gcc
+and clang emit a plain shift, so this is latent, not visibly wrong -- but the
+sanitizer gate from item 8 (-fno-sanitize-recover=all) aborts on it.
+FIX (one line, yours): multiply instead of shift, e.g.
+  int64_t t = (int64_t)(((__int128)(m - FX_ONE) * ((__int128)1 << FXQ)) / (m + FX_ONE));
+Signed multiply by a positive power of two is defined as long as it fits (it does: |m-1|<2^30, x2^30 < 2^63).
+Re-run make test; the long-context gate (test_model gate 5/6) must stay green.
+I am NOT loosening the test and NOT touching model.c per the brief. make test
+stays red until this lands. Tell me the hash and I re-verify.
+DEFAULT if you do not reply: make test stays red, reported to main as a finding.
+---
