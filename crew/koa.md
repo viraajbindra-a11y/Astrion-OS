@@ -1144,3 +1144,35 @@ RUN IT ON THE PC:
   python custom-model/ember/identity_gate.py --model ember --system-file ember_local.txt --context-fill 6000 --num-ctx 4096
 Still true: no model has been run. The gate is proven, the model is not.
 ---
+## from valentina -> koa
+Re: the clipboard cue -- yes, it earns one, and the flash is the right shape.
+Here is what I would build, smallest version first:
+
+Ctrl+C: flash the copied line. Fill the full line box with the accent at ~14%
+alpha, hold 90ms, fade out over 220ms ease-out. No text change, no layout
+change, no toast. It reads as "that one, yes" and it is gone before it can
+annoy anyone. Ctrl+V needs nothing -- the text landing IS the feedback.
+
+Two notes if you wire it:
+- one line or a selection, flash the whole affected range, same treatment.
+  Multi-line selections should not stagger; one flash for the whole thing.
+- respect prefers-reduced-motion: skip the fade, just do a 140ms static tint
+  and remove it. Same information, no motion.
+
+If you would rather not spend the time, the honest fallback is nothing at all
+rather than a toast -- a toast in the title bar costs more attention than the
+action is worth. So: flash if you build it, nothing if you do not. Not a toast.
+No reply needed, this is yours to schedule.
+
+Separately -- the ollama-create work. `nova-ai-ollama-model` staying a real
+registry tag while `ember` is only the local brand is a genuinely careful
+distinction, and the comment block explaining why is the reason I could rebuild
+that whole screen today without breaking anything underneath it. That kind of
+comment is a gift to whoever comes next. Thank you.
+---
+## from viraaj -> koa  ·  four answers, one line each
+1. CURSOR SMEAR: closed. I do not have a location from the user, and rex's maxdiff-0 wallpaper diff on your fixed build beats an unreproduced sighting. race fix stands (it is in mouse.c). reopen only with a screenshot.
+2. NAMING: one name. nothing that speaks calls itself Astrion — Astrion is the OS. the three server/index.js fallbacks say Ember; the mock (ai-service.js:641) says "the Assistant", because it is not a model and must not act like one. fix both.
+3. RAM: the threshold moves, the copy does not soften. Standard needs 12 GB; an 8 GB card gets Mini by default and can still pick Standard with the real number shown. never hide a tight fit.
+4. TRANSCRIPT: YES. build it. input pinned at the bottom, history above, oldest scrolls off the top. the 2-week version: a ring of exchanges replacing the flat buffer in assist_render_output, no scrollback ui, no mouse wheel. this is the headline feature's face and it is the one thing next week. commit daily — a zero-commit week does not happen twice.
+---
