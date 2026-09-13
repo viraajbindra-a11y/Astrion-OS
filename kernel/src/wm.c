@@ -3193,7 +3193,7 @@ static void open_common(enum app_kind app) {
              * composed around it. */
             desktop_terminal_frame(&w->x, &w->y, &w->w, &w->h);
         } else {
-            /* Cascade from the TERMINAL's left edge, not from screen centre.
+            /* Cascade from the TERMINAL's edges, not from screen centre.
              *
              * Centring a narrower window over a wider one and then nudging it
              * right left a ~117px vertical sliver of the Terminal showing down
@@ -3201,6 +3201,27 @@ static void open_common(enum app_kind app) {
              * "As / No / Ne / It / un / th / Or / as". It does not read as two
              * windows, it reads as corrupted memory, and it was in every
              * screenshot anyone would take of any app.
+             *
+             * WHICH edge depends on how much Terminal the window leaves bare,
+             * because the Terminal's text hangs off its LEFT edge and its
+             * right third is nearly always empty:
+             *
+             *  - a window that covers most of it (Files, Editor, Assistant:
+             *    860 of 984px) sits on the LEFT edge. The 124px it leaves on
+             *    the right is past the end of every line, so it is one clean
+             *    band of terminal background.
+             *  - a narrow window (Calculator 340, Monitor ~440, Settings 560)
+             *    sits on the RIGHT edge. Left-anchored, those left the TAILS
+             *    of lines showing: "ole thing. / iles what version / n / t / ."
+             *    -- fragments with no beginnings, which is the sliver bug
+             *    again on the other side. Right-anchored, what shows is the
+             *    HEAD of every line, which reads as text under a window, and
+             *    for the Calculator and the Monitor the bare band is the
+             *    Terminal's empty right third, so nothing is cut at all.
+             *
+             * The threshold is a third of the Terminal's width: below that the
+             * bare band cannot hold a readable run of words and the right side
+             * is the safer bet; above it the band is a column of line heads.
              *
              * Vertical step of one title bar plus air, so each title stays
              * whole above the next window: at 18px, under a 30px title bar,
@@ -3217,7 +3238,9 @@ static void open_common(enum app_kind app) {
              * two windows still cannot land on each other. */
             uint32_t tx, ty, tw, th;
             desktop_terminal_frame(&tx, &ty, &tw, &th);
-            w->x = tx;
+            uint32_t bare = (tw > w->w) ? tw - w->w : 0;   /* Terminal left uncovered */
+            if (bare * 3 >= tw)  w->x = tx + tw - w->w;    /* narrow: flush right */
+            else                 w->x = tx;                /* wide: flush left */
             if (w->w > SW - tx) w->x = (SW > w->w) ? (SW - w->w) / 2 : 0;
             w->y = ty + cascade_free_step(ty, w->h) * CASCADE_STEP;
             /* Never let the cascade push a window under the dock. */
