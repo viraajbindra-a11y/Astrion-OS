@@ -160,6 +160,19 @@ def main():
     out = sys.argv[2] if len(sys.argv) > 2 else "."
     os.makedirs(out, exist_ok=True)
     only = sys.argv[3:] or None
+    # A filter that matches nothing must be an ERROR, not a pass. Without this
+    # the loop below runs zero times, ok_n and len(results) are both 0, and the
+    # script prints "0/0 icons behaved" and exits 0 - a green run that booted
+    # nothing and clicked nothing. Found by calling this with the OLD argument
+    # order (iso, tag, outdir), where the outdir landed in argv[3:] and became
+    # an icon filter that matched no icon. One typo in a name would do the same.
+    if only:
+        known = {n for n, _ in DOCK}
+        unknown = [n for n in only if n not in known]
+        if unknown:
+            print(f"dock: no such icon(s): {', '.join(unknown)}")
+            print(f"dock: known icons are {', '.join(sorted(known))}")
+            return 2
 
     results = []
     for name, x in DOCK:
