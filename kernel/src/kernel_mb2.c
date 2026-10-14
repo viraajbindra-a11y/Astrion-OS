@@ -956,6 +956,27 @@ void kernel_mb2_main(uint32_t magic, uint64_t info_ptr) {
      * is gated on it. Nothing may touch the framebuffer until this has run. */
     fb_validate();
 
+    /* GDT + IDT NOW, before the heap, the PMM, the brain loader, PCI, the
+     * NIC, ATA and the filesystem - every one of those parses something it
+     * was handed (a memory map, a module, a device, a disk image) and a bug
+     * in any of them used to be a silent triple-fault reboot loop: no panic
+     * text, no serial, no idea which. With the table in place a fault lands
+     * on isr_handler and prints its vector, RIP and registers on serial and
+     * on the screen fb_validate() just approved. Interrupts stay masked until
+     * the end of boot, so only exceptions can reach the table this early,
+     * which is exactly the point. Both are self-contained: static tables and
+     * static IST stacks, nothing from the heap.
+     *
+     * GDT first: the boot GDT (null + one ring-0 code seg) is replaced with a
+     * full set - kernel code/data, ring-3 code/data, and a TSS - so we can
+     * run user programs at CPL 3; the IST stacks the IDT references live in
+     * that TSS. The kernel code selector stays 0x08, so the gates are valid. */
+    extern void gdt_install(void);
+    gdt_install();
+    serial_puts("IDT: installing 256-entry table (32 exceptions + 16 IRQs)...\n");
+    idt_install();
+    serial_puts("IDT: loaded - faults from here on panic visibly\n");
+
     serial_puts("\n");
     paint_boot_screen();
 
@@ -1156,19 +1177,8 @@ void kernel_mb2_main(uint32_t magic, uint64_t info_ptr) {
     serial_put_u32((uint32_t)learn_count());
     serial_puts(" remembered phrasing(s)\n");
 
-    /* GDT rebuild: replace the boot GDT (null + one ring-0 code seg) with a
-     * full set — kernel code/data, ring-3 code/data, and a TSS — so we can
-     * run user programs at CPL 3. Must precede the IDT (the IST stacks the
-     * IDT references live in the TSS) and any ring-3 entry. The kernel code
-     * selector stays 0x08, so the IDT's gates remain valid. */
-    extern void gdt_install(void);
-    gdt_install();
-
-    /* IDT - any later fault should panic visibly, not silently
-     * triple-fault. */
-    serial_puts("IDT: installing 256-entry table (32 exceptions + 16 IRQs)...\n");
-    idt_install();
-    serial_puts("IDT: loaded\n");
+    /* (GDT + IDT went in right after fb_validate() - see there. Everything
+     * from the heap down to the filesystem has been able to fault visibly.) */
 
     /* Remap legacy PIC IRQs 0..15 onto vectors 32..47. Mask everything
      * by default; the drivers below unmask their own lines. */
