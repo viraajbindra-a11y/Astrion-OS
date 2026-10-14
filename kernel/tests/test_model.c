@@ -163,6 +163,26 @@ static void build_state(struct model_state *st, const struct model_config *c)
     model_rope_init(st, c);
 }
 
+/* Give every build_* an undo. LeakSanitizer is part of -fsanitize=address on
+ * Linux and NOT on macOS, so a harness that mallocs a dozen buffers per state
+ * and never frees them passes `make test` on this laptop and fails it in CI -
+ * which is exactly what happened: 389,528 bytes in 96 allocations, caught only
+ * when the release workflow ran the same target on ubuntu. The local green was
+ * the weaker gate.
+ *
+ * It is a test-harness leak, not a kernel one - the kernel allocates these from
+ * the PMM and never from malloc - but a leaking harness makes LSan useless for
+ * finding the day a real one appears, which is the whole reason the sanitizer
+ * build exists. */
+static void free_state(struct model_state *st)
+{
+    free(st->kcache); free(st->vcache); free(st->inv_freq);
+    free(st->x); free(st->xn); free(st->q); free(st->heads);
+    free(st->scores); free(st->ff1); free(st->ff2); free(st->tmp);
+    free(st->act_fix); free(st->act_q); free(st->act_qg);
+    memset(st, 0, sizeof *st);
+}
+
 static void build_trace(struct model_trace *t, const struct model_config *c)
 {
     size_t D = c->dim, NL = c->n_layers;
@@ -174,6 +194,39 @@ static void build_trace(struct model_trace *t, const struct model_config *c)
     t->mlp   = malloc(NL * D * sizeof(int64_t));
     t->xout  = malloc(NL * D * sizeof(int64_t));
     t->final_norm = malloc(D * sizeof(int64_t));
+}
+
+static void free_trace(struct model_trace *t)
+{
+    free(t->ln1); free(t->qrope); free(t->krope); free(t->attn);
+    free(t->ln2); free(t->mlp); free(t->xout); free(t->final_norm);
+    memset(t, 0, sizeof *t);
+}
+
+static void free_matrix(struct model_matrix *M)
+{
+    free((void *)M->full); free((void *)M->q); free((void *)M->qg);
+    M->full = NULL; M->q = NULL; M->qg = NULL;
+}
+
+static void free_weights(struct model_weights *w)
+{
+    struct model_layer *layers = (struct model_layer *)w->layers;
+    for (uint32_t l = 0; l < w->cfg.n_layers; l++) {
+        struct model_layer *L = &layers[l];
+        free((void *)L->ln1); free((void *)L->ln2);
+        free((void *)L->bq);  free((void *)L->bk);  free((void *)L->bv);
+        /* qk_g is NULL until the qk-on gate allocates it; free() of NULL is
+         * defined and does nothing, so this is correct in both orders. */
+        free((void *)L->qk_g);
+        free_matrix(&L->wq); free_matrix(&L->wk); free_matrix(&L->wv);
+        free_matrix(&L->wo); free_matrix(&L->w_gate);
+        free_matrix(&L->w_up); free_matrix(&L->w_down);
+    }
+    free(layers);
+    free_matrix(&w->lm_head);
+    free((void *)w->embed); free((void *)w->final_ln);
+    memset(w, 0, sizeof *w);
 }
 
 /* Per-op max absolute deviation from the oracle, accumulated over the run. */
@@ -503,7 +556,15 @@ int main(void)
             }
             free(ks); free(vs);
         }
+        /* wl is a COPY of w carrying the same weight pointers, so only its
+         * STATE is ours to free here - free_weights(&wl) would double-free
+         * every matrix in w. */
+        free_state(&sl);
     }
+
+    free_state(&st);
+    free_trace(&tr);
+    free_weights(&w);
 
     printf("\nfailures  %d\n", failures);
     printf(failures ? "FAILED\n" : "PASS\n");
