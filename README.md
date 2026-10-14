@@ -40,7 +40,7 @@ is, it produces English-shaped text, not answers, and we say so on screen.
   under QEMU. Nothing is built on top of it. No browser.
 - No USB, no SMP, ATA-PIO only, cannot be installed to a disk.
 
-Source: [`kernel/`](kernel/). Plan: [`tasks/LAUNCH-SEPT.md`](tasks/LAUNCH-SEPT.md).
+Source: [`kernel/`](kernel/). Plan: [`tasks/LAUNCH.md`](tasks/LAUNCH.md).
 
 ## Who wrote it
 

@@ -1,4 +1,4 @@
-> **SUPERSEDED (2026-09-13) — see tasks/LAUNCH-SEPT.md.** Aug 31 is dead; the launch is Sep 28 and the ten-line checklist lives there. Item 7 below (release, README, deploy) was green-lit and done 2026-09-13. The hardware notes are still useful and still true: never booted on metal.
+> **SUPERSEDED (2026-09-13) — see tasks/LAUNCH.md.** Aug 31 is dead; the launch is Sep 28 and the ten-line checklist lives there. Item 7 below (release, README, deploy) was green-lit and done 2026-09-13. The hardware notes are still useful and still true: never booted on metal.
 
 # Your checklist — things only you can do (Jul 18 → Aug 31)
 

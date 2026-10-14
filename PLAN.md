@@ -1,6 +1,6 @@
 # Astrion OS — PLAN v2
 
-> **Scope note (2026-09-13):** this is the architecture plan for the **web desktop track**, frozen until Oct 1 (`tasks/PLAN-SEPT.md`). The product that launches Sep 28 is the from-scratch kernel in `kernel/`; see `tasks/LAUNCH-SEPT.md`. Three factual corrections are inline below, marked *2026-09-13*.
+> **Scope note (2026-09-13):** this is the architecture plan for the **web desktop track**, frozen until Oct 1 (`tasks/PLAN-SEPT.md`). The product that launches Sep 28 is the from-scratch kernel in `kernel/`; see `tasks/LAUNCH.md`. Three factual corrections are inline below, marked *2026-09-13*.
 
 *A rewrite of the plan after an adversarial audit of v1. Written so a 12-year-old (me) can read it and still precise enough to guide real code.*
 

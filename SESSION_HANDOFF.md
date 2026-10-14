@@ -1,4 +1,4 @@
-> **SUPERSEDED (2026-09-13) — see tasks/LAUNCH-SEPT.md.** April 2026 handoff for the web-desktop track (frozen until Oct 1). The "80 apps" below was the count at the time; `js/apps/` holds 78 app files today (62 real + 16 toys).
+> **SUPERSEDED (2026-09-13) — see tasks/LAUNCH.md.** April 2026 handoff for the web-desktop track (frozen until Oct 1). The "80 apps" below was the count at the time; `js/apps/` holds 78 app files today (62 real + 16 toys).
 
 # Session Handoff: M4 dock + Ollama JSON-mode + M7 Skill Marketplace + M8 Self-Mod Substrate
 

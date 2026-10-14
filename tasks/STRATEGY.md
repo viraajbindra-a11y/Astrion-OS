@@ -1,4 +1,4 @@
-> **SUPERSEDED (2026-09-13) — see tasks/LAUNCH-SEPT.md.** Kept for the reasoning; the dates and the "no network stack" wording below are stale. The kernel now has a NIC driver and a small stack for the Terminal; the true sentence is: *the AI lives inside the kernel and has no path to the network.*
+> **SUPERSEDED (2026-09-13) — see tasks/LAUNCH.md.** Kept for the reasoning; the dates and the "no network stack" wording below are stale. The kernel now has a NIC driver and a small stack for the Terminal; the true sentence is: *the AI lives inside the kernel and has no path to the network.*
 
 # Astrion — How We Win (Strategy)
 
@@ -78,7 +78,7 @@ a great chatbot, but it can be a great **local command layer**.
 
 ---
 
-## How we PROVE it — the August-end MVP *(dates superseded; see LAUNCH-SEPT.md)*
+## How we PROVE it — the August-end MVP *(dates superseded; see LAUNCH.md)*
 
 **Definition of the launchable MVP:** a from-scratch AI-native OS where you
 talk to it in plain English and it **safely does real things, fully offline**,
@@ -102,7 +102,7 @@ The proof still to build (the differentiator):
    it's different" so a stranger can boot it and get it. *(os-v0.3 +
    docs/try-astrion.md.)*
 
-Roadmap: see `tasks/LAUNCH-SEPT.md`. Tier 3 depth (per-process spaces) landed;
+Roadmap: see `tasks/LAUNCH.md`. Tier 3 depth (per-process spaces) landed;
 Tier 4 (real hardware) remains a bonus, not a blocker for "launchable."
 
 **North star:** someone boots Astrion with no internet, types a sentence, and

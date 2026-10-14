@@ -1,4 +1,4 @@
-> **SUPERSEDED (2026-09-13) — see tasks/LAUNCH-SEPT.md.** The Dec 21 date, the web-desktop launch and every phase below are dead. The product is the from-scratch kernel; it launches Sep 28. Kept for the reasoning only.
+> **SUPERSEDED (2026-09-13) — see tasks/LAUNCH.md.** The Dec 21 date, the web-desktop launch and every phase below are dead. The product is the from-scratch kernel; it launches Sep 28. Kept for the reasoning only.
 
 # Astrion OS — Road to v1.0 on December 21, 2026 (v3, post-audit)
 

@@ -7,7 +7,7 @@ releases ship and what `docs/try-astrion.md` tells people to boot.
 
 The web desktop in the repo root (`js/`, `server/`, `distro/`) is the older
 track and is frozen until Oct 1, 2026 (`tasks/PLAN-SEPT.md`). Plan and dates:
-`tasks/LAUNCH-SEPT.md`.
+`tasks/LAUNCH.md`.
 
 ## Status (2026-09-13)
 

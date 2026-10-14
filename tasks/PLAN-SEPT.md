@@ -1,7 +1,7 @@
 # The plan — launch Sunday 2026-09-28
 
 > **Amended 2026-09-13.** The date and the checklist now live in
-> [`LAUNCH-SEPT.md`](LAUNCH-SEPT.md). Two decisions recorded here, both the
+> [`LAUNCH.md`](LAUNCH.md). Two decisions recorded here, both the
 > founder's:
 >
 > **Decision 1 (2026-09-13) — the web track is frozen until Oct 1, 2026.**
@@ -13,7 +13,7 @@
 > **Decision 2 (2026-09-13) — the browser is cut from September.** The
 > "September — BROWSER" section below is void. There is no TCP or HTTP in the
 > kernel; what exists is an e1000 driver with ARP, DHCP, ICMP and DNS for the
-> Terminal's `net` command, and it is first on the cut list in `LAUNCH-SEPT.md`.
+> Terminal's `net` command, and it is first on the cut list in `LAUNCH.md`.
 > The browser is an **October** item at the earliest, and only after the
 > network stack has been red-teamed. "It browses" is not a launch milestone.
 

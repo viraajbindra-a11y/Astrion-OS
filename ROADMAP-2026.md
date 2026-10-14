@@ -1,4 +1,4 @@
-> **SUPERSEDED (2026-09-13) — see tasks/LAUNCH-SEPT.md.** The Dec 21 date and every phase below belong to the web-desktop track, which is frozen until Oct 1. The product is the from-scratch kernel; it launches Sep 28. Kept for the reasoning only.
+> **SUPERSEDED (2026-09-13) — see tasks/LAUNCH.md.** The Dec 21 date and every phase below belong to the web-desktop track, which is frozen until Oct 1. The product is the from-scratch kernel; it launches Sep 28. Kept for the reasoning only.
 
 # Astrion OS — Roadmap to v1.0 (Apr 20 → Dec 21, 2026)
 
