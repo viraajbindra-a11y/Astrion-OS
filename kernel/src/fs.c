@@ -501,16 +501,45 @@ uint32_t fs_total_bytes(void) {
 
 /* ─── Persistence ─────────────────────────────────────────
  *
- * On-disk layout (little-endian):
+ * On-disk layout (little-endian). TWO SLOTS, A and B, each a superblock
+ * sector followed by up to FS_LOAD_MAX of packed image:
  *
- *   sector 0 = superblock:
+ *   slot A: superblock at LBA 0,          image at LBA 1..
+ *   slot B: superblock at LBA FS_SLOT_B,  image at LBA FS_SLOT_B+1..
+ *
+ *   superblock:
  *     u32 magic = 0xA570F500
- *     u32 version = 2
+ *     u32 version = 3
  *     u32 node_count
  *     u32 total_data_bytes (sum of all file sizes)
- *     u8  reserved[496]
+ *     u64 seq              (v3: this slot's generation; higher is newer)
+ *     u32 image_bytes      (v3: packed image length, a multiple of 512)
+ *     u32 crc              (v3: CRC-32 of those image_bytes)
+ *     u8  reserved[480]
  *
- *   sectors 1..N = node table, packed:
+ * WHY TWO SLOTS. A sync used to write the superblock to sector 0 FIRST and
+ * the data after it, in place, over the previous image. A crash or reset
+ * in the middle - and PIO takes seconds for a big image - left sector 0
+ * describing nodes whose bytes were half old image, half new; the next
+ * boot failed the parse, seeded, and the sync after that wrote the seeds
+ * over what was left. Total loss from one badly-timed power cut. Writing
+ * the data first and the superblock last does not fix that on its own,
+ * because the data still lands on top of the only copy.
+ *
+ * So: every sync writes the slot the loaded image is NOT in - data
+ * sectors first, superblock last, carrying seq = loaded seq + 1 and a
+ * CRC of the image. The loader reads both superblocks, takes the highest
+ * seq whose CRC matches its image, and falls back to the other slot if
+ * that check fails. A crash at ANY point of a sync leaves the previous
+ * image untouched in the other slot; a torn superblock or torn data
+ * fails its CRC and the older generation loads instead, saying so. A v2
+ * disk (one slot, no seq/CRC) loads as slot A at seq 0, and the next
+ * sync writes slot B, so nothing a v2 kernel wrote is disturbed until
+ * the sync after that has already replaced it. A disk too small for two
+ * slots (under ~16 MiB) uses slot A only, with the torn-write detection
+ * but without the fallback, and says so once per sync.
+ *
+ *   image sectors, packed:
  *     u32 magic_node = 0xA570F510
  *     u32 kind
  *     u32 size           (payload bytes in data, file only)
@@ -529,10 +558,9 @@ uint32_t fs_total_bytes(void) {
  * v1 image is REJECTED by the version check rather than misread (a v1
  * leaf name would otherwise parse as a bogus relative path).
  *
- * The serializer rounds each node's total bytes up to 512, and
- * keeps writing more sectors as needed. The deserializer reads
- * sector 0, validates magic, then walks the tail sectors one by
- * one, allocating fs_nodes on the heap.
+ * The serializer rounds the image up to 512 and keeps writing sectors
+ * as needed. The deserializer reads a superblock, validates magic +
+ * version + CRC, then walks the image, allocating fs_nodes on the heap.
  *
  * Keeping a single contiguous append-style serialization makes
  * this trivially robust for the MVP. Fragmentation, free lists,
@@ -541,7 +569,8 @@ uint32_t fs_total_bytes(void) {
 
 #define MAGIC_SB    0xA570F500u
 #define MAGIC_NODE  0xA570F510u
-#define FS_VERSION  2u
+#define FS_VERSION  3u
+#define FS_VERSION_LEGACY 2u   /* one slot, no seq/CRC: read, never written */
 
 /* Sanity ceilings for parsing an UNTRUSTED on-disk image. node_count
  * and total_data_bytes come straight off the disk; without caps a
@@ -555,8 +584,45 @@ struct sb {
     uint32_t version;
     uint32_t node_count;
     uint32_t total_data_bytes;
-    uint8_t  reserved[496];
+    uint64_t seq;               /* v3 */
+    uint32_t image_bytes;       /* v3 */
+    uint32_t crc;               /* v3 */
+    uint8_t  reserved[480];
 } __attribute__((packed));
+
+/* Slot geometry, in sectors. An image is at most FS_LOAD_MAX bytes
+ * (image_fits), so a slot is one superblock + that many sectors, and
+ * slot B starts right after slot A's last possible sector. */
+#define FS_SLOT_SECTORS (1u + FS_LOAD_MAX / 512u)     /* 16385 */
+#define FS_SLOT_B       FS_SLOT_SECTORS
+#define FS_SLOT_LBA(slot) ((slot) ? FS_SLOT_B : 0u)
+
+/* Which slot the tree in RAM came from, and its generation. -1 = none
+ * (a fresh or foreign disk): the first sync then writes slot A at seq 1. */
+static int      active_slot = -1;
+static uint64_t active_seq;
+
+/* CRC-32 (IEEE 802.3, reflected, poly 0xEDB88320) over the packed image.
+ * Byte-at-a-time from a 256-entry table built on first use: an 8 MiB image
+ * is a few tens of ms, and a typical one is kilobytes. This is what tells
+ * a torn write from a whole one - the parse alone cannot, since a node
+ * record can be perfectly well-formed and still be from the wrong sync. */
+static uint32_t crc_table[256];
+static int      crc_ready;
+
+static uint32_t crc32_image(const uint8_t *p, uint32_t n) {
+    if (!crc_ready) {
+        for (uint32_t i = 0; i < 256; i++) {
+            uint32_t c = i;
+            for (int k = 0; k < 8; k++) c = (c & 1u) ? (0xEDB88320u ^ (c >> 1)) : (c >> 1);
+            crc_table[i] = c;
+        }
+        crc_ready = 1;
+    }
+    uint32_t c = 0xFFFFFFFFu;
+    for (uint32_t i = 0; i < n; i++) c = crc_table[(c ^ p[i]) & 0xFFu] ^ (c >> 8);
+    return c ^ 0xFFFFFFFFu;
+}
 
 struct node_hdr {
     uint32_t magic;
@@ -754,24 +820,44 @@ int fs_sync(void) {
     }
     fs_unlock(lf);      /* snapshot taken; the disk part runs with IRQs on */
 
-    /* Build + write superblock at sector 0. Both casts are the ones
-     * image_fits() just vetted. */
+    /* Pick the slot: the one the loaded image is NOT in, so the previous
+     * generation survives this write whatever happens to it. A disk with
+     * no room for slot B gets slot A every time - still CRC-checked, but
+     * a crash mid-sync then has nothing older to fall back on. */
+    int slot = active_slot == 0 ? 1 : 0;
+    if (slot == 1 && (uint64_t)FS_SLOT_B + 1u + total / 512u > ata_total_sectors()) {
+        serial_puts_x("fs: disk too small for a second image slot - syncing in place (no crash fallback)\n");
+        slot = 0;
+    }
+    uint32_t base = FS_SLOT_LBA(slot);
+
+    /* Data sectors FIRST, starting one past the slot's superblock. */
     int rc = 0;
-    zr(sec_buf, 512);
+    uint32_t lba = base + 1;
+    for (uint32_t i = 0; rc == 0 && i < total; i += 512) {
+        if (ata_write_sector(lba, flat_buf + i) != 0) rc = -1;
+        lba++;
+    }
+
+    /* Superblock LAST: until this sector lands, the slot still describes
+     * whatever it held before. Both casts are the ones image_fits() vetted. */
     struct sb sb;
+    zr((uint8_t *)&sb, sizeof(sb));
     sb.magic = MAGIC_SB;
     sb.version = FS_VERSION;
     sb.node_count = (uint32_t)count;
     sb.total_data_bytes = (uint32_t)data_bytes;
-    zr(sb.reserved, sizeof(sb.reserved));
+    sb.seq = active_seq + 1u;
+    sb.image_bytes = total;
+    sb.crc = crc32_image(flat_buf, total);
+    zr(sec_buf, 512);
     cp(sec_buf, (const uint8_t *)&sb, sizeof(sb));
-    if (ata_write_sector(0, sec_buf) != 0) rc = -1;
+    if (rc == 0 && ata_write_sector(base, sec_buf) != 0) rc = -1;
 
-    /* Write data sectors starting at LBA 1. */
-    uint32_t lba = 1;
-    for (uint32_t i = 0; rc == 0 && i < total; i += 512) {
-        if (ata_write_sector(lba, flat_buf + i) != 0) rc = -1;
-        lba++;
+    if (rc == 0) {
+        /* The tree in RAM is now this generation, in this slot. */
+        active_slot = slot;
+        active_seq  = sb.seq;
     }
     kfree(flat_buf);
     sync_release();
@@ -798,53 +884,146 @@ static int load_failed(const char *why) {
  * early return goes through load_done() so the flag cannot leak. */
 static int load_done(int rc) { sync_release(); return rc; }
 
+/* Read one slot's superblock and say whether it names an image we could
+ * load: magic, a version we read, and for v3 a sane image length. Fills
+ * *out; returns 1 if it is a candidate, 0 if not (a foreign/blank sector,
+ * a v2 superblock anywhere but slot A, a torn v3 header). Says nothing:
+ * the caller decides what is worth a line. */
+static int sb_candidate(int slot, struct sb *out) {
+    uint32_t base = FS_SLOT_LBA(slot);
+    if (base >= ata_total_sectors()) return 0;               /* slot past the disk */
+    if (ata_read_sector(base, sec_buf) != 0) return 0;
+    cp((uint8_t *)out, sec_buf, sizeof(*out));
+    if (out->magic != MAGIC_SB) return 0;
+    if (out->version == FS_VERSION_LEGACY) {
+        if (slot != 0) return 0;                             /* v2 only ever lived at 0 */
+        out->seq = 0;                                        /* oldest possible */
+        out->image_bytes = 0;                                /* "use the budget" */
+        out->crc = 0;
+        return 1;
+    }
+    if (out->version != FS_VERSION) return 0;
+    if (out->image_bytes == 0 || (out->image_bytes & 511u) != 0) return 0;
+    if (out->image_bytes > FS_LOAD_MAX) return 0;
+    return 1;
+}
+
+/* Read slot `slot`'s image as described by `sb` into a fresh kmalloc buffer
+ * of *out_bytes bytes (a multiple of 512), CRC-checked for v3. Returns the
+ * buffer, or 0 with a reason in *why. */
+static uint8_t *read_image(int slot, const struct sb *sb, uint32_t *out_bytes, const char **why) {
+    uint32_t bytes = sb->version == FS_VERSION_LEGACY
+        ? round_up((uint32_t)image_budget(sb->node_count, sb->total_data_bytes), 512)
+        : sb->image_bytes;
+    uint8_t *buf = (uint8_t *)kmalloc(bytes);
+    if (!buf) { *why = "out of heap for the read buffer"; return 0; }
+    uint32_t lba = FS_SLOT_LBA(slot) + 1;
+    for (uint32_t i = 0; i < bytes; i += 512) {
+        if (ata_read_sector(lba, buf + i) != 0) { kfree(buf); *why = "disk read error"; return 0; }
+        lba++;
+    }
+    if (sb->version != FS_VERSION_LEGACY && crc32_image(buf, bytes) != sb->crc) {
+        kfree(buf); *why = "its CRC does not match (a torn write)"; return 0;
+    }
+    *out_bytes = bytes;
+    return buf;
+}
+
+static int load_image(int slot, const struct sb *sb, const uint8_t *buf, uint32_t bytes);
+
 int fs_load_from_disk(void) {
     if (!ata_present()) return -1;
     if (!sync_acquire()) return -1;
-    if (ata_read_sector(0, sec_buf) != 0) return load_done(-1);
-    struct sb sb;
-    cp((uint8_t *)&sb, sec_buf, sizeof(sb));
 
-    /* Nothing of ours on this platter - a blank or foreign disk. Not an
-     * error and not worth a word: fs_init seeds and moves on. */
-    if (sb.magic != MAGIC_SB) return load_done(-1);
-
-    /* A real image, but not a format we read (v1 stored leaf names, which
-     * would parse as bogus relative paths). Declining is correct; doing it
-     * silently isn't, because those files are real and the next sync lands
-     * on top of them. */
-    if (sb.version != FS_VERSION) {
-        serial_puts_x("fs: disk holds a v");
-        serial_put_u64_x(sb.version);
-        serial_puts_x(" image; this kernel reads v2 only - ignoring it and booting seeds.\n"
-                      "fs: the old image stays on disk until something syncs over it.\n");
+    /* Both slots, newest first. Nothing of ours in either - a blank or
+     * foreign disk - is not an error and not worth a word: fs_init seeds
+     * and moves on. A v-other-than-2-or-3 header IS worth one: those files
+     * are real and the next sync would land on top of them. */
+    struct sb cand[2];
+    int have[2];
+    for (int i = 0; i < 2; i++) have[i] = sb_candidate(i, &cand[i]);
+    if (!have[0] && !have[1]) {
+        struct sb raw;
+        if (ata_read_sector(0, sec_buf) == 0) {
+            cp((uint8_t *)&raw, sec_buf, sizeof(raw));
+            if (raw.magic == MAGIC_SB) {
+                serial_puts_x("fs: disk holds a v");
+                serial_put_u64_x(raw.version);
+                serial_puts_x(" image; this kernel reads v2 and v3 only - ignoring it and booting seeds.\n"
+                              "fs: the old image stays on disk until something syncs over it.\n");
+            }
+        }
         return load_done(-1);
     }
-    if (sb.node_count == 0) return load_done(0);  /* clean disk; nothing to load */
-
-    /* How many bytes to slurp - and whether to slurp at all. Same function
-     * fs_sync() clears an image through before writing it, so our own sync
-     * can no longer produce anything that lands here. A superblock that
-     * still fails this is corrupt, hostile, or was written by a kernel with
-     * wider caps than ours. */
-    if (!image_fits(sb.node_count, sb.total_data_bytes)) {
-        serial_puts_x("fs: superblock claims ");
-        serial_put_u64_x(sb.node_count);
-        serial_puts_x(" nodes / ");
-        serial_put_u64_x(sb.total_data_bytes);
-        serial_puts_x(" data bytes\n");
-        return load_done(load_failed("that doesn't fit the load caps (corrupt, hostile, or from a wider-capped kernel)"));
-    }
-    uint32_t bytes = round_up((uint32_t)image_budget(sb.node_count, sb.total_data_bytes), 512);
-
-    uint8_t *buf = (uint8_t *)kmalloc(bytes);
-    if (!buf) return load_done(load_failed("out of heap for the read buffer"));
-    uint32_t lba = 1;
-    for (uint32_t i = 0; i < bytes; i += 512) {
-        if (ata_read_sector(lba, buf + i) != 0) { kfree(buf); return load_done(load_failed("disk read error")); }
-        lba++;
+    int order[2];
+    if (have[0] && have[1]) {
+        order[0] = cand[1].seq > cand[0].seq ? 1 : 0;   /* ties go to A */
+        order[1] = 1 - order[0];
+    } else {
+        order[0] = have[0] ? 0 : 1;
+        order[1] = -1;
     }
 
+    for (int k = 0; k < 2 && order[k] >= 0; k++) {
+        int slot = order[k];
+        const struct sb *sb = &cand[slot];
+        if (sb->node_count == 0) {                /* clean image: nothing to load */
+            active_slot = slot; active_seq = sb->seq;
+            return load_done(0);
+        }
+        /* How many bytes to slurp - and whether to slurp at all. Same
+         * function fs_sync() clears an image through before writing it, so
+         * our own sync can no longer produce anything that lands here. A
+         * superblock that still fails this is corrupt, hostile, or was
+         * written by a kernel with wider caps than ours. */
+        if (!image_fits(sb->node_count, sb->total_data_bytes)) {
+            serial_puts_x("fs: slot ");
+            serial_puts_x(slot ? "B" : "A");
+            serial_puts_x(" superblock claims ");
+            serial_put_u64_x(sb->node_count);
+            serial_puts_x(" nodes / ");
+            serial_put_u64_x(sb->total_data_bytes);
+            serial_puts_x(" data bytes - that doesn't fit the load caps; skipping it\n");
+            continue;
+        }
+        const char *why = 0;
+        uint32_t bytes = 0;
+        uint8_t *buf = read_image(slot, sb, &bytes, &why);
+        if (!buf) {
+            serial_puts_x("fs: slot ");
+            serial_puts_x(slot ? "B" : "A");
+            serial_puts_x(" (seq ");
+            serial_put_u64_x(sb->seq);
+            serial_puts_x(") could not be read: ");
+            serial_puts_x(why);
+            serial_puts_x(k == 0 && order[1] >= 0 ? " - trying the other slot\n" : "\n");
+            continue;
+        }
+        int rc = load_image(slot, sb, buf, bytes);
+        kfree(buf);
+        if (rc == 0) {
+            active_slot = slot; active_seq = sb->seq;
+            if (k > 0) {
+                serial_puts_x("fs: loaded the OLDER generation from slot ");
+                serial_puts_x(slot ? "B" : "A");
+                serial_puts_x(" (seq ");
+                serial_put_u64_x(sb->seq);
+                serial_puts_x("); the newest sync did not complete\n");
+            }
+            return load_done(0);
+        }
+        serial_puts_x("fs: slot ");
+        serial_puts_x(slot ? "B" : "A");
+        serial_puts_x(" has a malformed record");
+        serial_puts_x(k == 0 && order[1] >= 0 ? " - trying the other slot\n" : "\n");
+    }
+    return load_done(load_failed("no slot held a whole image"));
+}
+
+/* Parse `bytes` of a slot's image into the live tree. Returns 0 on success
+ * (the old tree freed), -1 if a record is malformed (the old tree intact). */
+static int load_image(int slot, const struct sb *sb, const uint8_t *buf, uint32_t bytes) {
+    (void)slot;
     /* Parse into a FRESH list, leaving the existing one (the seeds, or
      * a previously-mounted FS) untouched until we know the whole image
      * is valid. A corrupt disk must not leave a half-built filesystem
@@ -869,7 +1048,7 @@ int fs_load_from_disk(void) {
      * past it either. */
     uint64_t off = 0;
     int ok = 1;
-    for (uint32_t i = 0; i < sb.node_count; i++) {
+    for (uint32_t i = 0; i < sb->node_count; i++) {
         if (sizeof(struct node_hdr) > bytes - off) { ok = 0; break; }
         struct node_hdr h;
         cp((uint8_t *)&h, buf + (uint32_t)off, sizeof(h));
@@ -911,17 +1090,15 @@ int fs_load_from_disk(void) {
         off = (off + 7) & ~(uint64_t)7;   /* 64-bit round-up: can't wrap under 8 MiB */
     }
 
-    kfree(buf);
-
     if (!ok) {
         free_list(nodes);           /* discard the partial parse */
         nodes = saved_nodes;        /* restore the prior list... */
         node_count = saved_count;
         cwd = saved_cwd;            /* ...and where we were standing in it */
         fs_unlock(lf);
-        return load_done(load_failed("a record in it is malformed"));
+        return -1;
     }
     free_list(saved_nodes);         /* success: drop the old list */
     fs_unlock(lf);
-    return load_done(0);
+    return 0;
 }
